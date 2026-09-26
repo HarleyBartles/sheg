@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "entry": "article",
+  "source": {
+    "path": "article-source.md",
+    "sha256": "dc6bb97ebce3cd0c42945143c1eb230a74377111308d8b8563652898d996daf5"
+  },
+  "title": "A repair that made the system smaller",
+  "promise": "Follow the people and choices behind one practical repair.",
+  "beats": [
+    { "id": "symptom", "text": "The dashboard said the repair worked, but users still could not complete the task." },
+    { "id": "investigation", "text": "A maintainer traced the mismatch to a state update that ran in the wrong order." },
+    { "id": "repair", "text": "The team replaced the hidden coupling with one explicit transition." }
+  ],
+  "scanCards": [],
+  "asides": [
+    { "id": "test-notes", "title": "How the team tested it", "text": "They replayed the failed sequence against the new transition.", "offerAfterBeatId": "investigation" }
+  ],
+  "conditions": [
+    { "id": "with-aside", "beatIds": ["symptom", "investigation", "repair"], "asideIds": ["test-notes"] }
+  ],
+  "maxDecisions": 10
+}

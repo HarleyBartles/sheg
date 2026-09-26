@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "readers": [
+    {
+      "id": "curious-outside-reader",
+      "archetypeId": "curious-outsider",
+      "profileText": "Wants an accessible account and has little prior domain knowledge."
+    },
+    {
+      "id": "craft-reader",
+      "archetypeId": "craft-admirer",
+      "profileText": "Looks for the decisions and constraints behind the finished work."
+    }
+  ],
+  "admission": {
+    "rationale": "Both readers can test whether the account is understandable and concrete.",
+    "frozenAt": "2026-09-27T10:00:00Z"
+  }
+}
