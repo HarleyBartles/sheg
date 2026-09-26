@@ -1,8 +1,0 @@
-pyproject.toml
-src/system_one_polling/__init__.py
-src/system_one_polling.egg-info/PKG-INFO
-src/system_one_polling.egg-info/SOURCES.txt
-src/system_one_polling.egg-info/dependency_links.txt
-src/system_one_polling.egg-info/requires.txt
-src/system_one_polling.egg-info/top_level.txt
-tests/test_study.py
