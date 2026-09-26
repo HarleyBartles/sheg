@@ -17,7 +17,7 @@
 - Work in `Z:\_agent-worktrees\system-one-polling\port-simulated-reader-polling`, the existing linked worktree. Inspect branch, status, and current remote before any further source edits. The user explicitly chose this worktree, so do not switch its in-flight branch to main. Do not edit Portfolio or installed plugins.
 - Portfolio main commit `9d0864d0f4d3da4e451168cfd14ec080636ad25c` is a trial to learn from, not a runtime dependency or exact-route oracle. The standalone `1.0` manifest is the sole input; old `0.0.5` manifests need explicit conversion and are not silently accepted.
 - Keep article and scan entry, future-blind prompts, frozen cohorts, optional-aside visibility and offer origin, core outcome before optional satisfaction, finite exits, ordered exposure history, and honest denominators. Route names and branches may be redesigned within those invariants.
-- Jev requires a call and spend cap. Laya requires a call cap and a verified fit mechanism. Never change provider mid-run, start local weights, trim inputs, invent a cost or model revision, or issue a paid call in routine tests.
+- Jev requires a call and local spend cap. Laya requires a call cap and a verified fit mechanism. Reserve a conservative declared `maxPerCallUsd` for each Jev attempt before dispatch; reject a run with no defensible allowance. A provider bill above the allowance may overshoot the local cap: record it, stop new calls, and never present the local cap as a provider-side hard limit. Never change provider mid-run, start local weights, trim inputs, invent a cost or model revision, or issue a paid call in routine tests.
 - Require explicit output directory for runs. Keep stimulus and execution fingerprints distinct. No credentials or source text in checkpoints or reports. An interrupted run requires explicit resume; completed journeys are not repeated.
 - The owner can maintain TypeScript directly. Prefer focused modules, explicit public types, runtime validation at external boundaries, and readable domain names over generated abstraction layers.
 - `npm test` means `node --import tsx --test test/*.test.ts`; `npm run typecheck` means `tsc --noEmit`; `npm run build` bundles `src/cli.ts`, `src/mcp.ts`, and `src/worker.ts` for `node24` into `dist/`. Keep runtime imports bundle-safe. `dist/` is tracked so the plugin installed from this repo runs without a build at install time; regenerate and stage it with source changes. The lockfile is tracked.
@@ -35,7 +35,7 @@ All paths below are relative to this linked worktree. Private helpers may change
 | `src/journey.ts` | `runJourney(study, profile, condition, ask): Promise<JourneyResult>`; one finite article/scan graph and chronological exposure/choice events. |
 | `src/providers/jev.ts`, `src/providers/laya.ts` | `JevConfig`, `LayaConfig`, explicit provider implementations; `checkLayaFit` returns measured fit or unsupported-input. |
 | `src/identity.ts`, `src/budget.ts` | `stimulusFingerprint`, `executionFingerprint`, and serialized attempt/spend reservations shared across concurrent journeys. |
-| `src/jobs.ts`, `src/checkpoint.ts` | `checkStudy`, `traceStudy`, `startRun`, `runStatus`, `cancelRun`, `resumeRun`, `getReport`; checkpoint version and durable worker ownership. |
+| `src/jobs.ts`, `src/checkpoint.ts` | `checkStudy`, `traceStudy`, `startRun`, `runStatus`, `cancelRun`, `resumeRun`, `readCheckpoint`; checkpoint version and durable worker ownership. Task 8 adds `getReport`. |
 | `src/report.ts` | `buildReport`, `compareReports`; comparisons only for equal stimulus fingerprint and matched completed journey keys. |
 | `src/cli.ts`, `src/mcp.ts` | Thin CLI and MCP entry points over jobs and reports, with no second polling engine. |
 | `plugin.json`, `mcp.json`, `skills/simulated-reader-polling/`, `dist/` | Portable plugin metadata, skill, and runnable built JavaScript. The distribution must start when copied away from the source checkout. |
@@ -107,16 +107,16 @@ The route reducer offers `continue`, `skim_next`, `stop_satisfied`, and `leave` 
 
 **Files:** Create `src/identity.ts`, `src/budget.ts`, `test/identity.test.ts`, `test/budget.test.ts`.
 
-**Interfaces:** `stimulusFingerprint(study, promptContractHash): string` includes ordered cohort and source hashes. `executionFingerprint(stimulus, providerConfig): string` includes decision-affecting settings without credentials. `BudgetLedger.reserve(maxAttempts, estimatedUsd)`, `settle(reservation, resultOrError)`, and `reconcile(unpricedUsd)` serialize shared limits.
+**Interfaces:** `stimulusFingerprint(study, promptContractHash): string` includes ordered cohort and source hashes. `executionFingerprint(stimulus, providerConfig): string` includes decision-affecting settings without credentials. `BudgetLedger.reserve(maxAttempts, maxPerCallUsd)`, `settle(reservation, resultOrError)`, and `reconcile(unpricedUsd)` serialize shared limits.
 
-- [ ] Write RED tests that provider changes preserve stimulus identity but change execution identity; cohort order, source, prompt contract, checkpoint, or precision changes have the expected effect. Concurrent controlled reservations must not oversubscribe calls or hosted spend; unknown possibly billed failures stop later dispatch until reconciliation.
+- [ ] Write RED tests that provider changes preserve stimulus identity but change execution identity; cohort order, source, prompt contract, checkpoint, or precision changes have the expected effect. Concurrent controlled reservations must not oversubscribe calls or hosted spend allowance; unknown possibly billed failures stop later dispatch until reconciliation. A billed amount above its reservation records the overshoot and prevents further dispatch.
 - [ ] Implement canonical JSON identity and one serialized budget ledger. Reject nonfinite or negative limits/usage; local provider needs no hosted spend cap. Run focused tests with actual overlap and typecheck; commit.
 
 ### Task 7: Durable jobs and process recovery
 
 **Files:** Create `src/checkpoint.ts`, `src/jobs.ts`, `src/worker.ts`, `test/jobs.test.ts`.
 
-**Interfaces:** `RunConfig` has manifest/cohort paths, explicit provider, output directory for runs, caps, concurrency. `checkStudy` and `traceStudy` perform no provider call. `startRun` registers a durable run and starts a managed worker; `runStatus`, `cancelRun`, `resumeRun`, and `getReport` reconstruct state from disk. States: prepared, running, completed, partial, failed, cancelled.
+**Interfaces:** `RunConfig` has manifest/cohort paths, explicit provider, output directory for runs, `maxCalls`, hosted `maxUsd` and `maxPerCallUsd`, and concurrency. `checkStudy` and `traceStudy` perform no provider call. `startRun` registers a durable run and starts a managed worker; `runStatus`, `cancelRun`, `resumeRun`, and `readCheckpoint` reconstruct state from disk. States: prepared, running, completed, partial, failed, cancelled.
 
 - [ ] Write RED tests for check and trace without network; source rehash at start; concurrent journeys with sequential within-journey calls; cancellation in flight; stale running checkpoint after process kill; completed-journey skip; execution-fingerprint mismatch; two-process resume lock; and no credential/source-text persistence. Use a controlled child process for kill/restart evidence, not an in-memory simulation.
 - [ ] Implement atomic versioned checkpoints, explicit process ownership/locking, reserved attempts before each dispatch, stable output order, and child-worker lifetime independent of an MCP request. Resume restarts an incomplete journey from its beginning, never repeats a completed one. Verify focused tests and typecheck; commit.
@@ -125,7 +125,7 @@ The route reducer offers `continue`, `skim_next`, `stop_satisfied`, and `leave` 
 
 **Files:** Create `src/report.ts`, `test/report.test.ts`.
 
-**Interfaces:** `buildReport(checkpoint)` and `compareReports(left, right)` return JSON-safe evidence. Comparison requires equal stimulus fingerprint and aligns only common completed `(readerId, conditionId)` keys.
+**Interfaces:** `buildReport(checkpoint)`, `getReport(outputDir, runId)` via Task 7's `readCheckpoint`, and `compareReports(left, right)` return JSON-safe evidence. Comparison requires equal stimulus fingerprint and aligns only common completed `(readerId, conditionId)` keys.
 
 - [ ] Write RED tests for completed versus intended denominators, condition/archetype/optional/scan breakdowns, ordered exposure events, attempts, latency, tokens, billed/unknown charge, unknown Laya revision, failed/unsupported journey counts, and mismatch on cohort order or prompt contract.
 - [ ] Implement summaries from completed records while keeping exclusions visible. Label Jev/Laya comparison as agreement or divergence, never accuracy, calibration, readership, or publication score. Run focused tests and typecheck; inspect one example JSON report; commit.
