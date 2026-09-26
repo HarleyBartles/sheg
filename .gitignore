@@ -21,11 +21,6 @@ pnpm-debug.log*
 # TypeScript build metadata
 *.tsbuildinfo
 
-# Python cache files from transition tooling
-__pycache__/
-*.py[cod]
-.pytest_cache/
-
 # Editor and operating system files
 .DS_Store
 Thumbs.db

@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { StudyInputError } from '../src/errors.js';
-import { loadStudy } from '../src/study.js';
+import { StudyInputError } from '../src/domain/errors.js';
+import { loadStudy } from '../src/domain/study/load-study.js';
 
 const fixtureDirectory = fileURLToPath(new URL('./fixtures/', import.meta.url));
 
@@ -20,68 +20,83 @@ async function copiedStudy(t: TestContext, manifestName = 'article.json') {
   };
 }
 
-test('loads article and scan manifests with verified source and ordered frozen readers', async (t) => {
+test('loads article and chapter studies through the same graph primitives', async (t) => {
   const articleFiles = await copiedStudy(t);
-  const scanFiles = await copiedStudy(t, 'scan.json');
-
+  const chapterFiles = await copiedStudy(t, 'chapter.json');
   const article = await loadStudy(articleFiles.manifestPath, articleFiles.cohortPath);
-  const scan = await loadStudy(scanFiles.manifestPath, scanFiles.cohortPath);
+  const chapter = await loadStudy(chapterFiles.manifestPath, chapterFiles.cohortPath);
 
-  assert.equal(article.manifest.entry, 'article');
-  assert.deepEqual(article.profiles.map((reader) => reader.id), [
-    'curious-outside-reader',
-    'craft-reader',
-  ]);
+  assert.deepEqual(article.manifest.items.map((item) => item.id), ['symptom', 'investigation', 'repair', 'test-notes']);
+  assert.deepEqual(chapter.manifest.items.map((item) => item.id), ['arrival', 'letter', 'revelation']);
+  assert.equal(article.profiles[0]?.id, 'curious-outside-reader');
   assert.equal(article.sources[0]?.path, path.join(articleFiles.directory, 'article-source.md'));
   assert.equal(article.sources[0]?.sha256, 'dc6bb97ebce3cd0c42945143c1eb230a74377111308d8b8563652898d996daf5');
-  assert.equal(scan.manifest.entry, 'scan');
-  assert.deepEqual(scan.manifest.scanCards.map((card) => card.beatId), ['symptom', 'repair']);
 });
 
 test('accepts an explicitly absolute source reference', async (t) => {
   const files = await copiedStudy(t);
   const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as {
-    source: { path: string; sha256: string };
+    sources: Array<{ path: string; sha256: string }>;
   };
-  manifest.source.path = path.join(files.directory, 'article-source.md');
+  manifest.sources[0]!.path = path.join(files.directory, 'article-source.md');
   await writeFile(files.manifestPath, JSON.stringify(manifest));
 
   const study = await loadStudy(files.manifestPath, files.cohortPath);
-
-  assert.equal(study.sources[0]?.path, manifest.source.path);
+  assert.equal(study.sources[0]?.path, manifest.sources[0]!.path);
 });
 
-test('rejects source drift before a run can be created', async (t) => {
+test('rejects changed source content before a run can be created', async (t) => {
   const files = await copiedStudy(t);
   const sourcePath = path.join(files.directory, 'article-source.md');
-  await writeFile(sourcePath, `${await readFile(sourcePath, 'utf8')}A changed source.\n`);
-
+  await writeFile(sourcePath, `${await readFile(sourcePath, 'utf8')}Changed source.\n`);
   await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /source hash/i);
 });
 
-test('rejects unsupported old manifest versions', async (t) => {
+test('rejects duplicate or dangling graph IDs and malformed choice edges', async (t) => {
   const files = await copiedStudy(t);
-  const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as { version: string };
+  const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as {
+    items: Array<{ id: string }>;
+    transitions: Array<{ fromNodeId: string; choice?: string; toNodeId: string }>;
+  };
+  manifest.items[1]!.id = manifest.items[0]!.id;
+  await writeFile(files.manifestPath, JSON.stringify(manifest));
+  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /IDs must be unique/i);
+
+  manifest.items[1]!.id = 'investigation';
+  const decisionEdge = manifest.transitions.find((edge) => edge.fromNodeId === 'choose-investigation' && edge.choice === 'continue');
+  decisionEdge!.toNodeId = 'missing-node';
+  await writeFile(files.manifestPath, JSON.stringify(manifest));
+  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /unknown.*node/i);
+
+  decisionEdge!.toNodeId = 'show-repair';
+  manifest.transitions = manifest.transitions.filter((edge) => !(edge.fromNodeId === 'choose-investigation' && edge.choice === 'leave'));
+  await writeFile(files.manifestPath, JSON.stringify(manifest));
+  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /transition.*label|edge.*label/i);
+});
+
+test('rejects unreachable graph nodes and unsupported manifest versions', async (t) => {
+  const files = await copiedStudy(t);
+  const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as {
+    version: string;
+    nodes: Array<{ id: string; kind: string; outcome?: string }>;
+  };
+  manifest.nodes.push({ id: 'orphan', kind: 'terminal', outcome: 'orphaned' });
+  await writeFile(files.manifestPath, JSON.stringify(manifest));
+  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /unreachable/i);
+
+  manifest.nodes.pop();
   manifest.version = '0.0.5';
   await writeFile(files.manifestPath, JSON.stringify(manifest));
-
   await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /only manifest version 1\.0/i);
 });
 
-test('rejects dangling aside references and a decision ceiling too small for the route', async (t) => {
+test('rejects unknown manifest fields and requires an explicit frozen cohort', async (t) => {
   const files = await copiedStudy(t);
-  const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as {
-    asides: Array<{ offerAfterBeatId: string }>;
-    maxDecisions: number;
-  };
-  manifest.asides[0]!.offerAfterBeatId = 'missing-beat';
+  await assert.rejects(loadStudy(files.manifestPath, undefined), StudyInputError);
+  const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as Record<string, unknown>;
+  manifest.workspaceDiscovery = true;
   await writeFile(files.manifestPath, JSON.stringify(manifest));
-  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /aside.*beat/i);
-
-  manifest.asides[0]!.offerAfterBeatId = 'investigation';
-  manifest.maxDecisions = 1;
-  await writeFile(files.manifestPath, JSON.stringify(manifest));
-  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /decision ceiling/i);
+  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /unknown|unrecognized/i);
 });
 
 test('rejects duplicate readers and archetypes absent from the bundled catalogue', async (t) => {
@@ -97,14 +112,4 @@ test('rejects duplicate readers and archetypes absent from the bundled catalogue
   cohort.readers[1]!.archetypeId = 'unlisted-archetype';
   await writeFile(files.cohortPath, JSON.stringify(cohort));
   await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /unknown archetype/i);
-});
-
-test('requires an explicit frozen cohort and rejects unknown manifest fields', async (t) => {
-  const files = await copiedStudy(t);
-  await assert.rejects(loadStudy(files.manifestPath, undefined), StudyInputError);
-
-  const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as Record<string, unknown>;
-  manifest.workspaceDiscovery = true;
-  await writeFile(files.manifestPath, JSON.stringify(manifest));
-  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /unknown|unrecognized/i);
 });

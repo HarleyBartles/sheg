@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { StudyInputError } from './errors.js';
+import { StudyInputError } from '../errors.js';
 
 const profileSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
