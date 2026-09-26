@@ -89,12 +89,12 @@ Every traversal is bounded by `maxDecisions`, including cyclic graphs. Exposure 
 
 ### Task 4: Bounded generic graph journeys
 
-**Files:** Create `src/domain/journey/run.ts`, `src/domain/journey/events.ts`, `test/journey.test.ts`, `test/trace.test.ts`.
+**Files:** Create `src/domain/journey/run.ts`, `src/domain/journey/trace.ts`, `test/journey.test.ts`, `test/trace.test.ts`.
 
 **Interfaces:** Consumes Task 3's `DecisionRequest` and async `ask`; produces `JourneyResult` with ordered exposure and choice events, authored terminal outcome, completion status, and decision count. `runJourney` is provider independent. `traceStudy` later injects scripted choices through the same engine.
 
-- [ ] Write RED scenarios for sequential reading, early terminal exit, branching/scan-like entry, conditional optional-item exposure, deferred then re-offered content, and a bounded cycle. Check that every scenario terminates at its authored decision ceiling and an invalid scripted label fails before recording a valid choice.
-- [ ] Implement one generic graph walker with explicit decision-ceiling enforcement; avoid duplicate sync/async route engines. Record only items actually exposed. Run focused tests and typecheck; commit. Portfolio articles and novel chapters must both use this same walker.
+- [x] Write RED scenarios for sequential reading, early terminal exit, branching/scan-like entry, conditional optional-item exposure, deferred then re-offered content, and a bounded cycle. Check that every scenario terminates at its authored decision ceiling and an invalid scripted label fails before recording a valid choice.
+- [x] Implement one generic graph walker with explicit decision-ceiling enforcement; avoid duplicate sync/async route engines. Keep journey event/result contracts with the runner and scripted tracing in a focused module that feeds the same async engine. Record only items actually exposed. Run focused tests and typecheck; commit. Portfolio articles and novel chapters must both use this same walker. Verified with 25 passing Node tests, ESLint, and TypeScript typecheck.
 
 ### Task 5: Hosted Jev adapter and observed attempts
 
