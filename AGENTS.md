@@ -1,0 +1,33 @@
+# Repository agent orientation
+
+Before a substantial change, read the relevant approved design in
+`.agents/specs/` and the active implementation plan in `.agents/plans/`. Use
+those files for current requirements, task order, and verification.
+
+## Repository surfaces
+
+- `src/domain/` owns study, reader, decision, and journey contracts and behavior.
+- `src/application/`, `src/providers/`, `src/infrastructure/`, and
+  `src/entrypoints/` are the planned homes for orchestration, model adapters,
+  persistence/runtime support, and CLI/MCP boundaries as those surfaces are
+  implemented. Keep responsibility and ownership clear; avoid catch-all
+  modules.
+- `test/` is the separate Node test tree. Keep behavior tests grouped by the
+  responsibility they exercise.
+- `skills/simulated-reader-polling/` is the user-facing Codex skill. Plugin
+  metadata and packaged runtime are at the repository root when introduced.
+- `adr/README.md` indexes durable architecture decisions; `adr/template.md`
+  is the starting point for a new record.
+
+## Decision-record hygiene
+
+Record consequential architecture, contract, distribution, or operational
+choices as one decision per ADR. Update the index in the same change. When an
+accepted decision changes, add a superseding ADR rather than rewriting its
+history. Routine implementation details belong in code or the active plan.
+
+## Local verification
+
+Run `npm run lint`, `npm run typecheck`, and `npm test` for TypeScript changes.
+The tracked `.githooks/pre-commit` runs lint and the recursive test suite on
+commits once tests exist.
