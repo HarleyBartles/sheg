@@ -1,6 +1,6 @@
 # Standalone System One Polling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` (recommended) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship an ambient Codex plugin whose manifest-only polling harness runs reproducible simulated-reader studies against explicitly selected Jev or local Laya.
 
@@ -10,7 +10,7 @@
 
 **Spec:** `.agents/specs/2026-09-26-system-one-polling-design.md`
 
-**Execution Strategy:** `subagent-driven-development`. The tasks have separate reviewable outputs but share a source contract, so execute them in order with a fresh implementer and reviewer per task, followed by whole-branch review. The current worktree is the sole implementation workspace.
+**Execution Strategy:** `executing-plans`. The tasks are tightly coupled: manifest validation feeds the prompt renderer, route semantics feed budget and checkpoints, and both providers must satisfy one decision contract. One inline integration context is the better fit, with focused RED/GREEN checks per task and one fresh whole-branch review. The current worktree is the sole implementation workspace. A bounded specialist subagent can help with an independently checkable question, such as verifying the Laya wire schema, without handing off ownership of a plan task.
 
 ## Global Constraints
 
