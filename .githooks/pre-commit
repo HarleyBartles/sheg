@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if ! find tests -type f -name 'test_*.py' -print -quit 2>/dev/null | grep -q .; then
+  echo "No Python tests found; skipping pre-commit test run."
+  exit 0
+fi
+
+echo "Running repository tests before commit."
+python -m pytest -q

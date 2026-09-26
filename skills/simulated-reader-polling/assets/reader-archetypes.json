@@ -1,0 +1,122 @@
+[
+  {
+    "id": "story-first",
+    "arrival_intent": "Follow a true story in which someone encounters a problem and something changes.",
+    "background": "Enjoys essays with people, scenes and consequences; technical fluency is not the reason for reading.",
+    "desired_payoff": "A turn that feels caused by what happened, rather than a lesson pasted onto the end.",
+    "drawn_in_by": "A live situation, specific people and a change in what the author understood.",
+    "put_off_by": "An incident that stops moving so the author can deliver a disguised checklist."
+  },
+  {
+    "id": "craft-admirer",
+    "arrival_intent": "Watch a person make a thing and discover why its final shape works.",
+    "background": "Interested in process and decisions across writing, visual design, software or other crafts.",
+    "desired_payoff": "The constraints, rejected routes and particular choice become visible in the finished object.",
+    "drawn_in_by": "Material details, alternatives and the moment a better question changes the work.",
+    "put_off_by": "A reveal of the final artefact that skips the thinking that made it possible."
+  },
+  {
+    "id": "cultural-magpie",
+    "arrival_intent": "Follow a film, comic, type or cultural reference into an unexpected subject.",
+    "background": "Comfortable crossing subjects and interested in connections, not collecting references for their own sake.",
+    "desired_payoff": "The reference changes how the main subject can be seen.",
+    "drawn_in_by": "A vivid connection that survives beyond the opening joke or allusion.",
+    "put_off_by": "A familiar name used as bait and then discarded without affecting the argument."
+  },
+  {
+    "id": "curious-outsider",
+    "arrival_intent": "Understand why an unfamiliar practice or problem matters without becoming a specialist.",
+    "background": "Intelligent reader with little prior knowledge of this article's technical or design domain.",
+    "desired_payoff": "A clear mental picture and a reason to care that can be retold in ordinary language.",
+    "drawn_in_by": "Concrete examples and terms introduced when their meaning becomes necessary.",
+    "put_off_by": "Insider shorthand that makes entry impossible, or a remedial lecture that stalls the story."
+  },
+  {
+    "id": "human-stakes",
+    "arrival_intent": "Find out how a decision affected the people who used, built or inherited the result.",
+    "background": "May know the domain or not; follows consequences to people rather than systems alone.",
+    "desired_payoff": "A credible account of who carried the burden and what became easier or harder.",
+    "drawn_in_by": "Named responsibilities, specific friction and consequences that can be felt.",
+    "put_off_by": "Architecture presented as self-justifying while the people living with it disappear."
+  },
+  {
+    "id": "fellow-mistake-maker",
+    "arrival_intent": "Recognise a fallible decision and learn how the author revised his understanding.",
+    "background": "Has made consequential choices that looked reasonable at the time.",
+    "desired_payoff": "An honest reconstruction of the mistaken belief, its cost and what changed afterward.",
+    "drawn_in_by": "Self-implication and the awkward details that a victory story would omit.",
+    "put_off_by": "Retrospective inevitability or an absent colleague made to carry all the blame."
+  },
+  {
+    "id": "hopeful-maker",
+    "arrival_intent": "See whether new tools can help me make something worthwhile without needing permission from experts.",
+    "background": "Builds or wants to build with AI, code or design tools without claiming formal mastery.",
+    "desired_payoff": "A credible path to doing more while recognising where care and competence still matter.",
+    "drawn_in_by": "Respect for imperfect beginnings and examples of growing judgment through making.",
+    "put_off_by": "Gatekeeping, condescension or a demand to master every prerequisite before starting."
+  },
+  {
+    "id": "hype-weary",
+    "arrival_intent": "Find an account of emerging technology that neither sells a miracle nor performs cynicism.",
+    "background": "Has read too many confident claims about AI and wants proportion.",
+    "desired_payoff": "A bounded claim supported by a real mechanism and its limits.",
+    "drawn_in_by": "Specific evidence, costs and moments when the author changed his mind.",
+    "put_off_by": "Grand forecasts, empty buzzwords or anti-hype posturing without an alternative."
+  },
+  {
+    "id": "practical-borrower",
+    "arrival_intent": "Take one usable move from this article into a problem I already have.",
+    "background": "Has a live task and little need for a complete philosophy of the subject.",
+    "desired_payoff": "A next step with enough conditions to know when to try it.",
+    "drawn_in_by": "A concrete move, what it changed and the constraint that made it appropriate.",
+    "put_off_by": "Insight that never becomes actionable, or a universal recipe detached from its case."
+  },
+  {
+    "id": "model-builder",
+    "arrival_intent": "Leave with a way to reason about similar decisions, not merely copy this solution.",
+    "background": "Comfortable with complexity and interested in transferable distinctions.",
+    "desired_payoff": "A decision rule that survives outside the author's exact circumstances.",
+    "drawn_in_by": "Competing options, governing constraints and why one consideration outranked another.",
+    "put_off_by": "A list of tactics with no principle connecting them, or an aphorism with no test."
+  },
+  {
+    "id": "counterexample-hunter",
+    "arrival_intent": "Test where the apparent lesson stops being true.",
+    "background": "Enjoys a strong argument enough to push it against difficult cases.",
+    "desired_payoff": "A claim whose boundaries become sharper under pressure.",
+    "drawn_in_by": "Visible assumptions, counterpressure and a concession that improves the argument.",
+    "put_off_by": "A local success inflated into a rule for everyone."
+  },
+  {
+    "id": "maintainer-inheritor",
+    "arrival_intent": "Ask what this choice leaves for the next person who must operate or change it.",
+    "background": "Has inherited systems and knows the initial success is not the whole cost.",
+    "desired_payoff": "A candid account of reversibility, handover and the burden after delivery.",
+    "drawn_in_by": "Migration detail, operational consequences and documentation of why a path was chosen.",
+    "put_off_by": "A clean ending at launch that transfers unresolved work to an invisible successor."
+  },
+  {
+    "id": "hiring-evaluator",
+    "arrival_intent": "Decide whether forwarding this author's work for technical scrutiny would be worth the risk.",
+    "background": "A weary hiring manager has reviewed many polished agentic-engineering portfolios; three promising links were dismissed by the architect.",
+    "desired_payoff": "Enough legible, attributable evidence to make a confident forward-or-decline decision.",
+    "drawn_in_by": "A short path from professional claim to inspectable decision, responsibility and consequence.",
+    "put_off_by": "Another fluent pitch that makes the manager risk looking foolish when a technical peer opens the link."
+  },
+  {
+    "id": "jaded-architect",
+    "arrival_intent": "Strip the presentation away and test whether this author understands the engineering underneath.",
+    "background": "A principal engineer or architect has already dismissed three similar forwarded portfolios and expects pattern vocabulary to conceal thin reasoning.",
+    "desired_payoff": "A technical account that survives questions about mechanism, alternatives, cost, evidence and limits—or reveals where it does not.",
+    "drawn_in_by": "Specific decisions and falsifiable detail that remain coherent under hostile scrutiny.",
+    "put_off_by": "Named patterns, polished diagrams or confident outcomes that collapse when asked why this approach was chosen."
+  },
+  {
+    "id": "prospective-collaborator",
+    "arrival_intent": "Imagine solving a difficult problem alongside this author.",
+    "background": "Could become a colleague or partner and cares about how disagreement and credit are handled.",
+    "desired_payoff": "A sense that the author can reason openly, change course and make others effective.",
+    "drawn_in_by": "Candid uncertainty, colleagues' contributions and decisions made with rather than over people.",
+    "put_off_by": "Blame shifted onto absent teammates or a flawless-protagonist story."
+  }
+]
