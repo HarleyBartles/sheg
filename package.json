@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "description": "Bounded simulated-reader polling harness for Jev and local System One models",
   "scripts": {
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
     "build": "esbuild src/cli.ts src/mcp.ts src/worker.ts --bundle --platform=node --target=node24 --format=esm --outdir=dist"
   },
   "type": "module",
@@ -16,9 +17,12 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@types/node": "24.19.0",
     "esbuild": "0.28.2",
+    "eslint": "10.11.0",
     "tsx": "4.23.15",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1"
   }
 }
