@@ -1,184 +1,158 @@
 # Standalone System One Polling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` (recommended) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship an ambient Codex plugin whose manifest-only polling harness runs reproducible simulated-reader studies against explicitly selected Jev or local Laya.
+**Goal:** Ship one ambient Codex plugin whose TypeScript harness runs bounded, reproducible simulated-reader studies against explicitly selected Jev or local Laya.
 
-**Architecture:** Port the Portfolio manifest, cohort, prompt, and journey behavior into a provider-neutral Python package, then add two bounded decision adapters, durable job control, a CLI, and an MCP wrapper over the same core. Keep editorial judgment in the skill, deterministic limits and evidence in the harness, and model transport in adapters.
+**Architecture:** A standalone versioned manifest and frozen cohort feed one finite journey engine and one provider-neutral decision contract. The CLI and bundled MCP server call the same durable job controller; provider adapters handle Jev and Laya wire formats. Build runnable JavaScript into the plugin package, with no Python runtime in the installed plugin.
 
-**Tech Stack:** Python 3.12+, `openrouter==1.2.21` and its `httpx` transport for Jev, `httpx` for Laya, an MCP Python SDK pinned at implementation time after checking its current public API, `pytest` for behavior tests, Codex plugin manifest and `mcp.json`.
+**Tech Stack:** Node.js 24 LTS, TypeScript strict mode, npm with committed `package-lock.json`, Zod for runtime validation, Node's test runner with `tsx` for TypeScript tests, `esbuild` for bundled Node entry points, official MCP TypeScript SDK, and OpenRouter TypeScript SDK only if its Decisions API attempt and usage behavior can be verified. Pin exact direct dependency versions when installing them. No Python core.
 
 **Spec:** `.agents/specs/2026-09-26-system-one-polling-design.md`
 
-**Execution Strategy:** `executing-plans`. The tasks are tightly coupled: manifest validation feeds the prompt renderer, route semantics feed budget and checkpoints, and both providers must satisfy one decision contract. One inline integration context is the better fit, with focused RED/GREEN checks per task and one fresh whole-branch review. The current worktree is the sole implementation workspace. A bounded specialist subagent can help with an independently checkable question, such as verifying the Laya wire schema, without handing off ownership of a plan task.
+**Execution Strategy:** `executing-plans`, as previously selected by the user. Contracts and jobs are tightly coupled; one inline owner can keep the types, budget semantics, and package launch aligned. A fresh whole-branch review follows implementation.
 
-## Global Constraints
+## Global constraints and transition
 
-- Portfolio source is `Z:\portfolio` main at `9d0864d0f4d3da4e451168cfd14ec080636ad25c`, under `.agents/skills/simulated-reader-polling/`. Port from that revision; do not edit Portfolio or install over its skill.
-- The versioned `0.0.5` experiment manifest is the sole study input. Do not port flat `--article`, the Portfolio extractor, or implicit workspace discovery.
-- Resolve manifest-relative source references from the manifest directory. Verify source hashes before any decision call. Require explicit cohort and output directory for runs.
-- Preserve `article_route`, `scan_entry`, optional-read visibility and terminal-offer origins, ordered history, future-blind prompts, condition/archetype denominators, and complete-journey resume.
-- Provider selection never changes during a run; no automatic Jev/Laya fallback or local GPU/model startup. No silent input trimming.
-- Jev requires call and monetary caps; Laya requires a call cap. No paid test calls in routine CI. Local spend is not billed by the provider or is unknown, never zero hardware cost.
-- A poll is correlated simulation, not readership measurement or an automatic editorial score. Keep study charter and hypothesis out of reader-facing requests and reports.
-- Keep a stimulus fingerprint separate from the provider-specific execution fingerprint. Never persist credentials or source text in checkpoints or reports.
-- The plugin installs at the Codex user level from this repo's root. Do not add it to `agent-asset-marketplace` or require each consuming repo to install it.
-- Before implementation, read this plan and its spec, the live source paths below, and the repository's guidance. Work only in `Z:\_agent-worktrees\system-one-polling\port-simulated-reader-polling` after confirming branch and clean baseline. Use behavioral RED/GREEN tests, not change-detector tests.
+- Work in `Z:\_agent-worktrees\system-one-polling\port-simulated-reader-polling`, the existing linked worktree. Inspect branch, status, and current remote before any further source edits. The user explicitly chose this worktree, so do not switch its in-flight branch to main. Do not edit Portfolio or installed plugins.
+- Portfolio main commit `9d0864d0f4d3da4e451168cfd14ec080636ad25c` is a trial to learn from, not a runtime dependency or exact-route oracle. The standalone `1.0` manifest is the sole input; old `0.0.5` manifests need explicit conversion and are not silently accepted.
+- Keep article and scan entry, future-blind prompts, frozen cohorts, optional-aside visibility and offer origin, core outcome before optional satisfaction, finite exits, ordered exposure history, and honest denominators. Route names and branches may be redesigned within those invariants.
+- Jev requires a call and spend cap. Laya requires a call cap and a verified fit mechanism. Never change provider mid-run, start local weights, trim inputs, invent a cost or model revision, or issue a paid call in routine tests.
+- Require explicit output directory for runs. Keep stimulus and execution fingerprints distinct. No credentials or source text in checkpoints or reports. An interrupted run requires explicit resume; completed journeys are not repeated.
+- The owner can maintain TypeScript directly. Prefer focused modules, explicit public types, runtime validation at external boundaries, and readable domain names over generated abstraction layers.
+- `npm test` means `node --import tsx --test test/*.test.ts`; `npm run typecheck` means `tsc --noEmit`; `npm run build` bundles `src/cli.ts`, `src/mcp.ts`, and `src/worker.ts` for `node24` into `dist/`. Keep runtime imports bundle-safe. `dist/` is tracked so the plugin installed from this repo runs without a build at install time; regenerate and stage it with source changes. The lockfile is tracked.
+- The worktree currently has committed Python prototype files and hook plus uncommitted `.gitignore` edits. Two unfinished Python RED test drafts are preserved at `Z:\_agent-scratch\system-one-polling\python-red-drafts-2026-09-26`; inspect their behavioral cases during Tasks 1 and 2. Replace the prototype in the first committed TypeScript slice and remove obsolete Python-only files only after equivalent standalone manifest/cohort behavior is green. Do not delete or overwrite unrelated user work.
+- The repo has no `.agents/runbooks/planning.md` at plan revision time. This plan and the spec are the local planning guides; if a runbook appears during execution, read it then. The tracked pre-commit hook must run the current test command once tests exist, including from a staged commit, without bypassing the hook.
 
-## File map and shared contracts
+## File map and interfaces
 
-The executor may adjust private helpers but must preserve these public seams across tasks:
+All paths below are relative to this linked worktree. Private helpers may change, but public seams must stay coherent.
 
-| File | Responsibility / exported seam |
+| Path | Ownership and public seam |
 | --- | --- |
-| `src/system_one_polling/study.py` | `load_study(manifest_path: Path, cohort_path: Path) -> Study`; `Study` holds validated manifest, ordered `ReaderProfile` tuple, source hashes, and manifest directory. |
-| `src/system_one_polling/prompts.py` | `render_question(study: Study, profile: ReaderProfile, stage: str, visible_text: str, criteria: dict[str,str], history: tuple[dict,...]) -> DecisionRequest`; `prompt_contract_hash() -> str`. The rendered state is identical for both providers. |
-| `src/system_one_polling/decisions.py` | Immutable `DecisionRequest` and `DecisionResult` types; `validate_result(request, result) -> DecisionResult`; `DecisionProvider` async protocol `decide(request, *, max_attempts: int) -> DecisionResult`. Result carries choice, complete distribution, attempts, identity, latency, optional token usage, and cost status/value. |
-| `src/system_one_polling/routes.py` | `run_journey(study, profile, condition, ask) -> JourneyResult`, with an async `ask(request) -> DecisionResult` callback; canonical article/scan behavior and events. |
-| `src/system_one_polling/identity.py` | `stimulus_fingerprint(study) -> str`; `execution_fingerprint(stimulus: str, provider: ProviderConfig) -> str`. |
-| `src/system_one_polling/providers/jev.py` | `JevProvider(config)` implements `DecisionProvider` and retains billed cost / retry evidence. |
-| `src/system_one_polling/providers/laya.py` | `LayaProvider(config)` implements `DecisionProvider`; `check_fit(request, config) -> FitResult`; no truncation. |
-| `src/system_one_polling/jobs.py` | `check_study`, `trace_study`, `start_run`, `run_status`, `cancel_run`, `resume_run`, `get_report`; `RunConfig` has manifest, cohort, provider, limits, output path, concurrency. |
-| `src/system_one_polling/report.py` | `build_report(checkpoint) -> dict`; `compare_reports(left, right) -> dict` with stimulus and matched-completed-journey guard. |
-| `src/system_one_polling/cli.py` | `main(argv: list[str] | None = None) -> int` around the job API. |
-| `src/system_one_polling/mcp_server.py` | MCP tools around the job API, with no second execution engine. |
+| `src/study.ts`, `src/profiles.ts`, `src/schema.ts` | `loadStudy(manifestPath, cohortPath): Promise<Study>`; `Study` contains validated standalone `1.0` manifest, ordered frozen profiles, resolved source hashes and directory. |
+| `src/decision.ts`, `src/prompts.ts` | `DecisionRequest`, `DecisionResult`, `DecisionProvider.decide(request, maxAttempts)`, `validateDecision`; `renderQuestion(study, profile, stage, visibleText, criteria, history)` and `promptContractHash()`. |
+| `src/journey.ts` | `runJourney(study, profile, condition, ask): Promise<JourneyResult>`; one finite article/scan graph and chronological exposure/choice events. |
+| `src/providers/jev.ts`, `src/providers/laya.ts` | `JevConfig`, `LayaConfig`, explicit provider implementations; `checkLayaFit` returns measured fit or unsupported-input. |
+| `src/identity.ts`, `src/budget.ts` | `stimulusFingerprint`, `executionFingerprint`, and serialized attempt/spend reservations shared across concurrent journeys. |
+| `src/jobs.ts`, `src/checkpoint.ts` | `checkStudy`, `traceStudy`, `startRun`, `runStatus`, `cancelRun`, `resumeRun`, `getReport`; checkpoint version and durable worker ownership. |
+| `src/report.ts` | `buildReport`, `compareReports`; comparisons only for equal stimulus fingerprint and matched completed journey keys. |
+| `src/cli.ts`, `src/mcp.ts` | Thin CLI and MCP entry points over jobs and reports, with no second polling engine. |
+| `plugin.json`, `mcp.json`, `skills/simulated-reader-polling/`, `dist/` | Portable plugin metadata, skill, and runnable built JavaScript. The distribution must start when copied away from the source checkout. |
 
-Keep committed fixture manifests, source text, and frozen cohorts in `tests/fixtures/`. Test output goes to temporary directories. Source references in tests must be explicit. Build package metadata in `pyproject.toml`; put portable plugin files at root `plugin.json`, `mcp.json`, and `skills/simulated-reader-polling/`. The current [OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins) specifies this root layout; use `.codex-plugin/plugin.json` only if a proven Codex compatibility need remains.
+Use `test/*.test.ts` and `test/fixtures/` for focused behavior and fake transports. Keep generated run evidence in temporary test directories. No test should merely mirror an implementation branch or detect arbitrary source changes.
 
-## Review Focus
+The first `1.0` manifest contract uses `version`, `entry`, `source: { path, sha256 }`, `title`, `promise`, `beats: [{ id, text }]`, `scanCards: [{ id, title, beatId }]` for scan entry, `asides: [{ id, title, text, offerAfterBeatId }]`, `conditions: [{ id, beatIds, asideIds }]`, and `maxDecisions`. `source.path` is relative to the manifest directory unless explicitly absolute. `title`, `promise`, beat text, card titles, and opened aside text are reader-visible; source path and hashes are evidence only. A frozen cohort input uses `version`, ordered `readers: [{ id, archetypeId, profileText }]`, and `admission: { rationale, frozenAt }`. Runtime schemas reject unknown keys and dangling references. The exact JSON fixture in Task 1 is the canonical example for authors.
 
-1. A source changes after `check` but before `start`: re-read hashes at dispatch and refuse calls (Tasks 1 and 7).
-2. A Laya response names the generic model at top level but a different routing checkpoint: reject it, even if the choice is valid (Task 5).
-3. One asynchronous request is in flight during cancellation: record its result and usage before marking the job cancelled, then dispatch nothing new (Task 7).
-4. A process dies while a checkpoint says `running`: reconstruct `partial` from disk, require explicit resume, and do not rerun completed journeys (Task 7).
-5. Two reports share a manifest but differ in cohort ordering or prompt contract: refuse cross-provider comparison (Task 8).
+The route reducer offers `continue`, `skim_next`, `stop_satisfied`, and `leave` after each visible beat. At the last beat, `continue` exits as `finished_attentive` unless any earlier `skim_next` occurred, when it exits as `finished_skimming`. A scan journey first chooses one visible card ID and begins at that card's `beatId` within the selected condition. An aside offered after an authored beat accepts `open` or `defer`; the exit offer accepts `open` or `decline`, with `origin: unseen | deferred`. Only `open` reveals the body. The `maxDecisions` ceiling and strictly forward beat cursor prevent cycles. Exposure events persist IDs and order, not prompt or source text.
+
+## Review focus
+
+1. A source changes between `check` and `start`: start rehashes and refuses dispatch (Tasks 1 and 7).
+2. The local response advertises a generic model but routes to another checkpoint: refuse its choice (Task 5).
+3. Cancel arrives with a request in flight: record its outcome and usage, dispatch nothing further (Task 7).
+4. Worker dies while checkpoint says running: report partial and resume only incomplete journeys (Task 7).
+5. Reports have the same manifest but a different cohort order or prompt contract: refuse comparison (Task 8).
 
 ---
 
-### Task 1: Manifest and frozen cohort package
+### Task 1: Replace the prototype with the standalone study contract
 
-**Files:** Create `.githooks/pre-commit`, `pyproject.toml`, `src/system_one_polling/__init__.py`, `src/system_one_polling/study.py`, `src/system_one_polling/profiles.py`, `tests/test_study.py`, `tests/fixtures/article-v005.json`, `tests/fixtures/scan-v005.json`, `tests/fixtures/cohort.json`, and the fixture source files. Port `reader-archetypes.json` to `skills/simulated-reader-polling/assets/reader-archetypes.json`.
+**Files:** Create `package.json`, `package-lock.json`, `tsconfig.json`, `src/schema.ts`, `src/study.ts`, `src/profiles.ts`, `test/study.test.ts`, `test/fixtures/{article,scan,cohort,source}*`; modify `.gitignore`, `.githooks/pre-commit`; remove Python-only `pyproject.toml`, `src/system_one_polling/`, old Python tests and fixtures after accounting for uncommitted files. Retain a useful archetype asset under `skills/simulated-reader-polling/assets/` in standalone format.
 
-**Interfaces:** Consumes Portfolio `reader_panel_experiment.py` validation, compilation, and `load_experiment`; `reader_panel_source.py` `ReaderProfile`, `load_profiles`, and `validate_cohort`. Produces `Study`, `ReaderProfile`, `load_study`, `validate_manifest`, and normalized source records for Task 2 onward. `Study` is immutable at the API boundary; validated route records may remain dicts internally.
+**Interfaces:** Produces `Study`, `ReaderProfile`, `loadStudy(manifestPath: string, cohortPath: string): Promise<Study>` for every later task. The manifest declares `version: "1.0"`, entry (`article` or `scan`), ordered beats, visible scan cards, optional asides, conditions, source references with SHA-256, and an explicit decision ceiling. A cohort contains ordered profiles plus an admission record.
 
-- [ ] **Step 1: Write focused failing tests.** Build one article and one scan fixture at version `0.0.5` using the source's existing fixture shapes. Assert both load, and assert changed source bytes, wrong SHA, duplicate profile ID, unknown archetype, omitted cohort, malformed scan target, and a relative source resolved against the manifest's directory all fail before a provider is created. Use a temporary copy for source-drift testing.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_study.py -q`; expect missing package or failing contract assertions. Install local development dependencies with `python -m pip install -e ".[dev]"` once `pyproject.toml` exists, then repeat the specific failing assertion before implementation.
-- [ ] **Step 3: Implement.** Add `.githooks/pre-commit` to run `python -m pytest -q` when at least one `tests/test_*.py` file exists; before that condition, exit successfully with a skip message. Activate it only in this linked worktree via `core.hooksPath` worktree config. Then copy the source manifest validation and compile behavior before reorganizing it. Retain caps on manifest and visible bytes. Move generic profile parsing and archetype validation into `profiles.py`; omit `_structured_article`, `parse_article`, the Node extractor, and Portfolio paths. The manifest remains source of authored title/promise/route, while source records are independently hashed. Add package metadata with pinned runtime deps and a `dev` optional dependency group; Task 9 adds console scripts after their modules exist.
-- [ ] **Step 4: Run GREEN and source checks.** `python -m pytest tests/test_study.py -q`; inspect the ported source against Portfolio's `validate_experiment`, `_validate_scan_surface`, `compile_experiment`, and `load_experiment` for lost conditions. Run `rg -n 'portfolio|extract-article|--article|workspace.py' src tests` and explain any fixture-only matches.
-- [ ] **Step 5: Commit.** `bash .githooks/pre-commit` must pass with Task 1 tests present; then `git add .githooks pyproject.toml src tests skills && git commit -m "Port manifest and cohort contracts"`. Confirm the hook's run appears in commit output.
+- [ ] Inspect `git status`, the modified ignore file, and the preserved Python RED drafts in the named scratch directory. Carry their useful behavioral assertions into Tasks 1 and 2. Bootstrap the exact npm scripts above with pinned `typescript`, `tsx`, `esbuild`, `zod`, and `@types/node` so a RED test can run.
+- [ ] Write `test/study.test.ts` for an article and scan manifest, frozen ordered cohort, relative and explicitly absolute source references, changed source hash, invalid route/aside references, old `0.0.5` rejection, and decision-ceiling rejection. Run `npm test -- --test-name-pattern=study` and see behavioral RED.
+- [ ] Implement runtime schemas and `loadStudy`. Reject unknown or malformed input before model calls; resolve relative paths from the manifest directory, hash referenced files, and reject source drift. Choose a documented standalone `1.0` example rather than mechanically translating all trial fields.
+- [ ] Run `npm test` and `npm run typecheck`; inspect `loadStudy` through a TypeScript import against both fixtures. Change the hook to invoke `npm test` when `test/*.test.ts` exists; test a normal commit path. Commit the green TypeScript slice and accounted removal of obsolete Python material. A Node-specific `.gitignore` excludes `node_modules/`, caches, local env, and run output, while tracking the lockfile and `dist/`.
 
-### Task 2: Provider-neutral decision and prompt contract
+### Task 2: Typed decision and future-blind prompt contract
 
-**Files:** Create `src/system_one_polling/decisions.py`, `src/system_one_polling/prompts.py`, `tests/test_decisions.py`, `tests/test_prompts.py`.
+**Files:** Create `src/decision.ts`, `src/prompts.ts`, `test/decision.test.ts`, `test/prompts.test.ts`.
 
-**Interfaces:** Consumes `Study` and `ReaderProfile` from Task 1. Produces `DecisionRequest` with `state`, one named choice question, ordered criteria, and offered labels; `DecisionResult` with `choice`, `probabilities`, `attempts`, `provider`, `model`, `checkpoint`, `latency_seconds`, `input_tokens`, `cost_status` (`billed` / `not_billed` / `unknown`) and `cost_usd: float | None`; `render_question`, `prompt_contract_hash`, and `validate_result`. Provider model identity stays outside the rendered reader state.
+**Interfaces:** Consumes `Study`/`ReaderProfile`; produces `DecisionRequest { state, question, labels }`, `DecisionResult { choice, probabilities, attempts, provider, model, latencyMs, usage, chargeStatus, chargeUsd? }`, `DecisionProvider.decide(request, maxAttempts)`, `validateDecision`, `renderQuestion`, and a stable `promptContractHash`.
 
-- [ ] **Step 1: Write RED tests.** For a two-choice question, accept only an exact complete set of finite probabilities with each value in `[0,1]` and a sum within a documented numeric tolerance, with selected label among offered labels, attempts from `1..max_attempts`, and valid cost-status/value combinations. Assert that future beat text, unopened aside body, charter/hypothesis, provider key, and provider name never appear in rendered `state`. Assert prior choices appear in order and deferred versus first-unseen terminal prompts differ. Assert the same `render_question` output is passed to both fake providers.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_decisions.py tests/test_prompts.py -q`.
-- [ ] **Step 3: Implement.** Move `EXPERIMENT_CHOICE_LABELS`, criteria wording, and `render_experiment_request` logic from Portfolio `reader_panel_decisions.py` to provider-neutral `prompts.py`. Replace its hardcoded `model` with transport metadata set by adapters. Hash explicit versioned prompt contract content and renderer bytes; do not hash provider identity. Put generic result validation and `DecisionError` in `decisions.py`; preserve attempt count on errors.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_decisions.py tests/test_prompts.py -q` and compare rendered stages to Portfolio tests for scan, optional reads, and post-read effects.
-- [ ] **Step 5: Commit.** `git add src tests && git commit -m "Separate reader questions from model transport"`.
+- [ ] Write RED tests showing that hidden future beats and unopened aside bodies never appear, history remains chronological, and charter/hypothesis never enter reader state. Cover unknown labels, missing probability entries, nonfinite or negative values, wrong identity, and absent required billing evidence with one accepted result fixture.
+- [ ] Run the focused Node tests; implement the smallest renderer and validator satisfying them. Hash a declared prompt-contract version plus renderer-controlled decision semantics, rather than an arbitrary source-file checksum. Run focused tests and typecheck; commit.
 
-### Task 3: One canonical journey engine and scripted trace
+### Task 3: Finite article and scan journeys
 
-**Files:** Create `src/system_one_polling/routes.py`, `src/system_one_polling/trace.py`, `tests/test_routes.py`, `tests/test_trace.py`. Extend the fixtures with a two-aside article and a scan surface with dynamic entry choices.
+**Files:** Create `src/journey.ts`, `test/journey.test.ts`, `test/trace.test.ts`.
 
-**Interfaces:** Consumes `Study`, `DecisionRequest`, `DecisionResult`, and `render_question`. Produces `JourneyResult` containing reader, condition, ordered exposures and choice events, core outcome, optional outcomes, terminal state, completion flag, and any explicit unsupported-input reason; `run_journey(study, profile, condition, ask)`; `trace_study(study, script: Mapping[journey_key, list[str]]) -> list[dict]`, which runs the same renderer and route code with scripted choices and no network.
+**Interfaces:** Consumes Task 2's `DecisionRequest` and async `ask`; produces `JourneyResult` with ordered exposure and choice events, core outcome, optional-read outcome, completion status, and decision count. `runJourney` is provider independent. `traceStudy` later injects scripted choices through the same engine.
 
-- [ ] **Step 1: Write RED route tests.** Use scripted decisions to prove attentive/skim/lost/satisfied terminal distinction, optional body hidden before open, core outcome captured before optional satisfaction effect, `deferred_reoffer` distinct from `first_offer_unseen`, two asides at early exit, scan entry-to-content mapping, navigation to unread entries, and no future article text in a question. Assert an incomplete scripted journey is rejected, not guessed. Reuse or adapt the meaningful Portfolio `test_reader_panel_experiment.py` cases named `test_two_aside_route_offers_unseen_and_deferred_reads_after_core_exit`, `test_reader_who_leaves_before_aside_gets_an_unseen_end_offer`, and `test_scanner_route_links_visible_entries_to_beat_and_aside_then_backfills_article`.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_routes.py tests/test_trace.py -q`.
-- [ ] **Step 3: Implement.** Port one canonical `article_route` and `scan_entry` state machine from Portfolio `reader_panel_experiment.py`. Extract per-journey route behavior from its sync and async engines, rather than retaining two divergent copies. The `ask` callback receives each fully rendered question in sequence. Trace supplies validated synthetic `DecisionResult`s through that callback. Preserve the source's event and denominator-relevant fields so Task 8 can summarize them.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_routes.py tests/test_trace.py -q`; inspect the first, middle, terminal, and scan question payloads against source tests to confirm no hidden content leaks.
-- [ ] **Step 5: Commit.** `git add src tests && git commit -m "Port canonical reader journeys and scripted trace"`.
+- [ ] Write RED scenarios for an attentive completion, skim, satisfied early stop, lost-interest exit, scan-card entry, aside opened immediately, deferred then reopened, and never-seen aside offered at the end. Check that every scenario terminates within its authored decision ceiling and an invalid scripted label fails before recording a valid choice.
+- [ ] Implement a single transition table or explicit reducer with finite exits; avoid duplicate sync/async route engines. Record core outcome before optional satisfaction. Run focused tests and typecheck; commit. The trial route fixtures may inform cases, but no exact graph parity assertion is required.
 
-### Task 4: Jev adapter and billed-attempt evidence
+### Task 4: Hosted Jev adapter and observed attempts
 
-**Files:** Create `src/system_one_polling/providers/__init__.py`, `src/system_one_polling/providers/jev.py`, `tests/test_jev.py`; update `pyproject.toml` dependencies.
+**Files:** Create `src/providers/jev.ts`, `test/jev.test.ts`; update package dependencies and lockfile.
 
-**Interfaces:** Consumes `DecisionRequest`, `DecisionResult`, `DecisionProvider` from Task 2. Produces `JevConfig(model: str, api_key_env: str = 'OPENROUTER_API_KEY')` and `JevProvider(config)` implementing async `decide(request, *, max_attempts)`; Task 7 validates its configuration before dispatch. A `DecisionError` exposes attempted wire calls and whether provider charges remain unknown after failure.
+**Interfaces:** Produces `JevConfig { kind: "jev", model, keyEnv, endpoint, timeoutMs }` and `JevProvider` implementing Task 2's provider contract. On failure, return a typed error with actual attempted wire calls and `chargeStatus: "unknown"` when billing cannot be established.
 
-- [ ] **Step 1: Write RED tests with mock transport.** Verify typed choice request shape, exact response model allowlist including dated Jev revision, complete probabilities, billed `usage.cost`, token usage when supplied, latency, SDK overload and connection retries counted per wire request, no retry for authentication error, cap at `max_attempts`, and unknown charge reconciliation on failed attempts. Assert no key appears in exception text or persisted request representation. Adapt the behavior of Portfolio `test_reader_panel_decisions.py` tests rather than copying obsolete hardcoded-model assumptions.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_jev.py -q`.
-- [ ] **Step 3: Implement.** Port Portfolio's OpenRouter Decisions SDK transport and request-local `httpx` attempt hooks. Map neutral request to SDK envelope; normalize the SDK response through `validate_result`. Keep retries inside the allowed attempt reservation. Require `usage.cost` for successful Jev choices. Close sync and async clients on shutdown.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_jev.py -q`; run without a real API key or hosted request.
-- [ ] **Step 5: Commit.** `git add src tests pyproject.toml && git commit -m "Add bounded Jev decision adapter"`.
+- [ ] Verify the current OpenRouter Decisions API request/response, SDK retry hooks, and usage evidence in official docs or installed SDK source before selecting SDK versus direct HTTP. Record the chosen wire contract in `docs/jev-wire.md`. Do not inherit the trial's Python SDK assumptions.
+- [ ] Write fake-transport RED tests for typed choice payload, full distribution, selected model, successful billed cost, token/latency evidence when supplied, retryable status and connection errors, non-retryable auth failure, hard attempt cap, and no leaked key. Implement retries in an observable wrapper if the SDK cannot expose physical attempts. Run focused tests and typecheck; commit. Routine checks use no hosted key.
 
-### Task 5: Laya adapter, context fit, and checkpoint provenance
+### Task 5: Local Laya adapter and measured context fit
 
-**Files:** Create `src/system_one_polling/providers/laya.py`, `tests/test_laya.py`, `docs/local-laya.md`; update `pyproject.toml` for `httpx` if needed.
+**Files:** Create `src/providers/laya.ts`, `test/laya.test.ts`, `docs/local-laya.md`.
 
-**Interfaces:** Consumes Task 2's decision contract. Produces `LayaConfig(base_url: str, checkpoint: str, context_limit: int, precision: str | None, timeout_seconds: float)`, `FitResult(fits: bool, reason: str | None, measured_tokens: int | None)`, `check_fit(request, config)`, and `LayaProvider(config)` implementing `DecisionProvider`. A fit failure is an explicit unsupported-input result before dispatch, never a shortened prompt.
+**Interfaces:** Produces `LayaConfig { kind: "laya", baseUrl, checkpoint, contextLimit, precision?, timeoutMs }`, `checkLayaFit(request, config): Promise<FitResult>`, and `LayaProvider`. Fit is measured by a checkpoint-valid tokenizer or service method, otherwise returns explicit unsupported-input.
 
-- [ ] **Step 1: Write RED tests with a fake `/v1/systemone` HTTP service.** Probe available endpoint/config identity; accept top-level generic model only when response routing checkpoint matches configured checkpoint; reject missing/different routing checkpoint, unknown label, incomplete probabilities, and malformed response. Verify an over-limit full rendered request fails without a network call, and an unmeasurable fit also fails. Verify local charge is `not_billed` or `unknown`, never fabricated `0.0` billed dollars. Verify an unavailable local service raises a local error and does not instantiate Jev. Capture checkpoint, precision, and independently observable revision or explicit `unknown`.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_laya.py -q`.
-- [ ] **Step 3: Implement.** Use the documented Laya endpoint schema from the locally installed service or current upstream project before binding fields; record the verified schema and version in `docs/local-laya.md`. Serialize the complete reader question, count against the checkpoint's configured context using a tokenizer or an endpoint-provided fit method verified for that checkpoint, and fail closed if neither is available. Never use byte/4 estimation as proof of fit. Inspect response routing metadata, not only the generic top-level model. Keep the service URL explicit and do not start a GPU process.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_laya.py -q`. If a configured local service is running, perform one separate opt-in integration check with a synthetic two-choice request and save observed identity/fit evidence in the handoff; routine CI uses fakes only.
-- [ ] **Step 5: Commit.** `git add src tests docs pyproject.toml && git commit -m "Add local Laya decision adapter"`.
+- [ ] Verify `/v1/systemone` request, response, checkpoint routing metadata, and available context measurement against the actual Laya version. Record observed fields and unavailable provenance in `docs/local-laya.md` before coding the adapter.
+- [ ] Write fake-service RED tests for matching routing checkpoint despite generic top-level model, mismatch/missing checkpoint, malformed probabilities, unavailable service, over-limit and unmeasurable input with zero dispatch, and local charge as `not_billed` or `unknown`. Implement the adapter without provider fallback or GPU startup. Run focused tests and typecheck; commit. Keep a separate opt-in live local smoke check for later handoff.
 
-### Task 6: Identity and shared budget ledger
+### Task 6: Identity and concurrent budget reservations
 
-**Files:** Create `src/system_one_polling/identity.py`, `src/system_one_polling/budget.py`, `tests/test_identity.py`, `tests/test_budget.py`.
+**Files:** Create `src/identity.ts`, `src/budget.ts`, `test/identity.test.ts`, `test/budget.test.ts`.
 
-**Interfaces:** Consumes Tasks 1-5. Produces `ProviderConfig = JevConfig | LayaConfig`, `stimulus_fingerprint(study) -> str`, `execution_fingerprint(stimulus: str, provider: ProviderConfig) -> str`, and `BudgetLedger(max_calls: int, max_usd: float | None)` with async `reserve(max_attempts, estimated_usd) -> Reservation`, `settle(reservation, result_or_error) -> None`, and `reconcile(unpriced_usd: float) -> None`. Both config types expose provider kind, model/checkpoint, endpoint identity, temperature/precision when set, and other decision-affecting settings; neither fingerprint includes credentials.
+**Interfaces:** `stimulusFingerprint(study, promptContractHash): string` includes ordered cohort and source hashes. `executionFingerprint(stimulus, providerConfig): string` includes decision-affecting settings without credentials. `BudgetLedger.reserve(maxAttempts, estimatedUsd)`, `settle(reservation, resultOrError)`, and `reconcile(unpricedUsd)` serialize shared limits.
 
-- [ ] **Step 1: Write RED tests.** Assert stimulus hash changes with ordered cohort, source SHA, manifest text, or prompt contract, but remains equal for Jev and Laya with identical stimulus. Assert execution hash changes with provider, checkpoint/model, precision, and other decision settings. Use concurrent fake reservations to prove the call cap and Jev estimated spend cap cannot be oversubscribed, and a failed possibly billed Jev attempt blocks further spending until an explicit nonnegative reconciliation. Assert Laya requires calls but no USD cap and never records fabricated billed cost.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_identity.py tests/test_budget.py -q`.
-- [ ] **Step 3: Implement.** Canonicalize ordered manifest/cohort/source/prompt inputs for stimulus; hash provider config separately for execution. Reserve worst-case allowed wire attempts and estimated Jev spend under one async lock; settle actual usage and release unused reservations. Carry `unknown` billing evidence after a failed attempt and require explicit reconciliation on resume. Reject nonfinite/negative limits and usage.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_identity.py tests/test_budget.py -q` and inspect the concurrent reservation test for actual overlap, not merely sequential calls.
-- [ ] **Step 5: Commit.** `git add src tests && git commit -m "Separate polling identity and budget ledger"`.
+- [ ] Write RED tests that provider changes preserve stimulus identity but change execution identity; cohort order, source, prompt contract, checkpoint, or precision changes have the expected effect. Concurrent controlled reservations must not oversubscribe calls or hosted spend; unknown possibly billed failures stop later dispatch until reconciliation.
+- [ ] Implement canonical JSON identity and one serialized budget ledger. Reject nonfinite or negative limits/usage; local provider needs no hosted spend cap. Run focused tests with actual overlap and typecheck; commit.
 
-### Task 7: Durable job controller and recovery
+### Task 7: Durable jobs and process recovery
 
-**Files:** Create `src/system_one_polling/jobs.py`, `src/system_one_polling/checkpoints.py`, `tests/test_jobs.py`; modify `src/system_one_polling/routes.py` only if the per-decision callback needs cancellation visibility.
+**Files:** Create `src/checkpoint.ts`, `src/jobs.ts`, `src/worker.ts`, `test/jobs.test.ts`.
 
-**Interfaces:** Consumes Tasks 1-6. Produces `RunConfig(manifest_path: Path, cohort_path: Path, provider: ProviderConfig, output_dir: Path | None, max_calls: int, max_usd: float | None, concurrency: int)`, `check_study(config) -> dict`, `trace_study(config, script: Mapping[journey_key, list[str]]) -> list[dict]` delegating to Task 3, `start_run(config) -> str`, `run_status(output_dir: Path, run_id: str) -> dict`, `cancel_run(output_dir, run_id) -> dict`, `resume_run(config, run_id, *, reconciled_unpriced_usd: float | None = None) -> str`, and `get_report(output_dir, run_id) -> dict` (raw checkpoint until Task 8 adds a report builder). `output_dir` may be `None` only for check/trace. A checkpoint format version plus stimulus and execution fingerprints protects resume. Run states are `prepared`, `running`, `completed`, `partial`, `failed`, and `cancelled`.
+**Interfaces:** `RunConfig` has manifest/cohort paths, explicit provider, output directory for runs, caps, concurrency. `checkStudy` and `traceStudy` perform no provider call. `startRun` registers a durable run and starts a managed worker; `runStatus`, `cancelRun`, `resumeRun`, and `getReport` reconstruct state from disk. States: prepared, running, completed, partial, failed, cancelled.
 
-- [ ] **Step 1: Write RED tests with controlled async providers.** Assert `check` has no provider call, requires source hashes/cohort and limits, and rechecks hashes at start. Assert concurrent independent journeys overlap but each remains sequential. Assert status reconstructed after process restart marks stale `running` as `partial`. Assert resume skips completed journeys but restarts incomplete ones and rejects mismatched provider/model/settings, even with the same stimulus. Assert cancellation lets in-flight calls finish and record usage but begins no new journey. Assert checkpoints exclude credentials and raw source text.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_jobs.py -q`.
-- [ ] **Step 3: Implement.** Use an explicit output directory, unique run ID, atomic replace for checkpoint JSON, and a lock/ownership scheme that prevents two processes from resuming the same run. Call Task 6's ledger before each provider dispatch. Keep condition/readers in stable order irrespective of completion order. Record incomplete journeys separately from completed ones. Do not accept old Portfolio checkpoint format for resume. `start_run` must return after durable job registration and run work in a managed process that can outlive the MCP request; no untracked daemon thread tied to a server turn.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_jobs.py -q`; terminate a controlled worker process mid-journey in the test to prove disk recovery rather than in-memory status. Inspect checkpoint fields manually for hashes, state, budget, identity, and credential absence.
-- [ ] **Step 5: Commit.** `git add src tests && git commit -m "Add durable polling jobs and recovery"`.
+- [ ] Write RED tests for check and trace without network; source rehash at start; concurrent journeys with sequential within-journey calls; cancellation in flight; stale running checkpoint after process kill; completed-journey skip; execution-fingerprint mismatch; two-process resume lock; and no credential/source-text persistence. Use a controlled child process for kill/restart evidence, not an in-memory simulation.
+- [ ] Implement atomic versioned checkpoints, explicit process ownership/locking, reserved attempts before each dispatch, stable output order, and child-worker lifetime independent of an MCP request. Resume restarts an incomplete journey from its beginning, never repeats a completed one. Verify focused tests and typecheck; commit.
 
-### Task 8: Evidence reports and matched-run comparison
+### Task 8: Reports and matched comparison
 
-**Files:** Create `src/system_one_polling/report.py`, `tests/test_report.py`; extend `src/system_one_polling/jobs.py` report retrieval only to call this module.
+**Files:** Create `src/report.ts`, `test/report.test.ts`.
 
-**Interfaces:** Consumes Task 7 checkpoint plus `JourneyResult`. Produces `build_report(checkpoint) -> dict`, `compare_reports(left, right) -> dict`, both JSON-serializable. Comparison is defined only over common completed `(reader_id, condition_id)` keys under equal stimulus fingerprints.
+**Interfaces:** `buildReport(checkpoint)` and `compareReports(left, right)` return JSON-safe evidence. Comparison requires equal stimulus fingerprint and aligns only common completed `(readerId, conditionId)` keys.
 
-- [ ] **Step 1: Write RED tests.** Assert per-choice exposure/history events, completed versus partial denominator, archetype and condition summaries, optional and scan breakdowns, attempts/latency/token/billing evidence, model/checkpoint and revision-unknown provenance. Assert a same-manifest report with reordered cohort or changed prompt contract is refused; a Jev/Laya pair with equal stimulus aligns only matched completed journeys and separately counts failed/unsupported ones. Assert agreement is described as agreement, not accuracy or reader prevalence. Port relevant Portfolio `test_optional_summary_breaks_down_completed_journeys_by_outcome_and_archetype` and report-denominator tests.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_report.py -q`.
-- [ ] **Step 3: Implement.** Derive summaries from completed journey records and preserve intended cohort counts as distinct denominators. Keep unknown provider charges and unknown revisions explicit; include source hashes and fingerprints, not draft text. Reuse source `_optional_summaries`, `_scan_summaries`, and `_performance_summary` semantics where they apply, with provider-neutral usage fields.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_report.py -q`; review a rendered sample JSON report for custody and wording.
-- [ ] **Step 5: Commit.** `git add src tests && git commit -m "Report polling evidence and matched comparisons"`.
+- [ ] Write RED tests for completed versus intended denominators, condition/archetype/optional/scan breakdowns, ordered exposure events, attempts, latency, tokens, billed/unknown charge, unknown Laya revision, failed/unsupported journey counts, and mismatch on cohort order or prompt contract.
+- [ ] Implement summaries from completed records while keeping exclusions visible. Label Jev/Laya comparison as agreement or divergence, never accuracy, calibration, readership, or publication score. Run focused tests and typecheck; inspect one example JSON report; commit.
 
-### Task 9: CLI and MCP operations over the same core
+### Task 9: CLI and MCP over the shared job core
 
-**Files:** Create `src/system_one_polling/cli.py`, `src/system_one_polling/mcp_server.py`, `tests/test_cli.py`, `tests/test_mcp.py`; update `pyproject.toml` console scripts and dependency pins.
+**Files:** Create `src/cli.ts`, `src/mcp.ts`, `test/cli.test.ts`, `test/mcp.test.ts`; update `package.json` and lockfile for the official MCP TypeScript SDK.
 
-**Interfaces:** Consumes Task 7 job API and Task 8 reports. Produces CLI subcommands `check`, `trace`, `start`, `status`, `cancel`, `resume`, `report`, `compare`; MCP tools `poll_check`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_resume`, `poll_report` (and `poll_compare` for report parity). Every command/tool uses the same `RunConfig` parser and job functions.
+**Interfaces:** CLI `check`, `trace`, `start`, `status`, `cancel`, `resume`, `report`, `compare`; MCP `poll_check`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_resume`, `poll_report`, `poll_compare`. Both call Task 7/8 APIs and produce the same evidence.
 
-- [ ] **Step 1: Write RED tests.** Assert manifest-only arguments, mandatory cohort/provider and provider-specific caps, plus mandatory output directory for `start`/`resume`; invalid provider is refused before a network call. Assert check/trace work without credentials, output directory, or output mutation; start returns a durable run ID quickly; status/cancel/resume/report work after a server restart; and no provider fallback occurs. Assert MCP tools expose structured error/status payloads without leaking keys, and CLI/MCP produce the same underlying report for a scripted fake provider.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_cli.py tests/test_mcp.py -q`.
-- [ ] **Step 3: Implement.** Provide explicit provider options and local service URL/checkpoint/context settings, no implicit checkout-based defaults. `mcp_server.py` is a thin MCP SDK tool registration layer; pin SDK version after checking its current official API. Declare a `polling-mcp` console script as well as `polling`, and add `python -m system_one_polling.cli` for diagnosis. Both entry points must resolve from an installed package, not a `Z:` path.
-- [ ] **Step 4: Run GREEN.** `python -m pytest tests/test_cli.py tests/test_mcp.py -q`; run `python -m system_one_polling.cli --help` and start the MCP server with stdio in an isolated smoke harness that lists tools and calls `poll_check` against a fixture. No hosted call.
-- [ ] **Step 5: Commit.** `git add src tests pyproject.toml && git commit -m "Expose polling jobs through CLI and MCP"`.
+- [ ] Write RED tests for command/tool availability, provider-specific caps, manifest-only inputs, keyless check/trace, restart-safe status, CLI/MCP report parity, and safe error payloads. `poll_check` must reject a malformed manifest without starting a run.
+- [ ] Implement thin entry points around the job and report APIs. Run focused tests, typecheck, and `npm run build`; invoke `node dist/cli.js --help`, then connect an MCP test client to `node dist/mcp.js`, list tools and call `poll_check` on a fixture. Commit after the tracked hook passes.
 
-### Task 10: Ambient plugin, skill, installation, and full handoff proof
+### Task 10: Ambient plugin package and installation proof
 
-**Files:** Create `plugin.json`, `mcp.json`, `skills/simulated-reader-polling/SKILL.md`, `skills/simulated-reader-polling/references/designing-poll-studies.md`, `skills/simulated-reader-polling/references/assembling-a-cohort.md`, `skills/simulated-reader-polling/references/experiment-manifest.md`, `skills/simulated-reader-polling/references/operating-the-harness.md`, `skills/simulated-reader-polling/references/interpreting-poll-results.md`, `skills/simulated-reader-polling/references/reader-archetype-catalogue.md`, `README.md`, `docs/install-codex.md`, `tests/test_plugin_package.py`. Modify copied references so all commands, provider claims, and links reflect the standalone implementation.
+**Files:** Create `test/package.test.ts`, `plugin.json`, `mcp.json`, `skills/simulated-reader-polling/SKILL.md`, focused `skills/simulated-reader-polling/references/`, `README.md`, and `docs/install-codex.md`; modify `package.json` and tracked `dist/` as needed for a self-contained distribution.
 
-**Interfaces:** Consumes all public CLI/MCP seams. Produces one installable plugin root and user-level installation instructions. Root plugin manifest describes bundled skill and MCP launch. Any local catalog entry references this repo; no duplicate editable plugin source.
+**Interfaces:** Consumes Task 9's built Node CLI and MCP server. Produces one installable plugin root whose MCP command runs `node` with plugin-relative `dist/mcp.js`, plus user-level installation instructions. No duplicate editable plugin source.
 
-- [ ] **Step 1: Write RED packaging tests.** Validate plugin and MCP JSON files parse, skill references exist, every documented CLI subcommand appears in `--help`, no `Z:`/Portfolio/extractor dependencies remain in installed paths, and a copy of the plugin in a temporary directory launches its MCP command without the source checkout. Assert the skill says simulated results are not audience measurements, requires cohort freeze and rendered-stimulus inspection, and never promises automatic paid runs.
-- [ ] **Step 2: Run RED.** `python -m pytest tests/test_plugin_package.py -q`.
-- [ ] **Step 3: Implement.** Port the six editorial references and archetype catalogue, updating Portfolio-specific language and commands. Document installing from this repo at Codex user level, MCP process startup, environment variable for Jev, configured local Laya service, and version/update steps. Use the portable root `plugin.json` and `mcp.json` schemas in the current [OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins) and [Agent Plugins stdio specification](https://agent-plugins.org/specification). Prefer `mcp.json` with `type: "stdio"`, `command: "uvx"`, and separate `args: ["--from", "${PLUGIN_ROOT}", "polling-mcp"]`; confirm Windows Codex expands `PLUGIN_ROOT` in args and the copied plugin launches from `uv`'s cache without writing into the installed plugin. If that exact launch fails, choose and document a validated plugin-relative launcher rather than a path back to the checkout. A personal catalog can be created as install metadata inside this repo if Codex requires it; the plugin implementation remains one root. Do not alter a global Codex installation as part of routine tests.
-- [ ] **Step 4: Run GREEN and acceptance checks.** `python -m pytest -q`; run the CLI and MCP smoke checks from Task 9 in the copied plugin; run `rg -n 'Z:|portfolio|extract-article|--article|TODO|TBD' plugin.json mcp.json skills src docs README.md` and review legitimate source provenance mentions. From a fresh Codex chat after the user-level install, verify skill discovery and MCP tool startup. If this runtime cannot launch a fresh chat or install the plugin safely, record that as a handoff limitation rather than claiming proof.
-- [ ] **Step 5: Finish.** Review the complete branch against the spec, current live Portfolio source behavior, and the five Review Focus cases. Use `/verification-before-completion`, `/requesting-code-review`, and `/completing-planning-artifacts` as required. Commit the source and test work. Publish only under the execution-stage authorization and repo policy; a Draft PR is the reviewable handoff if requested. Keep old Portfolio checkpoints historical and plan a separate frozen Jev/Laya study after this release.
+- [ ] Verify current portable Codex plugin and MCP schemas from official docs. Write a RED package test that copies the plugin to an unrelated temporary directory, excludes its checkout and dev dependencies, launches MCP, lists tools, and calls `poll_check`; also check skill references and documented commands against the shipped artifact.
+- [ ] Author the root manifests and skill. Keep cohort audit, rendered-stimulus inspection, paid-run authorization, and cautious interpretation in the skill. Use only references still applicable to the standalone `1.0` contract. Keep `dist/` tracked; document `npm ci && npm run build`, installed Node 24 requirement, plugin update/build procedure, Jev key, and separately configured local Laya endpoint. Do not mutate the global Codex installation in routine tests.
+- [ ] Run `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, and package-copy MCP smoke. Inspect `git diff --check` and shipping files for stale Python runtime, Portfolio, extractor, checkout, or credential dependencies. If user-level installation can safely be exercised, verify fresh-chat discovery and MCP startup; otherwise report that evidence limit. Use `/verification-before-completion`, `/requesting-code-review`, and `/completing-planning-artifacts` at their proper stage. Commit through the tracked hook. Publish only under execution-stage authorization and repository policy.
 
 ## Acceptance evidence
 
-- `python -m pytest -q` passes with fake Jev/Laya transports and real route fixtures; no hosted call is required.
-- `polling check` and `polling trace` operate on manifest and cohort without a key or network; an unchanged study produces the same stimulus fingerprint across provider selections.
-- A bounded local run and a bounded mocked Jev run each yield checkpoints, reports, identity/usage evidence, and restart-safe status/resume/cancel behavior. The local GPU integration check is opt-in and records the actual checkpoint routing identity.
-- An installed plugin copy runs without Portfolio or this `Z:` checkout; fresh-chat Codex discovery and MCP startup are verified or explicitly recorded as unavailable.
-- No Portfolio files, marketplace canonical sources, article content, or currently installed skill are changed by this port.
+- Focused Node tests and typecheck pass with fake Jev/Laya transports; no hosted call is required.
+- `check` and scripted `trace` work without a key or network. A changed source is rejected at `start`, even after a previous successful `check`.
+- A bounded local or fake-provider run yields durable checkpoint, report, identity, usage evidence, and restart-safe status/resume/cancel. Live GPU smoke is opt-in and records observed routing identity.
+- A copied plugin launches from an unrelated directory using shipped JavaScript and runtime dependencies, without Portfolio, source checkout, Python, TypeScript compiler, or development dependencies. Fresh Codex discovery is verified or explicitly marked unverified.
+- No Portfolio source, marketplace source, article content, or currently installed skill is changed by this project.
