@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -22,6 +22,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   await cp(path.resolve('skills/simulated-reader-polling/SKILL.md'), path.join(plugin, 'skills/simulated-reader-polling/SKILL.md'), { recursive: true });
   await cp(path.resolve('skills/simulated-reader-polling/references'), path.join(plugin, 'skills/simulated-reader-polling/references'), { recursive: true });
   await cp(path.resolve('skills/simulated-reader-polling/assets'), path.join(plugin, 'skills/simulated-reader-polling/assets'), { recursive: true });
+  await assertSkillLinksResolve(path.join(plugin, 'skills/simulated-reader-polling'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/reader-archetypes.json')), true);
   for (const contract of ['reader-archetype.schema.json', 'reader-archetype-library.schema.json', 'reader-profile.schema.json', 'frozen-cohort.schema.json', 'study-manifest.schema.json']) {
     assert.equal(await exists(path.join(plugin, 'skills/simulated-reader-polling/assets', contract)), true);
@@ -73,4 +74,20 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
 
 async function exists(filePath: string): Promise<boolean> {
   try { await readFile(filePath); return true; } catch { return false; }
+}
+
+async function assertSkillLinksResolve(skillDirectory: string, pluginDirectory: string): Promise<void> {
+  for (const relativePath of await readdir(skillDirectory, { recursive: true })) {
+    if (!relativePath.endsWith('.md')) continue;
+    const markdownPath = path.join(skillDirectory, relativePath);
+    const markdown = await readFile(markdownPath, 'utf8');
+    for (const [, target] of markdown.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+      if (!target || /^[a-z][a-z\d+.-]*:/i.test(target) || target.startsWith('#')) continue;
+      const localPath = target.split('#', 1)[0]?.split('?', 1)[0];
+      if (!localPath) continue;
+      const resolvedPath = path.resolve(path.dirname(markdownPath), localPath);
+      assert.ok(resolvedPath.startsWith(pluginDirectory), `Skill link escapes plugin: ${target}`);
+      assert.equal(await exists(resolvedPath), true, `Broken packaged skill link in ${relativePath}: ${target}`);
+    }
+  }
 }
