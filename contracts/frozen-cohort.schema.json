@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "archetypes": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "arrival_intent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "background": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "desired_payoff": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "drawn_in_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "put_off_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "invariants": {
+            "minItems": 2,
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "variation_axes": {
+            "minItems": 2,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "values": {
+                  "minItems": 2,
+                  "maxItems": 5,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                      },
+                      "description": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "description"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "description",
+                "values"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "arrival_intent",
+          "background",
+          "desired_payoff",
+          "drawn_in_by",
+          "put_off_by",
+          "invariants",
+          "variation_axes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "readers": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "archetypeId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "variation": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            }
+          },
+          "arrival_intent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "background": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "desired_payoff": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "drawn_in_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "put_off_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id",
+          "arrival_intent",
+          "background",
+          "desired_payoff",
+          "drawn_in_by",
+          "put_off_by"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "admission": {
+      "type": "object",
+      "properties": {
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "frozenAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "rationale",
+        "frozenAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "version",
+    "readers",
+    "admission"
+  ],
+  "additionalProperties": false,
+  "$id": "https://schemas.system-one-polling.dev/frozen-cohort.schema.json",
+  "title": "Frozen reader cohort",
+  "x-validation-rules": [
+    "Text fields must contain non-whitespace content; surrounding whitespace is trimmed by runtime validation.",
+    "Reader IDs are unique within the cohort.",
+    "Every archetypeId refers to an archetype included in the cohort snapshot.",
+    "Profiles without archetypeId cannot include variation selections.",
+    "Archetype-derived profiles select exactly one declared value for every variation axis."
+  ]
+}

@@ -29,6 +29,7 @@ test('cohort order, source hashes, prompt contract, checkpoint, and precision af
   const study = await studyFixture(t);
   const base = stimulusFingerprint(study.manifest, study.profiles, 'prompt-v1');
   assert.notEqual(stimulusFingerprint(study.manifest, [...study.profiles].reverse(), 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint(study.manifest, [{ ...study.profiles[0]!, background: 'Has substantial hands-on experience.' }, study.profiles[1]!], 'prompt-v1'), base);
   assert.notEqual(stimulusFingerprint({ ...study.manifest, sources: study.manifest.sources.map((source) => ({ ...source, sha256: 'a'.repeat(64) })) }, study.profiles, 'prompt-v1'), base);
   assert.notEqual(stimulusFingerprint(study.manifest, study.profiles, 'prompt-v2'), base);
 

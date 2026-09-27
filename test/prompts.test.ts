@@ -25,6 +25,9 @@ test('decision state contains encountered stimuli in order and excludes future c
 
   assert.deepEqual(request.state.encounteredItems.map((item) => item.id), ['symptom', 'investigation']);
   assert.deepEqual(request.state.choiceHistory, history);
+  assert.equal(request.state.reader.profile.arrival_intent, 'Understand how software design choices affect the people who use a system.');
+  assert.equal('archetypeId' in request.state.reader.profile, false);
+  assert.equal('variation' in request.state.reader.profile, false);
   assert.equal(JSON.stringify(request.state).includes('The team replaced the hidden coupling'), false);
   assert.equal(JSON.stringify(request.state).includes(loaded.manifest.study.purpose), false);
   assert.deepEqual(request.labels, ['continue', 'open-notes', 'leave']);

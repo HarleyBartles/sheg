@@ -33,6 +33,24 @@ test('loads article and chapter studies through the same graph primitives', asyn
   assert.equal(article.sources[0]?.sha256, 'dc6bb97ebce3cd0c42945143c1eb230a74377111308d8b8563652898d996daf5');
 });
 
+test('loads a direct profile cohort without archetypes', async (t) => {
+  const files = await copiedStudy(t);
+  const cohort = JSON.parse(await readFile(files.cohortPath, 'utf8')) as {
+    archetypes?: unknown[];
+    readers: Array<Record<string, unknown>>;
+  };
+  delete cohort.archetypes;
+  for (const reader of cohort.readers) {
+    delete reader.archetypeId;
+    delete reader.variation;
+  }
+  await writeFile(files.cohortPath, JSON.stringify(cohort));
+
+  const study = await loadStudy(files.manifestPath, files.cohortPath);
+  assert.equal(study.profiles.length, 2);
+  assert.equal(study.profiles[0]?.archetypeId, undefined);
+});
+
 test('accepts an explicitly absolute source reference', async (t) => {
   const files = await copiedStudy(t);
   const manifest = JSON.parse(await readFile(files.manifestPath, 'utf8')) as {
@@ -99,17 +117,12 @@ test('rejects unknown manifest fields and requires an explicit frozen cohort', a
   await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /unknown|unrecognized/i);
 });
 
-test('rejects duplicate readers and archetypes absent from the bundled catalogue', async (t) => {
+test('rejects duplicate readers in a frozen cohort', async (t) => {
   const files = await copiedStudy(t);
   const cohort = JSON.parse(await readFile(files.cohortPath, 'utf8')) as {
-    readers: Array<{ id: string; archetypeId: string }>;
+    readers: Array<{ id: string }>;
   };
   cohort.readers[1]!.id = cohort.readers[0]!.id;
   await writeFile(files.cohortPath, JSON.stringify(cohort));
   await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /duplicate reader/i);
-
-  cohort.readers[1]!.id = 'craft-reader';
-  cohort.readers[1]!.archetypeId = 'unlisted-archetype';
-  await writeFile(files.cohortPath, JSON.stringify(cohort));
-  await assert.rejects(loadStudy(files.manifestPath, files.cohortPath), /unknown archetype/i);
 });

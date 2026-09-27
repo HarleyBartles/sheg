@@ -5,10 +5,11 @@ An ambient Codex plugin and standalone Node.js 24 harness for bounded simulated-
 ## What it does
 
 - Models articles, chapters, scans, and other reader experiences with one domain-neutral graph manifest.
+- Ships reusable reader archetypes and guidance to expand them into poll-specific profiles or author profiles directly.
 - Runs frozen simulated-reader cohorts with bounded decisions, durable checkpoints, call and spend controls, resume, reports, and matched comparisons.
 - Exposes the same job core through a CLI and eight MCP tools.
 
-Poll responses are simulated judgments. They are not observed readership, accuracy, calibration, or publication scores. Review the [skill](skills/simulated-reader-polling/SKILL.md) and [manifest reference](docs/reference/study-manifest.md) before using the harness.
+The plugin ships a [reader archetype library](dist/data/reader-archetypes.json), not ready-made reader profiles. The skill teaches agents to author archetypes, expand them into study-specific profiles, or prepare profiles directly. Poll responses are simulated judgments, not observed readership, accuracy, calibration, or publication scores. Review the [skill](skills/simulated-reader-polling/SKILL.md) and [manifest reference](docs/reference/study-manifest.md) before using the harness.
 
 ## Development
 

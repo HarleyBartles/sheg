@@ -2,7 +2,7 @@
 
 - Status: Proposed | Accepted | Superseded
 - Date: YYYY-MM-DD
-- Supersedes: None | [ADR-NNNN](NNNN-title.md)
+- Supersedes: None | ADR-NNNN (link to the prior record)
 
 ## Context
 

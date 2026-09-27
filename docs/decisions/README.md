@@ -15,6 +15,7 @@ alongside the code and planning artifacts.
 | [0004](0004-organize-source-by-responsibility.md) | Organize source by responsibility and keep tests separate | Accepted |
 | [0005](0005-distribute-as-an-ambient-codex-plugin.md) | Distribute as an ambient Codex plugin | Accepted |
 | [0006](0006-store-adrs-in-docs-decisions.md) | Store ADRs in `docs/decisions` | Accepted |
+| [0007](0007-guide-archetypes-and-freeze-reader-cohorts.md) | Guide archetype authoring and freeze study-specific reader profiles | Accepted |
 
 ## Writing and changing decisions
 

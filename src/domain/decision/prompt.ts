@@ -1,17 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { DecisionRequest } from './contract.js';
-import type { ReaderProfile } from '../readers/profile.js';
+import type { ReaderPerspective, ReaderProfile } from '../readers/profile.js';
 import type { StudyManifest } from '../study/manifest.js';
 
 export type ChoiceHistoryEvent = { nodeId: string; choice: string };
 export type PromptState = {
-  reader: { profile: string };
+  reader: { profile: ReaderPerspective };
   encounteredItems: Array<{ id: string; text: string }>;
   choiceHistory: ChoiceHistoryEvent[];
 };
 
 const promptContract = {
-  version: 1,
+  version: 2,
   stateFields: ['reader.profile', 'encounteredItems', 'choiceHistory'],
   onlyEncounteredItems: true,
   preserveEncounterOrder: true,
@@ -36,7 +36,13 @@ export function renderQuestion(
     return { id: item.id, text: item.text };
   });
   const state: PromptState = {
-    reader: { profile: profile.profileText },
+    reader: { profile: {
+      arrival_intent: profile.arrival_intent,
+      background: profile.background,
+      desired_payoff: profile.desired_payoff,
+      drawn_in_by: profile.drawn_in_by,
+      put_off_by: profile.put_off_by,
+    } },
     encounteredItems,
     choiceHistory: history.map((event) => ({ ...event })),
   };

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "archetypeId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "variation": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      }
+    },
+    "arrival_intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "background": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "desired_payoff": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "drawn_in_by": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "put_off_by": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "id",
+    "arrival_intent",
+    "background",
+    "desired_payoff",
+    "drawn_in_by",
+    "put_off_by"
+  ],
+  "additionalProperties": false,
+  "$id": "https://schemas.system-one-polling.dev/reader-profile.schema.json",
+  "title": "Concrete reader profile",
+  "x-validation-rules": [
+    "Text fields must contain non-whitespace content; surrounding whitespace is trimmed by runtime validation."
+  ]
+}

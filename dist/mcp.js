@@ -34405,43 +34405,109 @@ var StudyInputError = class extends Error {
 };
 
 // src/domain/readers/profile.ts
-var profileSchema = external_exports.object({
-  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  archetypeId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  profileText: external_exports.string().trim().min(1).max(500)
+var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
+var proseSchema = external_exports.string().trim().min(1).max(500);
+var readerArchetypeSchema = external_exports.object({
+  id: idSchema,
+  name: proseSchema,
+  arrival_intent: proseSchema,
+  background: proseSchema,
+  desired_payoff: proseSchema,
+  drawn_in_by: proseSchema,
+  put_off_by: proseSchema,
+  invariants: external_exports.array(proseSchema).min(2).max(6),
+  variation_axes: external_exports.array(external_exports.object({
+    id: idSchema,
+    description: proseSchema,
+    values: external_exports.array(external_exports.object({ id: idSchema, description: proseSchema }).strict()).min(2).max(5)
+  }).strict()).min(2).max(4)
+}).strict().superRefine((archetype, context) => {
+  const axisIds = archetype.variation_axes.map((axis) => axis.id);
+  if (new Set(axisIds).size !== axisIds.length) {
+    context.addIssue({ code: "custom", path: ["variation_axes"], message: "Variation axis IDs must be unique." });
+  }
+  for (const [index, axis] of archetype.variation_axes.entries()) {
+    const valueIds = axis.values.map((value) => value.id);
+    if (new Set(valueIds).size !== valueIds.length) {
+      context.addIssue({ code: "custom", path: ["variation_axes", index, "values"], message: "Variation values must have unique IDs within their axis." });
+    }
+  }
+});
+var archetypeLibrarySchema = external_exports.array(readerArchetypeSchema).min(1).superRefine((archetypes, context) => {
+  const ids = archetypes.map((archetype) => archetype.id);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: "custom", message: "Archetype IDs must be unique in a library." });
+  }
+});
+var readerProfileSchema = external_exports.object({
+  id: idSchema,
+  archetypeId: idSchema.optional(),
+  variation: external_exports.record(idSchema, idSchema).optional(),
+  arrival_intent: proseSchema,
+  background: proseSchema,
+  desired_payoff: proseSchema,
+  drawn_in_by: proseSchema,
+  put_off_by: proseSchema
 }).strict();
 var cohortSchema = external_exports.object({
-  version: external_exports.literal("1.0"),
-  readers: external_exports.array(profileSchema).min(1),
+  version: external_exports.literal("2.0"),
+  archetypes: archetypeLibrarySchema.optional(),
+  readers: external_exports.array(readerProfileSchema).min(1),
   admission: external_exports.object({
     rationale: external_exports.string().trim().min(1),
     frozenAt: external_exports.string().datetime({ offset: true })
   }).strict()
-}).strict();
-function loadProfiles(input2) {
+}).strict().superRefine((cohort, context) => {
+  const readerIds = cohort.readers.map((reader) => reader.id);
+  if (new Set(readerIds).size !== readerIds.length) {
+    context.addIssue({ code: "custom", path: ["readers"], message: "Frozen cohort contains a duplicate reader ID." });
+  }
+  const archetypes = new Map((cohort.archetypes ?? []).map((archetype) => [archetype.id, archetype]));
+  for (const [readerIndex, reader] of cohort.readers.entries()) {
+    if (!reader.archetypeId) {
+      if (reader.variation) {
+        context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation"], message: "Variation values require an archetype reference." });
+      }
+      continue;
+    }
+    const archetype = archetypes.get(reader.archetypeId);
+    if (!archetype) {
+      context.addIssue({ code: "custom", path: ["readers", readerIndex, "archetypeId"], message: `Unknown archetype: ${reader.archetypeId}.` });
+      continue;
+    }
+    if (!reader.variation) {
+      context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation"], message: "Archetype-derived profiles must select a value for every variation axis." });
+      continue;
+    }
+    const expectedAxes = archetype.variation_axes.map((axis) => axis.id).sort();
+    const selectedAxes = Object.keys(reader.variation).sort();
+    if (JSON.stringify(expectedAxes) !== JSON.stringify(selectedAxes)) {
+      context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation"], message: "Variation selections must cover exactly the archetype variation axes." });
+      continue;
+    }
+    for (const axis of archetype.variation_axes) {
+      const selection = reader.variation[axis.id];
+      if (!axis.values.some((value) => value.id === selection)) {
+        context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation", axis.id], message: `Unknown variation value for axis ${axis.id}.` });
+      }
+    }
+  }
+});
+function loadCohort(input2) {
   const result = cohortSchema.safeParse(input2);
   if (!result.success) {
     throw new StudyInputError(`Frozen cohort is invalid: ${result.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: result.error });
   }
-  const readers = result.data.readers;
-  const ids = new Set(readers.map((reader) => reader.id));
-  if (ids.size !== readers.length) {
-    throw new StudyInputError("Frozen cohort contains a duplicate reader ID.");
-  }
-  return readers;
+  return { archetypes: result.data.archetypes ?? [], readers: result.data.readers };
 }
-function validateCohort(readers, archetypeIds) {
-  for (const reader of readers) {
-    if (!archetypeIds.has(reader.archetypeId)) {
-      throw new StudyInputError(`Reader ${reader.id} uses an unknown archetype: ${reader.archetypeId}.`);
-    }
-  }
+function loadProfiles(input2) {
+  return loadCohort(input2).readers;
 }
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
 var promptContract = {
-  version: 1,
+  version: 2,
   stateFields: ["reader.profile", "encounteredItems", "choiceHistory"],
   onlyEncounteredItems: true,
   preserveEncounterOrder: true,
@@ -34459,7 +34525,13 @@ function renderQuestion(study, profile, decisionId, encounteredItemIds, history 
     return { id: item.id, text: item.text };
   });
   const state = {
-    reader: { profile: profile.profileText },
+    reader: { profile: {
+      arrival_intent: profile.arrival_intent,
+      background: profile.background,
+      desired_payoff: profile.desired_payoff,
+      drawn_in_by: profile.drawn_in_by,
+      put_off_by: profile.put_off_by
+    } },
     encounteredItems,
     choiceHistory: history.map((event) => ({ ...event }))
   };
@@ -34566,7 +34638,6 @@ async function traceStudy(study, profile, scriptedChoices) {
 import { createHash as createHash2 } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 // src/domain/study/manifest.ts
 var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -34689,10 +34760,6 @@ var manifestSchema = external_exports.object({
 
 // src/domain/study/load-study.ts
 var maximumManifestBytes = 2e5;
-var archetypeCatalogueUrls = [
-  new URL("../readers/reader-archetypes.json", import.meta.url),
-  new URL("./data/reader-archetypes.json", import.meta.url)
-];
 async function parseJsonFile(filePath, label) {
   let bytes;
   try {
@@ -34751,22 +34818,6 @@ async function loadStudy(manifestPath, cohortPath) {
   }
   const cohortJson = await parseJsonFile(path.resolve(cohortPath), "Frozen cohort");
   const profiles = loadProfiles(cohortJson);
-  let catalogueJson;
-  let catalogueRead = false;
-  for (const catalogueUrl of archetypeCatalogueUrls) {
-    try {
-      catalogueJson = await parseJsonFile(fileURLToPath(catalogueUrl), "Bundled archetype catalogue");
-      catalogueRead = true;
-      break;
-    } catch {
-    }
-  }
-  if (!catalogueRead) throw new StudyInputError("Bundled archetype catalogue is missing or unreadable.");
-  const catalogue = external_exports.array(external_exports.object({ id: external_exports.string() }).passthrough()).safeParse(catalogueJson);
-  if (!catalogue.success) {
-    throw new StudyInputError("Bundled archetype catalogue is invalid.", { cause: catalogue.error });
-  }
-  validateCohort(profiles, new Set(catalogue.data.map((archetype) => archetype.id)));
   return {
     manifest,
     profiles,

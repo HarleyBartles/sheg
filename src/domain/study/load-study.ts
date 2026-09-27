@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
 import { StudyInputError } from '../errors.js';
-import { loadProfiles, validateCohort, type ReaderProfile } from '../readers/profile.js';
+import { loadProfiles, type ReaderProfile } from '../readers/profile.js';
 import { manifestSchema } from './manifest.js';
 import type { StudyManifest } from './manifest.js';
 
@@ -17,10 +15,6 @@ export type Study = {
 };
 
 const maximumManifestBytes = 200_000;
-const archetypeCatalogueUrls = [
-  new URL('../readers/reader-archetypes.json', import.meta.url),
-  new URL('./data/reader-archetypes.json', import.meta.url),
-];
 
 async function parseJsonFile(filePath: string, label: string): Promise<unknown> {
   let bytes: Buffer;
@@ -83,21 +77,6 @@ export async function loadStudy(manifestPath: string, cohortPath: string | undef
 
   const cohortJson = await parseJsonFile(path.resolve(cohortPath), 'Frozen cohort');
   const profiles: readonly ReaderProfile[] = loadProfiles(cohortJson);
-  let catalogueJson: unknown;
-  let catalogueRead = false;
-  for (const catalogueUrl of archetypeCatalogueUrls) {
-    try {
-      catalogueJson = await parseJsonFile(fileURLToPath(catalogueUrl), 'Bundled archetype catalogue');
-      catalogueRead = true;
-      break;
-    } catch { /* Try the distribution-relative asset location next. */ }
-  }
-  if (!catalogueRead) throw new StudyInputError('Bundled archetype catalogue is missing or unreadable.');
-  const catalogue = z.array(z.object({ id: z.string() }).passthrough()).safeParse(catalogueJson);
-  if (!catalogue.success) {
-    throw new StudyInputError('Bundled archetype catalogue is invalid.', { cause: catalogue.error });
-  }
-  validateCohort(profiles, new Set(catalogue.data.map((archetype) => archetype.id)));
 
   return {
     manifest,
