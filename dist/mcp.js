@@ -35952,7 +35952,7 @@ function cleanBudget(snapshot) {
 // src/application/reports.ts
 import { createHash as createHash5 } from "node:crypto";
 import path5 from "node:path";
-var responseSchema2 = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), optionIds: external_exports.array(external_exports.string()), choice: external_exports.string(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), chargeUsd: external_exports.number().nonnegative().nullable() }).strict();
+var responseSchema2 = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), presentationOccurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), optionIds: external_exports.array(external_exports.string()), choice: external_exports.string(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), chargeUsd: external_exports.number().nonnegative().nullable() }).strict();
 var pollingReportSchema = external_exports.object({
   formatVersion: external_exports.literal(2),
   runId: external_exports.string().uuid(),
@@ -35969,7 +35969,7 @@ var pollingReportSchema = external_exports.object({
     sources: external_exports.array(external_exports.object({ path: external_exports.string(), sha256: external_exports.string() }).strict()),
     stimulusItems: external_exports.array(external_exports.object({ id: external_exports.string(), text: external_exports.string() }).strict()),
     tasks: external_exports.array(external_exports.object({ id: external_exports.string(), comparisonKey: external_exports.string().nullable(), instructions: external_exports.string(), options: external_exports.record(external_exports.string(), external_exports.string()) }).strict()),
-    taskResponses: external_exports.record(external_exports.string(), external_exports.object({ reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()) }).strict()),
+    taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()) }).strict()) }).strict()),
     journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), status: external_exports.string(), outcome: external_exports.string().nullable(), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2) }).strict())
   }).strict()),
   providerEvidence: external_exports.object({ attempts: external_exports.number().int(), billedUsd: external_exports.number().nonnegative(), unknownCharges: external_exports.number().int(), failedCells: external_exports.number().int() }).strict()
@@ -35989,16 +35989,20 @@ async function buildReport(checkpoint) {
       const stored = checkpoint.journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondent.id);
       const decisions = stored?.decisions ?? [];
       const occurrenceByKey = /* @__PURE__ */ new Map();
+      const presentationOccurrenceByTask = /* @__PURE__ */ new Map();
       const responses = decisions.map((checkpointDecision) => {
         const { decisionId, result } = checkpointDecision;
         const task = taskMap.get(decisionId);
         const key = task?.comparisonKey ?? "";
         const occurrence = (occurrenceByKey.get(key) ?? 0) + 1;
         occurrenceByKey.set(key, occurrence);
+        const presentationOccurrence = (presentationOccurrenceByTask.get(decisionId) ?? 0) + 1;
+        presentationOccurrenceByTask.set(decisionId, presentationOccurrence);
         return {
           taskId: decisionId,
           comparisonKey: task?.comparisonKey ?? null,
           occurrence,
+          presentationOccurrence,
           requestFingerprint: checkpointDecision.requestFingerprint,
           optionIds: Object.keys(task?.options ?? {}),
           choice: result.choice,
@@ -36015,26 +36019,30 @@ async function buildReport(checkpoint) {
     for (const journey of journeys) if (journey.status !== "completed") excludedByStatus[journey.status] = (excludedByStatus[journey.status] ?? 0) + 1;
     const taskResponses = {};
     for (const task of arm.tasks) {
-      const responses = journeys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id));
-      const counts = {};
-      for (const response of responses) counts[response.choice] = (counts[response.choice] ?? 0) + 1;
-      const options = Object.fromEntries(Object.keys(task.options).map((optionId) => {
-        const count = counts[optionId] ?? 0;
-        return [optionId, { count, proportion: responses.length ? count / responses.length : 0 }];
-      }));
-      const presentations = checkpoint.journeys.filter((journey) => journey.armId === arm.id).flatMap((journey) => journey.presentedTaskIds.filter((taskId) => taskId === task.id));
-      const reached = presentations.length;
-      const notReached = cohort.respondents.filter((respondent) => !checkpoint.journeys.some((journey) => journey.armId === arm.id && journey.respondentId === respondent.id && journey.presentedTaskIds.includes(task.id))).length;
-      taskResponses[task.id] = {
-        reached,
-        completed: responses.length,
-        incomplete: Math.max(0, reached - responses.length),
-        notReached,
-        correct: responses.filter((response) => response.correct === true).length,
-        incorrect: responses.filter((response) => response.correct === false).length,
-        unscored: responses.filter((response) => response.correct === null).length,
-        options
-      };
+      const occurrenceCount = Math.max(1, ...journeys.map((journey) => journey.responses.filter((response) => response.taskId === task.id).length), ...checkpoint.journeys.filter((journey) => journey.armId === arm.id).map((journey) => journey.presentedTaskIds.filter((taskId) => taskId === task.id).length));
+      const occurrences = Array.from({ length: occurrenceCount }, (_, index) => {
+        const occurrence = index + 1;
+        const reachedJourneys = journeys.filter((journey) => journey.responses.some((response) => response.taskId === task.id && response.presentationOccurrence === occurrence) || (checkpoint.journeys.find((cell) => cell.armId === arm.id && cell.respondentId === journey.respondentId)?.presentedTaskIds.filter((taskId) => taskId === task.id).length ?? 0) >= occurrence);
+        const responses = reachedJourneys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id && response.presentationOccurrence === occurrence));
+        const counts = {};
+        for (const response of responses) counts[response.choice] = (counts[response.choice] ?? 0) + 1;
+        const options = Object.fromEntries(Object.keys(task.options).map((optionId) => {
+          const count = counts[optionId] ?? 0;
+          return [optionId, { count, proportion: responses.length ? count / responses.length : 0 }];
+        }));
+        return {
+          occurrence,
+          reached: reachedJourneys.length,
+          completed: responses.length,
+          incomplete: reachedJourneys.length - responses.length,
+          notReached: cohort.respondents.length - reachedJourneys.length,
+          correct: responses.filter((response) => response.correct === true).length,
+          incorrect: responses.filter((response) => response.correct === false).length,
+          unscored: responses.filter((response) => response.correct === null).length,
+          options
+        };
+      });
+      taskResponses[task.id] = { occurrences };
     }
     const completed = journeys.filter((journey) => journey.status === "completed").length;
     const started = checkpoint.journeys.filter((journey) => journey.armId === arm.id).length;

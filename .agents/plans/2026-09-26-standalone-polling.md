@@ -1,5 +1,7 @@
 # Standalone System One Polling Implementation Plan
 
+> **Status:** Superseded by `.agents/specs/2026-09-27-stimulus-response-matched-studies.md` and `.agents/plans/2026-09-27-stimulus-response-matched-studies.md`; the superseding plan owns the current release scope.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship one ambient Codex plugin whose TypeScript harness runs bounded, reproducible simulated-reader studies against explicitly selected Jev or local Laya.

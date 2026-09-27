@@ -6,7 +6,7 @@ import { promptContractHash } from '../domain/decision/prompt.js';
 import { CheckpointStore, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 
-const responseSchema = z.object({ taskId: z.string(), comparisonKey: z.string().nullable(), occurrence: z.number().int().positive(), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), optionIds: z.array(z.string()), choice: z.string(), correct: z.boolean().nullable(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), confidence: z.number().nullable(), chargeUsd: z.number().nonnegative().nullable() }).strict();
+const responseSchema = z.object({ taskId: z.string(), comparisonKey: z.string().nullable(), occurrence: z.number().int().positive(), presentationOccurrence: z.number().int().positive(), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), optionIds: z.array(z.string()), choice: z.string(), correct: z.boolean().nullable(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), confidence: z.number().nullable(), chargeUsd: z.number().nonnegative().nullable() }).strict();
 export const pollingReportSchema = z.object({
   formatVersion: z.literal(2), runId: z.string().uuid(), status: z.string(), stimulusFingerprint: z.string(), executionFingerprint: z.string(),
   provider: z.object({ kind: z.enum(['jev', 'laya']), model: z.string().nullable(), checkpoint: z.string().nullable() }).strict(),
@@ -16,7 +16,7 @@ export const pollingReportSchema = z.object({
     sources: z.array(z.object({ path: z.string(), sha256: z.string() }).strict()),
     stimulusItems: z.array(z.object({ id: z.string(), text: z.string() }).strict()),
     tasks: z.array(z.object({ id: z.string(), comparisonKey: z.string().nullable(), instructions: z.string(), options: z.record(z.string(), z.string()) }).strict()),
-    taskResponses: z.record(z.string(), z.object({ reached: z.number().int(), completed: z.number().int(), incomplete: z.number().int(), notReached: z.number().int(), correct: z.number().int(), incorrect: z.number().int(), unscored: z.number().int(), options: z.record(z.string(), z.object({ count: z.number().int(), proportion: z.number().min(0).max(1) }).strict()) }).strict()),
+    taskResponses: z.record(z.string(), z.object({ occurrences: z.array(z.object({ occurrence: z.number().int().positive(), reached: z.number().int(), completed: z.number().int(), incomplete: z.number().int(), notReached: z.number().int(), correct: z.number().int(), incorrect: z.number().int(), unscored: z.number().int(), options: z.record(z.string(), z.object({ count: z.number().int(), proportion: z.number().min(0).max(1) }).strict()) }).strict()) }).strict()),
     journeys: z.array(z.object({ respondentId: z.string(), archetypeId: z.string().nullable(), status: z.string(), outcome: z.string().nullable(), events: z.array(z.unknown()), responses: z.array(responseSchema) }).strict()),
   }).strict()),
   providerEvidence: z.object({ attempts: z.number().int(), billedUsd: z.number().nonnegative(), unknownCharges: z.number().int(), failedCells: z.number().int() }).strict(),
@@ -41,13 +41,16 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
       const stored = checkpoint.journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondent.id);
       const decisions = stored?.decisions ?? [];
       const occurrenceByKey = new Map<string, number>();
+      const presentationOccurrenceByTask = new Map<string, number>();
       const responses = decisions.map((checkpointDecision) => {
         const { decisionId, result } = checkpointDecision;
         const task = taskMap.get(decisionId);
         const key = task?.comparisonKey ?? '';
         const occurrence = (occurrenceByKey.get(key) ?? 0) + 1;
         occurrenceByKey.set(key, occurrence);
-        return { taskId: decisionId, comparisonKey: task?.comparisonKey ?? null, occurrence, requestFingerprint: checkpointDecision.requestFingerprint, optionIds: Object.keys(task?.options ?? {}), choice: result.choice,
+        const presentationOccurrence = (presentationOccurrenceByTask.get(decisionId) ?? 0) + 1;
+        presentationOccurrenceByTask.set(decisionId, presentationOccurrence);
+        return { taskId: decisionId, comparisonKey: task?.comparisonKey ?? null, occurrence, presentationOccurrence, requestFingerprint: checkpointDecision.requestFingerprint, optionIds: Object.keys(task?.options ?? {}), choice: result.choice,
           correct: task?.answerKeyOptionId ? result.choice === task.answerKeyOptionId : null, attempts: result.attempts, latencyMs: result.latencyMs,
           confidence: result.confidence ?? null, chargeUsd: result.chargeUsd ?? null };
       });
@@ -57,19 +60,23 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
     for (const journey of journeys) if (journey.status !== 'completed') excludedByStatus[journey.status] = (excludedByStatus[journey.status] ?? 0) + 1;
     const taskResponses: PollingReport['arms'][number]['taskResponses'] = {};
     for (const task of arm.tasks) {
-      const responses = journeys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id));
-      const counts: Record<string, number> = {};
-      for (const response of responses) counts[response.choice] = (counts[response.choice] ?? 0) + 1;
-      const options = Object.fromEntries(Object.keys(task.options).map((optionId) => {
-        const count = counts[optionId] ?? 0;
-        return [optionId, { count, proportion: responses.length ? count / responses.length : 0 }];
-      }));
-      const presentations = checkpoint.journeys.filter((journey) => journey.armId === arm.id).flatMap((journey) => journey.presentedTaskIds.filter((taskId) => taskId === task.id));
-      const reached = presentations.length;
-      const notReached = cohort.respondents.filter((respondent) => !checkpoint.journeys.some((journey) => journey.armId === arm.id && journey.respondentId === respondent.id && journey.presentedTaskIds.includes(task.id))).length;
-      taskResponses[task.id] = { reached, completed: responses.length, incomplete: Math.max(0, reached - responses.length), notReached,
-        correct: responses.filter((response) => response.correct === true).length, incorrect: responses.filter((response) => response.correct === false).length,
-        unscored: responses.filter((response) => response.correct === null).length, options };
+      const occurrenceCount = Math.max(1, ...journeys.map((journey) => journey.responses.filter((response) => response.taskId === task.id).length), ...checkpoint.journeys.filter((journey) => journey.armId === arm.id).map((journey) => journey.presentedTaskIds.filter((taskId) => taskId === task.id).length));
+      const occurrences = Array.from({ length: occurrenceCount }, (_, index) => {
+        const occurrence = index + 1;
+        const reachedJourneys = journeys.filter((journey) => journey.responses.some((response) => response.taskId === task.id && response.presentationOccurrence === occurrence) ||
+          (checkpoint.journeys.find((cell) => cell.armId === arm.id && cell.respondentId === journey.respondentId)?.presentedTaskIds.filter((taskId) => taskId === task.id).length ?? 0) >= occurrence);
+        const responses = reachedJourneys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id && response.presentationOccurrence === occurrence));
+        const counts: Record<string, number> = {};
+        for (const response of responses) counts[response.choice] = (counts[response.choice] ?? 0) + 1;
+        const options = Object.fromEntries(Object.keys(task.options).map((optionId) => {
+          const count = counts[optionId] ?? 0;
+          return [optionId, { count, proportion: responses.length ? count / responses.length : 0 }];
+        }));
+        return { occurrence, reached: reachedJourneys.length, completed: responses.length, incomplete: reachedJourneys.length - responses.length, notReached: cohort.respondents.length - reachedJourneys.length,
+          correct: responses.filter((response) => response.correct === true).length, incorrect: responses.filter((response) => response.correct === false).length,
+          unscored: responses.filter((response) => response.correct === null).length, options };
+      });
+      taskResponses[task.id] = { occurrences };
     }
     const completed = journeys.filter((journey) => journey.status === 'completed').length;
     const started = checkpoint.journeys.filter((journey) => journey.armId === arm.id).length;

@@ -49,16 +49,16 @@ test('report keeps a per-arm matched denominator and answer-key scoring distinct
   assert.equal(report.arms[0]?.denominator.intended, 2);
   assert.equal(report.arms[0]?.denominator.started, 2);
   assert.equal(report.arms[0]?.denominator.completed, 1);
-  assert.equal(report.arms[0]?.taskResponses['entry-response']?.completed, 1);
-  assert.equal(report.arms[0]?.taskResponses['entry-response']?.incomplete, 1);
-  assert.equal(report.arms[0]?.taskResponses['entry-response']?.correct, 1);
-  assert.equal(report.arms[0]?.taskResponses['entry-response']?.options.unanswerable?.count, 1);
-  assert.equal(report.arms[1]?.taskResponses['entry-response']?.incorrect, 1);
-  assert.equal(report.arms[1]?.taskResponses['entry-response']?.options.clarify?.count, 0);
-  assert.equal(report.arms[0]?.taskResponses['entry-response']?.options.unanswerable?.proportion, 1);
-  assert.equal(report.arms[1]?.taskResponses['entry-response']?.options.leave?.proportion, 1);
-  assert.equal(report.arms[0]?.taskResponses['investigation-response']?.notReached, 1);
-  assert.equal(report.arms[0]?.taskResponses['investigation-response']?.unscored, 1);
+  assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.completed, 1);
+  assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.incomplete, 1);
+  assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.correct, 1);
+  assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.options.unanswerable?.count, 1);
+  assert.equal(report.arms[1]?.taskResponses['entry-response']?.occurrences[0]?.incorrect, 1);
+  assert.equal(report.arms[1]?.taskResponses['entry-response']?.occurrences[0]?.options.clarify?.count, 0);
+  assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.options.unanswerable?.proportion, 1);
+  assert.equal(report.arms[1]?.taskResponses['entry-response']?.occurrences[0]?.options.leave?.proportion, 1);
+  assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.notReached, 1);
+  assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.unscored, 1);
   assert.equal(report.providerEvidence.billedUsd, 0.002);
 });
 test('compares two arms within the same run by respondent and comparison key', async (t) => {
@@ -88,11 +88,14 @@ test('aligns repeated task presentations by occurrence order and counts only sha
   assert.equal(summary[0]?.unpairedResponses, 1);
   assert.equal(summary[1]?.occurrence, 2);
   assert.deepEqual(summary[1]?.optionTransitions, { leave: { leave: 1 } });
-  const originalTask = report.arms[0]?.taskResponses['entry-response'];
-  assert.equal(originalTask?.reached, 3);
-  assert.equal(originalTask?.completed, 2);
-  assert.equal(originalTask?.incomplete, 1);
-  assert.equal(originalTask?.notReached, 0);
+  const originalTask = report.arms[0]?.taskResponses['entry-response']?.occurrences;
+  assert.equal(originalTask?.[0]?.reached, 2);
+  assert.equal(originalTask?.[0]?.completed, 1);
+  assert.equal(originalTask?.[0]?.incomplete, 1);
+  assert.equal(originalTask?.[0]?.notReached, 0);
+  assert.equal(originalTask?.[1]?.reached, 1);
+  assert.equal(originalTask?.[1]?.completed, 1);
+  assert.equal(originalTask?.[1]?.notReached, 1);
 });
 test('rejects reports when the manifest changes after the run', async (t) => {
   const { checkpoint } = await setup(t);

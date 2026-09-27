@@ -2,7 +2,7 @@
 
 Confirm the run is completed before describing it as final. If it is running or interrupted, load [run and recovery](run-and-recovery.md) and report its current state.
 
-Use `poll_report` to inspect each arm's intended, completed, and excluded respondent counts. Per task, `reached`, `completed`, and `incomplete` count task presentations and responses, so repeated graph visits count as repeated task occurrences. `notReached` counts respondents who never encountered that task. Show option distributions and optional answer-key scoring separately. Provider attempts are retries, not additional responses.
+Use `poll_report` to inspect each arm's intended, completed, and excluded respondent counts. Per task, inspect each `occurrences` entry separately. Its `reached`, `completed`, `incomplete`, and `notReached` values count respondents at that occurrence; repeated graph visits appear as occurrence 1, 2, and so on. Show option distributions and optional answer-key scoring separately. Provider attempts are retries, not additional responses.
 
 Use `poll_compare` only with two arm IDs in the same report. The comparison pairs the same frozen respondents and aligns tasks by shared `comparisonKey` and occurrence order. It marks choices comparable only when both option IDs exist in both corresponding tasks. Do not compare reports across runs or claim causal lift when multiple treatment elements differ.
 
