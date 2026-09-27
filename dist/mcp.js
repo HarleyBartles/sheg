@@ -34392,7 +34392,7 @@ function toError(value) {
 }
 
 // src/entrypoints/mcp.ts
-import { readFile as readFile5 } from "node:fs/promises";
+import { readFile as readFile4 } from "node:fs/promises";
 import path6 from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -35951,7 +35951,6 @@ function cleanBudget(snapshot) {
 
 // src/application/reports.ts
 import { createHash as createHash5 } from "node:crypto";
-import { readFile as readFile4 } from "node:fs/promises";
 import path5 from "node:path";
 var responseSchema2 = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), optionIds: external_exports.array(external_exports.string()), choice: external_exports.string(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), chargeUsd: external_exports.number().nonnegative().nullable() }).strict();
 var pollingReportSchema = external_exports.object({
@@ -35976,9 +35975,13 @@ var pollingReportSchema = external_exports.object({
   providerEvidence: external_exports.object({ attempts: external_exports.number().int(), billedUsd: external_exports.number().nonnegative(), unknownCharges: external_exports.number().int(), failedCells: external_exports.number().int() }).strict()
 }).strict();
 async function buildReport(checkpoint) {
-  const [cohortJson, manifestJson] = await Promise.all([readFile4(checkpoint.cohortPath, "utf8"), readFile4(checkpoint.manifestPath, "utf8")]);
-  const cohort = loadCohort(JSON.parse(cohortJson));
-  const manifest = manifestSchema.parse(JSON.parse(manifestJson));
+  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
+  if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index]) || study.sources.length !== checkpoint.sourceHashes.length) {
+    throw new Error("Study inputs or provider settings changed since this run was prepared; the report cannot be reproduced.");
+  }
+  const { cohort, manifest } = study;
   const profiles = new Map(cohort.respondents.map((respondent) => [respondent.id, respondent]));
   const arms = manifest.arms.map((arm) => {
     const taskMap = new Map(arm.tasks.map((task) => [task.id, task]));
@@ -36019,12 +36022,14 @@ async function buildReport(checkpoint) {
         const count = counts[optionId] ?? 0;
         return [optionId, { count, proportion: responses.length ? count / responses.length : 0 }];
       }));
-      const reached = checkpoint.journeys.filter((journey) => journey.armId === arm.id && journey.presentedTaskIds.includes(task.id)).length;
+      const presentations = checkpoint.journeys.filter((journey) => journey.armId === arm.id).flatMap((journey) => journey.presentedTaskIds.filter((taskId) => taskId === task.id));
+      const reached = presentations.length;
+      const notReached = cohort.respondents.filter((respondent) => !checkpoint.journeys.some((journey) => journey.armId === arm.id && journey.respondentId === respondent.id && journey.presentedTaskIds.includes(task.id))).length;
       taskResponses[task.id] = {
         reached,
         completed: responses.length,
-        incomplete: reached - responses.length,
-        notReached: cohort.respondents.length - reached,
+        incomplete: Math.max(0, reached - responses.length),
+        notReached,
         correct: responses.filter((response) => response.correct === true).length,
         incorrect: responses.filter((response) => response.correct === false).length,
         unscored: responses.filter((response) => response.correct === null).length,
@@ -36076,6 +36081,37 @@ function compareReports(report, leftArmId, rightArmId) {
     });
     return [{ respondentId: journey.respondentId, taskComparisons }];
   });
+  const comparisonKeys = /* @__PURE__ */ new Set([
+    ...[...left.journeys, ...right.journeys].flatMap((journey) => journey.responses.filter((response) => response.comparisonKey).map((response) => `${response.comparisonKey}:${response.occurrence}`)),
+    ...[...left.tasks, ...right.tasks].flatMap((task) => task.comparisonKey ? [`${task.comparisonKey}:1`] : [])
+  ]);
+  const leftResponseByCell = indexResponses(left.journeys);
+  const rightResponseByCell = indexResponses(right.journeys);
+  const comparisonRespondentIds = new Set([...left.journeys, ...right.journeys].map((journey) => journey.respondentId));
+  const comparisonTasks = [...comparisonKeys].sort().map((key) => {
+    const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
+    const occurrence = Number(occurrenceText);
+    const optionTransitions = {};
+    let leftResponses = 0;
+    let rightResponses = 0;
+    let pairedResponses = 0;
+    let comparableResponses = 0;
+    for (const respondentId of comparisonRespondentIds) {
+      const cellKey = `${respondentId}\0${comparisonKey}\0${occurrence}`;
+      const leftResponse = leftResponseByCell.get(cellKey);
+      const rightResponse = rightResponseByCell.get(cellKey);
+      if (leftResponse) leftResponses += 1;
+      if (rightResponse) rightResponses += 1;
+      if (!leftResponse || !rightResponse) continue;
+      pairedResponses += 1;
+      const commonOptionIds = leftResponse.optionIds.filter((id) => rightResponse.optionIds.includes(id));
+      if (!commonOptionIds.includes(leftResponse.choice) || !commonOptionIds.includes(rightResponse.choice)) continue;
+      comparableResponses += 1;
+      const row = optionTransitions[leftResponse.choice] ??= {};
+      row[rightResponse.choice] = (row[rightResponse.choice] ?? 0) + 1;
+    }
+    return { comparisonKey, occurrence, leftResponses, rightResponses, pairedResponses, comparableResponses, unpairedResponses: pairedResponses - comparableResponses, leftOnlyResponses: Math.max(0, leftResponses - pairedResponses), rightOnlyResponses: Math.max(0, rightResponses - pairedResponses), optionTransitions };
+  });
   const leftByItem = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
   const rightByItem = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
   const itemChanges = [.../* @__PURE__ */ new Set([...leftByItem.keys(), ...rightByItem.keys()])].flatMap((id) => leftByItem.get(id) === rightByItem.get(id) ? [] : [{ id, leftText: leftByItem.get(id) ?? null, rightText: rightByItem.get(id) ?? null }]);
@@ -36091,7 +36127,17 @@ function compareReports(report, leftArmId, rightArmId) {
     const fields = ["instructions", "options"].filter((field) => JSON.stringify(leftTask[field]) !== JSON.stringify(rightTask[field]));
     return fields.length ? [{ comparisonKey: key, fields }] : [];
   });
-  return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, matched };
+  return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, comparisonTasks, matched };
+}
+function indexResponses(journeys) {
+  const indexed = /* @__PURE__ */ new Map();
+  for (const journey of journeys) {
+    for (const response of journey.responses) {
+      if (!response.comparisonKey) continue;
+      indexed.set(`${journey.respondentId}\0${response.comparisonKey}\0${response.occurrence}`, response);
+    }
+  }
+  return indexed;
 }
 
 // src/entrypoints/mcp.ts
@@ -36116,7 +36162,7 @@ function createPollingServer(manager = new RunManager()) {
   });
   server.registerTool("poll_trace", { description: "Trace scripted option IDs through one frozen respondent and study arm without provider calls.", inputSchema: { manifestPath: external_exports.string(), cohortPath: external_exports.string(), armId: external_exports.string(), respondentId: external_exports.string(), choices: external_exports.array(external_exports.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
-    const cohort = loadRespondents(JSON.parse(await readFile5(cohortPath, "utf8")));
+    const cohort = loadRespondents(JSON.parse(await readFile4(cohortPath, "utf8")));
     const profile = cohort.find((respondent) => respondent.id === respondentId);
     const arm = study.manifest.arms.find((candidate) => candidate.id === armId);
     if (!profile || !arm) throw new Error("Arm or respondent ID is not in the study inputs.");
