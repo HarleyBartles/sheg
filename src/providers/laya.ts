@@ -107,7 +107,7 @@ export class LayaProvider implements DecisionProvider {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: { type: 'choice', instructions: question.instructions, criteria: question.criteria },
+            [question.id]: { type: 'choice', instructions: question.instructions, criteria: question.options },
           },
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs),

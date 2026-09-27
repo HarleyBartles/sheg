@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadProfiles } from '../domain/readers/profile.js';
+import { loadRespondents } from '../domain/respondents/profile.js';
 import { traceStudy } from '../domain/journey/trace.js';
 import { loadStudy } from '../domain/study/load-study.js';
 import { RunManager, checkStudy, type RunConfig } from '../application/jobs.js';
-import { compareReports, getReport, pollingReportSchema } from '../application/reports.js';
+import { compareReports, getReport } from '../application/reports.js';
 
 const manager = new RunManager();
 
@@ -17,23 +17,24 @@ export async function runCli(args: readonly string[], io = { out: (value: string
     if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
     if (command === 'check' || command === 'start') {
       const config = JSON.parse(await readFile(required(options, 'config'), 'utf8')) as RunConfig;
-      result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint }) => ({ valid: true, readerCount: study.profiles.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint })) : await manager.startRun(config);
+      result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint })) : await manager.startRun(config);
     } else if (command === 'trace') {
       const manifestPath = path.resolve(required(options, 'manifest'));
       const cohortPath = path.resolve(required(options, 'cohort'));
       const study = await loadStudy(manifestPath, cohortPath);
-      const profile = loadProfiles(JSON.parse(await readFile(cohortPath, 'utf8'))).find((reader) => reader.id === required(options, 'reader'));
+      const profile = loadRespondents(JSON.parse(await readFile(cohortPath, 'utf8'))).find((reader) => reader.id === required(options, 'respondent'));
       if (!profile) throw new Error('Reader ID is not in the frozen cohort.');
       const choices = required(options, 'choices').split(',').filter(Boolean);
-      result = await traceStudy(study.manifest, profile, choices);
+      const arm = study.manifest.arms.find((candidate) => candidate.id === required(options, 'arm'));
+      if (!arm) throw new Error('Arm ID is not in the study.');
+      result = await traceStudy(arm, profile, choices);
     } else if (command === 'status') result = await manager.runStatus(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'cancel') result = await manager.cancelRun(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'resume') result = await manager.resumeRun(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'report') result = await getReport(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'compare') {
-      const left = pollingReportSchema.parse(JSON.parse(await readFile(required(options, 'left'), 'utf8')));
-      const right = pollingReportSchema.parse(JSON.parse(await readFile(required(options, 'right'), 'utf8')));
-      result = compareReports(left, right);
+      const report = await getReport(required(options, 'output'), required(options, 'run-id'));
+      result = compareReports(report, required(options, 'left-arm'), required(options, 'right-arm'));
     } else throw new Error(`Unknown command: ${command}`);
     io.out(JSON.stringify(result));
     return 0;
@@ -46,11 +47,11 @@ export async function runCli(args: readonly string[], io = { out: (value: string
 const helpText = `system-one-polling <command>
 Commands:
   check --config <json>                         Validate study and provider configuration
-  trace --manifest <json> --cohort <json> --reader <id> --choices <a,b,...>
+  trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>
   start --config <json>                         Start a durable run
   status|cancel|resume --output <dir> --run-id <id>
   report --output <dir> --run-id <id>
-  compare --left <report.json> --right <report.json>`;
+  compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>`;
 
 function parseArgs(args: readonly string[]): Record<string, string> {
   const options: Record<string, string> = {};

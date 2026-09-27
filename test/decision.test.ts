@@ -4,13 +4,13 @@ import { DecisionError, validateDecision } from '../src/domain/decision/validate
 import type { DecisionRequest, DecisionResult } from '../src/domain/decision/contract.js';
 
 const request: DecisionRequest = {
-  state: { reader: { profile: 'Wants a concrete, accessible account.' }, visibleText: 'The repair began with a confusing symptom.' },
+  state: { respondent: { profile: 'Wants a concrete, accessible account.' }, visibleText: 'The repair began with a confusing symptom.' },
   question: {
     id: 'attention:symptom',
     instructions: 'Choose the action that best matches this reader’s experience.',
-    criteria: { continue: 'Continue reading.', leave: 'Leave now.' },
+    options: { continue: 'Continue reading.', leave: 'Leave now.' },
   },
-  labels: ['continue', 'leave'],
+  optionIds: ['continue', 'leave'],
 };
 
 function result(overrides: Partial<DecisionResult> = {}): DecisionResult {
@@ -48,7 +48,7 @@ test('rejects confidence outside its finite zero-to-one range', () => {
   }
 });
 
-test('rejects choices outside the offered labels and incomplete or unnormalized distributions', () => {
+test('rejects choices outside the offered option IDs and incomplete or unnormalized distributions', () => {
   for (const invalid of [
     result({ choice: 'maybe' }),
     result({ probabilities: { continue: 1 } }),
@@ -58,9 +58,9 @@ test('rejects choices outside the offered labels and incomplete or unnormalized 
   }
 });
 
-test('rejects a request whose labels do not match its own decision criteria', () => {
-  const invalidRequest = { ...request, labels: ['continue', 'unoffered'] };
-  assert.throws(() => validateDecision(invalidRequest, result()), /request labels/i);
+test('rejects a request whose option IDs do not match its own options', () => {
+  const invalidRequest = { ...request, optionIds: ['continue', 'unoffered'] };
+  assert.throws(() => validateDecision(invalidRequest, result()), /option ids/i);
 });
 
 test('rejects nonfinite, negative, and nonnumeric probabilities', () => {

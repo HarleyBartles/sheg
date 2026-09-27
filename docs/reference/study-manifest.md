@@ -1,18 +1,19 @@
-# Study manifest reference
+# Study manifest
 
-The standalone manifest is strict JSON with `version: "1.0"`. See the runnable [article fixture](../../test/fixtures/article.json), [chapter fixture](../../test/fixtures/chapter.json), and companion [frozen cohort](../../test/fixtures/cohort.json).
+The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms under a title and purpose. Each arm is a stimulus variant and has its own sources, ordered stimulus items, typed tasks, and presentation mode. See the [article fixture](../../test/fixtures/article.json), [chapter fixture](../../test/fixtures/chapter.json), and [respondent cohort](../../test/fixtures/cohort.json).
 
-## Fields
+## Arm fields
 
-- `study`: `title` and `purpose` metadata. Purpose is not included in reader state.
-- `sources`: files and SHA-256 hashes used for integrity checks.
-- `items`: stable IDs and reader-visible text.
-- `decisions`: stable IDs, instructions, and a `criteria` map whose keys are choice labels.
-- `nodes`: graph nodes of kind `expose` (`itemId`), `decide` (`decisionId`), or `terminal` (`outcome`).
-- `transitions`: one unconditional edge from each expose node and exactly one edge per offered choice from each decision node.
-- `entryNodeId`: first graph node.
-- `maxDecisions`: hard ceiling that bounds cycles.
+- `id` and `label`: stable identity and display name for the arm.
+- `sources`: source paths and SHA-256 hashes, verified before a run.
+- `items`: bounded stimulus segments in presentation order.
+- `tasks`: typed response tasks. The initial response type is finite choice, with stable option IDs and descriptions. `unanswerable` is an ordinary explicit option when relevant. Optional `answerKeyOptionId` is scoring metadata and is never sent to a provider.
+- `presentation`: `sequence` exposes every item in order and then asks each task; `graph` uses `expose`, `ask`, and `terminal` nodes with bounded decisions and one transition per offered option.
 
-Keep IDs unique and references valid. Every node must be reachable. Give every terminal branch an authored outcome; the engine does not infer one. Keep optional items behind explicit graph edges. Run `check` after any source, manifest, or cohort edit because source hashes and the stimulus fingerprint must reflect the exact study being polled.
+For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse option IDs only when they retain the same meaning. Each frozen respondent is run once through every arm in the same run. Reports align task occurrence order within each respondent. They do not pool across runs.
 
-The version `2.0` frozen cohort has an ordered `readers` list, concrete perspective fields, and an admission record. Its normative shape is the [frozen cohort JSON Schema](../../skills/simulated-reader-polling/assets/frozen-cohort.schema.json), with the related [reader profile](../../skills/simulated-reader-polling/assets/reader-profile.schema.json) and [archetype](../../skills/simulated-reader-polling/assets/reader-archetype.schema.json) contracts. The full cohort snapshot, including archetype definitions, and its concrete profiles contribute to the stimulus fingerprint. The Codex skill's [archetype and cohort guide](../../skills/simulated-reader-polling/references/archetypes-and-cohorts.md) teaches authoring, expansion, and direct-profile workflows.
+## Example study design
+
+To compare two explanations of the same passage, create `original` and `revised` arms with their own source hash and item text. Give both arms a comprehension task with the same `comparisonKey` and the same stable options such as `supported`, `contradicted`, and `unanswerable`. Reuse one frozen respondent cohort for both. The report then shows each arm's option counts and proportions, the source and stimulus changes, and each respondent's paired answer when both answers use shared option IDs. This is a descriptive comparison of profile-conditioned responses, not evidence of human comprehension or an isolated causal effect.
+
+The [study manifest schema](../../skills/stimulus-response-polling/assets/study-manifest.schema.json), [respondent cohort schema](../../skills/stimulus-response-polling/assets/respondent-cohort.schema.json), and [respondent profile schema](../../skills/stimulus-response-polling/assets/respondent-profile.schema.json) are the consumer contracts. The cohort uses `version: "3.0"` and an ordered `respondents` list. Its full snapshot and all arm contents contribute to the stimulus fingerprint. The [archetype and cohort guide](../../skills/stimulus-response-polling/references/archetypes-and-cohorts.md) explains authoring and expansion.

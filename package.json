@@ -1,7 +1,7 @@
 {
   "name": "system-one-polling",
   "version": "0.1.0",
-  "description": "Bounded simulated-reader polling harness for Jev and local System One models",
+  "description": "Bounded text stimulus and typed-response study harness for Jev and local System One models",
   "scripts": {
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",

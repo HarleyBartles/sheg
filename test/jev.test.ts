@@ -16,9 +16,9 @@ const request: DecisionRequest = {
   question: {
     id: 'entry-response',
     instructions: 'Would you continue reading?',
-    criteria: { continue: 'Read the next section.', leave: 'Stop reading.' },
+    options: { continue: 'Read the next section.', leave: 'Stop reading.' },
   },
-  labels: ['continue', 'leave'],
+  optionIds: ['continue', 'leave'],
 };
 
 function response(overrides: Record<string, unknown> = {}): Response {
@@ -73,7 +73,7 @@ test('sends one typed choice and preserves the served model, distribution, usage
         'entry-response': {
           type: 'choice',
           instructions: request.question.instructions,
-          criteria: request.question.criteria,
+          criteria: request.question.options,
         },
       },
     });

@@ -66,8 +66,8 @@ export class RunManager {
         provider: c.provider, maxCalls: c.maxCalls, ...(c.maxUsd === undefined ? {} : { maxUsd: c.maxUsd }),
         ...(c.maxPerCallUsd === undefined ? {} : { maxPerCallUsd: c.maxPerCallUsd }), concurrency: c.concurrency,
         stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint,
-        sourceHashes: study.sources.map((source) => source.sha256), readerIds: study.profiles.map((profile) => profile.id),
-        journeys: [], activeReaderIds: [], cancellationRequested: false, budget: emptyBudgetSnapshot(c.maxCalls, c.maxUsd),
+        sourceHashes: study.sources.map((source) => source.sha256), respondentIds: study.respondents.map((profile) => profile.id),
+        journeys: [], activeCellIds: [], cancellationRequested: false, budget: emptyBudgetSnapshot(c.maxCalls, c.maxUsd),
       });
       checkpoint = await store.update(runId, (current) => ({ ...current, status: 'running', updatedAt: new Date().toISOString() }));
       this.launch(store, checkpoint, lock);
@@ -85,7 +85,7 @@ export class RunManager {
           const current = await store.read(runId);
           const ledger = BudgetLedger.restore(cleanBudget(current.budget));
           ledger.markInterruptedReservationsUnpriced();
-          return await store.update(runId, (latest) => ({ ...latest, status: 'partial', activeReaderIds: [], budget: ledger.snapshot(), updatedAt: new Date().toISOString() }));
+          return await store.update(runId, (latest) => ({ ...latest, status: 'partial', activeCellIds: [], budget: ledger.snapshot(), updatedAt: new Date().toISOString() }));
         } finally { await lock.release(); }
       } catch (error) { if (!(error instanceof ProcessLockError)) throw error; }
     }
@@ -129,7 +129,7 @@ export class RunManager {
       ? new JevProvider(checkpoint.provider as JevConfig)
       : new LayaProvider(checkpoint.provider as LayaConfig, { ...(this.options.measureLayaFit === undefined ? {} : { measureFit: this.options.measureLayaFit }) }));
     const task = runWorker(store, checkpoint, provider).then(() => undefined).catch(async () => {
-      await store.update(checkpoint.runId, (current) => ({ ...current, status: 'failed', activeReaderIds: [], updatedAt: new Date().toISOString() }));
+      await store.update(checkpoint.runId, (current) => ({ ...current, status: 'failed', activeCellIds: [], updatedAt: new Date().toISOString() }));
     }).finally(async () => { this.active.delete(checkpoint.runId); await lock.release(); });
     this.active.set(checkpoint.runId, task);
   }

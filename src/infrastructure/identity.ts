@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { StudyManifest } from '../domain/study/manifest.js';
-import type { FrozenCohort } from '../domain/readers/profile.js';
+import type { FrozenCohort } from '../domain/respondents/profile.js';
 
 export type ExecutionProvider =
   | { kind: 'jev'; model: string; keyEnv?: string; endpoint?: string; timeoutMs?: number }

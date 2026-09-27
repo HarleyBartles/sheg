@@ -1,20 +1,20 @@
-import type { ReaderProfile } from '../readers/profile.js';
-import type { StudyManifest } from '../study/manifest.js';
+import type { RespondentProfile } from '../respondents/profile.js';
+import type { StudyArm } from '../study/manifest.js';
 import { JourneyExecutionError, runJourney, type JourneyResult } from './run.js';
 
 export async function traceStudy(
-  study: StudyManifest,
-  profile: ReaderProfile,
+  arm: StudyArm,
+  profile: RespondentProfile,
   scriptedChoices: readonly string[],
 ): Promise<JourneyResult> {
   let choiceIndex = 0;
   const result = await runJourney({
-    study,
+    arm,
     profile,
     ask: async (request) => {
       const choice = scriptedChoices[choiceIndex++];
       if (choice === undefined) {
-        throw new JourneyExecutionError(`Script ended before decision ${request.question.id}.`);
+        throw new JourneyExecutionError(`Script ended before task ${request.question.id}.`);
       }
       return { choice };
     },

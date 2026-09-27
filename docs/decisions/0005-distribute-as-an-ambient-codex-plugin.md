@@ -6,7 +6,7 @@
 
 ## Context
 
-The simulated-reader skill and harness are useful across the maintainer's
+The stimulus-response-polling skill and harness are useful across the maintainer's
 repositories. Installing a copy into every consuming repository would create
 repeated configuration and version drift. Publishing through the personal
 agent-asset marketplace is not required for a plugin that is installed directly
@@ -31,7 +31,7 @@ orchestrate each reader decision itself.
 ## Decision
 
 Make this repository the canonical source for a self-contained Codex plugin
-containing the simulated-reader skill and a bundled Node.js MCP server. Install
+containing the stimulus-response-polling skill and a bundled Node.js MCP server. Install
 it at the Codex user level for ambient use across repositories. Do not require
 consuming repositories to vendor or install it individually, and do not make
 the agent-asset marketplace a required distribution path. The MCP server calls

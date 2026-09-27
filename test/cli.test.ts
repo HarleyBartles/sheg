@@ -30,7 +30,7 @@ test('CLI check validates explicit provider config without key or network', asyn
 
 test('CLI scripted trace is keyless and uses the shared graph runner', async () => {
   const output: string[] = [];
-  const status = await runCli(['trace', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--reader', 'curious-outside-reader', '--choices', 'continue,continue'], {
+  const status = await runCli(['trace', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--arm', 'original', '--respondent', 'curious-outside-reader', '--choices', 'continue,continue'], {
     out: (text) => { output.push(text); return true; }, error: (text) => { output.push(text); return true; },
   });
   assert.equal(status, 0);

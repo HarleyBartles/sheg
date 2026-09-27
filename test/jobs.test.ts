@@ -25,7 +25,7 @@ function checkpoint(directory: string, overrides: Partial<RunCheckpoint> = {}): 
     provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'JEV_API_KEY', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
     maxCalls: 10, maxUsd: 1, maxPerCallUsd: 0.05, concurrency: 2,
     stimulusFingerprint: 'a'.repeat(64), executionFingerprint: 'b'.repeat(64),
-    sourceHashes: ['c'.repeat(64)], readerIds: ['reader-a', 'reader-b'], journeys: [], activeReaderIds: [],
+    sourceHashes: ['c'.repeat(64)], respondentIds: ['reader-a', 'reader-b'], journeys: [], activeCellIds: [],
     cancellationRequested: false, budget: emptyBudgetSnapshot(10, 1),
     ...overrides,
   };
@@ -36,7 +36,7 @@ test('checkpoint store writes an atomic versioned record without source text or 
   const store = new CheckpointStore(directory);
   const created = await store.create(checkpoint(directory));
   const loaded = await store.read(created.runId);
-  assert.equal(loaded.formatVersion, 1);
+  assert.equal(loaded.formatVersion, 2);
   assert.equal(loaded.runId, created.runId);
   assert.deepEqual(await store.list(), [loaded]);
   const raw = await readFile(path.join(directory, `run-${created.runId}.json`), 'utf8');
@@ -129,7 +129,7 @@ test('check validates and fingerprints a study without creating a provider or ru
     provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 },
     outputDirectory: directory, maxCalls: 10,
   });
-  assert.equal(checked.study.profiles.length, 2);
+  assert.equal(checked.study.respondents.length, 2);
   assert.match(checked.executionFingerprint, /^[a-f\d]{64}$/);
   assert.equal(providerCreated, false);
   assert.deepEqual(await new CheckpointStore(directory).list(), []);
@@ -158,7 +158,7 @@ test('managed run checkpoints sequential provider decisions and reaches complete
   const provider: DecisionProvider = { async decide(request) {
     const choice = choices[calls++];
     assert.ok(choice);
-    const labels = Object.keys(request.question.criteria);
+    const labels = Object.keys(request.question.options);
     const probabilities = Object.fromEntries(labels.map((label) => [label, label === choice ? 1 : 0]));
     return { choice, probabilities, attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
   } };
@@ -177,4 +177,52 @@ test('managed run checkpoints sequential provider decisions and reaches complete
   assert.equal(calls, 4);
   assert.equal(current.journeys[0]?.status, 'completed');
   assert.equal(current.budget.usedCalls, 4);
+});
+
+test('matched run executes one cell for every frozen respondent in every arm', async (t) => {
+  const directory = await tempDirectory(t);
+  const manifest = JSON.parse(await readFile(path.resolve('test/fixtures/article.json'), 'utf8'));
+  const revised = structuredClone(manifest.arms[0]); revised.id = 'revised'; revised.label = 'Revised'; revised.sources = [{ ...revised.sources[0] }];
+  manifest.arms.push(revised);
+  const manifestPath = path.join(directory, 'matched.json');
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await copyFile(path.resolve('test/fixtures/cohort.json'), path.join(directory, 'cohort.json'));
+  await copyFile(path.resolve('test/fixtures/article-source.md'), path.join(directory, 'article-source.md'));
+  let calls = 0;
+  const provider: DecisionProvider = { async decide(request) {
+    calls += 1;
+    const choice = 'continue';
+    return { choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
+  } };
+  const manager = new RunManager({ providerFactory: () => provider });
+  const started = await manager.startRun({ manifestPath, cohortPath: path.join(directory, 'cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 }, outputDirectory: path.join(directory, 'runs'), maxCalls: 10, concurrency: 1 });
+  let current = started;
+  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(path.join(directory, 'runs'), started.runId); }
+  assert.equal(current.status, 'completed');
+  assert.equal(current.journeys.length, 4);
+  assert.equal(calls, 8);
+  assert.equal(new Set(current.journeys.map((journey) => `${journey.armId}/${journey.respondentId}`)).size, 4);
+});
+
+test('resume replays completed responses without charging the same respondent-task cell twice', async (t) => {
+  const directory = await tempDirectory(t);
+  let failedOnce = false;
+  let entryCalls = 0;
+  let laterCalls = 0;
+  const provider: DecisionProvider = { async decide(request) {
+    if (request.question.id === 'entry-response') entryCalls += 1; else laterCalls += 1;
+    if (request.question.id === 'investigation-response' && !failedOnce) { failedOnce = true; throw Object.assign(new Error('temporary failure'), { attempts: 0, chargeStatus: 'not_billed' }); }
+    const choice = 'continue';
+    return { choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
+  } };
+  const manager = new RunManager({ providerFactory: () => provider });
+  const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 10, concurrency: 1 });
+  let current = started;
+  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); }
+  assert.equal(current.status, 'partial');
+  await manager.resumeRun(directory, started.runId);
+  for (let attempt = 0; attempt < 100; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); if (current.status !== 'running') break; }
+  assert.equal(current.status, 'completed');
+  assert.equal(entryCalls, 2);
+  assert.equal(laterCalls, 3);
 });

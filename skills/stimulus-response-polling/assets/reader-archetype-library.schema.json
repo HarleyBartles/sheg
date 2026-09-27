@@ -113,8 +113,5 @@
     "additionalProperties": false
   },
   "$id": "https://schemas.system-one-polling.dev/reader-archetype-library.schema.json",
-  "title": "Reader archetype library",
-  "x-validation-rules": [
-    "Archetype IDs are unique within a library."
-  ]
+  "title": "Reader archetype library"
 }

@@ -1,11 +1,11 @@
 # Data contracts
 
-The JSON Schemas shipped directly in `skills/simulated-reader-polling/assets/` are the consumer-facing contracts. They travel with the skill that teaches agents how to author these files:
+The JSON Schemas shipped in `skills/stimulus-response-polling/assets/` are the consumer-facing contracts and travel with the installed plugin skill:
 
-- [Reader archetype](../../skills/simulated-reader-polling/assets/reader-archetype.schema.json)
-- [Reader archetype library](../../skills/simulated-reader-polling/assets/reader-archetype-library.schema.json)
-- [Concrete reader profile](../../skills/simulated-reader-polling/assets/reader-profile.schema.json)
-- [Frozen reader cohort](../../skills/simulated-reader-polling/assets/frozen-cohort.schema.json)
-- [Study manifest](../../skills/simulated-reader-polling/assets/study-manifest.schema.json)
+- [Reader archetype](../../skills/stimulus-response-polling/assets/reader-archetype.schema.json)
+- [Reader archetype library](../../skills/stimulus-response-polling/assets/reader-archetype-library.schema.json)
+- [Respondent profile](../../skills/stimulus-response-polling/assets/respondent-profile.schema.json)
+- [Respondent cohort](../../skills/stimulus-response-polling/assets/respondent-cohort.schema.json)
+- [Study manifest](../../skills/stimulus-response-polling/assets/study-manifest.schema.json)
 
-The runtime validators are the authoritative executable validation in `src/domain/readers/profile.ts` and `src/domain/study/manifest.ts`. The schemas are generated from those Zod definitions with `npm run contracts:build`. Cross-record rules that JSON Schema cannot express are listed in each asset's `x-validation-rules` extension and enforced by the runtime validators.
+Runtime validators in `src/domain/readers/archetype.ts`, `src/domain/respondents/profile.ts`, and `src/domain/study/manifest.ts` are authoritative for executable validation. Schemas are generated from those definitions with `npm run contracts:build`. Cross-record constraints appear in each schema's `x-validation-rules` and are enforced by runtime validators.

@@ -109,10 +109,5 @@
   ],
   "additionalProperties": false,
   "$id": "https://schemas.system-one-polling.dev/reader-archetype.schema.json",
-  "title": "Reader archetype",
-  "x-validation-rules": [
-    "Variation axis IDs are unique within an archetype.",
-    "Variation value IDs are unique within each axis.",
-    "Text fields must contain non-whitespace content; surrounding whitespace is trimmed by runtime validation."
-  ]
+  "title": "Reader archetype"
 }

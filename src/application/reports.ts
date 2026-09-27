@@ -1,99 +1,112 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { loadProfiles } from '../domain/readers/profile.js';
+import { loadCohort } from '../domain/respondents/profile.js';
+import { manifestSchema } from '../domain/study/manifest.js';
 import { CheckpointStore, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 
+const responseSchema = z.object({ taskId: z.string(), comparisonKey: z.string().nullable(), occurrence: z.number().int().positive(), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), optionIds: z.array(z.string()), choice: z.string(), correct: z.boolean().nullable(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), confidence: z.number().nullable(), chargeUsd: z.number().nonnegative().nullable() }).strict();
 export const pollingReportSchema = z.object({
-  formatVersion: z.literal(1), runId: z.string().uuid(), status: z.string(),
-  stimulusFingerprint: z.string(), executionFingerprint: z.string(), provider: z.object({ kind: z.enum(['jev', 'laya']), model: z.string().nullable(), checkpoint: z.string().nullable() }).strict(),
-  denominator: z.object({ intended: z.number().int().nonnegative(), completed: z.number().int().nonnegative(), excluded: z.number().int().nonnegative(), excludedByStatus: z.record(z.string(), z.number().int().nonnegative()) }).strict(),
-  outcomes: z.record(z.string(), z.number().int().nonnegative()),
-  archetypes: z.record(z.string(), z.object({ intended: z.number().int().nonnegative(), completed: z.number().int().nonnegative(), outcomes: z.record(z.string(), z.number().int().nonnegative()) }).strict()),
-  items: z.record(z.string(), z.object({ exposures: z.number().int().nonnegative(), readers: z.number().int().nonnegative() }).strict()),
-  journeys: z.array(z.object({ readerId: z.string(), archetypeId: z.string().nullable(), status: z.string(), outcome: z.string().nullable(), events: z.array(z.unknown()), decisions: z.array(z.object({ decisionId: z.string(), choice: z.string(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), inputTokens: z.number().int().nonnegative().nullable(), outputTokens: z.number().int().nonnegative().nullable(), confidence: z.number().nullable(), chargeStatus: z.string(), chargeUsd: z.number().nonnegative().nullable() }).strict()) }).strict()),
-  providerEvidence: z.object({ attempts: z.number().int().nonnegative(), meanLatencyMs: z.number().nonnegative().nullable(), inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), confidence: z.object({ count: z.number().int().nonnegative(), mean: z.number().min(0).max(1).nullable() }).strict(), billedUsd: z.number().nonnegative(), unknownCharges: z.number().int().nonnegative(), unsupportedJourneys: z.number().int().nonnegative(), failedJourneys: z.number().int().nonnegative() }).strict(),
+  formatVersion: z.literal(2), runId: z.string().uuid(), status: z.string(), stimulusFingerprint: z.string(), executionFingerprint: z.string(),
+  provider: z.object({ kind: z.enum(['jev', 'laya']), model: z.string().nullable(), checkpoint: z.string().nullable() }).strict(),
+  cohortSize: z.number().int().nonnegative(),
+  arms: z.array(z.object({ id: z.string(), label: z.string(), denominator: z.object({ intended: z.number().int(), started: z.number().int(), completed: z.number().int(), excluded: z.number().int(), excludedByStatus: z.record(z.string(), z.number().int()) }).strict(),
+    fingerprint: z.string(),
+    sources: z.array(z.object({ path: z.string(), sha256: z.string() }).strict()),
+    stimulusItems: z.array(z.object({ id: z.string(), text: z.string() }).strict()),
+    tasks: z.array(z.object({ id: z.string(), comparisonKey: z.string().nullable(), instructions: z.string(), options: z.record(z.string(), z.string()) }).strict()),
+    taskResponses: z.record(z.string(), z.object({ reached: z.number().int(), completed: z.number().int(), incomplete: z.number().int(), notReached: z.number().int(), correct: z.number().int(), incorrect: z.number().int(), unscored: z.number().int(), options: z.record(z.string(), z.object({ count: z.number().int(), proportion: z.number().min(0).max(1) }).strict()) }).strict()),
+    journeys: z.array(z.object({ respondentId: z.string(), archetypeId: z.string().nullable(), status: z.string(), outcome: z.string().nullable(), events: z.array(z.unknown()), responses: z.array(responseSchema) }).strict()),
+  }).strict()),
+  providerEvidence: z.object({ attempts: z.number().int(), billedUsd: z.number().nonnegative(), unknownCharges: z.number().int(), failedCells: z.number().int() }).strict(),
 }).strict();
-
 export type PollingReport = z.infer<typeof pollingReportSchema>;
 
 export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingReport> {
-  const rawCohort = JSON.parse(await readFile(checkpoint.cohortPath, 'utf8')) as unknown;
-  const profiles = loadProfiles(rawCohort);
-  const archetypeByReader = new Map(profiles.map((profile) => [profile.id, profile.archetypeId]));
-  const intended = checkpoint.readerIds;
-  const completedJourneys = checkpoint.journeys.filter((journey) => journey.status === 'completed' && journey.result);
-  const excludedByStatus: Record<string, number> = {};
-  for (const id of intended) {
-    const journey = checkpoint.journeys.find((record) => record.readerId === id);
-    if (!journey || journey.status !== 'completed' || !journey.result) {
-      const status = journey?.status ?? 'not-started';
-      excludedByStatus[status] = (excludedByStatus[status] ?? 0) + 1;
-    }
-  }
-  const outcomes: Record<string, number> = {};
-  const archetypes: PollingReport['archetypes'] = {};
-  const items: PollingReport['items'] = {};
-  const journeys: PollingReport['journeys'] = [];
-  let attempts = 0; let latencyTotal = 0; let latencyCount = 0; let inputTokens = 0; let outputTokens = 0;
-  let confidenceTotal = 0; let confidenceCount = 0; let billedUsd = 0; let unknownCharges = 0;
-  for (const readerId of intended) {
-    const journey = checkpoint.journeys.find((record) => record.readerId === readerId);
-    const archetypeId = archetypeByReader.get(readerId) ?? null;
-    const bucket = archetypeId ? (archetypes[archetypeId] ??= { intended: 0, completed: 0, outcomes: {} }) : undefined;
-    if (bucket) bucket.intended += 1;
-    const isComplete = journey?.status === 'completed' && journey.result !== undefined;
-    const result = isComplete ? journey.result : undefined;
-    const outcome = result?.outcome ?? null;
-    if (result) {
-      if (outcome !== null) { outcomes[outcome] = (outcomes[outcome] ?? 0) + 1; if (bucket) bucket.outcomes[outcome] = (bucket.outcomes[outcome] ?? 0) + 1; }
-      if (bucket) bucket.completed += 1;
-      for (const event of result.events) {
-        if (event.type !== 'exposure') continue;
-        const item = items[event.itemId] ??= { exposures: 0, readers: 0 };
-        item.exposures += 1;
-      }
-      const exposed = new Set(result.events.filter((event) => event.type === 'exposure').map((event) => event.itemId));
-      for (const itemId of exposed) items[itemId]!.readers += 1;
-    }
-    const decisions = (journey?.decisions ?? []).map(({ decisionId, result: decision }) => {
-      attempts += decision.attempts; latencyTotal += decision.latencyMs; latencyCount += 1;
-      inputTokens += decision.usage.inputTokens ?? 0; outputTokens += decision.usage.outputTokens ?? 0;
-      if (decision.confidence !== undefined) { confidenceTotal += decision.confidence; confidenceCount += 1; }
-      if (decision.chargeStatus === 'billed') billedUsd += decision.chargeUsd ?? 0;
-      if (decision.chargeStatus === 'unknown') unknownCharges += 1;
-      return { decisionId, choice: decision.choice, attempts: decision.attempts, latencyMs: decision.latencyMs, inputTokens: decision.usage.inputTokens ?? null, outputTokens: decision.usage.outputTokens ?? null, confidence: decision.confidence ?? null, chargeStatus: decision.chargeStatus, chargeUsd: decision.chargeUsd ?? null };
+  const [cohortJson, manifestJson] = await Promise.all([readFile(checkpoint.cohortPath, 'utf8'), readFile(checkpoint.manifestPath, 'utf8')]);
+  const cohort = loadCohort(JSON.parse(cohortJson));
+  const manifest = manifestSchema.parse(JSON.parse(manifestJson));
+  const profiles = new Map(cohort.respondents.map((respondent) => [respondent.id, respondent]));
+  const arms = manifest.arms.map((arm) => {
+    const taskMap = new Map(arm.tasks.map((task) => [task.id, task]));
+    const journeys = cohort.respondents.map((respondent) => {
+      const stored = checkpoint.journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondent.id);
+      const decisions = stored?.decisions ?? [];
+      const occurrenceByKey = new Map<string, number>();
+      const responses = decisions.map((checkpointDecision) => {
+        const { decisionId, result } = checkpointDecision;
+        const task = taskMap.get(decisionId);
+        const key = task?.comparisonKey ?? '';
+        const occurrence = (occurrenceByKey.get(key) ?? 0) + 1;
+        occurrenceByKey.set(key, occurrence);
+        return { taskId: decisionId, comparisonKey: task?.comparisonKey ?? null, occurrence, requestFingerprint: checkpointDecision.requestFingerprint, optionIds: Object.keys(task?.options ?? {}), choice: result.choice,
+          correct: task?.answerKeyOptionId ? result.choice === task.answerKeyOptionId : null, attempts: result.attempts, latencyMs: result.latencyMs,
+          confidence: result.confidence ?? null, chargeUsd: result.chargeUsd ?? null };
+      });
+      return { respondentId: respondent.id, archetypeId: respondent.archetypeId ?? null, status: stored?.status ?? 'not-started', outcome: stored?.result?.outcome ?? null, events: stored?.result?.events ?? [], responses };
     });
-    journeys.push({ readerId, archetypeId, status: journey?.status ?? 'not-started', outcome, events: result?.events ?? [], decisions });
-  }
-  const rawProvider = checkpoint.provider;
-  const report = {
-    formatVersion: 1 as const, runId: checkpoint.runId, status: checkpoint.status,
-    stimulusFingerprint: checkpoint.stimulusFingerprint, executionFingerprint: checkpoint.executionFingerprint,
-    provider: { kind: rawProvider.kind, model: rawProvider.kind === 'jev' ? rawProvider.model : null, checkpoint: rawProvider.kind === 'laya' ? rawProvider.checkpoint : null },
-    denominator: { intended: intended.length, completed: completedJourneys.length, excluded: intended.length - completedJourneys.length, excludedByStatus },
-    outcomes, archetypes, items, journeys,
-    providerEvidence: { attempts, meanLatencyMs: latencyCount ? latencyTotal / latencyCount : null, inputTokens, outputTokens, confidence: { count: confidenceCount, mean: confidenceCount ? confidenceTotal / confidenceCount : null }, billedUsd, unknownCharges, unsupportedJourneys: checkpoint.journeys.filter((journey) => journey.failureKind === 'unsupported-input').length, failedJourneys: checkpoint.journeys.filter((journey) => journey.status === 'failed').length },
-  };
-  return pollingReportSchema.parse(report);
-}
-
-export async function getReport(outputDirectory: string, runId: string): Promise<PollingReport> {
-  const checkpoint = await new CheckpointStore(path.resolve(outputDirectory)).read(runId);
-  return buildReport(checkpoint);
-}
-
-export function compareReports(left: PollingReport, right: PollingReport) {
-  if (left.stimulusFingerprint !== right.stimulusFingerprint) throw new Error('Reports have different stimulus fingerprints and cannot be compared.');
-  const rightByReader = new Map(right.journeys.filter((journey) => journey.status === 'completed').map((journey) => [journey.readerId, journey]));
-  const matched = left.journeys.filter((journey) => journey.status === 'completed' && rightByReader.has(journey.readerId));
-  const readers = matched.map((journey) => {
-    const other = rightByReader.get(journey.readerId)!;
-    const leftChoices = new Map(journey.decisions.map((decision) => [decision.decisionId, decision.choice]));
-    const rightChoices = new Map(other.decisions.map((decision) => [decision.decisionId, decision.choice]));
-    const common = [...leftChoices.keys()].filter((id) => rightChoices.has(id));
-    const agreements = common.filter((id) => leftChoices.get(id) === rightChoices.get(id)).length;
-    return { readerId: journey.readerId, leftOutcome: journey.outcome, rightOutcome: other.outcome, outcomeAgreement: journey.outcome === other.outcome, commonDecisionCount: common.length, choiceAgreements: agreements, choiceDivergences: common.length - agreements };
+    const excludedByStatus: Record<string, number> = {};
+    for (const journey of journeys) if (journey.status !== 'completed') excludedByStatus[journey.status] = (excludedByStatus[journey.status] ?? 0) + 1;
+    const taskResponses: PollingReport['arms'][number]['taskResponses'] = {};
+    for (const task of arm.tasks) {
+      const responses = journeys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id));
+      const counts: Record<string, number> = {};
+      for (const response of responses) counts[response.choice] = (counts[response.choice] ?? 0) + 1;
+      const options = Object.fromEntries(Object.keys(task.options).map((optionId) => {
+        const count = counts[optionId] ?? 0;
+        return [optionId, { count, proportion: responses.length ? count / responses.length : 0 }];
+      }));
+      const reached = checkpoint.journeys.filter((journey) => journey.armId === arm.id && journey.presentedTaskIds.includes(task.id)).length;
+      taskResponses[task.id] = { reached, completed: responses.length, incomplete: reached - responses.length, notReached: cohort.respondents.length - reached,
+        correct: responses.filter((response) => response.correct === true).length, incorrect: responses.filter((response) => response.correct === false).length,
+        unscored: responses.filter((response) => response.correct === null).length, options };
+    }
+    const completed = journeys.filter((journey) => journey.status === 'completed').length;
+    const started = checkpoint.journeys.filter((journey) => journey.armId === arm.id).length;
+    const snapshot = { sources: arm.sources, items: arm.items, tasks: arm.tasks };
+    const fingerprint = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+    return { id: arm.id, label: arm.label, fingerprint, sources: arm.sources, stimulusItems: arm.items, tasks: arm.tasks.map((task) => ({ id: task.id, comparisonKey: task.comparisonKey ?? null, instructions: task.instructions, options: task.options })), denominator: { intended: cohort.respondents.length, started, completed, excluded: cohort.respondents.length - completed, excludedByStatus }, taskResponses, journeys };
   });
-  return { stimulusFingerprint: left.stimulusFingerprint, leftRunId: left.runId, rightRunId: right.runId, matchedCompletedReaders: readers.length, unmatchedCompletedLeft: left.denominator.completed - readers.length, unmatchedCompletedRight: right.denominator.completed - readers.length, readers };
+  const rawProvider = checkpoint.provider;
+  return pollingReportSchema.parse({ formatVersion: 2, runId: checkpoint.runId, status: checkpoint.status, stimulusFingerprint: checkpoint.stimulusFingerprint, executionFingerprint: checkpoint.executionFingerprint,
+    provider: { kind: rawProvider.kind, model: rawProvider.kind === 'jev' ? rawProvider.model : null, checkpoint: rawProvider.kind === 'laya' ? rawProvider.checkpoint : null }, cohortSize: profiles.size, arms,
+    providerEvidence: { attempts: checkpoint.budget.usedCalls, billedUsd: checkpoint.budget.billedUsd,
+      unknownCharges: checkpoint.budget.unpricedReservations, failedCells: checkpoint.journeys.filter((journey) => journey.status === 'failed').length } });
+}
+export async function getReport(outputDirectory: string, runId: string): Promise<PollingReport> { return buildReport(await new CheckpointStore(path.resolve(outputDirectory)).read(runId)); }
+
+export function compareReports(report: PollingReport, leftArmId: string, rightArmId: string) {
+  if (leftArmId === rightArmId) throw new Error('Choose two distinct arms from the same run.');
+  const left = report.arms.find((arm) => arm.id === leftArmId);
+  const right = report.arms.find((arm) => arm.id === rightArmId);
+  if (!left || !right) throw new Error('Both arm IDs must exist in the same report.');
+  const rightByRespondent = new Map(right.journeys.map((journey) => [journey.respondentId, journey]));
+  const matched = left.journeys.flatMap((journey) => {
+    const other = rightByRespondent.get(journey.respondentId);
+    if (!other) return [];
+    const otherResponses = new Map(other.responses.filter((response) => response.comparisonKey).map((response) => [`${response.comparisonKey}:${response.occurrence}`, response]));
+    const taskComparisons = journey.responses.filter((response) => response.comparisonKey).flatMap((response) => {
+      const counterpart = otherResponses.get(`${response.comparisonKey}:${response.occurrence}`);
+      if (!counterpart) return [];
+      const commonOptionIds = response.optionIds.filter((id) => counterpart.optionIds.includes(id));
+      return [{ comparisonKey: response.comparisonKey, occurrence: response.occurrence, leftChoice: response.choice, rightChoice: counterpart.choice, comparable: commonOptionIds.includes(response.choice) && commonOptionIds.includes(counterpart.choice), agreement: response.choice === counterpart.choice }];
+    });
+    return [{ respondentId: journey.respondentId, taskComparisons }];
+  });
+  const leftByItem = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
+  const rightByItem = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
+  const itemChanges = [...new Set([...leftByItem.keys(), ...rightByItem.keys()])].flatMap((id) => leftByItem.get(id) === rightByItem.get(id) ? [] : [{ id, leftText: leftByItem.get(id) ?? null, rightText: rightByItem.get(id) ?? null }]);
+  const leftSources = new Map(left.sources.map((source) => [source.path, source.sha256]));
+  const rightSources = new Map(right.sources.map((source) => [source.path, source.sha256]));
+  const sourceChanges = [...new Set([...leftSources.keys(), ...rightSources.keys()])].flatMap((sourcePath) => leftSources.get(sourcePath) === rightSources.get(sourcePath) ? [] : [{ path: sourcePath, leftSha256: leftSources.get(sourcePath) ?? null, rightSha256: rightSources.get(sourcePath) ?? null }]);
+  const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
+  const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
+  const taskChanges = [...new Set([...leftTasks.keys(), ...rightTasks.keys()])].flatMap((key) => {
+    const leftTask = leftTasks.get(key); const rightTask = rightTasks.get(key);
+    if (!leftTask || !rightTask) return [{ comparisonKey: key, fields: ['task-presence'] }];
+    const fields = (['instructions', 'options'] as const).filter((field) => JSON.stringify(leftTask[field]) !== JSON.stringify(rightTask[field]));
+    return fields.length ? [{ comparisonKey: key, fields }] : [];
+  });
+  return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, matched };
 }

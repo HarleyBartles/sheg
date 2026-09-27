@@ -56,9 +56,6 @@
     "put_off_by"
   ],
   "additionalProperties": false,
-  "$id": "https://schemas.system-one-polling.dev/reader-profile.schema.json",
-  "title": "Concrete reader profile",
-  "x-validation-rules": [
-    "Text fields must contain non-whitespace content; surrounding whitespace is trimmed by runtime validation."
-  ]
+  "$id": "https://schemas.system-one-polling.dev/respondent-profile.schema.json",
+  "title": "Respondent profile"
 }

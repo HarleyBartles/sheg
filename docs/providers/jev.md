@@ -14,7 +14,7 @@ contract again when upgrading the adapter.
 - Authentication: `Authorization: Bearer <OpenRouter API key>`
 - Request: `{ model, state, questions }`
 - Choice question: `{ type: "choice", instructions, criteria }`, where
-  `criteria` maps every offered label to its description.
+  `criteria` maps every offered stable option ID to its description.
 - Response: `answers[questionId]` contains `type: "choice"`, `choice`,
   `probabilities`, and `confidence`. The envelope reports the actual `model`,
   provider, and `usage` with `input_tokens`, `output_tokens`, and `cost`.

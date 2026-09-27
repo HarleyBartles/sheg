@@ -19690,7 +19690,7 @@ var StudyInputError = class extends Error {
   }
 };
 
-// src/domain/readers/profile.ts
+// src/domain/readers/archetype.ts
 var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 var proseSchema = external_exports.string().trim().min(1).max(500);
 var readerArchetypeSchema = external_exports.object({
@@ -19725,184 +19725,212 @@ var archetypeLibrarySchema = external_exports.array(readerArchetypeSchema).min(1
     context.addIssue({ code: "custom", message: "Archetype IDs must be unique in a library." });
   }
 });
-var readerProfileSchema = external_exports.object({
-  id: idSchema,
-  archetypeId: idSchema.optional(),
-  variation: external_exports.record(idSchema, idSchema).optional(),
-  arrival_intent: proseSchema,
-  background: proseSchema,
-  desired_payoff: proseSchema,
-  drawn_in_by: proseSchema,
-  put_off_by: proseSchema
+
+// src/domain/respondents/profile.ts
+var idSchema2 = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
+var proseSchema2 = external_exports.string().trim().min(1).max(500);
+var respondentProfileSchema = external_exports.object({
+  id: idSchema2,
+  archetypeId: idSchema2.optional(),
+  variation: external_exports.record(idSchema2, idSchema2).optional(),
+  arrival_intent: proseSchema2,
+  background: proseSchema2,
+  desired_payoff: proseSchema2,
+  drawn_in_by: proseSchema2,
+  put_off_by: proseSchema2
 }).strict();
-var cohortSchema = external_exports.object({
-  version: external_exports.literal("2.0"),
+var respondentCohortSchema = external_exports.object({
+  version: external_exports.literal("3.0"),
   archetypes: archetypeLibrarySchema.optional(),
-  readers: external_exports.array(readerProfileSchema).min(1),
+  respondents: external_exports.array(respondentProfileSchema).min(1),
   admission: external_exports.object({
     rationale: external_exports.string().trim().min(1),
     frozenAt: external_exports.string().datetime({ offset: true })
-  }).strict()
+  }).strict().optional()
 }).strict().superRefine((cohort, context) => {
-  const readerIds = cohort.readers.map((reader) => reader.id);
-  if (new Set(readerIds).size !== readerIds.length) {
-    context.addIssue({ code: "custom", path: ["readers"], message: "Frozen cohort contains a duplicate reader ID." });
+  const respondentIds = cohort.respondents.map((respondent) => respondent.id);
+  if (new Set(respondentIds).size !== respondentIds.length) {
+    context.addIssue({ code: "custom", path: ["respondents"], message: "Frozen cohort contains a duplicate respondent ID." });
   }
   const archetypes = new Map((cohort.archetypes ?? []).map((archetype) => [archetype.id, archetype]));
-  for (const [readerIndex, reader] of cohort.readers.entries()) {
-    if (!reader.archetypeId) {
-      if (reader.variation) {
-        context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation"], message: "Variation values require an archetype reference." });
+  for (const [respondentIndex, respondent] of cohort.respondents.entries()) {
+    if (!respondent.archetypeId) {
+      if (respondent.variation) {
+        context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Variation values require an archetype reference." });
       }
       continue;
     }
-    const archetype = archetypes.get(reader.archetypeId);
+    const archetype = archetypes.get(respondent.archetypeId);
     if (!archetype) {
-      context.addIssue({ code: "custom", path: ["readers", readerIndex, "archetypeId"], message: `Unknown archetype: ${reader.archetypeId}.` });
+      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "archetypeId"], message: `Unknown archetype: ${respondent.archetypeId}.` });
       continue;
     }
-    if (!reader.variation) {
-      context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation"], message: "Archetype-derived profiles must select a value for every variation axis." });
+    if (!respondent.variation) {
+      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Archetype-derived profiles must select a value for every variation axis." });
       continue;
     }
     const expectedAxes = archetype.variation_axes.map((axis) => axis.id).sort();
-    const selectedAxes = Object.keys(reader.variation).sort();
+    const selectedAxes = Object.keys(respondent.variation).sort();
     if (JSON.stringify(expectedAxes) !== JSON.stringify(selectedAxes)) {
-      context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation"], message: "Variation selections must cover exactly the archetype variation axes." });
+      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Variation selections must cover exactly the archetype variation axes." });
       continue;
     }
     for (const axis of archetype.variation_axes) {
-      const selection = reader.variation[axis.id];
+      const selection = respondent.variation[axis.id];
       if (!axis.values.some((value) => value.id === selection)) {
-        context.addIssue({ code: "custom", path: ["readers", readerIndex, "variation", axis.id], message: `Unknown variation value for axis ${axis.id}.` });
+        context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation", axis.id], message: `Unknown variation value for axis ${axis.id}.` });
       }
     }
   }
 });
 function loadCohort(input2) {
-  const result = cohortSchema.safeParse(input2);
+  const result = respondentCohortSchema.safeParse(input2);
   if (!result.success) {
-    throw new StudyInputError(`Frozen cohort is invalid: ${result.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: result.error });
+    throw new StudyInputError(`Frozen respondent cohort is invalid: ${result.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: result.error });
   }
-  return { archetypes: result.data.archetypes ?? [], readers: result.data.readers };
+  return { archetypes: result.data.archetypes ?? [], respondents: result.data.respondents };
 }
 
 // src/domain/study/manifest.ts
 var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose = external_exports.string().trim().min(1);
 var sourceReferenceSchema = external_exports.object({
   path: external_exports.string().min(1),
   sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
 }).strict();
 var itemSchema = external_exports.object({
   id: identifier,
-  text: external_exports.string().trim().min(1)
+  text: prose
 }).strict();
-var decisionSchema = external_exports.object({
+var taskSchema = external_exports.object({
   id: identifier,
-  instructions: external_exports.string().trim().min(1),
-  criteria: external_exports.record(identifier, external_exports.string().trim().min(1)).refine((criteria) => Object.keys(criteria).length > 0)
-}).strict();
+  instructions: prose,
+  options: external_exports.record(identifier, prose).refine((options) => Object.keys(options).length > 0, "A choice task requires at least one option."),
+  comparisonKey: identifier.optional(),
+  answerKeyOptionId: identifier.optional()
+}).strict().superRefine((task, context) => {
+  if (task.answerKeyOptionId && !(task.answerKeyOptionId in task.options)) {
+    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${task.answerKeyOptionId}.` });
+  }
+});
 var nodeSchema = external_exports.discriminatedUnion("kind", [
   external_exports.object({ id: identifier, kind: external_exports.literal("expose"), itemId: identifier }).strict(),
-  external_exports.object({ id: identifier, kind: external_exports.literal("decide"), decisionId: identifier }).strict(),
+  external_exports.object({ id: identifier, kind: external_exports.literal("ask"), taskId: identifier }).strict(),
   external_exports.object({ id: identifier, kind: external_exports.literal("terminal"), outcome: identifier }).strict()
 ]);
 var transitionSchema = external_exports.object({
   fromNodeId: identifier,
-  choice: identifier.optional(),
+  optionId: identifier.optional(),
   toNodeId: identifier
 }).strict();
-var manifestSchema = external_exports.object({
-  version: external_exports.literal("1.0"),
-  study: external_exports.object({
-    title: external_exports.string().trim().min(1),
-    purpose: external_exports.string().trim().min(1)
-  }).strict(),
+var presentationSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("graph"),
+    nodes: external_exports.array(nodeSchema).min(1),
+    transitions: external_exports.array(transitionSchema),
+    entryNodeId: identifier,
+    maxDecisions: external_exports.number().int().positive()
+  }).strict()
+]);
+var armSchema = external_exports.object({
+  id: identifier,
+  label: prose,
   sources: external_exports.array(sourceReferenceSchema).min(1),
   items: external_exports.array(itemSchema).min(1),
-  decisions: external_exports.array(decisionSchema).min(1),
-  nodes: external_exports.array(nodeSchema).min(1),
-  transitions: external_exports.array(transitionSchema).min(1),
-  entryNodeId: identifier,
-  maxDecisions: external_exports.number().int().positive()
-}).strict().superRefine((manifest, context) => {
-  const allIds = [
-    ...manifest.items.map((item) => item.id),
-    ...manifest.decisions.map((decision) => decision.id),
-    ...manifest.nodes.map((node2) => node2.id)
-  ];
+  tasks: external_exports.array(taskSchema).min(1),
+  presentation: presentationSchema
+}).strict().superRefine((arm, context) => {
+  const presentation = arm.presentation;
+  const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
+  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
+  const itemIds = new Set(arm.items.map((item) => item.id));
+  const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
+  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
   if (new Set(allIds).size !== allIds.length) {
-    context.addIssue({ code: "custom", path: [], message: "Item, decision, and node IDs must be unique." });
+    context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
   }
-  const itemIds = new Set(manifest.items.map((item) => item.id));
-  const decisionById = new Map(manifest.decisions.map((decision) => [decision.id, decision]));
-  const nodeById = new Map(manifest.nodes.map((node2) => [node2.id, node2]));
-  if (!nodeById.has(manifest.entryNodeId)) {
-    context.addIssue({ code: "custom", path: ["entryNodeId"], message: `Unknown entry node ${manifest.entryNodeId}.` });
+  if (presentation.kind === "sequence") return;
+  const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
+  if (!nodesById.has(presentation.entryNodeId)) {
+    context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
   }
-  for (const [index, node2] of manifest.nodes.entries()) {
+  for (const [index, node2] of presentation.nodes.entries()) {
     if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
-      context.addIssue({ code: "custom", path: ["nodes", index, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
     }
-    if (node2.kind === "decide" && !decisionById.has(node2.decisionId)) {
-      context.addIssue({ code: "custom", path: ["nodes", index, "decisionId"], message: `Node references unknown decision ${node2.decisionId}.` });
+    if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
     }
   }
   const outgoing = /* @__PURE__ */ new Map();
-  for (const [index, edge] of manifest.transitions.entries()) {
-    const source = nodeById.get(edge.fromNodeId);
+  for (const [index, edge] of presentation.transitions.entries()) {
+    const source = nodesById.get(edge.fromNodeId);
     if (!source) {
-      context.addIssue({ code: "custom", path: ["transitions", index, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
       continue;
     }
-    if (!nodeById.has(edge.toNodeId)) {
-      context.addIssue({ code: "custom", path: ["transitions", index, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
+    if (!nodesById.has(edge.toNodeId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
     }
     const edges = outgoing.get(edge.fromNodeId) ?? [];
     outgoing.set(edge.fromNodeId, [...edges, edge]);
     if (source.kind === "terminal") {
-      context.addIssue({ code: "custom", path: ["transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
     }
-    if (source.kind === "expose" && edge.choice !== void 0) {
-      context.addIssue({ code: "custom", path: ["transitions", index, "choice"], message: "Exposure transitions must be unconditional." });
+    if (source.kind === "expose" && edge.optionId !== void 0) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "optionId"], message: "Exposure transitions must be unconditional." });
     }
   }
-  for (const [index, node2] of manifest.nodes.entries()) {
+  for (const [index, node2] of presentation.nodes.entries()) {
     const edges = outgoing.get(node2.id) ?? [];
     if (node2.kind === "terminal") {
-      if (edges.length > 0) context.addIssue({ code: "custom", path: ["nodes", index], message: "Terminal nodes cannot have outgoing transitions." });
+      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Terminal nodes cannot have outgoing transitions." });
       continue;
     }
     if (node2.kind === "expose") {
-      if (edges.length !== 1 || edges[0]?.choice !== void 0) {
-        context.addIssue({ code: "custom", path: ["nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
+      if (edges.length !== 1 || edges[0]?.optionId !== void 0) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
       }
       continue;
     }
-    const decision = decisionById.get(node2.decisionId);
-    const offeredLabels = Object.keys(decision?.criteria ?? {});
-    const edgeLabels = edges.map((edge) => edge.choice);
-    if (edgeLabels.some((label) => label === void 0) || new Set(edgeLabels).size !== edgeLabels.length || edgeLabels.length !== offeredLabels.length || offeredLabels.some((label) => !edgeLabels.includes(label))) {
-      context.addIssue({ code: "custom", path: ["nodes", index], message: "Decision transitions must contain exactly one edge for each offered label." });
+    const task = taskById.get(node2.taskId);
+    const optionIds = Object.keys(task?.options ?? {});
+    const edgeOptionIds = edges.map((edge) => edge.optionId);
+    if (edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Task transitions must contain exactly one edge for every offered option and no others." });
     }
   }
-  if (nodeById.has(manifest.entryNodeId)) {
+  if (nodesById.has(presentation.entryNodeId)) {
     const visited = /* @__PURE__ */ new Set();
-    const pending = [manifest.entryNodeId];
+    const pending = [presentation.entryNodeId];
     while (pending.length > 0) {
       const current = pending.pop();
       if (visited.has(current)) continue;
       visited.add(current);
       for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
     }
-    const unreachable = manifest.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
+    const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
     if (unreachable.length > 0) {
-      context.addIssue({ code: "custom", path: ["nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
     }
   }
-  const visibleBytes = manifest.items.reduce((total, item) => total + Buffer.byteLength(item.text, "utf8"), 0);
+});
+var manifestSchema = external_exports.object({
+  version: external_exports.literal("2.0"),
+  study: external_exports.object({
+    title: prose,
+    purpose: prose
+  }).strict(),
+  arms: external_exports.array(armSchema).min(1)
+}).strict().superRefine((study, context) => {
+  const armIds = study.arms.map((arm) => arm.id);
+  if (new Set(armIds).size !== armIds.length) {
+    context.addIssue({ code: "custom", path: ["arms"], message: "Arm IDs must be unique within a study." });
+  }
+  const visibleBytes = study.arms.reduce((total, arm) => total + arm.items.reduce((armTotal, item) => armTotal + Buffer.byteLength(item.text, "utf8"), 0), 0);
   if (visibleBytes > 8e4) {
-    context.addIssue({ code: "custom", path: ["items"], message: "Study stimulus text exceeds the 80 KB limit." });
+    context.addIssue({ code: "custom", path: ["arms"], message: "Study stimulus text exceeds the 80 KB limit." });
   }
 });
 
@@ -19941,8 +19969,8 @@ async function loadStudy(manifestPath, cohortPath) {
   } catch (error62) {
     throw new StudyInputError("Manifest must be valid UTF-8 JSON.", { cause: error62 });
   }
-  if (!manifestJson || typeof manifestJson !== "object" || !("version" in manifestJson) || manifestJson.version !== "1.0") {
-    throw new StudyInputError("Only manifest version 1.0 is supported.");
+  if (!manifestJson || typeof manifestJson !== "object" || !("version" in manifestJson) || manifestJson.version !== "2.0") {
+    throw new StudyInputError("Only study contract version 2.0 is supported.");
   }
   const parsedManifest = manifestSchema.safeParse(manifestJson);
   if (!parsedManifest.success) {
@@ -19950,27 +19978,28 @@ async function loadStudy(manifestPath, cohortPath) {
   }
   const manifest = parsedManifest.data;
   const sources = [];
-  for (const source of manifest.sources) {
-    const resolvedPath = path.resolve(path.dirname(absoluteManifestPath), source.path);
-    let sourceBytes;
-    try {
-      sourceBytes = await readFile(resolvedPath);
-    } catch (error62) {
-      throw new StudyInputError(`Referenced source is missing or unreadable: ${source.path}.`, { cause: error62 });
+  for (const arm of manifest.arms) {
+    for (const source of arm.sources) {
+      const resolvedPath = path.resolve(path.dirname(absoluteManifestPath), source.path);
+      let sourceBytes;
+      try {
+        sourceBytes = await readFile(resolvedPath);
+      } catch (error62) {
+        throw new StudyInputError(`Referenced source is missing or unreadable: ${source.path}.`, { cause: error62 });
+      }
+      const actualHash = createHash("sha256").update(sourceBytes).digest("hex");
+      if (actualHash !== source.sha256.toLowerCase()) {
+        throw new StudyInputError(`Referenced source hash does not match: ${source.path}.`);
+      }
+      sources.push({ armId: arm.id, path: resolvedPath, sha256: actualHash });
     }
-    const actualHash = createHash("sha256").update(sourceBytes).digest("hex");
-    if (actualHash !== source.sha256.toLowerCase()) {
-      throw new StudyInputError(`Referenced source hash does not match: ${source.path}.`);
-    }
-    sources.push({ path: resolvedPath, sha256: actualHash });
   }
-  const cohortJson = await parseJsonFile(path.resolve(cohortPath), "Frozen cohort");
+  const cohortJson = await parseJsonFile(path.resolve(cohortPath), "Frozen respondent cohort");
   const cohort = loadCohort(cohortJson);
-  const profiles = cohort.readers;
   return {
     manifest,
     cohort,
-    profiles,
+    respondents: cohort.respondents,
     sources,
     manifestDirectory: path.dirname(absoluteManifestPath)
   };
@@ -19979,25 +20008,27 @@ async function loadStudy(manifestPath, cohortPath) {
 // src/domain/decision/prompt.ts
 import { createHash as createHash2 } from "node:crypto";
 var promptContract = {
-  version: 2,
-  stateFields: ["reader.profile", "encounteredItems", "choiceHistory"],
+  version: 3,
+  stateFields: ["respondent.profile", "encounteredItems", "responseHistory"],
   onlyEncounteredItems: true,
   preserveEncounterOrder: true,
   historyOrder: "chronological",
   studyMetadataExcluded: true,
-  decisionSemantics: "Choose exactly one offered label according to the supplied criteria."
+  answerKeysExcluded: true,
+  otherArmsExcluded: true,
+  decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
-function renderQuestion(study, profile, decisionId, encounteredItemIds, history = []) {
-  const decision = study.decisions.find((candidate) => candidate.id === decisionId);
-  if (!decision) throw new Error(`Unknown decision ${decisionId}.`);
-  const itemsById = new Map(study.items.map((item) => [item.id, item]));
+function renderQuestion(arm, profile, taskId, encounteredItemIds, history = []) {
+  const task = arm.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) throw new Error(`Unknown task ${taskId}.`);
+  const itemsById = new Map(arm.items.map((item) => [item.id, item]));
   const encounteredItems = encounteredItemIds.map((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
     return { id: item.id, text: item.text };
   });
   const state = {
-    reader: { profile: {
+    respondent: { profile: {
       arrival_intent: profile.arrival_intent,
       background: profile.background,
       desired_payoff: profile.desired_payoff,
@@ -20005,16 +20036,12 @@ function renderQuestion(study, profile, decisionId, encounteredItemIds, history 
       put_off_by: profile.put_off_by
     } },
     encounteredItems,
-    choiceHistory: history.map((event) => ({ ...event }))
+    responseHistory: history.map((event) => ({ ...event }))
   };
   return {
     state,
-    question: {
-      id: decision.id,
-      instructions: decision.instructions,
-      criteria: { ...decision.criteria }
-    },
-    labels: Object.keys(decision.criteria)
+    question: { id: task.id, instructions: task.instructions, options: { ...task.options } },
+    optionIds: Object.keys(task.options)
   };
 }
 function promptContractHash() {
@@ -20178,12 +20205,12 @@ var decisionRequestSchema = external_exports.object({
   question: external_exports.object({
     id: external_exports.string().min(1),
     instructions: external_exports.string().min(1),
-    criteria: external_exports.record(external_exports.string().min(1), external_exports.string().min(1))
+    options: external_exports.record(external_exports.string().min(1), external_exports.string().min(1))
   }).strict(),
-  labels: external_exports.array(external_exports.string().min(1)).min(1)
+  optionIds: external_exports.array(external_exports.string().min(1)).min(1)
 }).strict().superRefine((request, context) => {
-  if (new Set(request.labels).size !== request.labels.length || request.labels.length !== Object.keys(request.question.criteria).length || request.labels.some((label) => !(label in request.question.criteria))) {
-    context.addIssue({ code: "custom", path: ["labels"], message: "Request labels must uniquely match the offered criteria." });
+  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== Object.keys(request.question.options).length || request.optionIds.some((optionId) => !(optionId in request.question.options))) {
+    context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
   }
 });
 var decisionResultSchema = external_exports.object({
@@ -20288,7 +20315,7 @@ var providerConfigSchema = external_exports.discriminatedUnion("kind", [
 var journeyResultSchema = external_exports.object({
   events: external_exports.array(external_exports.discriminatedUnion("type", [
     external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), itemId: external_exports.string() }).strict(),
-    external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), decisionId: external_exports.string(), choice: external_exports.string() }).strict()
+    external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), choice: external_exports.string() }).strict()
   ])),
   outcome: external_exports.string().nullable(),
   status: external_exports.enum(["completed", "decision-limit"]),
@@ -20307,7 +20334,7 @@ var budgetSnapshotSchema = external_exports.object({
   blocked: external_exports.boolean()
 }).strict();
 var runCheckpointSchema = external_exports.object({
-  formatVersion: external_exports.literal(1),
+  formatVersion: external_exports.literal(2),
   runId: external_exports.string().uuid(),
   status: external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled"]),
   createdAt: external_exports.string().datetime(),
@@ -20323,24 +20350,27 @@ var runCheckpointSchema = external_exports.object({
   stimulusFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
   executionFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
   sourceHashes: external_exports.array(external_exports.string().regex(/^[a-f\d]{64}$/i)),
-  readerIds: external_exports.array(external_exports.string().min(1)),
+  respondentIds: external_exports.array(external_exports.string().min(1)),
   journeys: external_exports.array(external_exports.object({
-    readerId: external_exports.string().min(1),
+    armId: external_exports.string().min(1),
+    respondentId: external_exports.string().min(1),
     status: external_exports.enum(["completed", "failed", "partial"]),
     result: journeyResultSchema.optional(),
-    decisions: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), result: decisionResultSchema }).strict()),
-    attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), result: decisionResultSchema }).strict()),
+    decisions: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
+    attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
+    presentedTaskIds: external_exports.array(external_exports.string().min(1)),
     failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional()
   }).strict()),
-  activeReaderIds: external_exports.array(external_exports.string().min(1)),
+  activeCellIds: external_exports.array(external_exports.string().min(1)),
   cancellationRequested: external_exports.boolean(),
   budget: budgetSnapshotSchema
 }).strict().superRefine((checkpoint, context) => {
   if (checkpoint.sourceHashes.some((hash2) => hash2.length !== 64)) {
     context.addIssue({ code: "custom", path: ["sourceHashes"], message: "Source hashes must be SHA-256 values." });
   }
-  if (new Set(checkpoint.readerIds).size !== checkpoint.readerIds.length || new Set(checkpoint.journeys.map((journey) => journey.readerId)).size !== checkpoint.journeys.length) {
-    context.addIssue({ code: "custom", path: ["readerIds"], message: "Checkpoint reader IDs must be unique." });
+  const cellIds = checkpoint.journeys.map((journey) => `${journey.armId}\0${journey.respondentId}`);
+  if (new Set(checkpoint.respondentIds).size !== checkpoint.respondentIds.length || new Set(cellIds).size !== cellIds.length) {
+    context.addIssue({ code: "custom", path: ["respondentIds"], message: "Checkpoint respondent IDs and arm/respondent cells must be unique." });
   }
 });
 var CheckpointStore = class {
@@ -20349,7 +20379,7 @@ var CheckpointStore = class {
   }
   directory;
   async create(input2) {
-    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 1, runId: input2.runId ?? randomUUID3() });
+    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 2, runId: input2.runId ?? randomUUID3() });
     await mkdir2(this.directory, { recursive: true });
     const filePath = this.filePath(checkpoint.runId);
     try {
@@ -20533,16 +20563,16 @@ function validateDecision(request, result, options = {}) {
     throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error });
   }
   const decision = parsed.data;
-  const labels = [...request.labels];
-  if (labels.length === 0 || new Set(labels).size !== labels.length || labels.length !== Object.keys(request.question.criteria).length || labels.some((label) => !(label in request.question.criteria))) {
-    throw new DecisionError("Decision request labels must uniquely match the offered criteria.");
+  const optionIds = [...request.optionIds];
+  if (optionIds.length === 0 || new Set(optionIds).size !== optionIds.length || optionIds.length !== Object.keys(request.question.options).length || optionIds.some((optionId) => !(optionId in request.question.options))) {
+    throw new DecisionError("Decision request option IDs must uniquely match the offered options.");
   }
-  if (!labels.includes(decision.choice)) {
+  if (!optionIds.includes(decision.choice)) {
     throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
   }
   const probabilityLabels = Object.keys(decision.probabilities);
-  if (probabilityLabels.length !== labels.length || labels.some((label) => !(label in decision.probabilities))) {
-    throw new DecisionError("Decision probabilities must contain exactly one entry for every offered label.");
+  if (probabilityLabels.length !== optionIds.length || optionIds.some((optionId) => !(optionId in decision.probabilities))) {
+    throw new DecisionError("Decision probabilities must contain exactly one entry for every offered option ID.");
   }
   const probabilityTotal = Object.values(decision.probabilities).reduce((sum, value) => sum + value, 0);
   if (Math.abs(probabilityTotal - 1) > probabilitySumTolerance) {
@@ -20637,7 +20667,7 @@ var JevProvider = class {
         [question.id]: {
           type: "choice",
           instructions: question.instructions,
-          criteria: question.criteria
+          criteria: question.options
         }
       }
     });
@@ -20795,7 +20825,7 @@ var LayaProvider = class {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: { type: "choice", instructions: question.instructions, criteria: question.criteria }
+            [question.id]: { type: "choice", instructions: question.instructions, criteria: question.options }
           }
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs)
@@ -20848,6 +20878,9 @@ function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+// src/application/worker.ts
+import { createHash as createHash4 } from "node:crypto";
+
 // src/domain/journey/run.ts
 var JourneyExecutionError = class extends Error {
   constructor(message) {
@@ -20855,61 +20888,50 @@ var JourneyExecutionError = class extends Error {
     this.name = "JourneyExecutionError";
   }
 };
-async function runJourney({ study, profile, ask }) {
-  const nodesById = new Map(study.nodes.map((node2) => [node2.id, node2]));
-  const outgoing = /* @__PURE__ */ new Map();
-  for (const transition of study.transitions) {
-    const edges = outgoing.get(transition.fromNodeId) ?? [];
-    outgoing.set(transition.fromNodeId, [...edges, transition]);
-  }
+async function runJourney({ arm, profile, ask }) {
   const events = [];
-  const encounteredItemIds = [];
-  const choiceHistory = [];
+  const encountered = [];
+  const history = [];
   let decisionCount = 0;
-  let currentNodeId = study.entryNodeId;
-  while (true) {
-    const node2 = nodesById.get(currentNodeId);
-    if (!node2) throw new JourneyExecutionError(`Graph points to unknown node ${currentNodeId}.`);
-    if (node2.kind === "terminal") {
-      return { events, outcome: node2.outcome, status: "completed", decisionCount };
-    }
-    if (node2.kind === "expose") {
-      encounteredItemIds.push(node2.itemId);
-      events.push({
-        type: "exposure",
-        sequence: events.length,
-        nodeId: node2.id,
-        itemId: node2.itemId
-      });
-      const [transition2] = outgoing.get(node2.id) ?? [];
-      if (!transition2 || transition2.choice !== void 0) {
-        throw new JourneyExecutionError(`Exposure node ${node2.id} must have one unconditional transition.`);
-      }
-      currentNodeId = transition2.toNodeId;
-      continue;
-    }
-    if (decisionCount >= study.maxDecisions) {
-      return { events, outcome: null, status: "decision-limit", decisionCount };
-    }
-    const request = renderQuestion(study, profile, node2.decisionId, encounteredItemIds, choiceHistory);
+  const expose = (itemId, nodeId) => {
+    encountered.push(itemId);
+    events.push({ type: "exposure", sequence: events.length, nodeId, itemId });
+  };
+  const answer = async (taskId, nodeId) => {
+    const request = renderQuestion(arm, profile, taskId, encountered, history);
     const result = await ask(request);
-    if (typeof result?.choice !== "string" || !Object.hasOwn(request.question.criteria, result.choice)) {
-      throw new JourneyExecutionError(`Decision ${node2.decisionId} returned a choice that is not an offered choice.`);
+    if (typeof result?.choice !== "string" || !Object.hasOwn(request.question.options, result.choice)) {
+      throw new JourneyExecutionError(`Task ${taskId} returned an option that was not offered.`);
     }
     decisionCount += 1;
-    choiceHistory.push({ nodeId: node2.id, choice: result.choice });
-    events.push({
-      type: "choice",
-      sequence: events.length,
-      nodeId: node2.id,
-      decisionId: node2.decisionId,
-      choice: result.choice
-    });
-    const transition = (outgoing.get(node2.id) ?? []).find((edge) => edge.choice === result.choice);
-    if (!transition) {
-      throw new JourneyExecutionError(`Decision node ${node2.id} has no transition for ${result.choice}.`);
+    history.push({ taskId, choice: result.choice });
+    events.push({ type: "choice", sequence: events.length, nodeId, taskId, choice: result.choice });
+    return result.choice;
+  };
+  if (arm.presentation.kind === "sequence") {
+    for (const item of arm.items) expose(item.id, `sequence-expose-${item.id}`);
+    for (const task of arm.tasks) await answer(task.id, `sequence-ask-${task.id}`);
+    return { events, outcome: "completed", status: "completed", decisionCount };
+  }
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  let current = graph.entryNodeId;
+  while (true) {
+    const node2 = nodes.get(current);
+    if (!node2) throw new JourneyExecutionError(`Graph points to unknown node ${current}.`);
+    if (node2.kind === "terminal") return { events, outcome: node2.outcome, status: "completed", decisionCount };
+    if (node2.kind === "expose") {
+      expose(node2.itemId, node2.id);
+      const edge2 = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+      if (!edge2) throw new JourneyExecutionError(`Exposure node ${node2.id} has no transition.`);
+      current = edge2.toNodeId;
+      continue;
     }
-    currentNodeId = transition.toNodeId;
+    if (decisionCount >= graph.maxDecisions) return { events, outcome: null, status: "decision-limit", decisionCount };
+    const choice = await answer(node2.taskId, node2.id);
+    const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id && candidate.optionId === choice);
+    if (!edge) throw new JourneyExecutionError(`Task node ${node2.id} has no transition for ${choice}.`);
+    current = edge.toNodeId;
   }
 }
 
@@ -20924,120 +20946,100 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
-  const execution = executionFingerprint(stimulus, identityProvider);
-  if (stimulus !== checkpoint.stimulusFingerprint || execution !== checkpoint.executionFingerprint) {
-    throw new Error("Study or provider settings changed since this run was prepared.");
-  }
+  if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint) throw new Error("Study or provider settings changed since this run was prepared.");
   const { maxUsd, ...budgetRest } = checkpoint.budget;
   const ledger = restoredBudget ?? BudgetLedger.restore({ ...budgetRest, ...maxUsd === void 0 ? {} : { maxUsd } });
-  const profileById = new Map(study.profiles.map((profile) => [profile.id, profile]));
+  const respondents = new Map(study.respondents.map((respondent) => [respondent.id, respondent]));
+  const cells = study.manifest.arms.flatMap((arm) => study.respondents.map((respondent) => ({ arm, respondent, id: cellId(arm.id, respondent.id) })));
   const cursor = { next: 0 };
-  const runReader = async (readerId) => {
-    const profile = profileById.get(readerId);
-    if (!profile) throw new Error(`Frozen reader ${readerId} is no longer present.`);
+  const runCell = async (arm, respondentId, id) => {
+    const profile = respondents.get(respondentId);
+    if (!profile) throw new Error(`Frozen respondent ${respondentId} is no longer present.`);
     let decisions = [];
-    const previousJourney = (await store.read(checkpoint.runId)).journeys.find((journey) => journey.readerId === readerId);
-    const attemptHistory = [...previousJourney?.attemptHistory ?? [], ...previousJourney?.decisions ?? []];
+    const previous = (await store.read(checkpoint.runId)).journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
+    const attemptHistory = [...previous?.attemptHistory ?? []];
+    const replayDecisions = previous?.decisions ?? [];
+    const presentedTaskIds = [...previous?.presentedTaskIds ?? []];
+    let replayCursor = 0;
+    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
-      const result = await runJourney({
-        study: study.manifest,
-        profile,
-        ask: async (request) => {
-          if (await cancellationRequested(store, checkpoint.runId)) throw new RunCancelled();
-          const reservation = await ledger.reserve(1, checkpoint.provider.kind === "jev" ? checkpoint.maxPerCallUsd : void 0);
-          await updateCheckpoint(store, checkpoint.runId, (current) => ({
-            ...current,
-            budget: ledger.snapshot(),
-            activeReaderIds: addUnique(current.activeReaderIds, readerId)
-          }));
-          if (await cancellationRequested(store, checkpoint.runId)) {
-            await ledger.settle(reservation, { attempts: 0, chargeStatus: "not_billed" });
-            await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot() }));
-            throw new RunCancelled();
-          }
-          let decision;
-          try {
-            decision = await provider.decide(request, 1);
-          } catch (error62) {
-            const evidence = errorEvidence(error62);
-            await ledger.settle(reservation, evidence);
-            await updateCheckpoint(store, checkpoint.runId, (current) => ({
-              ...current,
-              budget: ledger.snapshot(),
-              journeys: replaceJourney(current.journeys, {
-                readerId,
-                status: "partial",
-                decisions,
-                attemptHistory
-              }, current.readerIds)
-            }));
-            throw error62;
-          }
-          await ledger.settle(reservation, {
-            attempts: decision.attempts,
-            chargeStatus: decision.chargeStatus,
-            ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd }
-          });
-          decisions = [...decisions, { decisionId: request.question.id, result: decision }];
-          await updateCheckpoint(store, checkpoint.runId, (current) => ({
-            ...current,
-            budget: ledger.snapshot(),
-            journeys: replaceJourney(current.journeys, {
-              readerId,
-              status: "partial",
-              decisions,
-              attemptHistory
-            }, current.readerIds)
-          }));
-          return decision;
+      const result = await runJourney({ arm, profile, ask: async (request) => {
+        const replay = replayDecisions[replayCursor];
+        if (replay) {
+          if (replay.decisionId !== request.question.id) throw new Error("Task sequence changed while recovering the run.");
+          if (replay.requestFingerprint !== requestFingerprint(request)) throw new Error("Rendered task request changed while recovering the run.");
+          replayCursor += 1;
+          decisions.push(replay);
+          return replay.result;
         }
-      });
-      await updateCheckpoint(store, checkpoint.runId, (current) => ({
-        ...current,
-        budget: ledger.snapshot(),
-        journeys: replaceJourney(current.journeys, { readerId, status: "completed", result, decisions, attemptHistory }, current.readerIds)
-      }));
+        const presentedCount = presentedTaskIds.filter((id2) => id2 === request.question.id).length;
+        const completedCount = decisions.filter((decision2) => decision2.decisionId === request.question.id).length;
+        if (presentedCount <= completedCount) presentedTaskIds.push(request.question.id);
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+        if (await cancellationRequested(store, checkpoint.runId)) throw new RunCancelled();
+        const reservation = await ledger.reserve(1, checkpoint.provider.kind === "jev" ? checkpoint.maxPerCallUsd : void 0);
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), activeCellIds: addUnique(current.activeCellIds, id) }));
+        if (await cancellationRequested(store, checkpoint.runId)) {
+          await ledger.settle(reservation, { attempts: 0, chargeStatus: "not_billed" });
+          throw new RunCancelled();
+        }
+        let decision;
+        try {
+          decision = await provider.decide(request, 1);
+        } catch (error62) {
+          await ledger.settle(reservation, errorEvidence(error62));
+          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+          throw error62;
+        }
+        await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd } });
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: requestFingerprint(request), result: decision }];
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+        return decision;
+      } });
+      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "completed", result, decisions, attemptHistory, presentedTaskIds }) }));
     } catch (error62) {
       const cancelled = error62 instanceof RunCancelled || await cancellationRequested(store, checkpoint.runId);
       const current = await store.read(checkpoint.runId);
-      const previous = current.journeys.find((journey) => journey.readerId === readerId);
-      decisions = decisions.length > 0 ? decisions : previous?.decisions ?? [];
-      await updateCheckpoint(store, checkpoint.runId, (latest) => ({
-        ...latest,
-        budget: ledger.snapshot(),
-        journeys: replaceJourney(latest.journeys, {
-          readerId,
-          status: cancelled ? "partial" : "failed",
-          decisions,
-          attemptHistory,
-          ...!cancelled ? { failureKind: isUnsupported(error62) ? "unsupported-input" : error62 instanceof JourneyExecutionError ? "journey" : "provider" } : {}
-        }, latest.readerIds)
-      }));
+      const previousJourney = current.journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
+      decisions = decisions.length > 0 ? decisions : previousJourney?.decisions ?? [];
+      await updateCheckpoint(store, checkpoint.runId, (latest) => ({ ...latest, budget: ledger.snapshot(), journeys: replaceJourney(latest.journeys, {
+        armId: arm.id,
+        respondentId,
+        status: cancelled ? "partial" : "failed",
+        decisions,
+        attemptHistory,
+        presentedTaskIds,
+        ...!cancelled ? { failureKind: isUnsupported(error62) ? "unsupported-input" : error62 instanceof JourneyExecutionError ? "journey" : "provider" } : {}
+      }) }));
     } finally {
-      await updateCheckpoint(store, checkpoint.runId, (current) => ({
-        ...current,
-        activeReaderIds: current.activeReaderIds.filter((id) => id !== readerId),
-        budget: ledger.snapshot()
-      }));
+      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, activeCellIds: current.activeCellIds.filter((cell) => cell !== id), budget: ledger.snapshot() }));
     }
   };
   const worker = async () => {
-    while (cursor.next < checkpoint.readerIds.length) {
+    while (cursor.next < cells.length) {
       if (await cancellationRequested(store, checkpoint.runId)) return;
-      const readerId = checkpoint.readerIds[cursor.next++];
-      if (!readerId) return;
+      const cell = cells[cursor.next++];
+      if (!cell) return;
       const current = await store.read(checkpoint.runId);
-      if (current.journeys.some((journey) => journey.readerId === readerId && journey.status === "completed")) continue;
-      await runReader(readerId);
+      if (current.journeys.some((journey) => journey.armId === cell.arm.id && journey.respondentId === cell.respondent.id && journey.status === "completed")) continue;
+      await runCell(cell.arm, cell.respondent.id, cell.id);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(checkpoint.concurrency, checkpoint.readerIds.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(checkpoint.concurrency, cells.length) }, () => worker()));
   return updateCheckpoint(store, checkpoint.runId, (current) => {
-    const done = new Set(current.journeys.filter((journey) => journey.status === "completed").map((journey) => journey.readerId));
+    const completed = new Set(current.journeys.filter((journey) => journey.status === "completed").map((journey) => cellId(journey.armId, journey.respondentId)));
     const failed = current.journeys.some((journey) => journey.status === "failed");
-    const status2 = current.cancellationRequested ? "cancelled" : done.size === current.readerIds.length ? "completed" : failed ? "partial" : "partial";
-    return { ...current, status: status2, budget: ledger.snapshot(), activeReaderIds: [] };
+    return { ...current, status: current.cancellationRequested ? "cancelled" : completed.size === cells.length ? "completed" : failed ? "partial" : "partial", budget: ledger.snapshot(), activeCellIds: [] };
   });
+}
+function cellId(armId, respondentId) {
+  return `${armId}/${respondentId}`;
+}
+function requestFingerprint(request) {
+  return createHash4("sha256").update(JSON.stringify(request)).digest("hex");
+}
+function replaceJourney(journeys, replacement) {
+  return [...journeys.filter((journey) => !(journey.armId === replacement.armId && journey.respondentId === replacement.respondentId)), replacement];
 }
 async function cancellationRequested(store, runId2) {
   return (await store.read(runId2)).cancellationRequested;
@@ -21045,26 +21047,18 @@ async function cancellationRequested(store, runId2) {
 async function updateCheckpoint(store, runId2, mutate) {
   return store.update(runId2, (current) => ({ ...mutate(current), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
 }
-function replaceJourney(journeys, replacement, readerOrder) {
-  const next = [...journeys.filter((journey) => journey.readerId !== replacement.readerId), replacement];
-  const index = new Map(readerOrder.map((id, order) => [id, order]));
-  return next.sort((left, right) => (index.get(left.readerId) ?? Number.MAX_SAFE_INTEGER) - (index.get(right.readerId) ?? Number.MAX_SAFE_INTEGER));
-}
 function addUnique(values, value) {
-  return values.includes(value) ? [...values] : [...values, value];
-}
-function isUnsupported(error62) {
-  return error62 instanceof Error && /unsupported-input/i.test(error62.message);
+  return values.includes(value) ? values : [...values, value];
 }
 function errorEvidence(error62) {
-  if (!error62 || typeof error62 !== "object") return { attempts: 1, chargeStatus: "unknown" };
-  const value = error62;
-  const attempts = Number.isInteger(value.attempts) && value.attempts >= 0 ? value.attempts : 1;
-  if (value.chargeStatus === "billed" && typeof value.chargeUsd === "number") {
-    return { attempts, chargeStatus: "billed", chargeUsd: value.chargeUsd };
+  if (typeof error62 === "object" && error62 !== null && "attempts" in error62 && typeof error62.attempts === "number" && "chargeStatus" in error62 && ["not_billed", "unknown", "billed"].includes(String(error62.chargeStatus))) {
+    const evidence = error62;
+    return { attempts: evidence.attempts, chargeStatus: evidence.chargeStatus, ...evidence.chargeUsd === void 0 ? {} : { chargeUsd: evidence.chargeUsd } };
   }
-  if (value.chargeStatus === "not_billed") return { attempts, chargeStatus: "not_billed" };
-  return { attempts, chargeStatus: "unknown" };
+  return { attempts: 0, chargeStatus: "not_billed" };
+}
+function isUnsupported(error62) {
+  return typeof error62 === "object" && error62 !== null && "message" in error62 && String(error62.message).includes("unsupported-input");
 }
 
 // src/application/jobs.ts
@@ -21127,9 +21121,9 @@ var RunManager = class {
         stimulusFingerprint: checked.stimulusFingerprint,
         executionFingerprint: checked.executionFingerprint,
         sourceHashes: study.sources.map((source) => source.sha256),
-        readerIds: study.profiles.map((profile) => profile.id),
+        respondentIds: study.respondents.map((profile) => profile.id),
         journeys: [],
-        activeReaderIds: [],
+        activeCellIds: [],
         cancellationRequested: false,
         budget: emptyBudgetSnapshot(c.maxCalls, c.maxUsd)
       });
@@ -21151,7 +21145,7 @@ var RunManager = class {
           const current = await store.read(runId2);
           const ledger = BudgetLedger.restore(cleanBudget(current.budget));
           ledger.markInterruptedReservationsUnpriced();
-          return await store.update(runId2, (latest) => ({ ...latest, status: "partial", activeReaderIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+          return await store.update(runId2, (latest) => ({ ...latest, status: "partial", activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
         } finally {
           await lock.release();
         }
@@ -21197,7 +21191,7 @@ var RunManager = class {
   launch(store, checkpoint, lock) {
     const provider = this.options.providerFactory?.(checkpoint.provider) ?? (checkpoint.provider.kind === "jev" ? new JevProvider(checkpoint.provider) : new LayaProvider(checkpoint.provider, { ...this.options.measureLayaFit === void 0 ? {} : { measureFit: this.options.measureLayaFit } }));
     const task = runWorker(store, checkpoint, provider).then(() => void 0).catch(async () => {
-      await store.update(checkpoint.runId, (current) => ({ ...current, status: "failed", activeReaderIds: [], updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+      await store.update(checkpoint.runId, (current) => ({ ...current, status: "failed", activeCellIds: [], updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
     }).finally(async () => {
       this.active.delete(checkpoint.runId);
       await lock.release();

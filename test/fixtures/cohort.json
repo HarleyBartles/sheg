@@ -1,5 +1,5 @@
 {
-  "version": "2.0",
+  "version": "3.0",
   "archetypes": [
     {
       "id": "craft-admirer",
@@ -104,7 +104,11 @@
       ]
     }
   ],
-  "readers": [
+  "admission": {
+    "rationale": "One newcomer tests accessible explanation while one practitioner attends to concrete craft and trade-offs.",
+    "frozenAt": "2026-09-27T10:00:00Z"
+  },
+  "respondents": [
     {
       "id": "curious-outside-reader",
       "archetypeId": "curious-outsider",
@@ -131,9 +135,5 @@
       "drawn_in_by": "Specific implementation decisions and evidence from their consequences.",
       "put_off_by": "A polished result that hides the trade-offs that produced it."
     }
-  ],
-  "admission": {
-    "rationale": "One newcomer tests accessible explanation while one practitioner attends to concrete craft and trade-offs.",
-    "frozenAt": "2026-09-27T10:00:00Z"
-  }
+  ]
 }

@@ -2,15 +2,15 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { StudyInputError } from '../errors.js';
-import { loadCohort, type FrozenCohort, type ReaderProfile } from '../readers/profile.js';
+import { loadCohort, type RespondentCohort, type RespondentProfile } from '../respondents/profile.js';
 import { manifestSchema } from './manifest.js';
 import type { StudyManifest } from './manifest.js';
 
-export type StudySource = { readonly path: string; readonly sha256: string };
+export type StudySource = { readonly armId: string; readonly path: string; readonly sha256: string };
 export type Study = {
   readonly manifest: StudyManifest;
-  readonly cohort: FrozenCohort;
-  readonly profiles: readonly ReaderProfile[];
+  readonly cohort: RespondentCohort;
+  readonly respondents: readonly RespondentProfile[];
   readonly sources: readonly StudySource[];
   readonly manifestDirectory: string;
 };
@@ -52,8 +52,8 @@ export async function loadStudy(manifestPath: string, cohortPath: string | undef
   } catch (error) {
     throw new StudyInputError('Manifest must be valid UTF-8 JSON.', { cause: error });
   }
-  if (!manifestJson || typeof manifestJson !== 'object' || !('version' in manifestJson) || manifestJson.version !== '1.0') {
-    throw new StudyInputError('Only manifest version 1.0 is supported.');
+  if (!manifestJson || typeof manifestJson !== 'object' || !('version' in manifestJson) || manifestJson.version !== '2.0') {
+    throw new StudyInputError('Only study contract version 2.0 is supported.');
   }
   const parsedManifest = manifestSchema.safeParse(manifestJson);
   if (!parsedManifest.success) {
@@ -61,29 +61,30 @@ export async function loadStudy(manifestPath: string, cohortPath: string | undef
   }
   const manifest = parsedManifest.data;
   const sources: StudySource[] = [];
-  for (const source of manifest.sources) {
-    const resolvedPath = path.resolve(path.dirname(absoluteManifestPath), source.path);
-    let sourceBytes: Buffer;
-    try {
-      sourceBytes = await readFile(resolvedPath);
-    } catch (error) {
-      throw new StudyInputError(`Referenced source is missing or unreadable: ${source.path}.`, { cause: error });
+  for (const arm of manifest.arms) {
+    for (const source of arm.sources) {
+      const resolvedPath = path.resolve(path.dirname(absoluteManifestPath), source.path);
+      let sourceBytes: Buffer;
+      try {
+        sourceBytes = await readFile(resolvedPath);
+      } catch (error) {
+        throw new StudyInputError(`Referenced source is missing or unreadable: ${source.path}.`, { cause: error });
+      }
+      const actualHash = createHash('sha256').update(sourceBytes).digest('hex');
+      if (actualHash !== source.sha256.toLowerCase()) {
+        throw new StudyInputError(`Referenced source hash does not match: ${source.path}.`);
+      }
+      sources.push({ armId: arm.id, path: resolvedPath, sha256: actualHash });
     }
-    const actualHash = createHash('sha256').update(sourceBytes).digest('hex');
-    if (actualHash !== source.sha256.toLowerCase()) {
-      throw new StudyInputError(`Referenced source hash does not match: ${source.path}.`);
-    }
-    sources.push({ path: resolvedPath, sha256: actualHash });
   }
 
-  const cohortJson = await parseJsonFile(path.resolve(cohortPath), 'Frozen cohort');
+  const cohortJson = await parseJsonFile(path.resolve(cohortPath), 'Frozen respondent cohort');
   const cohort = loadCohort(cohortJson);
-  const profiles = cohort.readers;
 
   return {
     manifest,
     cohort,
-    profiles,
+    respondents: cohort.respondents,
     sources,
     manifestDirectory: path.dirname(absoluteManifestPath),
   };

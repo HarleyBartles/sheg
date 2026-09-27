@@ -28,10 +28,10 @@ test('provider changes preserve stimulus identity and change execution identity'
 test('cohort order, source hashes, prompt contract, checkpoint, and precision affect the relevant fingerprints', async (t) => {
   const study = await studyFixture(t);
   const base = stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1');
-  assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, readers: [...study.profiles].reverse() }, 'prompt-v1'), base);
-  assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, readers: [{ ...study.profiles[0]!, background: 'Has substantial hands-on experience.' }, study.profiles[1]!] }, 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, respondents: [...study.respondents].reverse() }, 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, respondents: [{ ...study.respondents[0]!, background: 'Has substantial hands-on experience.' }, study.respondents[1]!] }, 'prompt-v1'), base);
   assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, archetypes: study.cohort.archetypes.map((archetype, index) => index === 0 ? { ...archetype, invariants: ['A changed invariant.', ...archetype.invariants.slice(1)] } : archetype) }, 'prompt-v1'), base);
-  assert.notEqual(stimulusFingerprint({ ...study.manifest, sources: study.manifest.sources.map((source) => ({ ...source, sha256: 'a'.repeat(64) })) }, study.cohort, 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint({ ...study.manifest, arms: study.manifest.arms.map((arm) => ({ ...arm, sources: arm.sources.map((source) => ({ ...source, sha256: 'a'.repeat(64) })) })) }, study.cohort, 'prompt-v1'), base);
   assert.notEqual(stimulusFingerprint(study.manifest, study.cohort, 'prompt-v2'), base);
 
   const checkpoint = executionFingerprint(base, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024 });

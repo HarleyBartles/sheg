@@ -19,18 +19,18 @@ export function validateDecision(
     throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue) => issue.message).join(' ')}`, { cause: parsed.error });
   }
   const decision = parsed.data;
-  const labels = [...request.labels];
-  if (labels.length === 0 || new Set(labels).size !== labels.length ||
-      labels.length !== Object.keys(request.question.criteria).length ||
-      labels.some((label) => !(label in request.question.criteria))) {
-    throw new DecisionError('Decision request labels must uniquely match the offered criteria.');
+  const optionIds = [...request.optionIds];
+  if (optionIds.length === 0 || new Set(optionIds).size !== optionIds.length ||
+      optionIds.length !== Object.keys(request.question.options).length ||
+      optionIds.some((optionId) => !(optionId in request.question.options))) {
+    throw new DecisionError('Decision request option IDs must uniquely match the offered options.');
   }
-  if (!labels.includes(decision.choice)) {
+  if (!optionIds.includes(decision.choice)) {
     throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
   }
   const probabilityLabels = Object.keys(decision.probabilities);
-  if (probabilityLabels.length !== labels.length || labels.some((label) => !(label in decision.probabilities))) {
-    throw new DecisionError('Decision probabilities must contain exactly one entry for every offered label.');
+  if (probabilityLabels.length !== optionIds.length || optionIds.some((optionId) => !(optionId in decision.probabilities))) {
+    throw new DecisionError('Decision probabilities must contain exactly one entry for every offered option ID.');
   }
   const probabilityTotal = Object.values(decision.probabilities).reduce((sum, value) => sum + value, 0);
   if (Math.abs(probabilityTotal - 1) > probabilitySumTolerance) {

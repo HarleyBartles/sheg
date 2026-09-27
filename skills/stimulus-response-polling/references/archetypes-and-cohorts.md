@@ -1,16 +1,16 @@
-# Author archetypes and prepare reader cohorts
+# Author archetypes and prepare respondent cohorts
 
 Use this workflow when the user wants to create a reusable reader archetype, expand archetypes into readers for one poll, combine bundled and custom archetypes, or supply profiles directly.
 
 ## The three artifacts
 
 - An **archetype** is a reusable pattern of reader motivation and perspective. It defines what remains true across its readers and the dimensions that may vary.
-- A **reader profile** is one concrete participant's starting perspective on the particular study subject. It is shaped by both the archetype and the material being polled.
+- A **respondent profile** is one concrete participant's starting perspective on the particular study subject. It is shaped by both the archetype and the material being polled.
 - A **frozen cohort** is the ordered set of concrete profiles used in a poll. The harness polls these profiles, never archetypes directly.
 
-Use the skill's [reader archetype](../assets/reader-archetype.schema.json), [archetype library](../assets/reader-archetype-library.schema.json), [reader profile](../assets/reader-profile.schema.json), and [frozen cohort](../assets/frozen-cohort.schema.json) JSON Schemas for normative shapes and validation constraints. The schemas list cross-record rules that also receive runtime enforcement. The [bundled archetype library](../../../dist/data/reader-archetypes.json) provides reusable starting points and quality examples. Its source is `src/domain/readers/reader-archetypes.json` in this repository.
+Use the skill's [reader archetype](../assets/reader-archetype.schema.json), [archetype library](../assets/reader-archetype-library.schema.json), [respondent profile](../assets/respondent-profile.schema.json), and [frozen cohort](../assets/respondent-cohort.schema.json) JSON Schemas for normative shapes and validation constraints. The schemas list cross-record rules that also receive runtime enforcement. The [bundled archetype library](../../../dist/data/reader-archetypes.json) provides reusable starting points and quality examples. Its source is `src/domain/readers/reader-archetypes.json` in this repository.
 
-The plugin ships archetypes, not reader profiles. A user can choose shipped archetypes, provide custom contract-compliant archetypes, mix both, or bypass archetypes and provide concrete profiles directly.
+The plugin ships archetypes, not respondent profiles. A user can choose shipped archetypes, provide custom contract-compliant archetypes, mix both, or bypass archetypes and provide concrete profiles directly.
 
 ## Write or adapt archetypes
 
@@ -30,6 +30,6 @@ The cohort snapshot makes expansion auditable and independent of later library e
 
 ## Supply profiles directly
 
-A user may skip archetypes and author a cohort of concrete reader profiles directly. Follow the [reader profile](../assets/reader-profile.schema.json) and [frozen cohort](../assets/frozen-cohort.schema.json) contracts. Leave `archetypeId` and `variation` out of direct profiles and omit the cohort's top-level `archetypes` array when it is not needed. Keep profiles poll-specific, distinct, and frozen before outcomes are viewed.
+A user may skip archetypes and author a cohort of concrete respondent profiles directly. Follow the [respondent profile](../assets/respondent-profile.schema.json) and [frozen cohort](../assets/respondent-cohort.schema.json) contracts. Leave `archetypeId` and `variation` out of direct profiles and omit the cohort's top-level `archetypes` array when it is not needed. Keep profiles poll-specific, distinct, and frozen before outcomes are viewed.
 
 After authoring either route, validate against the [study manifest schema](../assets/study-manifest.schema.json), then call `poll_check` on the exact manifest, cohort, provider configuration, and budgets. Fix validation errors; do not silently rewrite the user's cohort.

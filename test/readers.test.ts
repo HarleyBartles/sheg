@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { archetypeLibrarySchema, loadCohort } from '../src/domain/readers/profile.js';
+import { archetypeLibrarySchema } from '../src/domain/readers/archetype.js';
+import { loadCohort } from '../src/domain/respondents/profile.js';
 
 const libraryUrl = new URL('../src/domain/readers/reader-archetypes.json', import.meta.url);
-const schemaAssets = new URL('../skills/simulated-reader-polling/assets/', import.meta.url);
+const schemaAssets = new URL('../skills/stimulus-response-polling/assets/', import.meta.url);
 
 function reader(id: string, archetypeId?: string, variation?: Record<string, string>) {
   return {
@@ -32,16 +33,16 @@ test('the shipped archetype library follows the authoring contract', async () =>
 
 test('published schemas carry constraints that consumers can validate directly', async () => {
   const manifest = JSON.parse(await readFile(new URL('study-manifest.schema.json', schemaAssets), 'utf8')) as {
-    properties: { decisions: { items: { properties: { criteria: { minProperties?: number } } } } };
+    properties: { arms: { items: { properties: { tasks: { items: { properties: { options: { minProperties?: number } } } } } } } };
     'x-validation-rules': string[];
   };
-  const cohort = JSON.parse(await readFile(new URL('frozen-cohort.schema.json', schemaAssets), 'utf8')) as {
+  const cohort = JSON.parse(await readFile(new URL('respondent-cohort.schema.json', schemaAssets), 'utf8')) as {
     'x-validation-rules': string[];
   };
 
-  assert.equal(manifest.properties.decisions.items.properties.criteria.minProperties, 1);
-  assert.ok(manifest['x-validation-rules'].some((rule) => rule.includes('criteria object')));
-  assert.ok(cohort['x-validation-rules'].some((rule) => rule.includes('Archetype IDs are unique')));
+  assert.equal(manifest.properties.arms.items.properties.tasks.items.properties.options.minProperties, 1);
+  assert.ok(manifest['x-validation-rules'].some((rule) => rule.includes('Task option IDs')));
+  assert.ok(cohort['x-validation-rules'].some((rule) => rule.includes('Respondent IDs are unique')));
 });
 
 test('cohort can mix shipped and custom archetypes with concrete varied profiles', async () => {
@@ -74,9 +75,9 @@ test('cohort can mix shipped and custom archetypes with concrete varied profiles
     }],
   };
   const cohort = loadCohort({
-    version: '2.0',
+    version: '3.0',
     archetypes: [shipped, custom],
-    readers: [
+    respondents: [
       reader('newcomer', shipped.id, { subject_familiarity: 'newcomer', explanation_tolerance: 'concrete_first' }),
       reader('practitioner', custom.id, { practice_depth: 'direct', decision_focus: 'mechanism' }),
     ],
@@ -84,24 +85,24 @@ test('cohort can mix shipped and custom archetypes with concrete varied profiles
   });
 
   assert.deepEqual(cohort.archetypes.map((item) => item.id), ['curious-outsider', 'domain-practitioner']);
-  assert.deepEqual(cohort.readers.map((item) => item.id), ['newcomer', 'practitioner']);
+  assert.deepEqual(cohort.respondents.map((item) => item.id), ['newcomer', 'practitioner']);
 });
 
 test('direct profiles work without archetypes or archetype lineage', () => {
-  const cohort = loadCohort({ version: '2.0', readers: [reader('direct-reader')], admission: admission() });
+  const cohort = loadCohort({ version: '3.0', respondents: [reader('direct-reader')], admission: admission() });
   assert.equal(cohort.archetypes.length, 0);
-  assert.equal(cohort.readers[0]?.archetypeId, undefined);
+  assert.equal(cohort.respondents[0]?.archetypeId, undefined);
 });
 
 test('archetype-derived profiles must select every declared variation axis value', async () => {
   const library = archetypeLibrarySchema.parse(JSON.parse(await readFile(libraryUrl, 'utf8')) as unknown);
   const shipped = library.find((item) => item.id === 'curious-outsider');
   assert.ok(shipped);
-  const input = { version: '2.0', archetypes: [shipped], readers: [reader('reader-one', shipped.id, { subject_familiarity: 'newcomer' })], admission: admission() };
+  const input = { version: '3.0', archetypes: [shipped], respondents: [reader('reader-one', shipped.id, { subject_familiarity: 'newcomer' })], admission: admission() };
 
   assert.throws(() => loadCohort(input), /variation/i);
-  input.readers[0] = reader('reader-one', shipped.id, { subject_familiarity: 'unknown', explanation_tolerance: 'concrete_first' });
+  input.respondents[0] = reader('reader-one', shipped.id, { subject_familiarity: 'unknown', explanation_tolerance: 'concrete_first' });
   assert.throws(() => loadCohort(input), /variation/i);
-  input.readers[0] = reader('reader-one', 'missing-archetype', {});
+  input.respondents[0] = reader('reader-one', 'missing-archetype', {});
   assert.throws(() => loadCohort(input), /unknown archetype/i);
 });

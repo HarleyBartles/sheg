@@ -1,6 +1,6 @@
 # ADR-0003: Use domain-neutral polling primitives and an explicit graph
 
-- Status: Accepted
+- Status: Superseded by [ADR-0008](0008-model-stimulus-task-respondent-and-matched-arms.md)
 - Date: 2026-09-27
 - Supersedes: None
 

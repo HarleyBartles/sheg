@@ -9,9 +9,9 @@ test('build replaces the distribution with only current runtime outputs', async 
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'polling-build-'));
   t.after(() => rm(temporaryDirectory, { recursive: true, force: true }));
   const outputDirectory = path.join(temporaryDirectory, 'dist');
-  await mkdir(path.join(outputDirectory, 'skills/simulated-reader-polling/assets'), { recursive: true });
+  await mkdir(path.join(outputDirectory, 'skills/stimulus-response-polling/assets'), { recursive: true });
   await writeFile(path.join(outputDirectory, 'stale.js'), 'stale');
-  await writeFile(path.join(outputDirectory, 'skills/simulated-reader-polling/assets/reader-archetypes.json'), 'stale');
+  await writeFile(path.join(outputDirectory, 'skills/stimulus-response-polling/assets/reader-archetypes.json'), 'stale');
 
   await buildPlugin(outputDirectory);
 

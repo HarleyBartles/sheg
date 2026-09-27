@@ -74,7 +74,7 @@ export class JevProvider implements DecisionProvider {
         [question.id]: {
           type: 'choice',
           instructions: question.instructions,
-          criteria: question.criteria,
+          criteria: question.options,
         },
       },
     });

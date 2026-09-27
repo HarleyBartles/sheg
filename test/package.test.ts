@@ -19,15 +19,15 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   const plugin = path.join(sandbox, 'installed', 'system-one-polling');
   await mkdir(path.dirname(plugin), { recursive: true });
   for (const item of ['plugin.json', 'mcp.json', 'dist']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
-  await cp(path.resolve('skills/simulated-reader-polling/SKILL.md'), path.join(plugin, 'skills/simulated-reader-polling/SKILL.md'), { recursive: true });
-  await cp(path.resolve('skills/simulated-reader-polling/references'), path.join(plugin, 'skills/simulated-reader-polling/references'), { recursive: true });
-  await cp(path.resolve('skills/simulated-reader-polling/assets'), path.join(plugin, 'skills/simulated-reader-polling/assets'), { recursive: true });
-  await assertSkillLinksResolve(path.join(plugin, 'skills/simulated-reader-polling'), plugin);
+  await cp(path.resolve('skills/stimulus-response-polling/SKILL.md'), path.join(plugin, 'skills/stimulus-response-polling/SKILL.md'), { recursive: true });
+  await cp(path.resolve('skills/stimulus-response-polling/references'), path.join(plugin, 'skills/stimulus-response-polling/references'), { recursive: true });
+  await cp(path.resolve('skills/stimulus-response-polling/assets'), path.join(plugin, 'skills/stimulus-response-polling/assets'), { recursive: true });
+  await assertSkillLinksResolve(path.join(plugin, 'skills/stimulus-response-polling'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/reader-archetypes.json')), true);
-  for (const contract of ['reader-archetype.schema.json', 'reader-archetype-library.schema.json', 'reader-profile.schema.json', 'frozen-cohort.schema.json', 'study-manifest.schema.json']) {
-    assert.equal(await exists(path.join(plugin, 'skills/simulated-reader-polling/assets', contract)), true);
+  for (const contract of ['reader-archetype.schema.json', 'reader-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
+    assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets', contract)), true);
   }
-  assert.equal(await exists(path.join(plugin, 'dist/skills/simulated-reader-polling/assets/reader-archetypes.json')), false);
+  assert.equal(await exists(path.join(plugin, 'dist/skills/stimulus-response-polling/assets/reader-archetypes.json')), false);
   assert.equal(await exists(path.join(plugin, 'node_modules')), false);
   const manifest = JSON.parse(await readFile(path.join(plugin, 'plugin.json'), 'utf8')) as { name: string };
   const mcp = JSON.parse(await readFile(path.join(plugin, 'mcp.json'), 'utf8')) as { mcpServers: Record<string, { type: string; command: string; args: string[]; cwd: string }> };
@@ -56,20 +56,20 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   } } });
   assert.equal(result.isError ?? false, false);
   assert.equal((result.structuredContent as { valid?: boolean }).valid, true);
-  const skill = await readFile(path.join(plugin, 'skills/simulated-reader-polling/SKILL.md'), 'utf8');
-  assert.match(skill, /author reader archetypes/);
+  const skill = await readFile(path.join(plugin, 'skills/stimulus-response-polling/SKILL.md'), 'utf8');
+  assert.match(skill, /Write or review archetypes/);
   assert.match(skill, /references\/archetypes-and-cohorts\.md/);
   assert.match(skill, /references\/prepare-and-trace\.md/);
   assert.match(skill, /references\/run-and-recovery\.md/);
   assert.match(skill, /references\/interpret-results\.md/);
   assert.match(skill, /poll_check` before `poll_start`/);
-  const runGuidance = await readFile(path.join(plugin, 'skills/simulated-reader-polling/references/run-and-recovery.md'), 'utf8');
+  const runGuidance = await readFile(path.join(plugin, 'skills/stimulus-response-polling/references/run-and-recovery.md'), 'utf8');
   assert.match(runGuidance, /explicit user authorization/);
-  const resultsGuidance = await readFile(path.join(plugin, 'skills/simulated-reader-polling/references/interpret-results.md'), 'utf8');
-  assert.match(resultsGuidance, /simulation of profile-conditioned judgments/);
-  const cohortGuidance = await readFile(path.join(plugin, 'skills/simulated-reader-polling/references/archetypes-and-cohorts.md'), 'utf8');
+  const resultsGuidance = await readFile(path.join(plugin, 'skills/stimulus-response-polling/references/interpret-results.md'), 'utf8');
+  assert.match(resultsGuidance, /simulated profile-conditioned typed responses/);
+  const cohortGuidance = await readFile(path.join(plugin, 'skills/stimulus-response-polling/references/archetypes-and-cohorts.md'), 'utf8');
   assert.match(cohortGuidance, /Supply profiles directly/);
-  assert.equal(await exists(path.resolve(plugin, 'skills/simulated-reader-polling/references/../../../dist/data/reader-archetypes.json')), true);
+  assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/reader-archetypes.json')), true);
 });
 
 async function exists(filePath: string): Promise<boolean> {

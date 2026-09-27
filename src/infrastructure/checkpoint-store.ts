@@ -15,7 +15,7 @@ const providerConfigSchema = z.discriminatedUnion('kind', [
 const journeyResultSchema = z.object({
   events: z.array(z.discriminatedUnion('type', [
     z.object({ type: z.literal('exposure'), sequence: z.number().int().nonnegative(), nodeId: z.string(), itemId: z.string() }).strict(),
-    z.object({ type: z.literal('choice'), sequence: z.number().int().nonnegative(), nodeId: z.string(), decisionId: z.string(), choice: z.string() }).strict(),
+    z.object({ type: z.literal('choice'), sequence: z.number().int().nonnegative(), nodeId: z.string(), taskId: z.string(), choice: z.string() }).strict(),
   ])),
   outcome: z.string().nullable(),
   status: z.enum(['completed', 'decision-limit']),
@@ -31,7 +31,7 @@ const budgetSnapshotSchema = z.object({
 }).strict();
 
 export const runCheckpointSchema = z.object({
-  formatVersion: z.literal(1),
+  formatVersion: z.literal(2),
   runId: z.string().uuid(),
   status: z.enum(['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled']),
   createdAt: z.string().datetime(),
@@ -47,37 +47,39 @@ export const runCheckpointSchema = z.object({
   stimulusFingerprint: z.string().regex(/^[a-f\d]{64}$/i),
   executionFingerprint: z.string().regex(/^[a-f\d]{64}$/i),
   sourceHashes: z.array(z.string().regex(/^[a-f\d]{64}$/i)),
-  readerIds: z.array(z.string().min(1)),
+  respondentIds: z.array(z.string().min(1)),
   journeys: z.array(z.object({
-    readerId: z.string().min(1),
+    armId: z.string().min(1),
+    respondentId: z.string().min(1),
     status: z.enum(['completed', 'failed', 'partial']),
     result: journeyResultSchema.optional(),
-    decisions: z.array(z.object({ decisionId: z.string().min(1), result: decisionResultSchema }).strict()),
-    attemptHistory: z.array(z.object({ decisionId: z.string().min(1), result: decisionResultSchema }).strict()),
+    decisions: z.array(z.object({ decisionId: z.string().min(1), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
+    attemptHistory: z.array(z.object({ decisionId: z.string().min(1), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
+    presentedTaskIds: z.array(z.string().min(1)),
     failureKind: z.enum(['provider', 'journey', 'unsupported-input']).optional(),
   }).strict()),
-  activeReaderIds: z.array(z.string().min(1)),
+  activeCellIds: z.array(z.string().min(1)),
   cancellationRequested: z.boolean(),
   budget: budgetSnapshotSchema,
 }).strict().superRefine((checkpoint, context) => {
   if (checkpoint.sourceHashes.some((hash) => hash.length !== 64)) {
     context.addIssue({ code: 'custom', path: ['sourceHashes'], message: 'Source hashes must be SHA-256 values.' });
   }
-  if (new Set(checkpoint.readerIds).size !== checkpoint.readerIds.length ||
-      new Set(checkpoint.journeys.map((journey) => journey.readerId)).size !== checkpoint.journeys.length) {
-    context.addIssue({ code: 'custom', path: ['readerIds'], message: 'Checkpoint reader IDs must be unique.' });
+  const cellIds = checkpoint.journeys.map((journey) => `${journey.armId}\0${journey.respondentId}`);
+  if (new Set(checkpoint.respondentIds).size !== checkpoint.respondentIds.length || new Set(cellIds).size !== cellIds.length) {
+    context.addIssue({ code: 'custom', path: ['respondentIds'], message: 'Checkpoint respondent IDs and arm/respondent cells must be unique.' });
   }
 });
 
 export type RunCheckpoint = z.infer<typeof runCheckpointSchema>;
 export type CompletedJourney = RunCheckpoint['journeys'][number] & { result: JourneyResult };
-export type CheckpointDecision = { decisionId: string; result: DecisionResult };
+export type CheckpointDecision = { decisionId: string; requestFingerprint: string; result: DecisionResult };
 
 export class CheckpointStore {
   constructor(readonly directory: string) {}
 
   async create(input: Omit<RunCheckpoint, 'formatVersion' | 'runId'> & { runId?: string }): Promise<RunCheckpoint> {
-    const checkpoint = runCheckpointSchema.parse({ ...input, formatVersion: 1, runId: input.runId ?? randomUUID() });
+    const checkpoint = runCheckpointSchema.parse({ ...input, formatVersion: 2, runId: input.runId ?? randomUUID() });
     await mkdir(this.directory, { recursive: true });
     const filePath = this.filePath(checkpoint.runId);
     try {

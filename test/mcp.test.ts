@@ -25,7 +25,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   assert.equal(checked.isError ?? false, false);
   assert.equal((checked.structuredContent as { valid?: boolean }).valid, true);
   const trace = await client.callTool({ name: 'poll_trace', arguments: {
-    manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), readerId: 'curious-outside-reader', choices: ['continue', 'continue'],
+    manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), armId: 'original', respondentId: 'curious-outside-reader', choices: ['continue', 'continue'],
   } });
   assert.equal(JSON.parse((trace.content[0] as { text: string }).text).outcome, 'completed');
   const malformed = await client.callTool({ name: 'poll_check', arguments: { config: { manifestPath: 'missing.json', cohortPath: 'missing.json', outputDirectory: directory, maxCalls: 1, provider: { kind: 'laya', baseUrl: 'not-url', checkpoint: '', contextLimit: 0, timeoutMs: 0 } } } });

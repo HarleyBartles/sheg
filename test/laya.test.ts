@@ -13,8 +13,8 @@ const config: LayaConfig = {
 
 const request: DecisionRequest = {
   state: { reader: { profile: 'Curious reader' }, encounteredItems: [{ id: 'opening', text: 'A short passage.' }], choiceHistory: [] },
-  question: { id: 'continue', instructions: 'What should happen?', criteria: { continue: 'Continue reading', stop: 'Stop reading' } },
-  labels: ['continue', 'stop'],
+  question: { id: 'continue', instructions: 'What should happen?', options: { continue: 'Continue reading', stop: 'Stop reading' } },
+  optionIds: ['continue', 'stop'],
 };
 
 test('fit check refuses unmeasurable context without calling Laya', async () => {

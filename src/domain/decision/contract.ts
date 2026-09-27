@@ -8,14 +8,14 @@ export const decisionRequestSchema = z.object({
   question: z.object({
     id: z.string().min(1),
     instructions: z.string().min(1),
-    criteria: z.record(z.string().min(1), z.string().min(1)),
+    options: z.record(z.string().min(1), z.string().min(1)),
   }).strict(),
-  labels: z.array(z.string().min(1)).min(1),
+  optionIds: z.array(z.string().min(1)).min(1),
 }).strict().superRefine((request, context) => {
-  if (new Set(request.labels).size !== request.labels.length ||
-      request.labels.length !== Object.keys(request.question.criteria).length ||
-      request.labels.some((label) => !(label in request.question.criteria))) {
-    context.addIssue({ code: 'custom', path: ['labels'], message: 'Request labels must uniquely match the offered criteria.' });
+  if (new Set(request.optionIds).size !== request.optionIds.length ||
+      request.optionIds.length !== Object.keys(request.question.options).length ||
+      request.optionIds.some((optionId) => !(optionId in request.question.options))) {
+    context.addIssue({ code: 'custom', path: ['optionIds'], message: 'Request option IDs must uniquely match the offered options.' });
   }
 });
 

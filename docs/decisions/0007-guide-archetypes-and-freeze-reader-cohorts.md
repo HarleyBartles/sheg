@@ -1,6 +1,6 @@
 # ADR-0007: Guide archetype authoring and freeze study-specific reader profiles
 
-- Status: Accepted
+- Status: Superseded by [ADR-0008](0008-model-stimulus-task-respondent-and-matched-arms.md)
 - Date: 2026-09-27
 - Supersedes: None
 
