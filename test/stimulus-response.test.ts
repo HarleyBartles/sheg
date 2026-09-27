@@ -99,6 +99,68 @@ test('validates graph task transitions against stable offered option IDs', () =>
   assert.equal(studyManifestSchema.safeParse(study([arm])).success, false);
 });
 
+function graphArm(decisionCount: number, maxDecisions = 4): StudyArm {
+  const arm = comprehensionArm('control');
+  const nodes: Extract<StudyArm['presentation'], { kind: 'graph' }>['nodes'] = Array.from({ length: decisionCount }, (_, index) => ({
+    id: `ask-${index}`,
+    kind: 'ask' as const,
+    taskId: 'comprehension',
+  }));
+  nodes.push({ id: 'finished', kind: 'terminal' as const, outcome: 'finished' });
+  return {
+    ...arm,
+    presentation: {
+      kind: 'graph',
+      entryNodeId: 'ask-0',
+      maxDecisions,
+      nodes,
+      transitions: nodes.flatMap((node) => node.kind === 'ask'
+        ? Object.keys(arm.tasks[0]!.options).map((optionId) => ({
+          fromNodeId: node.id,
+          optionId,
+          toNodeId: node.id === `ask-${decisionCount - 1}` ? 'finished' : `ask-${Number(node.id.slice(4)) + 1}`,
+        }))
+        : []),
+    },
+  };
+}
+
+test('rejects a graph whose reachable ask-option path cycles', () => {
+  const arm = graphArm(1);
+  const presentation = arm.presentation;
+  assert.equal(presentation.kind, 'graph');
+  presentation.transitions[0]!.toNodeId = 'ask-0';
+
+  const result = studyManifestSchema.safeParse(study([arm]));
+  assert.equal(result.success, false);
+  assert.match(result.error.issues.map((issue) => issue.message).join('\n'), /cycle/i);
+});
+
+test('rejects exposure-only graph cycles', () => {
+  const arm = graphArm(1);
+  const presentation = arm.presentation;
+  assert.equal(presentation.kind, 'graph');
+  presentation.nodes.unshift({ id: 'show-passage', kind: 'expose', itemId: 'passage' });
+  presentation.entryNodeId = 'show-passage';
+  presentation.transitions.unshift({ fromNodeId: 'show-passage', toNodeId: 'ask-0' });
+  presentation.transitions[1]!.toNodeId = 'show-passage';
+
+  const result = studyManifestSchema.safeParse(study([arm]));
+  assert.equal(result.success, false);
+  assert.match(result.error.issues.map((issue) => issue.message).join('\n'), /cycle/i);
+});
+
+test('rejects every branch that cannot reach a terminal within maxDecisions', () => {
+  const result = studyManifestSchema.safeParse(study([graphArm(3, 2)]));
+  assert.equal(result.success, false);
+  assert.match(result.error.issues.map((issue) => issue.message).join('\n'), /maxDecisions|terminal/i);
+});
+
+test('accepts a branching graph when every branch terminates within maxDecisions', () => {
+  const result = studyManifestSchema.safeParse(study([graphArm(3, 3)]));
+  assert.equal(result.success, true, result.success ? '' : result.error.message);
+});
+
 test('rejects duplicate respondent IDs in a frozen cohort', () => {
   const result = respondentCohortSchema.safeParse({ version: '3.0', respondents: [respondent, respondent] });
   assert.equal(result.success, false);

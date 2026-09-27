@@ -57,5 +57,8 @@
   ],
   "additionalProperties": false,
   "$id": "urn:sheg:schema:respondent-profile.schema.json",
-  "title": "Respondent profile"
+  "title": "Respondent profile",
+  "x-validation-rules": [
+    "Combined profile prose must not exceed 1,500 characters across intent, context, desired_outcome, engagement_cues, and friction_cues."
+  ]
 }

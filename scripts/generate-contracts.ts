@@ -11,7 +11,9 @@ const schemaBaseUri = 'urn:sheg:schema:';
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
   { filename: 'respondent-archetype.schema.json', title: 'Respondent archetype', schema: respondentArchetypeSchema },
   { filename: 'respondent-archetype-library.schema.json', title: 'Respondent archetype library', schema: respondentArchetypeLibrarySchema },
-  { filename: 'respondent-profile.schema.json', title: 'Respondent profile', schema: respondentProfileSchema },
+  { filename: 'respondent-profile.schema.json', title: 'Respondent profile', schema: respondentProfileSchema, validationRules: [
+    'Combined profile prose must not exceed 1,500 characters across intent, context, desired_outcome, engagement_cues, and friction_cues.',
+  ] },
   { filename: 'respondent-cohort.schema.json', title: 'Frozen respondent cohort', schema: respondentCohortSchema, validationRules: [
     'Respondent IDs are unique within the cohort.', 'Every archetypeId refers to an archetype included in the cohort snapshot.',
     'Archetype-derived respondents select exactly one declared value for every variation axis.',

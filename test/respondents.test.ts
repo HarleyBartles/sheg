@@ -4,6 +4,7 @@ import test from 'node:test';
 import { respondentArchetypeLibrarySchema as archetypeLibrarySchema } from '../src/domain/respondents/archetype.js';
 import { respondentArchetypeGroups } from '../src/domain/respondents/archetype-catalogue.js';
 import { loadCohort } from '../src/domain/respondents/cohort.js';
+import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
 
 const groupUrls = respondentArchetypeGroups.map((group) => new URL(`../src/domain/respondents/archetype-groups/${group.filename}`, import.meta.url));
 const schemaAssets = new URL('../skills/stimulus-response-polling/assets/', import.meta.url);
@@ -49,10 +50,14 @@ test('published schemas carry constraints that consumers can validate directly',
   const cohort = JSON.parse(await readFile(new URL('respondent-cohort.schema.json', schemaAssets), 'utf8')) as {
     'x-validation-rules': string[];
   };
+  const profile = JSON.parse(await readFile(new URL('respondent-profile.schema.json', schemaAssets), 'utf8')) as {
+    'x-validation-rules': string[];
+  };
 
   assert.equal(manifest.properties.arms.items.properties.tasks.items.properties.options.minProperties, 1);
   assert.ok(manifest['x-validation-rules'].some((rule) => rule.includes('Task option IDs')));
   assert.ok(cohort['x-validation-rules'].some((rule) => rule.includes('Respondent IDs are unique')));
+  assert.ok(profile['x-validation-rules'].some((rule) => rule.includes('1,500 characters')));
 });
 
 test('the archetype library contract reuses the separately shipped archetype schema', async () => {
@@ -128,6 +133,18 @@ test('direct profiles work without archetypes or archetype lineage', () => {
   const cohort = loadCohort({ version: '3.0', respondents: [respondent('direct-reader')], admission: admission() });
   assert.equal(cohort.archetypes.length, 0);
   assert.equal(cohort.respondents[0]?.archetypeId, undefined);
+});
+
+test('enforces an aggregate 1,500-character ceiling across profile prose fields', () => {
+  const fieldNames = ['intent', 'context', 'desired_outcome', 'engagement_cues', 'friction_cues'] as const;
+  const exactLimit = {
+    id: 'bounded-reader',
+    ...Object.fromEntries(fieldNames.map((field) => [field, 'x'.repeat(300)])),
+  };
+  assert.equal(respondentProfileSchema.safeParse(exactLimit).success, true);
+
+  const overLimit = { ...exactLimit, friction_cues: 'x'.repeat(301) };
+  assert.equal(respondentProfileSchema.safeParse(overLimit).success, false);
 });
 
 test('archetype-derived profiles must select every declared variation axis value', async () => {

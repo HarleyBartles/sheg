@@ -19941,6 +19941,48 @@ var studyArmSchema = external_exports.object({
     if (unreachable.length > 0) {
       context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
     }
+    const state = /* @__PURE__ */ new Map();
+    const decisionsToTerminal = /* @__PURE__ */ new Map();
+    let containsCycle = false;
+    const longestDecisionsToTerminal = (nodeId) => {
+      const node2 = nodesById.get(nodeId);
+      if (!node2) return null;
+      if (state.get(nodeId) === "visiting") {
+        containsCycle = true;
+        return null;
+      }
+      if (state.get(nodeId) === "visited") return decisionsToTerminal.get(nodeId) ?? null;
+      state.set(nodeId, "visiting");
+      let longest;
+      if (node2.kind === "terminal") {
+        longest = 0;
+      } else {
+        const edges = outgoing.get(nodeId) ?? [];
+        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
+        const completedContinuations = continuations.filter((count) => count !== null);
+        if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
+          longest = null;
+        } else {
+          const nextDecisionCount = Math.max(...completedContinuations);
+          longest = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+        }
+      }
+      state.set(nodeId, "visited");
+      decisionsToTerminal.set(nodeId, longest);
+      return longest;
+    };
+    const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
+    if (containsCycle) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Graph contains a cycle; every journey must terminate." });
+    } else if (longestPath === null) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Every graph branch must reach a terminal node." });
+    } else if (longestPath > presentation.maxDecisions) {
+      context.addIssue({
+        code: "custom",
+        path: ["presentation", "maxDecisions"],
+        message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`
+      });
+    }
   }
 });
 
@@ -20012,7 +20054,15 @@ var respondentProfileSchema = external_exports.object({
   desired_outcome: proseSchema2,
   engagement_cues: proseSchema2,
   friction_cues: proseSchema2
-}).strict();
+}).strict().superRefine((profile, context) => {
+  const proseLength = profile.intent.length + profile.context.length + profile.desired_outcome.length + profile.engagement_cues.length + profile.friction_cues.length;
+  if (proseLength > 1500) {
+    context.addIssue({
+      code: "custom",
+      message: "Combined profile prose must not exceed 1,500 characters across the five prose fields."
+    });
+  }
+});
 
 // src/domain/respondents/cohort.ts
 var respondentCohortSchema = external_exports.object({
