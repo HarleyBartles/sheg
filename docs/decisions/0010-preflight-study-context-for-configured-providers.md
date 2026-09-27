@@ -43,11 +43,14 @@ provider ineligible for the complete study; incomplete traversal or unmeasurable
 input is unverified and cannot be treated as fit.
 
 Keep provider-specific limits in provider configuration: 1,024 tokens for the
-pinned Laya setup and 32K for Jev 1.13. The adapter measures and enforces its own
-final request shape. Provider selection remains explicit and stable throughout
-a run. Before a cohort is frozen, preflight uses the maximum valid profile
-envelope and labels its result provisional; with a frozen cohort it measures
-the actual respondents.
+pinned Laya setup and 32K for Jev 1.13. Laya uses its pinned checkpoint
+tokenizer and prompt construction. Jev uses a conservative estimate of one
+token per three serialized UTF-8 bytes, rounded up, and reserves 20% of its
+published context window. Results identify the measurement method; a Jev fit is
+an estimate with headroom, not an exact tokenizer count. Provider selection
+remains explicit and stable throughout a run. Before a cohort is frozen,
+preflight uses the maximum valid profile envelope and labels its result
+provisional; with a frozen cohort it measures the actual respondents.
 
 ## Consequences
 
@@ -61,8 +64,9 @@ the actual respondents.
   ceiling may protect the host, but incomplete coverage must remain visibly
   unverified.
 - The Jev context ceiling is tied to model identity; moving aliases require
-  refreshed limit metadata.
-- Provider tokenizer support and final request measurement are prerequisites
-  for a green fit result; no approximate count may claim exact fit.
+  refreshed limit metadata. Its estimate and 20% reserve make the fit result
+  conservative guidance rather than an exact token count.
+- Laya tokenizer and prompt construction support are prerequisites for a green
+  fit result.
 - Larger provider-specific respondent profiles and automatic provider routing
   remain future decisions.

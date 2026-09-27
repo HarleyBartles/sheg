@@ -104,9 +104,10 @@ choice's task identity, selected option identity, and selected option meaning.
 It records which stimulus items had been exposed before that choice, without
 repeating the full text of every earlier stimulus. Summary metadata records the
 number of exposure and decision events represented, the covered event range,
-and the compact summary's serialized size. The measured summary/request token
-counts are retained in preflight/run metadata; the model-facing progress fields
-describe what the respondent has seen and chosen.
+and the compact summary's serialized size. Provider measurement metadata is
+retained in preflight/run records: exact tokenizer counts for Laya and estimates
+with reserve for Jev. The model-facing progress fields describe what the
+respondent has seen and chosen.
 
 The compiler must not use a generative model to summarize history. This keeps
 preflight reproducible and avoids adding an unmeasured summarization call. The
@@ -140,11 +141,12 @@ task request. The walk preserves distinct path histories even when branches
 reconverge at the same node, since their compact summaries may differ.
 
 For every scenario the preflight records the respondent, arm, path, decision
-node, provider identity, measured tokens, effective limit, and fit result. A
-provider receives a whole-study `fits` result only after every required scenario
-has been measured and every request fits. If any scenario exceeds the limit,
-the result identifies the earliest failing node on each affected path and the
-measured amount over limit. Reports may show how many respondent/path scenarios
+node, provider identity, measured or estimated tokens, effective limit, and fit
+result. A provider receives a whole-study `fits` result only after every
+required scenario has been evaluated and every request fits. If any scenario
+exceeds the limit, the result identifies the earliest failing node on each
+affected path and its measured or estimated amount over limit. Reports may show
+how many respondent/path scenarios
 remain within limits at each decision depth. These are exhaustive counts, not
 predictions of respondent likelihood.
 
@@ -164,11 +166,14 @@ provider's actual constraints:
   would-be clipping, or an over-limit request rejects inference before the
   model is called. Enforcement must share the exact sequence builder with
   inference to avoid a preflight/inference mismatch.
-- **Jev:** measure the final Decisions API request against the configured Jev
-  model's 32K context. Include state, instructions, criteria, serialization, and
-  any fixed provider framing represented by the adapter's measurement
-  contract. The 32K limit is attached to the pinned model identity; a moving
-  alias must refresh model metadata before it can claim fit.
+- **Jev:** estimate the final serialized Decisions API request against the
+  configured Jev model's 32K context. Use a conservative one token per three
+  UTF-8 bytes estimate, rounded up, and reserve 20% of the published context
+  window. Include state, instructions, criteria, serialization, and fixed
+  provider framing represented by the adapter's request contract. Report the
+  estimate and reserve; this is an estimate, not provider-reported usage or an
+  exact tokenizer count. The 32K limit is attached to the pinned model identity;
+  a moving alias must refresh model metadata before it can claim fit.
 
 The request compiler and graph walker are provider-neutral. Provider adapters
 must not truncate or drop state to fit. Runtime admission repeats the same
