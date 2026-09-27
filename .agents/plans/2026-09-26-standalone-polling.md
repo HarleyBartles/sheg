@@ -111,8 +111,8 @@ Every traversal is bounded by `maxDecisions`, including cyclic graphs. Exposure 
 
 **Interfaces:** Produces `LayaConfig { kind: "laya", baseUrl, checkpoint, contextLimit, precision?, timeoutMs }`, `checkLayaFit(request, config): Promise<FitResult>`, and `LayaProvider`. Fit is measured by a checkpoint-valid tokenizer or service method, otherwise returns explicit unsupported-input.
 
-- [ ] Verify `/v1/systemone` request, response, checkpoint routing metadata, and available context measurement against the actual Laya version. Record observed fields and unavailable provenance in `docs/local-laya.md` before coding the adapter.
-- [ ] Write fake-service RED tests for matching routing checkpoint despite generic top-level model, mismatch/missing checkpoint, malformed probabilities, unavailable service, over-limit and unmeasurable input with zero dispatch, and local charge as `not_billed` or `unknown`. Implement the adapter without provider fallback or GPU startup. Run focused tests and typecheck; commit. Keep a separate opt-in live local smoke check for later handoff.
+- [x] Verify `/v1/systemone` request, response, checkpoint routing metadata, and available context measurement against the actual Laya version. Record observed fields and unavailable provenance in `docs/local-laya.md` before coding the adapter. Upstream currently has no pre-inference fit endpoint; the adapter requires a checkpoint-matched `FitMeasurer` and reports unmeasurable input without dispatch until a reviewed pinned integration is available.
+- [x] Write fake-service RED tests for matching routing checkpoint despite generic top-level model, mismatch/missing checkpoint, malformed probabilities, unavailable service, over-limit and unmeasurable input with zero dispatch, and local charge as `not_billed` or `unknown`. Implement the adapter without provider fallback or GPU startup. Run focused tests and typecheck; commit. Keep a separate opt-in live local smoke check for later handoff.
 
 ### Task 7: Identity and concurrent budget reservations
 
