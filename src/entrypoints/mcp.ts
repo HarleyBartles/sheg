@@ -7,13 +7,14 @@ import { traceStudy } from '../domain/journey/trace.js';
 import { loadStudy } from '../infrastructure/study-loader.js';
 import { RunManager, checkStudy, type RunConfig } from '../application/run-manager.js';
 import { compareReports, getReport } from '../application/reports.js';
+import { preflightStudy, preflightInputSchema, type StudyPreflightInput } from '../application/preflight.js';
 
 const configSchema = z.object({
   manifestPath: z.string(), cohortPath: z.string(), outputDirectory: z.string(), maxCalls: z.number().int().positive(),
   maxUsd: z.number().positive().optional(), maxPerCallUsd: z.number().positive().optional(), concurrency: z.number().int().positive().max(64).default(1),
   provider: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('jev'), model: z.string(), keyEnv: z.string(), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict(),
-    z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string(), contextLimit: z.number().int().positive(), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
+    z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string(), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
   ]),
 }).strict();
 
@@ -23,6 +24,7 @@ export function createPollingServer(manager = new RunManager()): McpServer {
     const checked = await checkStudy(config as RunConfig);
     return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint });
   });
+  server.registerTool('poll_preflight', { description: 'Measure every reachable decision packet for a frozen cohort or maximum valid profile envelope against configured providers without inference calls or run creation.', inputSchema: preflightInputSchema.shape }, async (input) => jsonResult(await preflightStudy(input as StudyPreflightInput)));
   server.registerTool('poll_trace', { description: 'Trace scripted option IDs through one frozen respondent and study arm without provider calls.', inputSchema: { manifestPath: z.string(), cohortPath: z.string(), armId: z.string(), respondentId: z.string(), choices: z.array(z.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
     const profile = study.respondents.find((respondent) => respondent.id === respondentId);

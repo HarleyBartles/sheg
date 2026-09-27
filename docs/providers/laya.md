@@ -4,7 +4,7 @@ The harness talks to a running Laya service over its local HTTP API. It does not
 
 ## Configuration
 
-Configure a running `/v1/systemone` endpoint with the intended checkpoint, context limit, timeout, and precision provenance. The adapter refuses inference unless a checkpoint-matched `FitMeasurer` is available. It does not assume a built-in tokenizer or launch a local model. Live Laya/GPU verification is an opt-in operator action after a compatible fit measurer is available.
+Configure a running `/v1/systemone` endpoint with the intended checkpoint, `contextLimit`, `headLimit`, timeout, precision provenance, and a local `tokenizerJsonPath` plus its SHA-256 digest. The tokenizer asset must be the one loaded by that Laya checkpoint. The adapter checks the digest on load and records it in run identity; the operator is responsible for configuring the service with that same asset because the service does not report the tokenizer revision.
 
 ## Wire contract observed
 
@@ -14,11 +14,11 @@ These fields were checked against the upstream [Laya service](https://github.com
 
 ## Context admission
 
-The observed service does not expose a pre-inference context-fit operation. Its reported input token usage arrives with the inference result, which is too late to prevent truncation. The model runtime composes an encoded question prefix and state, then limits the state tokens to the remaining `max_len` budget. Checking only the raw state length would also miss option and instruction tokens.
+The service does not expose a pre-inference context-fit operation. Its reported input token usage arrives with inference, too late to prevent truncation. The adapter vendors Laya's TypeScript tokenizer and sequence builder from [revision `ec8409e`](https://github.com/NandhaKishorM/laya/commit/ec8409e542941bb4bb649d5fec00d4cec96ae024), including the repository's Apache-2.0 license and provenance notice. That upstream revision states its TypeScript implementation is byte-identical in behavior to the Python implementation.
 
-The adapter therefore requires a `FitMeasurer` that uses the configured checkpoint's tokenizer and the service's exact request rendering and limits. It must return the checkpoint identity, full rendered token count, and effective limit. A different checkpoint, a limit mismatch, an unavailable measurement, or a count above the limit produces `unsupported-input`; the adapter makes no inference request. The harness does not approximate tokenizer counts or silently trim, summarize, or omit visible state.
+Before every inference, the adapter runs the actual request state through the pinned tokenizer and Laya's sequence builder. It rejects options beyond Laya's 48-token cap, question head truncation under `headLimit`, or state truncation under `contextLimit`. An unavailable tokenizer, checksum mismatch, or overflow prevents the HTTP inference call. It never silently trims or summarizes the respondent's trajectory.
 
-No production `FitMeasurer` is bundled yet. The upstream [laya-ts source package](https://github.com/NandhaKishorM/laya/tree/main/laya-ts) contains matching TypeScript tokenizer and sequence helpers, but it is not currently published as an npm package. The adapter does not depend on an unversioned Git source. Until a reviewed, pinned tokenizer integration or service-side fit endpoint is provided, Laya runs stop as `unsupported-input: context-unmeasurable` before inference. This is an explicit capability boundary, not a successful Laya integration smoke test.
+The fit count measures input tokens. It is machine-independent for the same tokenizer JSON and request; GPU capacity, service configuration, and checkpoint compatibility still determine whether inference succeeds. This fit check does not replace an operator smoke test against the configured Laya service.
 
 ## Provenance and failure behavior
 

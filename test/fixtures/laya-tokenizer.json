@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "added_tokens": [
+    { "id": 10, "content": "[CLS]" },
+    { "id": 11, "content": "[SEP]" },
+    { "id": 12, "content": "[MASK]" },
+    { "id": 13, "content": "[PAD]" },
+    { "id": 14, "content": "[UNK]" }
+  ],
+  "normalizer": {
+    "type": "Replace",
+    "pattern": { "String": " " },
+    "content": "▁"
+  },
+  "pre_tokenizer": { "type": "Metaspace" },
+  "model": {
+    "type": "BPE",
+    "vocab": { "<unk>": 0, "▁": 1 },
+    "merges": []
+  }
+}

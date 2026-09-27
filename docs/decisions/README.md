@@ -18,6 +18,7 @@ alongside the code.
 | [0007](0007-guide-archetypes-and-freeze-reader-cohorts.md) | Guide archetype authoring and freeze study-specific reader profiles | Superseded by 0008 |
 | [0008](0008-model-stimulus-task-respondent-and-matched-arms.md) | Model stimulus, task, respondent, and matched arms | Archetype taxonomy superseded by 0009 |
 | [0009](0009-generalize-and-group-respondent-archetypes.md) | Generalize and group respondent archetypes | Accepted |
+| [0010](0010-preflight-study-context-for-configured-providers.md) | Preflight study context for configured providers | Proposed |
 
 ## Writing and changing decisions
 

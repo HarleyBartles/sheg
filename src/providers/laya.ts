@@ -1,26 +1,28 @@
 import { z } from 'zod';
 import { decisionRequestSchema, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
-import type { DecisionProvider } from '../domain/decision/provider.js';
+import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, validateDecision } from '../domain/decision/validate.js';
+import { measureLayaContext } from './laya/context-fit.js';
+export { measureLayaContext } from './laya/context-fit.js';
 
 export type LayaConfig = {
   kind: 'laya';
   baseUrl: string;
   checkpoint: string;
   contextLimit: number;
+  headLimit: number;
+  tokenizerJsonPath: string;
+  tokenizerSha256: string;
   precision?: string;
   timeoutMs: number;
 };
 
-export type FitMeasurement = { checkpoint: string; tokens: number; limit: number };
-export type FitMeasurer = (request: DecisionRequest, config: LayaConfig) => Promise<FitMeasurement>;
-export type FitResult =
-  | { status: 'fits'; tokens: number; limit: number }
-  | { status: 'unsupported-input'; reason: 'context-unmeasurable' | 'checkpoint-mismatch' }
-  | { status: 'unsupported-input'; reason: 'context-over-limit'; tokens: number; limit: number };
+export type FitMeasurer = (request: DecisionRequest, config: LayaConfig) => Promise<ProviderContextFit>;
+export type FitResult = ProviderContextFit;
 
 export class LayaCallError extends Error {
-  constructor(message: string, readonly attempts: number, readonly chargeStatus: 'not_billed' | 'unknown') {
+  constructor(message: string, readonly attempts: number, readonly chargeStatus: 'not_billed' | 'unknown',
+    readonly contextFit?: ProviderContextFit, readonly decisionId?: string) {
     super(message);
     this.name = 'LayaCallError';
   }
@@ -53,35 +55,35 @@ export async function checkLayaFit(
   config: LayaConfig,
   measureFit?: FitMeasurer,
 ): Promise<FitResult> {
-  if (!measureFit) return { status: 'unsupported-input', reason: 'context-unmeasurable' };
-  let measurement: FitMeasurement;
+  let measurement: ProviderContextFit;
   try {
-    measurement = await measureFit(request, config);
+    measurement = await (measureFit ?? measureLayaContext)(request, config);
   } catch {
-    return { status: 'unsupported-input', reason: 'context-unmeasurable' };
+    return { provider: 'laya', status: 'unavailable', method: 'laya-context-fit/v1', modelIdentity: config.checkpoint, tokenCount: 'measured', tokens: 0, contextLimit: config.contextLimit, headroomTokens: 0, effectiveLimit: config.contextLimit, details: {}, reason: 'context-unmeasurable' };
   }
-  if (measurement.checkpoint !== config.checkpoint || measurement.limit !== config.contextLimit ||
-      !Number.isInteger(measurement.tokens) || measurement.tokens < 0 ||
-      !Number.isInteger(measurement.limit) || measurement.limit < 1) {
-    return { status: 'unsupported-input', reason: 'checkpoint-mismatch' };
+  if (measurement.provider !== 'laya' || measurement.modelIdentity !== config.checkpoint || measurement.contextLimit !== config.contextLimit ||
+      measurement.details.tokenizerSha256 !== config.tokenizerSha256.toLowerCase()) {
+    return { ...measurement, status: 'unavailable', reason: 'checkpoint-or-tokenizer-mismatch' };
   }
-  if (measurement.tokens > measurement.limit) {
-    return { status: 'unsupported-input', reason: 'context-over-limit', tokens: measurement.tokens, limit: measurement.limit };
-  }
-  return { status: 'fits', tokens: measurement.tokens, limit: measurement.limit };
+  return measurement;
 }
 
 export class LayaProvider implements DecisionProvider {
   private readonly fetchRequest: typeof fetch;
 
   constructor(private readonly config: LayaConfig, private readonly options: LayaProviderOptions = {}) {
-    if (config.kind !== 'laya' || !config.baseUrl || !config.checkpoint ||
+    if (config.kind !== 'laya' || !config.baseUrl || !config.checkpoint || !config.tokenizerJsonPath || !/^[a-f\d]{64}$/i.test(config.tokenizerSha256) ||
         !Number.isInteger(config.contextLimit) || config.contextLimit < 1 ||
+        !Number.isInteger(config.headLimit) || config.headLimit < 1 ||
         !Number.isInteger(config.timeoutMs) || config.timeoutMs < 1 ||
         (config.precision !== undefined && !config.precision)) {
       throw new TypeError('Laya configuration requires a base URL, checkpoint, positive context limit, and positive timeout.');
     }
     this.fetchRequest = options.fetchRequest ?? fetch;
+  }
+
+  async measure(request: DecisionRequest): Promise<ProviderContextFit> {
+    return checkLayaFit(request, this.config, this.options.measureFit);
   }
 
   async decide(request: DecisionRequest, maxAttempts: number): Promise<DecisionResult> {
@@ -91,9 +93,9 @@ export class LayaProvider implements DecisionProvider {
     const parsedRequest = decisionRequestSchema.safeParse(request);
     if (!parsedRequest.success) throw new LayaCallError('Laya decision request is invalid.', 0, 'not_billed');
 
-    const fit = await checkLayaFit(parsedRequest.data, this.config, this.options.measureFit);
+    const fit = await this.measure(parsedRequest.data);
     if (fit.status !== 'fits') {
-      throw new LayaCallError(`Laya input is unsupported: ${fit.reason}.`, 0, 'not_billed');
+      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed', fit, parsedRequest.data.question.id);
     }
 
     const { question } = parsedRequest.data;

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { loadStudy } from '../infrastructure/study-loader.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
-import { CheckpointStore, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
+import { CheckpointStore, contextFailureSchema, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 
 const responseSchema = z.object({ taskId: z.string(), comparisonKey: z.string().nullable(), occurrence: z.number().int().positive(), presentationOccurrence: z.number().int().positive(), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), optionIds: z.array(z.string()), choice: z.string(), correct: z.boolean().nullable(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), confidence: z.number().nullable(), chargeUsd: z.number().nonnegative().nullable() }).strict();
@@ -17,7 +17,7 @@ export const pollingReportSchema = z.object({
     stimulusItems: z.array(z.object({ id: z.string(), text: z.string() }).strict()),
     tasks: z.array(z.object({ id: z.string(), comparisonKey: z.string().nullable(), instructions: z.string(), options: z.record(z.string(), z.string()) }).strict()),
     taskResponses: z.record(z.string(), z.object({ occurrences: z.array(z.object({ occurrence: z.number().int().positive(), reached: z.number().int(), completed: z.number().int(), incomplete: z.number().int(), notReached: z.number().int(), correct: z.number().int(), incorrect: z.number().int(), unscored: z.number().int(), options: z.record(z.string(), z.object({ count: z.number().int(), proportion: z.number().min(0).max(1) }).strict()) }).strict()) }).strict()),
-    journeys: z.array(z.object({ respondentId: z.string(), archetypeId: z.string().nullable(), status: z.string(), outcome: z.string().nullable(), events: z.array(z.unknown()), responses: z.array(responseSchema) }).strict()),
+    journeys: z.array(z.object({ respondentId: z.string(), archetypeId: z.string().nullable(), status: z.string(), outcome: z.string().nullable(), events: z.array(z.unknown()), responses: z.array(responseSchema), failureEvidence: contextFailureSchema.optional() }).strict()),
   }).strict()),
   providerEvidence: z.object({ attempts: z.number().int(), billedUsd: z.number().nonnegative(), unknownCharges: z.number().int(), failedCells: z.number().int() }).strict(),
 }).strict();
@@ -27,7 +27,7 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === 'laya'
-    ? { kind: 'laya' as const, checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, ...(checkpoint.provider.precision === undefined ? {} : { precision: checkpoint.provider.precision }) }
+    ? { kind: 'laya' as const, checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...(checkpoint.provider.precision === undefined ? {} : { precision: checkpoint.provider.precision }) }
     : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint ||
       study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index]) || study.sources.length !== checkpoint.sourceHashes.length) {
@@ -54,7 +54,8 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
           correct: task?.answerKeyOptionId ? result.choice === task.answerKeyOptionId : null, attempts: result.attempts, latencyMs: result.latencyMs,
           confidence: result.confidence ?? null, chargeUsd: result.chargeUsd ?? null };
       });
-      return { respondentId: respondent.id, archetypeId: respondent.archetypeId ?? null, status: stored?.status ?? 'not-started', outcome: stored?.result?.outcome ?? null, events: stored?.result?.events ?? [], responses };
+      return { respondentId: respondent.id, archetypeId: respondent.archetypeId ?? null, status: stored?.status ?? 'not-started', outcome: stored?.result?.outcome ?? null, events: stored?.result?.events ?? [], responses,
+        ...(stored?.failureEvidence === undefined ? {} : { failureEvidence: stored.failureEvidence }) };
     });
     const excludedByStatus: Record<string, number> = {};
     for (const journey of journeys) if (journey.status !== 'completed') excludedByStatus[journey.status] = (excludedByStatus[journey.status] ?? 0) + 1;

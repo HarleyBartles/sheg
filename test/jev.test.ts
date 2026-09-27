@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { JevCallError, JevProvider, type JevConfig } from '../src/providers/jev.js';
+import { JevCallError, JevProvider, measureJevContext, type JevConfig } from '../src/providers/jev.js';
 import type { DecisionRequest } from '../src/domain/decision/decision.js';
 
 const config: JevConfig = {
@@ -47,6 +47,25 @@ function installTestKey(): () => void {
     else process.env[config.keyEnv] = previous;
   };
 }
+
+test('estimates the exact request with fixed context reserve and refuses unknown model limits', async () => {
+  const fit = measureJevContext(request, config.model);
+  assert.equal(fit.status, 'fits');
+  assert.equal(fit.tokenCount, 'estimated');
+  assert.equal(fit.contextLimit, 32_768);
+  assert.equal(fit.effectiveLimit, 26_214);
+  assert.equal(measureJevContext(request, 'typesafe/jev-latest').status, 'unavailable');
+
+  const oversized = { ...request, state: { text: 'x'.repeat(100_000) } };
+  assert.equal(measureJevContext(oversized, config.model).status, 'overflow');
+  const restore = installTestKey();
+  let calls = 0;
+  try {
+    const provider = new JevProvider(config, async () => { calls += 1; throw new Error('must not call'); });
+    await assert.rejects(provider.decide(oversized, 1), /estimated-context-over-limit/);
+    assert.equal(calls, 0);
+  } finally { restore(); }
+});
 
 function fakeFetch(handler: (url: string, init: RequestInit) => Promise<Response>): typeof fetch {
   return ((input: Parameters<typeof fetch>[0], init?: RequestInit) => handler(String(input), init ?? {})) as typeof fetch;

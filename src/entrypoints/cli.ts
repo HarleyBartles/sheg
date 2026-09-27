@@ -5,6 +5,7 @@ import { traceStudy } from '../domain/journey/trace.js';
 import { loadStudy } from '../infrastructure/study-loader.js';
 import { RunManager, checkStudy, type RunConfig } from '../application/run-manager.js';
 import { compareReports, getReport } from '../application/reports.js';
+import { preflightStudy, type PreflightProviderConfig } from '../application/preflight.js';
 
 const manager = new RunManager();
 
@@ -14,7 +15,15 @@ export async function runCli(args: readonly string[], io = { out: (value: string
     const options = parseArgs(rest);
     let result: unknown;
     if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
-    if (command === 'check' || command === 'start') {
+    if (command === 'preflight') {
+      if (options.mode !== undefined && options.mode !== 'frozen-cohort' && options.mode !== 'maximum-profile') {
+        throw new Error('Preflight --mode must be frozen-cohort or maximum-profile.');
+      }
+      const providers = JSON.parse(await readFile(required(options, 'providers'), 'utf8')) as PreflightProviderConfig[];
+      const mode = options.mode === 'maximum-profile' ? 'maximum-profile' : 'frozen-cohort';
+      result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), ...(options.cohort === undefined ? {} : { cohortPath: path.resolve(options.cohort) }), mode, providers });
+    }
+    else if (command === 'check' || command === 'start') {
       const config = JSON.parse(await readFile(required(options, 'config'), 'utf8')) as RunConfig;
       result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint })) : await manager.startRun(config);
     } else if (command === 'trace') {
@@ -46,6 +55,7 @@ export async function runCli(args: readonly string[], io = { out: (value: string
 
 const helpText = `sheg <command>
 Commands:
+  preflight --manifest <json> [--cohort <json>] [--mode frozen-cohort|maximum-profile] --providers <json-file>
   check --config <json>                         Validate study and provider configuration
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>
   start --config <json>                         Start a durable run

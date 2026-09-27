@@ -9,3 +9,34 @@ Use this workflow to validate inputs, inspect stimulus and task boundaries, or d
 5. Use `poll_trace` with an arm ID, frozen respondent ID, and scripted option IDs to debug a route. A scripted trace is graph evidence, not respondent evidence.
 
 Prefer `sequence` when the study presents all bounded items then asks its tasks. Use graph presentation only when conditional exposure or branching is itself part of the research design. Do not use `poll_start` as a validation shortcut. If the check or trace suggests simulated response evidence may help, read [run and recovery](run-and-recovery.md) before deciding whether to start a poll.
+# Provider context preflight
+
+Run `poll_preflight` with the study manifest, frozen cohort, and every configured
+provider you want to compare. For a provisional profile-size sample,
+omit the cohort and select `maximum-profile`; it uses one synthetic profile
+with 1,500 characters across the allowed prose fields. Its `basis` is
+`synthetic-profile`: a `fit` means this sample fits, not that every valid
+character mix will fit. A frozen-cohort result checks every path for the exact
+provided respondents. The CLI equivalent is:
+
+```sh
+sheg preflight --manifest study.json --cohort cohort.json --providers providers.json
+sheg preflight --manifest study.json --mode maximum-profile --providers providers.json
+```
+
+Preflight follows every valid response path for every respondent and arm. One
+overflow means that provider does not fit the measured cohort or sample under
+the configured limits. An incomplete walk or unavailable measurement is
+reported as unverified, never as fit.
+Results name the respondent, arm, path, and decision for each overflowing
+packet. Preflight does not create a run or contact an inference endpoint.
+`configuration` reports whether required settings or Jev credentials are
+present; `availability` is unverified because no endpoint is contacted.
+The result includes input and provider execution fingerprints so a saved fit
+can be matched to its study, respondent basis, compiler, and provider settings.
+Traversal stops as unverified at 100,000 packets or 16 MiB of serialized
+packet data.
+
+Laya uses the pinned tokenizer and configured 1,024-token limit. Jev's
+`typesafe/jev-1.13` estimate is `ceil(UTF-8 request bytes / 3)` with a 20%
+reserve from its 32K context. The Jev count is an estimate, not provider usage.

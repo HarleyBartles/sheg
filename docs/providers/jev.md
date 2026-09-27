@@ -10,6 +10,16 @@ Checked 2026-09-27 against OpenRouter's current Decisions API reference and
 TypeScript examples. The Decisions endpoint is an alpha API, so verify this
 contract again when upgrading the adapter.
 
+## Context preflight
+
+For the pinned `typesafe/jev-1.13` model, preflight estimates tokens as the
+UTF-8 byte length of the exact serialized request divided by three, rounded up.
+It reserves 20% of the configured 32,768-token context (6,554 tokens), so the
+estimate must be at most 26,214. This is an estimate, not provider-reported
+usage. Other Jev model identifiers are unavailable to preflight until their
+context limit is explicitly supported. Runtime applies this check before any
+network request.
+
 - Endpoint: `POST https://openrouter.ai/api/alpha/decisions`
 - Authentication: `Authorization: Bearer <OpenRouter API key>`
 - Request: `{ model, state, questions }`

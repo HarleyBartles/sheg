@@ -9,7 +9,7 @@ import { ProcessLock } from './process-lock.js';
 
 const providerConfigSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('jev'), model: z.string().min(1), keyEnv: z.string().min(1), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict(),
-  z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
 ]);
 
 const journeyResultSchema = z.object({
@@ -29,6 +29,13 @@ const budgetSnapshotSchema = z.object({
   reservedUsd: z.number().finite().nonnegative(), unpricedReservations: z.number().int().nonnegative(),
   overspendUsd: z.number().finite().nonnegative(), blocked: z.boolean(),
 }).strict();
+
+export const contextFailureSchema = z.object({
+  decisionId: z.string().min(1), nodeId: z.string().min(1), reason: z.string().min(1),
+  tokens: z.number().int().nonnegative(), effectiveLimit: z.number().int().nonnegative(),
+  measurementMethod: z.string().min(1),
+}).strict();
+export type ContextFailure = z.infer<typeof contextFailureSchema>;
 
 export const runCheckpointSchema = z.object({
   formatVersion: z.literal(2),
@@ -57,6 +64,7 @@ export const runCheckpointSchema = z.object({
     attemptHistory: z.array(z.object({ decisionId: z.string().min(1), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
     presentedTaskIds: z.array(z.string().min(1)),
     failureKind: z.enum(['provider', 'journey', 'unsupported-input']).optional(),
+    failureEvidence: contextFailureSchema.optional(),
   }).strict()),
   activeCellIds: z.array(z.string().min(1)),
   cancellationRequested: z.boolean(),

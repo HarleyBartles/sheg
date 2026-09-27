@@ -96,6 +96,51 @@ export const studyArmSchema = z.object({
     if (unreachable.length > 0) {
       context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: `Graph contains unreachable nodes: ${unreachable.join(', ')}.` });
     }
+
+    const state = new Map<string, 'visiting' | 'visited'>();
+    const decisionsToTerminal = new Map<string, number | null>();
+    let containsCycle = false;
+    const longestDecisionsToTerminal = (nodeId: string): number | null => {
+      const node = nodesById.get(nodeId);
+      if (!node) return null;
+      if (state.get(nodeId) === 'visiting') {
+        containsCycle = true;
+        return null;
+      }
+      if (state.get(nodeId) === 'visited') return decisionsToTerminal.get(nodeId) ?? null;
+
+      state.set(nodeId, 'visiting');
+      let longest: number | null;
+      if (node.kind === 'terminal') {
+        longest = 0;
+      } else {
+        const edges = outgoing.get(nodeId) ?? [];
+        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
+        const completedContinuations = continuations.filter((count): count is number => count !== null);
+        if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
+          longest = null;
+        } else {
+          const nextDecisionCount = Math.max(...completedContinuations);
+          longest = nextDecisionCount + (node.kind === 'ask' ? 1 : 0);
+        }
+      }
+      state.set(nodeId, 'visited');
+      decisionsToTerminal.set(nodeId, longest);
+      return longest;
+    };
+
+    const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
+    if (containsCycle) {
+      context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: 'Graph contains a cycle; every journey must terminate.' });
+    } else if (longestPath === null) {
+      context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: 'Every graph branch must reach a terminal node.' });
+    } else if (longestPath > presentation.maxDecisions) {
+      context.addIssue({
+        code: 'custom',
+        path: ['presentation', 'maxDecisions'],
+        message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`,
+      });
+    }
   }
 });
 

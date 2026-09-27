@@ -9,7 +9,7 @@ test('CLI help lists all supported workflow commands', async () => {
   const lines: string[] = [];
   const status = await runCli(['--help'], { out: (text) => { lines.push(text); return true; }, error: (text) => { lines.push(text); return true; } });
   assert.equal(status, 0);
-  for (const command of ['check', 'trace', 'start', 'status', 'cancel', 'reconcile', 'resume', 'report', 'compare']) assert.match(lines[0] ?? '', new RegExp(command));
+  for (const command of ['check', 'preflight', 'trace', 'start', 'status', 'cancel', 'reconcile', 'resume', 'report', 'compare']) assert.match(lines[0] ?? '', new RegExp(command));
 });
 
 test('CLI check validates explicit provider config without key or network', async (t) => {
@@ -26,6 +26,30 @@ test('CLI check validates explicit provider config without key or network', asyn
   assert.equal(status, 0, errors.join('\n'));
   assert.equal(JSON.parse(output[0] ?? '{}').valid, true);
   assert.equal(errors.length, 0);
+});
+
+test('CLI preflight reports fit for every packet without provider calls', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'polling-preflight-cli-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const providersPath = path.join(directory, 'providers.json');
+  await writeFile(providersPath, JSON.stringify([{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }]));
+  const output: string[] = []; const errors: string[] = [];
+  const status = await runCli(['preflight', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--providers', providersPath], {
+    out: (text) => { output.push(text); return true; }, error: (text) => { errors.push(text); return true; },
+  });
+  assert.equal(status, 0, errors.join('\n'));
+  const result = JSON.parse(output[0] ?? '{}') as { providers: Array<{ status: string; packetCount: number }> };
+  assert.equal(result.providers[0]?.status, 'fit');
+  assert.ok((result.providers[0]?.packetCount ?? 0) > 0);
+});
+
+test('CLI preflight rejects an unknown mode instead of selecting frozen-cohort', async () => {
+  const errors: string[] = [];
+  const status = await runCli(['preflight', '--mode', 'maximum-profiles', '--manifest', 'study.json', '--providers', 'providers.json'], {
+    out: () => true, error: (value) => { errors.push(value); return true; },
+  });
+  assert.equal(status, 1);
+  assert.match(errors[0] ?? '', /mode/i);
 });
 
 test('CLI scripted trace is keyless and uses the shared graph runner', async () => {
