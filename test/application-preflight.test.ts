@@ -40,6 +40,16 @@ test('an unavailable provider measurement or incomplete traversal cannot report 
   assert.equal(result.providers[0]?.unavailable.length, 0);
 });
 
+test('an unknown Jev context window is unverified even after complete path traversal', async () => {
+  const result = await preflightStudy({
+    manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
+    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+  });
+  assert.equal(result.providers[0]?.complete, true);
+  assert.equal(result.providers[0]?.status, 'unverified');
+  assert.ok((result.providers[0]?.unavailable.length ?? 0) > 0);
+});
+
 test('maximum-profile mode exercises the full aggregate prose allowance and labels results provisional', async () => {
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), mode: 'maximum-profile',
