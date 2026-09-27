@@ -120,8 +120,8 @@ Every traversal is bounded by `maxDecisions`, including cyclic graphs. Exposure 
 
 **Interfaces:** `stimulusFingerprint(study, promptContractHash): string` includes ordered cohort and source hashes. `executionFingerprint(stimulus, providerConfig): string` includes decision-affecting settings without credentials. `BudgetLedger.reserve(maxAttempts, maxPerCallUsd)`, `settle(reservation, resultOrError)`, and `reconcile(unpricedUsd)` serialize shared limits.
 
-- [ ] Write RED tests that provider changes preserve stimulus identity but change execution identity; cohort order, source, prompt contract, checkpoint, or precision changes have the expected effect. Concurrent controlled reservations must not oversubscribe calls or hosted spend allowance; unknown possibly billed failures stop later dispatch until reconciliation. A billed amount above its reservation records the overshoot and prevents further dispatch.
-- [ ] Implement canonical JSON identity and one serialized budget ledger. Reject nonfinite or negative limits/usage; local provider needs no hosted spend cap. Run focused tests with actual overlap and typecheck; commit.
+- [x] Write RED tests that provider changes preserve stimulus identity but change execution identity; cohort order, source, prompt contract, checkpoint, or precision changes have the expected effect. Concurrent controlled reservations must not oversubscribe calls or hosted spend allowance; unknown possibly billed failures stop later dispatch until reconciliation. A billed amount above its reservation records the overshoot and prevents further dispatch.
+- [x] Implement canonical JSON identity and one serialized budget ledger. Reject nonfinite or negative limits/usage; local provider needs no hosted spend cap. Run focused tests with actual overlap and typecheck; commit.
 
 ### Task 8: Durable jobs and process recovery
 
