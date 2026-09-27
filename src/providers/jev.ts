@@ -1,7 +1,7 @@
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { decisionRequestSchema, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
-import type { DecisionProvider } from '../domain/decision/provider.js';
+import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, validateDecision } from '../domain/decision/validate.js';
 
 export type JevConfig = {
@@ -42,6 +42,30 @@ const wireResponseSchema = z.object({
 }).passthrough();
 
 const retryableStatuses = new Set([429, 500, 502, 503, 524, 529]);
+const JEV_MODEL = 'typesafe/jev-1.13';
+const JEV_CONTEXT_LIMIT = 32_768;
+const JEV_HEADROOM = Math.ceil(JEV_CONTEXT_LIMIT * 0.2);
+const JEV_EFFECTIVE_LIMIT = JEV_CONTEXT_LIMIT - JEV_HEADROOM;
+const JEV_MEASUREMENT_METHOD = 'utf8-bytes-div-3+20%-reserve/v1';
+
+function requestBody(request: DecisionRequest, model: string): Record<string, unknown> {
+  const { question } = request;
+  return { model, state: request.state, questions: { [question.id]: { type: 'choice', instructions: question.instructions, criteria: question.options } } };
+}
+
+export function measureJevContext(request: DecisionRequest, model: string): ProviderContextFit {
+  const serialized = JSON.stringify(requestBody(request, model));
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  const tokens = Math.ceil(bytes / 3);
+  const knownModel = model === JEV_MODEL;
+  return {
+    provider: 'jev', status: !knownModel ? 'unavailable' : tokens > JEV_EFFECTIVE_LIMIT ? 'overflow' : 'fits',
+    method: JEV_MEASUREMENT_METHOD, modelIdentity: model, tokenCount: 'estimated', tokens,
+    contextLimit: JEV_CONTEXT_LIMIT, headroomTokens: JEV_HEADROOM, effectiveLimit: JEV_EFFECTIVE_LIMIT,
+    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20 },
+    ...(!knownModel ? { reason: 'model-context-unknown' } : tokens > JEV_EFFECTIVE_LIMIT ? { reason: 'estimated-context-over-limit' } : {}),
+  };
+}
 
 export class JevProvider implements DecisionProvider {
   constructor(
@@ -62,23 +86,15 @@ export class JevProvider implements DecisionProvider {
     if (!parsedRequest.success) {
       throw new JevCallError('Jev decision request is invalid.', 0, 'not_billed');
     }
+    const fit = this.measure(parsedRequest.data);
+    if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed');
     const apiKey = process.env[this.config.keyEnv];
     if (!apiKey) {
       throw new JevCallError(`Jev API key environment variable ${this.config.keyEnv} is not set.`, 0, 'not_billed');
     }
 
     const { question } = parsedRequest.data;
-    const body = JSON.stringify({
-      model: this.config.model,
-      state: parsedRequest.data.state,
-      questions: {
-        [question.id]: {
-          type: 'choice',
-          instructions: question.instructions,
-          criteria: question.options,
-        },
-      },
-    });
+    const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
     const startedAt = performance.now();
     let attempts = 0;
 
@@ -158,6 +174,10 @@ export class JevProvider implements DecisionProvider {
     }
 
     throw new JevCallError('Jev call limit reached without a response.', attempts, 'unknown');
+  }
+
+  measure(request: DecisionRequest): ProviderContextFit {
+    return measureJevContext(request, this.config.model);
   }
 }
 

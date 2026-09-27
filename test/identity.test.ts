@@ -20,7 +20,7 @@ test('provider changes preserve stimulus identity and change execution identity'
   const study = await studyFixture(t);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1');
   const jev = executionFingerprint(stimulus, { kind: 'jev', model: 'jev-latest' });
-  const laya = executionFingerprint(stimulus, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024 });
+  const laya = executionFingerprint(stimulus, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024, headLimit: 192, tokenizerSha256: 'a'.repeat(64) });
   assert.equal(stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1'), stimulus);
   assert.notEqual(jev, laya);
 });
@@ -34,9 +34,9 @@ test('cohort order, source hashes, prompt contract, checkpoint, and precision af
   assert.notEqual(stimulusFingerprint({ ...study.manifest, arms: study.manifest.arms.map((arm) => ({ ...arm, sources: arm.sources.map((source) => ({ ...source, sha256: 'a'.repeat(64) })) })) }, study.cohort, 'prompt-v1'), base);
   assert.notEqual(stimulusFingerprint(study.manifest, study.cohort, 'prompt-v2'), base);
 
-  const checkpoint = executionFingerprint(base, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024 });
-  assert.notEqual(executionFingerprint(base, { kind: 'laya', checkpoint: 'multilingual', contextLimit: 1024 }), checkpoint);
-  assert.notEqual(executionFingerprint(base, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024, precision: 'fp16' }), checkpoint);
+  const checkpoint = executionFingerprint(base, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024, headLimit: 192, tokenizerSha256: 'a'.repeat(64) });
+  assert.notEqual(executionFingerprint(base, { kind: 'laya', checkpoint: 'multilingual', contextLimit: 1024, headLimit: 192, tokenizerSha256: 'a'.repeat(64) }), checkpoint);
+  assert.notEqual(executionFingerprint(base, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024, headLimit: 192, tokenizerSha256: 'a'.repeat(64), precision: 'fp16' }), checkpoint);
 });
 
 test('execution fingerprint never includes credentials or transport-only settings', async (t) => {

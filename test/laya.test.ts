@@ -2,12 +2,22 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LayaProvider, checkLayaFit, type FitMeasurer, type LayaConfig } from '../src/providers/laya.js';
 import type { DecisionRequest } from '../src/domain/decision/decision.js';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const tokenizerPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/laya-tokenizer.json');
+const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerPath)).digest('hex');
 
 const config: LayaConfig = {
   kind: 'laya',
   baseUrl: 'http://127.0.0.1:8787',
   checkpoint: 'laya-typed-decisions',
   contextLimit: 1024,
+  headLimit: 192,
+  tokenizerJsonPath: tokenizerPath,
+  tokenizerSha256,
   timeoutMs: 1000,
 };
 
@@ -17,38 +27,41 @@ const request: DecisionRequest = {
   optionIds: ['continue', 'stop'],
 };
 
-test('fit check refuses unmeasurable context without calling Laya', async () => {
-  assert.deepEqual(await checkLayaFit(request, config), { status: 'unsupported-input', reason: 'context-unmeasurable' });
+test('fit check measures context with the pinned tokenizer by default', async () => {
+  const measured = await checkLayaFit(request, config);
+  assert.equal(measured.provider, 'laya');
+  assert.equal(measured.tokenCount, 'measured');
+  assert.equal(measured.details.tokenizerSha256, tokenizerSha256);
 });
 
-test('fit check reports overflow and exact fit from a checkpoint measurer', async () => {
-  const measure: FitMeasurer = async () => ({ checkpoint: config.checkpoint, tokens: 1025, limit: 1024 });
-  assert.deepEqual(await checkLayaFit(request, config, measure), {
-    status: 'unsupported-input', reason: 'context-over-limit', tokens: 1025, limit: 1024,
-  });
+function fit(tokens: number, status: 'fits' | 'overflow' = 'fits') {
+  return { provider: 'laya' as const, status, method: 'test', modelIdentity: config.checkpoint, tokenCount: 'measured' as const, tokens, contextLimit: config.contextLimit, headroomTokens: 0, effectiveLimit: config.contextLimit, details: { tokenizerSha256 } };
+}
 
-  const exact: FitMeasurer = async () => ({ checkpoint: config.checkpoint, tokens: 1024, limit: 1024 });
-  assert.deepEqual(await checkLayaFit(request, config, exact), { status: 'fits', tokens: 1024, limit: 1024 });
+test('fit check reports overflow and exact fit from a checkpoint measurer', async () => {
+  const measure: FitMeasurer = async () => fit(1025, 'overflow');
+  assert.equal((await checkLayaFit(request, config, measure)).status, 'overflow');
+
+  const exact: FitMeasurer = async () => fit(1024);
+  assert.equal((await checkLayaFit(request, config, exact)).status, 'fits');
 });
 
 test('fit check rejects measurement from another checkpoint', async () => {
-  const measure: FitMeasurer = async () => ({ checkpoint: 'laya', tokens: 10, limit: 1024 });
-  assert.deepEqual(await checkLayaFit(request, config, measure), {
-    status: 'unsupported-input', reason: 'checkpoint-mismatch',
-  });
+  const measure: FitMeasurer = async () => ({ ...fit(10), modelIdentity: 'laya' });
+  assert.equal((await checkLayaFit(request, config, measure)).reason, 'checkpoint-or-tokenizer-mismatch');
 });
 
 test('provider makes zero inference requests when context cannot be measured', async () => {
   let calls = 0;
-  const provider = new LayaProvider(config, { fetchRequest: async () => { calls += 1; throw new Error('unexpected request'); } });
+  const provider = new LayaProvider(config, { measureFit: async () => { throw new Error('tokenizer unavailable'); }, fetchRequest: async () => { calls += 1; throw new Error('unexpected request'); } });
   await assert.rejects(provider.decide(request, 1), /context-unmeasurable/);
   assert.equal(calls, 0);
 });
 
 test('provider accepts the routed checkpoint while preserving Laya confidence semantics', async () => {
-  const fit: FitMeasurer = async () => ({ checkpoint: config.checkpoint, tokens: 20, limit: 1024 });
+  const measure: FitMeasurer = async () => fit(20);
   const provider = new LayaProvider(config, {
-    measureFit: fit,
+    measureFit: measure,
     fetchRequest: async (_url, init) => {
       assert.equal(init?.method, 'POST');
       return Response.json({
@@ -67,19 +80,19 @@ test('provider accepts the routed checkpoint while preserving Laya confidence se
 });
 
 test('provider rejects missing or mismatched routed checkpoint and malformed probabilities', async () => {
-  const fit: FitMeasurer = async () => ({ checkpoint: config.checkpoint, tokens: 20, limit: 1024 });
+  const measure: FitMeasurer = async () => fit(20);
   for (const payload of [
     { model: 'laya-rl-agent', answers: {}, usage: {}, routing: {} },
     { model: 'laya-rl-agent', answers: {}, usage: {}, routing: { model: 'laya' } },
     { model: 'laya-rl-agent', answers: { continue: { type: 'choice', choice: 'continue', probabilities: { continue: 0.8, stop: 0.3 } } }, usage: {}, routing: { model: config.checkpoint } },
   ]) {
-    const provider = new LayaProvider(config, { measureFit: fit, fetchRequest: async () => Response.json(payload) });
+    const provider = new LayaProvider(config, { measureFit: measure, fetchRequest: async () => Response.json(payload) });
     await assert.rejects(provider.decide(request, 1));
   }
 });
 
 test('provider reports an unavailable local service without fallback', async () => {
-  const fit: FitMeasurer = async () => ({ checkpoint: config.checkpoint, tokens: 20, limit: 1024 });
-  const provider = new LayaProvider(config, { measureFit: fit, fetchRequest: async () => { throw new Error('offline'); } });
+  const measure: FitMeasurer = async () => fit(20);
+  const provider = new LayaProvider(config, { measureFit: measure, fetchRequest: async () => { throw new Error('offline'); } });
   await assert.rejects(provider.decide(request, 1), /local service/);
 });

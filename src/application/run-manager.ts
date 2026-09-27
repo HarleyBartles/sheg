@@ -17,7 +17,7 @@ const configSchema = z.object({
   manifestPath: z.string().min(1), cohortPath: z.string().min(1),
   provider: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('jev'), model: z.string().min(1), keyEnv: z.string().min(1), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict(),
-    z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
+    z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
   ]),
   outputDirectory: z.string().min(1), maxCalls: z.number().int().positive(), maxUsd: z.number().finite().positive().optional(),
   maxPerCallUsd: z.number().finite().positive().optional(), concurrency: z.number().int().min(1).max(64).default(1),
@@ -41,7 +41,7 @@ export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === 'laya'
-    ? { kind: 'laya' as const, checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...(normalized.provider.precision === undefined ? {} : { precision: normalized.provider.precision }) }
+    ? { kind: 'laya' as const, checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...(normalized.provider.precision === undefined ? {} : { precision: normalized.provider.precision }) }
     : normalized.provider;
   return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider) };
 }

@@ -4,7 +4,7 @@ import type { FrozenCohort } from '../domain/respondents/cohort.js';
 
 export type ExecutionProvider =
   | { kind: 'jev'; model: string; keyEnv?: string; endpoint?: string; timeoutMs?: number }
-  | { kind: 'laya'; checkpoint: string; contextLimit: number; precision?: string; baseUrl?: string; timeoutMs?: number };
+  | { kind: 'laya'; checkpoint: string; contextLimit: number; headLimit: number; tokenizerSha256: string; precision?: string; baseUrl?: string; timeoutMs?: number };
 
 export function stimulusFingerprint(
   study: StudyManifest,
@@ -25,6 +25,8 @@ export function executionFingerprint(stimulus: string, provider: ExecutionProvid
       kind: provider.kind,
       checkpoint: requireText(provider.checkpoint, 'Laya checkpoint'),
       contextLimit: requirePositiveInteger(provider.contextLimit, 'Laya context limit'),
+      headLimit: requirePositiveInteger(provider.headLimit, 'Laya head limit'),
+      tokenizerSha256: requireText(provider.tokenizerSha256, 'Laya tokenizer SHA-256'),
       ...(provider.precision === undefined ? {} : { precision: provider.precision }),
     };
   }

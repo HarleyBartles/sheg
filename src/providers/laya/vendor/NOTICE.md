@@ -1,0 +1,1 @@
+Vendored tokenizer and sequence helpers from NandhaKishorM/laya, laya-ts, source commit ec8409e542941bb4bb649d5fec00d4cec96ae024. Upstream laya-ts was merged via PR #243 and reports parity with its Python implementation. Licensed under Apache-2.0; see LICENSE.laya. Source files are kept at the pinned upstream implementation except for the local lint suppression header.

@@ -126,7 +126,7 @@ test('check validates and fingerprints a study without creating a provider or ru
   const manager = new RunManager({ providerFactory: () => { providerCreated = true; throw new Error('provider must not be created for check'); } });
   const checked = await checkStudy({
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
-    provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 },
+    provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 },
     outputDirectory: directory, maxCalls: 10,
   });
   assert.equal(checked.study.respondents.length, 2);
@@ -145,7 +145,7 @@ test('start rehashes source files and refuses drift before creating a checkpoint
   const manager = new RunManager();
   await assert.rejects(manager.startRun({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
-    provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 },
+    provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 },
     outputDirectory: path.join(directory, 'runs'), maxCalls: 10,
   }), /source/i);
   assert.deepEqual(await new CheckpointStore(path.join(directory, 'runs')).list(), []);
@@ -165,7 +165,7 @@ test('managed run checkpoints sequential provider decisions and reaches complete
   const manager = new RunManager({ providerFactory: () => provider });
   const started = await manager.startRun({
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
-    provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 },
+    provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 },
     outputDirectory: directory, maxCalls: 10, concurrency: 1,
   });
   let current = started;
@@ -195,7 +195,7 @@ test('matched run executes one cell for every frozen respondent in every arm', a
     return { choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
   } };
   const manager = new RunManager({ providerFactory: () => provider });
-  const started = await manager.startRun({ manifestPath, cohortPath: path.join(directory, 'cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 }, outputDirectory: path.join(directory, 'runs'), maxCalls: 10, concurrency: 1 });
+  const started = await manager.startRun({ manifestPath, cohortPath: path.join(directory, 'cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: path.join(directory, 'runs'), maxCalls: 10, concurrency: 1 });
   let current = started;
   for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(path.join(directory, 'runs'), started.runId); }
   assert.equal(current.status, 'completed');
@@ -216,7 +216,7 @@ test('resume replays completed responses without charging the same respondent-ta
     return { choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
   } };
   const manager = new RunManager({ providerFactory: () => provider });
-  const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 10, concurrency: 1 });
+  const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 10, concurrency: 1 });
   let current = started;
   for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); }
   assert.equal(current.status, 'partial');

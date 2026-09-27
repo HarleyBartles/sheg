@@ -27,7 +27,7 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === 'laya'
-    ? { kind: 'laya' as const, checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, ...(checkpoint.provider.precision === undefined ? {} : { precision: checkpoint.provider.precision }) }
+    ? { kind: 'laya' as const, checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...(checkpoint.provider.precision === undefined ? {} : { precision: checkpoint.provider.precision }) }
     : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint ||
       study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index]) || study.sources.length !== checkpoint.sourceHashes.length) {
