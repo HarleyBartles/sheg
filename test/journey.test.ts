@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runJourney } from '../src/domain/journey/run.js';
+import type { PromptState } from '../src/domain/decision/prompt.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 import { loadRespondents } from '../src/domain/respondents/cohort.js';
 import type { DecisionRequest } from '../src/domain/decision/decision.js';
@@ -23,9 +24,13 @@ test('sequence mode exposes bounded stimulus then asks each typed task', async (
 
 test('graph mode follows selected stable option IDs and stops at terminal node', async () => {
   const choices = ['continue', 'open-notes', 'continue'];
-  const result = await runJourney({ arm: article, profile, ask: async () => ({ choice: choices.shift()! }) });
+  const requests: DecisionRequest[] = [];
+  const result = await runJourney({ arm: article, profile, ask: async (request) => { requests.push(request); return { choice: choices.shift()! }; } });
   assert.equal(result.outcome, 'completed');
   assert.deepEqual(result.events.filter((event) => event.type === 'exposure').map((event) => event.itemId), ['symptom', 'investigation', 'test-notes', 'repair']);
+  const states = requests.map((request) => request.state as unknown as PromptState);
+  assert.deepEqual(states.map((state) => state.encounteredItems.map((item) => item.id)), [['symptom'], ['investigation'], ['test-notes']]);
+  assert.deepEqual(states[2]?.trajectory.choices.map((choice) => choice.choiceId), ['continue', 'open-notes']);
 });
 
 test('rejects provider choices absent from the current task options', async () => {

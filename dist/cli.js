@@ -12,9 +12,12 @@ import { pathToFileURL } from "node:url";
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
 var promptContract = {
-  version: 4,
-  stateFields: ["respondent.profile", "encounteredItems", "responseHistory"],
-  onlyEncounteredItems: true,
+  version: 5,
+  stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
+  graphExposureWindow: "items exposed since the previous decision",
+  sequenceExposureWindow: "all arm items for every task",
+  trajectory: ["prior task and choice IDs", "selected choice meanings", "prior exposure IDs", "event counts and range"],
+  onlyCurrentGraphExposureText: true,
   preserveEncounterOrder: true,
   historyOrder: "chronological",
   studyMetadataExcluded: true,
@@ -22,11 +25,54 @@ var promptContract = {
   otherArmsExcluded: true,
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
-function renderQuestion(arm, profile, taskId, encounteredItemIds, history = []) {
+function compactTrajectory(arm, history) {
+  const exposureIds = [];
+  const choices = [];
+  for (const event of history) {
+    if (event.type === "exposure") {
+      exposureIds.push(event.itemId);
+      continue;
+    }
+    const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
+    const choiceMeaning = task?.options[event.choice];
+    if (!task || choiceMeaning === void 0) {
+      throw new Error(`Unknown choice ${event.choice} for task ${event.taskId} in journey history.`);
+    }
+    choices.push({
+      taskId: event.taskId,
+      choiceId: event.choice,
+      choiceMeaning,
+      exposedItemIds: [...exposureIds]
+    });
+  }
+  const body = {
+    version: 1,
+    eventCount: history.length,
+    exposureCount: exposureIds.length,
+    decisionCount: choices.length,
+    eventRange: history.length === 0 ? null : { firstSequence: history[0].sequence, lastSequence: history.at(-1).sequence },
+    choices
+  };
+  let payloadUtf8Bytes = 0;
+  for (; ; ) {
+    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
+    if (nextSize === payloadUtf8Bytes) break;
+    payloadUtf8Bytes = nextSize;
+  }
+  return { ...body, payloadUtf8Bytes };
+}
+function compileDecisionPacket(arm, profile, taskId, history = []) {
   const task = arm.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`Unknown task ${taskId}.`);
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
-  const encounteredItems = encounteredItemIds.map((id) => {
+  let itemIds;
+  if (arm.presentation.kind === "sequence") {
+    itemIds = arm.items.map((item) => item.id);
+  } else {
+    const lastChoiceIndex = history.findLastIndex((event) => event.type === "choice");
+    itemIds = history.slice(lastChoiceIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
+  }
+  const encounteredItems = itemIds.map((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
     return { id: item.id, text: item.text };
@@ -40,7 +86,7 @@ function renderQuestion(arm, profile, taskId, encounteredItemIds, history = []) 
       friction_cues: profile.friction_cues
     } },
     encounteredItems,
-    responseHistory: history.map((event) => ({ ...event }))
+    trajectory: compactTrajectory(arm, history)
   };
   return {
     state,
@@ -61,21 +107,17 @@ var JourneyExecutionError = class extends Error {
 };
 async function runJourney({ arm, profile, ask }) {
   const events = [];
-  const encountered = [];
-  const history = [];
   let decisionCount = 0;
   const expose = (itemId, nodeId) => {
-    encountered.push(itemId);
     events.push({ type: "exposure", sequence: events.length, nodeId, itemId });
   };
   const answer = async (taskId, nodeId) => {
-    const request = renderQuestion(arm, profile, taskId, encountered, history);
+    const request = compileDecisionPacket(arm, profile, taskId, events);
     const result = await ask(request);
     if (typeof result?.choice !== "string" || !Object.hasOwn(request.question.options, result.choice)) {
       throw new JourneyExecutionError(`Task ${taskId} returned an option that was not offered.`);
     }
     decisionCount += 1;
-    history.push({ taskId, choice: result.choice });
     events.push({ type: "choice", sequence: events.length, nodeId, taskId, choice: result.choice });
     return result.choice;
   };
