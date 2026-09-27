@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "system-one-polling",
+  "version": "0.1.0",
+  "description": "Run bounded, evidence-conscious simulated reader polls with hosted Jev or a configured local System One model.",
+  "author": {
+    "name": "Harley Bartles",
+    "url": "https://github.com/HarleyBartles"
+  },
+  "repository": "https://github.com/HarleyBartles/system-one-polling",
+  "license": "MIT",
+  "keywords": ["polling", "reader research", "system one", "jev", "simulation"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "System One Polling",
+        "shortDescription": "Run bounded simulated reader studies.",
+        "longDescription": "Prepare a frozen reader cohort, run bounded Jev or local System One polling, and inspect cautious evidence-based reports.",
+        "developerName": "Harley Bartles",
+        "category": "Research",
+        "capabilities": ["Read", "Write"]
+      }
+    }
+  }
+}

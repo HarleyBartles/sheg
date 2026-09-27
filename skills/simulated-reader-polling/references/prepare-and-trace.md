@@ -1,0 +1,10 @@
+# Prepare and trace a study
+
+Use these steps when the user asks to validate inputs, inspect reader-facing material, or debug a graph route without running model inference.
+
+1. Read the version `1.0` manifest and separate frozen cohort. Consult [study inputs](manifest.md) for their fields. Check the cohort rationale and profile fit to the study question. Do not silently edit or replace the cohort.
+2. Inspect every reader-visible item, decision, offered label, reachable transition, terminal outcome, and decision ceiling. Check that optional content is only reachable through its intended graph edges. Only graph items are shown to readers; source files and hashes establish integrity.
+3. Call `poll_check` with the manifest, cohort, output directory, explicit provider, and budgets. This validates and fingerprints inputs without a provider call.
+4. Use `poll_trace` with a frozen reader ID and scripted choices to debug a route. A scripted trace is graph evidence, not reader evidence.
+
+Do not use `poll_start` as a validation shortcut. If the check or trace suggests simulated-reader evidence may help, read [run and recovery](run-and-recovery.md) before deciding whether to start a poll.
