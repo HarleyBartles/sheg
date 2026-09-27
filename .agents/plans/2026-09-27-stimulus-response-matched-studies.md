@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` for this tightly coupled plan. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Artifact status:** in-progress
+**Artifact status:** completed-awaiting-retirement
 
 **Goal:** Replace the unreleased reader-only study contract with typed stimulus-task-response studies and matched A/B arms, then ship one complete comprehension-choice slice through the existing plugin.
 
