@@ -29,16 +29,16 @@ If a task declares one correct option, its report includes correct, incorrect, a
 
 ## Comparison and interpretation
 
-- A matched A/B run executes each frozen profile once per arm. It reports intended, completed, and excluded profile counts per arm, plus completed response-cell counts per task. These denominators are not interchangeable.
+- A matched A/B run executes each frozen profile once per arm. It reports cohort, started, completed, and excluded profile counts per arm. For each task-presentation occurrence, it reports how many profiles reached it, completed it, or reached it without a valid response, plus the cohort profiles who never reached it. These denominators are not interchangeable; graph early exits and unselected branches are not missing answers.
 - Reports show per-arm option counts and proportions, and a matched profile-level transition table for stable option IDs shared by the compared tasks.
-- The study declares comparison keys for tasks intended to measure the same response across arms. Reusing an option ID across tasks asserts that it has the same response meaning in both arms. Paired option transitions are emitted only for a shared comparison key and shared option IDs. Arm-specific options remain visible in arm distributions and are counted as unpaired; they are never silently treated as equivalent.
+- The study declares comparison keys for task presentations intended to measure the same response across arms. Reusing an option ID across tasks asserts that it has the same response meaning in both arms. Repeated presentations align by comparison key and occurrence order. Paired option transitions are emitted only for a shared comparison key and shared option IDs. Arm-specific options remain visible in arm distributions and are counted as unpaired; they are never silently treated as equivalent.
 - Changing stimulus, question wording, or option descriptions is permitted. The report records arm fingerprints and makes changed fields inspectable. Users must not infer a causal effect for one changed field when multiple fields changed together.
-- The provider and model configuration must match for the primary matched comparison. Comparison validation rejects mismatched provider/model configurations; users can still inspect separate reports. It is never presented as an isolated stimulus effect when multiple treatment fields changed together.
-- Reports are descriptive outputs for this cohort and provider. They do not claim a representative human sample, human accuracy, statistical significance, real-world lift, or calibration. Repeating identical profile-task calls is not a way to increase sample size. No confidence interval or significance test is introduced.
+- Provider selection and all decision-affecting model settings are run-level and shared by every arm. Arm comparisons happen within one run; cross-run comparison is not supported in this release. This ensures a matched comparison cannot mix providers or model configurations.
+- Reports are scoped to one run and its cohort/provider configuration. There is no cross-run pooling feature. They do not claim a representative human sample, human accuracy, statistical significance, real-world lift, or calibration. Repeating identical profile-task calls is not a way to increase sample size. No confidence interval or significance test is introduced.
 
 ## Presentation flow
 
-The existing bounded graph remains available inside an arm to express sequential exposure, conditional content, question order, and early exit. A simple passage followed by one question must also be easy to author as a minimal arm flow. Graph traversal and termination bounds remain deterministic. Each question event records one response cell; an early exit means later cells are unobserved, not negative responses.
+An arm declares one of two presentation modes. `sequence` exposes its ordered text items and then presents its ordered tasks, requiring no graph authoring. `graph` supplies the existing bounded graph to express interleaved exposure, conditional content, question order, and early exit. Graph traversal and termination bounds remain deterministic. Each task presentation records one response cell; an early exit means later cells are unobserved, not negative responses.
 
 ## Runtime and evidence
 
@@ -51,7 +51,7 @@ The existing bounded graph remains available inside an arm to express sequential
 
 ## Migration and scope
 
-This project has not merged its first implementation. Replace the unreleased `1.0` study manifest, `2.0` reader cohort contract, and report shape in PR #1 with the new contracts. Do not add compatibility shims for these unreleased formats. Update fixtures, tests, documentation, generated schema assets, and distribution together.
+This project has not merged its first implementation. Replace the unreleased study manifest `1.0` with study contract `2.0`, reader cohort `2.0` with respondent cohort `3.0`, checkpoint format `1` with `2`, and report format `1` with `2` in PR #1. Do not add compatibility shims for these unreleased formats. Update fixtures, tests, documentation, generated schema assets, and distribution together.
 
 Out of scope for this slice: free-text or span responses, ranking/pairwise response types, image/audio/video stimuli, external human-panel recruitment, real-world task execution, statistical inference, provider/model sampling studies, and duplicate-call replication analysis. The contracts should be extensible, but the first release must not advertise unsupported response types.
 
@@ -61,7 +61,7 @@ Out of scope for this slice: free-text or span responses, ranking/pairwise respo
 2. A user can prepare two arms with distinct stimulus/question content and run both against exactly the same frozen profile IDs.
 3. Every completed respondent-task-arm cell has one persisted typed response. Retries count only as attempts; they do not add respondents or response cells.
 4. The provider prompt excludes answer keys, hidden content, study purpose, and other arms while preserving the profile, exposed material, history, and current options.
-5. A/B reports show arm-specific fingerprints, cohort and task denominators, option distributions, matched profile changes only where comparison keys and option IDs align, and explicit unmatched/incomplete counts.
-6. Comparisons cannot imply an isolated treatment effect when provider/model differs or when multiple stimulus/task fields changed; reports expose these facts.
+5. A/B reports show arm-specific fingerprints, cohort and task-presentation denominators, option distributions, matched profile changes only where comparison keys and option IDs align, and explicit not-reached, incomplete, and unmatched counts.
+6. Comparisons cannot imply an isolated treatment effect when multiple stimulus/task fields changed; reports expose the arm-specific changes.
 7. Durable run behavior, budgets, provider evidence, CLI/MCP parity, plugin packaging, generated contracts, and clean `dist/` behavior continue to pass the repository gate.
 8. The installed skill and docs define the unit of observation as a distinct profile-task-arm cell and explicitly prohibit counting deterministic repeats or retries as additional respondents.
