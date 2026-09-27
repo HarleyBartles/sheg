@@ -43,7 +43,7 @@ export async function runCli(args: readonly string[], io = { out: (value: string
   }
 }
 
-const helpText = `system-one-polling <command>
+const helpText = `sheg <command>
 Commands:
   check --config <json>                         Validate study and provider configuration
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>

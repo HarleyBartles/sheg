@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This directory records durable decisions for System One Polling: the context in
+This directory records durable decisions for Sheg: the context in
 which each decision was made, the alternatives considered, and its consequences.
 The records are part of the repository so future contributors can read them
 alongside the code and planning artifacts.

@@ -56,6 +56,6 @@
     "friction_cues"
   ],
   "additionalProperties": false,
-  "$id": "https://schemas.system-one-polling.dev/respondent-profile.schema.json",
+  "$id": "urn:sheg:schema:respondent-profile.schema.json",
   "title": "Respondent profile"
 }

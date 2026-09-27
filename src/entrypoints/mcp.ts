@@ -18,7 +18,7 @@ const configSchema = z.object({
 }).strict();
 
 export function createPollingServer(manager = new RunManager()): McpServer {
-  const server = new McpServer({ name: 'system-one-polling', version: '0.1.0' }, { instructions: 'Polling decisions are simulations. Check and trace do not contact a provider. Hosted runs require explicit call and spend caps. Reports describe simulated responses, not readership or publication outcomes.' });
+  const server = new McpServer({ name: 'sheg', version: '0.1.0' }, { instructions: 'Polling decisions are simulations. Check and trace do not contact a provider. Hosted runs require explicit call and spend caps. Reports describe simulated responses, not readership or publication outcomes.' });
   server.registerTool('poll_check', { description: 'Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls.', inputSchema: { config: configSchema } }, async ({ config }) => {
     const checked = await checkStudy(config as RunConfig);
     return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint });

@@ -7,7 +7,7 @@ import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
-const schemaBaseUri = 'https://schemas.system-one-polling.dev/';
+const schemaBaseUri = 'urn:sheg:schema:';
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
   { filename: 'respondent-archetype.schema.json', title: 'Respondent archetype', schema: respondentArchetypeSchema },
   { filename: 'respondent-archetype-library.schema.json', title: 'Respondent archetype library', schema: respondentArchetypeLibrarySchema },

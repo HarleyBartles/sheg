@@ -21483,7 +21483,7 @@ async function runCli(args, io = { out: (value) => process.stdout.write(`${value
     return 1;
   }
 }
-var helpText = `system-one-polling <command>
+var helpText = `sheg <command>
 Commands:
   check --config <json>                         Validate study and provider configuration
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>

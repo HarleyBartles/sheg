@@ -6,7 +6,7 @@ This repository root is both an Agent Plugin package and a local repo marketplac
 
 1. Copy or clone this repository to a stable local directory.
 2. Register the repo marketplace once with `codex plugin marketplace add <repository-root>`.
-3. Restart Codex and install or enable **System One Polling** in the Plugins Directory.
+3. Restart Codex and install or enable **Sheg** in the Plugins Directory.
 4. Verify `poll_check` and `poll_trace` appear before preparing a paid run.
 
 The marketplace entry points to the repository root (`./`), where `plugin.json`, `mcp.json`, `skills/`, and `dist/` live. Codex installs a cached copy, so source edits require refreshing the marketplace and restarting Codex. Follow the current [Codex plugin installation guide](https://developers.openai.com/plugins/build/plugins) for local marketplace behavior.

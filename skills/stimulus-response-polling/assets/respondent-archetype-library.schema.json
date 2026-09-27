@@ -3,8 +3,8 @@
   "minItems": 1,
   "type": "array",
   "items": {
-    "$ref": "https://schemas.system-one-polling.dev/respondent-archetype.schema.json"
+    "$ref": "urn:sheg:schema:respondent-archetype.schema.json"
   },
-  "$id": "https://schemas.system-one-polling.dev/respondent-archetype-library.schema.json",
+  "$id": "urn:sheg:schema:respondent-archetype-library.schema.json",
   "title": "Respondent archetype library"
 }

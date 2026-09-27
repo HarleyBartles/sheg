@@ -108,6 +108,6 @@
     "variation_axes"
   ],
   "additionalProperties": false,
-  "$id": "https://schemas.system-one-polling.dev/respondent-archetype.schema.json",
+  "$id": "urn:sheg:schema:respondent-archetype.schema.json",
   "title": "Respondent archetype"
 }

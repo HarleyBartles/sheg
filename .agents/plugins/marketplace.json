@@ -1,11 +1,11 @@
 {
-  "name": "system-one-polling",
+  "name": "sheg",
   "interface": {
-    "displayName": "System One Polling"
+    "displayName": "Sheg"
   },
   "plugins": [
     {
-      "name": "system-one-polling",
+      "name": "sheg",
       "source": {
         "source": "local",
         "path": "./"

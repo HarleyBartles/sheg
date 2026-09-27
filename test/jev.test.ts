@@ -6,7 +6,7 @@ import type { DecisionRequest } from '../src/domain/decision/decision.js';
 const config: JevConfig = {
   kind: 'jev',
   model: 'typesafe/jev-1.13',
-  keyEnv: 'SYSTEM_ONE_POLLING_TEST_OPENROUTER_KEY',
+  keyEnv: 'SHEG_TEST_OPENROUTER_KEY',
   endpoint: 'https://openrouter.ai/api/alpha/decisions',
   timeoutMs: 2_000,
 };

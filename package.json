@@ -1,7 +1,7 @@
 {
-  "name": "system-one-polling",
+  "name": "sheg",
   "version": "0.1.0",
-  "description": "Bounded text stimulus and typed-response study harness for Jev and local System One models",
+  "description": "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   "scripts": {
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",

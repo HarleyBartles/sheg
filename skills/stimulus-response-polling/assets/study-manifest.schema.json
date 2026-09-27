@@ -289,7 +289,7 @@
     "arms"
   ],
   "additionalProperties": false,
-  "$id": "https://schemas.system-one-polling.dev/study-manifest.schema.json",
+  "$id": "urn:sheg:schema:study-manifest.schema.json",
   "title": "Study manifest",
   "x-validation-rules": [
     "Each study contains one or more arms, each with its own stimulus, tasks, and presentation.",

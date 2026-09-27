@@ -1,6 +1,6 @@
-# System One Polling
+# Sheg
 
-System One Polling is a Codex plugin and Node.js harness for running bounded, text-based stimulus and typed-response studies with Jev or a configured local System One provider.
+Sheg runs structured stimulus-task-response polls against simulated respondent cohorts using System One models. It is a Codex plugin and Node.js harness for bounded text studies. Jev is the available inference provider; local Laya inference remains gated.
 
 ## What it does
 
@@ -19,10 +19,10 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
 1. Add the repository marketplace:
 
    ```sh
-   codex plugin marketplace add HarleyBartles/system-one-polling
+   codex plugin marketplace add HarleyBartles/sheg
    ```
 
-2. Restart the Codex desktop app, open the Plugins Directory, select the **System One Polling** marketplace, and install the plugin.
+2. Restart the Codex desktop app, open the Plugins Directory, select the **Sheg** marketplace, and install the plugin.
 3. Confirm the `poll_check`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).

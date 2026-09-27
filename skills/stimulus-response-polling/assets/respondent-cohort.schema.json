@@ -7,13 +7,13 @@
       "const": "3.0"
     },
     "archetypes": {
-      "$ref": "https://schemas.system-one-polling.dev/respondent-archetype-library.schema.json"
+      "$ref": "urn:sheg:schema:respondent-archetype-library.schema.json"
     },
     "respondents": {
       "minItems": 1,
       "type": "array",
       "items": {
-        "$ref": "https://schemas.system-one-polling.dev/respondent-profile.schema.json"
+        "$ref": "urn:sheg:schema:respondent-profile.schema.json"
       }
     },
     "admission": {
@@ -41,7 +41,7 @@
     "respondents"
   ],
   "additionalProperties": false,
-  "$id": "https://schemas.system-one-polling.dev/respondent-cohort.schema.json",
+  "$id": "urn:sheg:schema:respondent-cohort.schema.json",
   "title": "Frozen respondent cohort",
   "x-validation-rules": [
     "Respondent IDs are unique within the cohort.",

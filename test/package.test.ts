@@ -16,7 +16,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
       await rm(sandbox, { recursive: true, force: true });
     }
   });
-  const plugin = path.join(sandbox, 'installed', 'system-one-polling');
+  const plugin = path.join(sandbox, 'installed', 'sheg');
   await mkdir(path.dirname(plugin), { recursive: true });
   for (const item of ['plugin.json', 'mcp.json', 'dist']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
   await cp(path.resolve('skills/stimulus-response-polling/SKILL.md'), path.join(plugin, 'skills/stimulus-response-polling/SKILL.md'), { recursive: true });
@@ -33,10 +33,10 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(plugin, 'node_modules')), false);
   const manifest = JSON.parse(await readFile(path.join(plugin, 'plugin.json'), 'utf8')) as { name: string };
   const mcp = JSON.parse(await readFile(path.join(plugin, 'mcp.json'), 'utf8')) as { mcpServers: Record<string, { type: string; command: string; args: string[]; cwd: string }> };
-  assert.equal(manifest.name, 'system-one-polling');
-  assert.equal(mcp.mcpServers['system-one-polling']?.type, 'stdio');
-  assert.equal(mcp.mcpServers['system-one-polling']?.args[0], '${PLUGIN_ROOT}/dist/mcp.js');
-  assert.equal(mcp.mcpServers['system-one-polling']?.cwd, '${PLUGIN_ROOT}');
+  assert.equal(manifest.name, 'sheg');
+  assert.equal(mcp.mcpServers['sheg']?.type, 'stdio');
+  assert.equal(mcp.mcpServers['sheg']?.args[0], '${PLUGIN_ROOT}/dist/mcp.js');
+  assert.equal(mcp.mcpServers['sheg']?.cwd, '${PLUGIN_ROOT}');
   const inputs = path.join(sandbox, 'user-study');
   await mkdir(inputs);
   for (const fixture of ['article.json', 'cohort.json', 'article-source.md']) await cp(path.resolve('test/fixtures', fixture), path.join(inputs, fixture));
