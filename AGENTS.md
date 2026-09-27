@@ -1,5 +1,10 @@
 # Repository agent orientation
 
+At the start of a task, invoke `/using-superpowers-plus` when it is available
+in the ambient harness. Use it as the first-turn router for selecting
+applicable skills and workflow guidance. Do not vendor a repository copy solely
+for this purpose.
+
 ## Repository surfaces
 
 - `src/domain/` owns study, respondent, decision, and journey contracts and behavior.
