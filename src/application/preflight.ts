@@ -95,7 +95,7 @@ export async function preflightStudy(input: StudyPreflightInput): Promise<{ prov
       status: !complete || unavailable.length ? 'unverified' : overflows.length ? 'does-not-fit' : 'fit',
       basis: config.mode === 'maximum-profile' ? 'synthetic-profile' : 'frozen-cohort',
       configuration: providerConfig.kind === 'jev'
-        ? process.env[providerConfig.keyEnv] ? 'configured' : 'incomplete'
+        ? process.env[providerConfig.keyEnv]?.trim() ? 'configured' : 'incomplete'
         : unavailable.length ? 'incomplete' : 'configured',
       availability: 'unverified',
       complete, packetCount: traversal.packetCount, terminalJourneyCount: traversal.terminalJourneyCount,

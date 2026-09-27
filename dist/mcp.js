@@ -36881,7 +36881,7 @@ async function preflightStudy(input2) {
       tokenizerSha256: providerConfig.kind === "laya" ? providerConfig.tokenizerSha256 : null,
       status: !complete || unavailable2.length ? "unverified" : overflows.length ? "does-not-fit" : "fit",
       basis: config2.mode === "maximum-profile" ? "synthetic-profile" : "frozen-cohort",
-      configuration: providerConfig.kind === "jev" ? process.env[providerConfig.keyEnv] ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
+      configuration: providerConfig.kind === "jev" ? process.env[providerConfig.keyEnv]?.trim() ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
       availability: "unverified",
       complete,
       packetCount: traversal.packetCount,

@@ -75,6 +75,17 @@ test('provider context fit stays distinct from missing credentials and unverifie
   assert.equal(result.providers[0]?.status, 'fit');
   assert.equal(result.providers[0]?.configuration, 'incomplete');
   assert.equal(result.providers[0]?.availability, 'unverified');
+
+  process.env[missingCredential] = '   ';
+  try {
+    const blankKey = await preflightStudy({
+      manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
+      providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: missingCredential, endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+    });
+    assert.equal(blankKey.providers[0]?.configuration, 'incomplete');
+  } finally {
+    delete process.env[missingCredential];
+  }
 });
 
 test('preflight identities change with the respondent basis and provider context settings', async () => {
