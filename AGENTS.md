@@ -6,7 +6,7 @@ those files for current requirements, task order, and verification.
 
 ## Repository surfaces
 
-- `src/domain/` owns study, reader, decision, and journey contracts and behavior.
+- `src/domain/` owns study, respondent, decision, and journey contracts and behavior.
 - `src/application/`, `src/providers/`, `src/infrastructure/`, and
   `src/entrypoints/` are the planned homes for orchestration, model adapters,
   persistence/runtime support, and CLI/MCP boundaries as those surfaces are

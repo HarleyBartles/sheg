@@ -1,14 +1,15 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import { archetypeLibrarySchema, readerArchetypeSchema } from '../src/domain/readers/archetype.js';
-import { respondentCohortSchema, respondentProfileSchema } from '../src/domain/respondents/profile.js';
+import { respondentArchetypeLibrarySchema, respondentArchetypeSchema } from '../src/domain/respondents/archetype.js';
+import { respondentCohortSchema } from '../src/domain/respondents/cohort.js';
+import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
 import { manifestSchema } from '../src/domain/study/manifest.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
-  { filename: 'reader-archetype.schema.json', title: 'Reader archetype', schema: readerArchetypeSchema },
-  { filename: 'reader-archetype-library.schema.json', title: 'Reader archetype library', schema: archetypeLibrarySchema },
+  { filename: 'respondent-archetype.schema.json', title: 'Respondent archetype', schema: respondentArchetypeSchema },
+  { filename: 'respondent-archetype-library.schema.json', title: 'Respondent archetype library', schema: respondentArchetypeLibrarySchema },
   { filename: 'respondent-profile.schema.json', title: 'Respondent profile', schema: respondentProfileSchema },
   { filename: 'respondent-cohort.schema.json', title: 'Frozen respondent cohort', schema: respondentCohortSchema, validationRules: [
     'Respondent IDs are unique within the cohort.', 'Every archetypeId refers to an archetype included in the cohort snapshot.',

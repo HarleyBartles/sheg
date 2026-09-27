@@ -23,11 +23,13 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   await cp(path.resolve('skills/stimulus-response-polling/references'), path.join(plugin, 'skills/stimulus-response-polling/references'), { recursive: true });
   await cp(path.resolve('skills/stimulus-response-polling/assets'), path.join(plugin, 'skills/stimulus-response-polling/assets'), { recursive: true });
   await assertSkillLinksResolve(path.join(plugin, 'skills/stimulus-response-polling'), plugin);
-  assert.equal(await exists(path.join(plugin, 'dist/data/reader-archetypes.json')), true);
-  for (const contract of ['reader-archetype.schema.json', 'reader-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
+  assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
+  for (const contract of ['respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
     assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets', contract)), true);
   }
-  assert.equal(await exists(path.join(plugin, 'dist/skills/stimulus-response-polling/assets/reader-archetypes.json')), false);
+  assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets/reader-archetype.schema.json')), false);
+  assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets/reader-archetype-library.schema.json')), false);
+  assert.equal(await exists(path.join(plugin, 'dist/skills/stimulus-response-polling/assets/respondent-archetypes')), false);
   assert.equal(await exists(path.join(plugin, 'node_modules')), false);
   const manifest = JSON.parse(await readFile(path.join(plugin, 'plugin.json'), 'utf8')) as { name: string };
   const mcp = JSON.parse(await readFile(path.join(plugin, 'mcp.json'), 'utf8')) as { mcpServers: Record<string, { type: string; command: string; args: string[]; cwd: string }> };
@@ -69,7 +71,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.match(resultsGuidance, /simulated profile-conditioned typed responses/);
   const cohortGuidance = await readFile(path.join(plugin, 'skills/stimulus-response-polling/references/archetypes-and-cohorts.md'), 'utf8');
   assert.match(cohortGuidance, /Supply profiles directly/);
-  assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/reader-archetypes.json')), true);
+  assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
 
 async function exists(filePath: string): Promise<boolean> {

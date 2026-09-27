@@ -1,0 +1,155 @@
+[
+  {
+    "id": "hiring-evaluator",
+    "intent": "Decide whether forwarding this author's work for technical scrutiny would be worth the risk.",
+    "context": "A weary hiring manager has reviewed many polished agentic-engineering portfolios; three promising links were dismissed by the architect.",
+    "desired_outcome": "Enough legible, attributable evidence to make a confident forward-or-decline decision.",
+    "engagement_cues": "A short path from professional claim to inspectable decision, responsibility and consequence.",
+    "friction_cues": "Another fluent pitch that makes the manager risk looking foolish when a technical peer opens the link.",
+    "name": "Hiring evaluator",
+    "invariants": [
+      "Assesses whether evidence supports the professional claims being made.",
+      "Considers the reputational cost of forwarding work that fails later scrutiny."
+    ],
+    "variation_axes": [
+      {
+        "id": "evaluation_role",
+        "description": "The reader’s role in deciding whether work advances.",
+        "values": [
+          {
+            "id": "recruiter",
+            "description": "Screens for relevance and clear evidence."
+          },
+          {
+            "id": "hiring_manager",
+            "description": "Decides whether a candidate merits team time."
+          },
+          {
+            "id": "technical_referrer",
+            "description": "Risks personal credibility when recommending the work."
+          }
+        ]
+      },
+      {
+        "id": "evidence_threshold",
+        "description": "How much inspectable detail the reader needs before making a recommendation.",
+        "values": [
+          {
+            "id": "claim_check",
+            "description": "Needs concrete evidence for each major claim."
+          },
+          {
+            "id": "decision_trace",
+            "description": "Needs to inspect decisions and trade-offs."
+          },
+          {
+            "id": "peer_scrutiny",
+            "description": "Needs evidence likely to survive technical questioning."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "jaded-architect",
+    "intent": "Strip the presentation away and test whether this author understands the engineering underneath.",
+    "context": "A principal engineer or architect has already dismissed three similar forwarded portfolios and expects pattern vocabulary to conceal thin reasoning.",
+    "desired_outcome": "A technical account that survives questions about mechanism, alternatives, cost, evidence and limits—or reveals where it does not.",
+    "engagement_cues": "Specific decisions and falsifiable detail that remain coherent under hostile scrutiny.",
+    "friction_cues": "Named patterns, polished diagrams or confident outcomes that collapse when asked why this approach was chosen.",
+    "name": "Jaded architect",
+    "invariants": [
+      "Tests engineering claims beneath the presentation and pattern vocabulary.",
+      "Looks for mechanisms, alternatives, costs, evidence, and limits that withstand scrutiny."
+    ],
+    "variation_axes": [
+      {
+        "id": "engineering_focus",
+        "description": "Which engineering concern most shapes the reader’s scrutiny.",
+        "values": [
+          {
+            "id": "architecture",
+            "description": "Boundaries, dependencies, and system structure."
+          },
+          {
+            "id": "operations",
+            "description": "Reliability, observability, and ongoing cost."
+          },
+          {
+            "id": "delivery",
+            "description": "Implementation choices and evidence of execution."
+          }
+        ]
+      },
+      {
+        "id": "scrutiny_style",
+        "description": "How the reader approaches a claim that sounds polished.",
+        "values": [
+          {
+            "id": "mechanism",
+            "description": "Asks how the result was produced."
+          },
+          {
+            "id": "alternatives",
+            "description": "Asks what else was considered and why rejected."
+          },
+          {
+            "id": "falsification",
+            "description": "Looks for evidence that could disprove the claim."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "prospective-collaborator",
+    "intent": "Imagine solving a difficult problem alongside this author.",
+    "context": "Could become a colleague or partner and cares about how disagreement and credit are handled.",
+    "desired_outcome": "A sense that the author can reason openly, change course and make others effective.",
+    "engagement_cues": "Candid uncertainty, colleagues' contributions and decisions made with rather than over people.",
+    "friction_cues": "Blame shifted onto absent teammates or a flawless-protagonist story.",
+    "name": "Prospective collaborator",
+    "invariants": [
+      "Imagines working through a difficult problem with the author.",
+      "Values open reasoning, fair credit, disagreement, and shared effectiveness."
+    ],
+    "variation_axes": [
+      {
+        "id": "collaboration_context",
+        "description": "The kind of working relationship the reader imagines.",
+        "values": [
+          {
+            "id": "teammate",
+            "description": "A close day-to-day colleague."
+          },
+          {
+            "id": "partner",
+            "description": "A peer coordinating across teams."
+          },
+          {
+            "id": "client",
+            "description": "A partner depending on delivered work."
+          }
+        ]
+      },
+      {
+        "id": "trust_signal",
+        "description": "What most helps the reader judge whether collaboration would work.",
+        "values": [
+          {
+            "id": "course_correction",
+            "description": "Evidence the author can change course."
+          },
+          {
+            "id": "shared_credit",
+            "description": "Evidence others’ contributions are recognized."
+          },
+          {
+            "id": "disagreement",
+            "description": "Evidence conflict is handled constructively."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { BudgetLedger } from '../infrastructure/budget-ledger.js';
 import { CheckpointStore, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
-import type { DecisionProvider, DecisionResult } from '../domain/decision/contract.js';
+import type { DecisionResult } from '../domain/decision/decision.js';
+import type { DecisionProvider } from '../domain/decision/provider.js';
 import { JourneyExecutionError, runJourney } from '../domain/journey/run.js';
 import { loadStudy } from '../domain/study/load-study.js';
 import { promptContractHash } from '../domain/decision/prompt.js';

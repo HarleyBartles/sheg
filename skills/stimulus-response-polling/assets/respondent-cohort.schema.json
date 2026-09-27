@@ -21,27 +21,27 @@
             "minLength": 1,
             "maxLength": 500
           },
-          "arrival_intent": {
+          "intent": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "background": {
+          "context": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "desired_payoff": {
+          "desired_outcome": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "drawn_in_by": {
+          "engagement_cues": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "put_off_by": {
+          "friction_cues": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
@@ -109,11 +109,11 @@
         "required": [
           "id",
           "name",
-          "arrival_intent",
-          "background",
-          "desired_payoff",
-          "drawn_in_by",
-          "put_off_by",
+          "intent",
+          "context",
+          "desired_outcome",
+          "engagement_cues",
+          "friction_cues",
           "invariants",
           "variation_axes"
         ],
@@ -145,27 +145,27 @@
               "pattern": "^[a-z][a-z0-9_-]{0,63}$"
             }
           },
-          "arrival_intent": {
+          "intent": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "background": {
+          "context": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "desired_payoff": {
+          "desired_outcome": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "drawn_in_by": {
+          "engagement_cues": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
           },
-          "put_off_by": {
+          "friction_cues": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500
@@ -173,11 +173,11 @@
         },
         "required": [
           "id",
-          "arrival_intent",
-          "background",
-          "desired_payoff",
-          "drawn_in_by",
-          "put_off_by"
+          "intent",
+          "context",
+          "desired_outcome",
+          "engagement_cues",
+          "friction_cues"
         ],
         "additionalProperties": false
       }

@@ -9,7 +9,7 @@ The first release after this redesign must make a multiple-choice comprehension 
 ## User workflow
 
 1. The user supplies bounded text stimulus and records its source and exact content.
-2. The user authors or selects a frozen cohort of distinct respondent profiles. Bundled reader archetypes remain available as inputs for authoring study-specific profiles. The runtime does not generate profiles.
+2. The user authors or selects a frozen cohort of distinct respondent profiles. Bundled respondent archetypes remain available as inputs for authoring study-specific profiles. Archetypes have a stable respondent-level contract and are organized into semantic groups for discovery; group membership does not constrain mixing. The runtime does not generate profiles.
 3. The user defines one or more tasks with structured response contracts. The first supported contract is a finite choice, whose options have stable IDs and user-facing descriptions. Comprehension questions may include an `unanswerable` option and may declare exactly one correct option as a hidden answer key when the user wants correctness to be scored.
 4. The user defines one or more study arms. A single-arm study is supported; a matched A/B study has at least two arms and evaluates the same frozen profile cohort in each arm. An arm owns its stimulus and its presentation/task flow.
 5. The user validates and previews the exact respondent-visible state, then runs under explicit provider, call, and spend limits.
@@ -19,7 +19,7 @@ The first release after this redesign must make a multiple-choice comprehension 
 
 - **Stimulus:** bounded text visible to respondents. It may comprise one passage or multiple items. Source references and hashes bind the study to the exact supplied material.
 - **Task:** a question or instruction about the stimulus, paired with a declared response contract. First release supports typed choice only.
-- **Respondent profile:** one explicitly authored perspective. Cohorts are frozen, ordered, and unique by profile ID. Reader archetypes are a reusable family of respondent archetypes; user-defined archetypes and directly authored profiles remain valid.
+- **Respondent profile:** one explicitly authored perspective with generalized `intent`, `context`, `desired_outcome`, `engagement_cues`, and `friction_cues`. Cohorts are frozen, ordered, and unique by profile ID. Respondent archetypes are reusable authoring guides grouped semantically; user-defined archetypes and directly authored profiles remain valid.
 - **Arm/condition:** one study variant with its own stimulus and task presentation. A single-arm study has one arm. A/B conditions reuse the same cohort; profiles are matched across arms by stable ID.
 - **Response cell:** one respondent profile answering one task presentation in one arm, with the exact exposed stimulus and response history as context. A valid cell contributes at most one recorded response. Provider retries are attempts to complete that same cell, not additional observations. Re-running an identical completed cell is outside the first release and cannot inflate respondent or response denominators. Revisiting a task in a graph after new exposure or response history is a distinct task presentation.
 

@@ -4,7 +4,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { traceStudy } from '../src/domain/journey/trace.js';
 import { manifestSchema } from '../src/domain/study/manifest.js';
-import { loadRespondents } from '../src/domain/respondents/profile.js';
+import { loadRespondents } from '../src/domain/respondents/cohort.js';
 
 const fixture = new URL('./fixtures/', import.meta.url);
 const study = manifestSchema.parse(JSON.parse(readFileSync(fileURLToPath(new URL('article.json', fixture)), 'utf8')));

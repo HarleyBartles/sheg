@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DecisionError, validateDecision } from '../src/domain/decision/validate.js';
-import type { DecisionRequest, DecisionResult } from '../src/domain/decision/contract.js';
+import type { DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
 
 const request: DecisionRequest = {
   state: { respondent: { profile: 'Wants a concrete, accessible account.' }, visibleText: 'The repair began with a confusing symptom.' },

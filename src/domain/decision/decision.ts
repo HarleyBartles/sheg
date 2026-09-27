@@ -1,8 +1,5 @@
 import { z } from 'zod';
 
-export type ProviderKind = 'jev' | 'laya';
-export type ChargeStatus = 'billed' | 'not_billed' | 'unknown';
-
 export const decisionRequestSchema = z.object({
   state: z.record(z.string(), z.unknown()),
   question: z.object({
@@ -38,14 +35,3 @@ export const decisionResultSchema = z.object({
 
 export type DecisionRequest = z.infer<typeof decisionRequestSchema>;
 export type DecisionResult = z.infer<typeof decisionResultSchema>;
-
-export type ValidationOptions = {
-  maxAttempts?: number;
-  provider?: ProviderKind;
-  model?: string;
-  checkpoint?: string;
-};
-
-export interface DecisionProvider {
-  decide(request: DecisionRequest, maxAttempts: number): Promise<DecisionResult>;
-}

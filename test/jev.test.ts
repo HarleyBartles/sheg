@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JevCallError, JevProvider, type JevConfig } from '../src/providers/jev.js';
-import type { DecisionRequest } from '../src/domain/decision/contract.js';
+import type { DecisionRequest } from '../src/domain/decision/decision.js';
 
 const config: JevConfig = {
   kind: 'jev',

@@ -19690,17 +19690,17 @@ var StudyInputError = class extends Error {
   }
 };
 
-// src/domain/readers/archetype.ts
+// src/domain/respondents/archetype.ts
 var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 var proseSchema = external_exports.string().trim().min(1).max(500);
-var readerArchetypeSchema = external_exports.object({
+var respondentArchetypeSchema = external_exports.object({
   id: idSchema,
   name: proseSchema,
-  arrival_intent: proseSchema,
-  background: proseSchema,
-  desired_payoff: proseSchema,
-  drawn_in_by: proseSchema,
-  put_off_by: proseSchema,
+  intent: proseSchema,
+  context: proseSchema,
+  desired_outcome: proseSchema,
+  engagement_cues: proseSchema,
+  friction_cues: proseSchema,
   invariants: external_exports.array(proseSchema).min(2).max(6),
   variation_axes: external_exports.array(external_exports.object({
     id: idSchema,
@@ -19719,7 +19719,7 @@ var readerArchetypeSchema = external_exports.object({
     }
   }
 });
-var archetypeLibrarySchema = external_exports.array(readerArchetypeSchema).min(1).superRefine((archetypes, context) => {
+var respondentArchetypeLibrarySchema = external_exports.array(respondentArchetypeSchema).min(1).superRefine((archetypes, context) => {
   const ids = archetypes.map((archetype) => archetype.id);
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: "custom", message: "Archetype IDs must be unique in a library." });
@@ -19733,15 +19733,17 @@ var respondentProfileSchema = external_exports.object({
   id: idSchema2,
   archetypeId: idSchema2.optional(),
   variation: external_exports.record(idSchema2, idSchema2).optional(),
-  arrival_intent: proseSchema2,
-  background: proseSchema2,
-  desired_payoff: proseSchema2,
-  drawn_in_by: proseSchema2,
-  put_off_by: proseSchema2
+  intent: proseSchema2,
+  context: proseSchema2,
+  desired_outcome: proseSchema2,
+  engagement_cues: proseSchema2,
+  friction_cues: proseSchema2
 }).strict();
+
+// src/domain/respondents/cohort.ts
 var respondentCohortSchema = external_exports.object({
   version: external_exports.literal("3.0"),
-  archetypes: archetypeLibrarySchema.optional(),
+  archetypes: respondentArchetypeLibrarySchema.optional(),
   respondents: external_exports.array(respondentProfileSchema).min(1),
   admission: external_exports.object({
     rationale: external_exports.string().trim().min(1),
@@ -20008,7 +20010,7 @@ async function loadStudy(manifestPath, cohortPath) {
 // src/domain/decision/prompt.ts
 import { createHash as createHash2 } from "node:crypto";
 var promptContract = {
-  version: 3,
+  version: 4,
   stateFields: ["respondent.profile", "encounteredItems", "responseHistory"],
   onlyEncounteredItems: true,
   preserveEncounterOrder: true,
@@ -20029,11 +20031,11 @@ function renderQuestion(arm, profile, taskId, encounteredItemIds, history = []) 
   });
   const state = {
     respondent: { profile: {
-      arrival_intent: profile.arrival_intent,
-      background: profile.background,
-      desired_payoff: profile.desired_payoff,
-      drawn_in_by: profile.drawn_in_by,
-      put_off_by: profile.put_off_by
+      intent: profile.intent,
+      context: profile.context,
+      desired_outcome: profile.desired_outcome,
+      engagement_cues: profile.engagement_cues,
+      friction_cues: profile.friction_cues
     } },
     encounteredItems,
     responseHistory: history.map((event) => ({ ...event }))
@@ -20199,7 +20201,7 @@ import { randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir, rename as rename2, rm as rm2 } from "node:fs/promises";
 import path3 from "node:path";
 
-// src/domain/decision/contract.ts
+// src/domain/decision/decision.ts
 var decisionRequestSchema = external_exports.object({
   state: external_exports.record(external_exports.string(), external_exports.unknown()),
   question: external_exports.object({

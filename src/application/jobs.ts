@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { loadStudy } from '../domain/study/load-study.js';
-import type { DecisionProvider } from '../domain/decision/contract.js';
+import type { DecisionProvider } from '../domain/decision/provider.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
 import { BudgetLedger } from '../infrastructure/budget-ledger.js';
 import { CheckpointStore, emptyBudgetSnapshot, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';

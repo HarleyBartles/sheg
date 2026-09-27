@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadRespondents } from '../domain/respondents/profile.js';
+import { loadRespondents } from '../domain/respondents/cohort.js';
 import { traceStudy } from '../domain/journey/trace.js';
 import { loadStudy } from '../domain/study/load-study.js';
 import { RunManager, checkStudy, type RunConfig } from '../application/jobs.js';

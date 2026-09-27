@@ -12,7 +12,7 @@ test('prompt contains only encountered stimulus and the selected arm task, never
   const task = arm.tasks[1]!;
   const request = renderQuestion(arm, study.respondents[0]!, task.id, ['symptom', 'investigation'], [{ taskId: arm.tasks[0]!.id, choice: 'continue' }]);
   assert.deepEqual(request.state.encounteredItems.map((item) => item.id), ['symptom', 'investigation']);
-  assert.equal(request.state.respondent.profile.arrival_intent, study.respondents[0]!.arrival_intent);
+  assert.equal(request.state.respondent.profile.intent, study.respondents[0]!.intent);
   assert.equal(JSON.stringify(request).includes('answerKeyOptionId'), false);
   assert.equal(JSON.stringify(request).includes(study.manifest.study.purpose), false);
   assert.deepEqual(request.optionIds, Object.keys(task.options));

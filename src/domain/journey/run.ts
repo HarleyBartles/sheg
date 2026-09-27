@@ -1,4 +1,4 @@
-import type { DecisionRequest } from '../decision/contract.js';
+import type { DecisionRequest } from '../decision/decision.js';
 import { renderQuestion, type ChoiceHistoryEvent } from '../decision/prompt.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 import type { StudyArm } from '../study/manifest.js';

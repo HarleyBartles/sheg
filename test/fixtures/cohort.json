@@ -3,11 +3,11 @@
   "archetypes": [
     {
       "id": "craft-admirer",
-      "arrival_intent": "Watch a person make a thing and discover why its final shape works.",
-      "background": "Interested in process and decisions across writing, visual design, software or other crafts.",
-      "desired_payoff": "The constraints, rejected routes and particular choice become visible in the finished object.",
-      "drawn_in_by": "Material details, alternatives and the moment a better question changes the work.",
-      "put_off_by": "A reveal of the final artefact that skips the thinking that made it possible.",
+      "intent": "Watch a person make a thing and discover why its final shape works.",
+      "context": "Interested in process and decisions across writing, visual design, software or other crafts.",
+      "desired_outcome": "The constraints, rejected routes and particular choice become visible in the finished object.",
+      "engagement_cues": "Material details, alternatives and the moment a better question changes the work.",
+      "friction_cues": "A reveal of the final artefact that skips the thinking that made it possible.",
       "name": "Craft admirer",
       "invariants": [
         "Looks for the choices and constraints that shaped the finished work.",
@@ -54,11 +54,11 @@
     },
     {
       "id": "curious-outsider",
-      "arrival_intent": "Understand why an unfamiliar practice or problem matters without becoming a specialist.",
-      "background": "Intelligent reader with little prior knowledge of this article's technical or design domain.",
-      "desired_payoff": "A clear mental picture and a reason to care that can be retold in ordinary language.",
-      "drawn_in_by": "Concrete examples and terms introduced when their meaning becomes necessary.",
-      "put_off_by": "Insider shorthand that makes entry impossible, or a remedial lecture that stalls the story.",
+      "intent": "Understand why an unfamiliar practice or problem matters without becoming a specialist.",
+      "context": "Intelligent reader with little prior knowledge of this article's technical or design domain.",
+      "desired_outcome": "A clear mental picture and a reason to care that can be retold in ordinary language.",
+      "engagement_cues": "Concrete examples and terms introduced when their meaning becomes necessary.",
+      "friction_cues": "Insider shorthand that makes entry impossible, or a remedial lecture that stalls the story.",
       "name": "Curious outsider",
       "invariants": [
         "Wants to understand why the subject matters without becoming a specialist.",
@@ -116,11 +116,11 @@
         "subject_familiarity": "newcomer",
         "explanation_tolerance": "concrete_first"
       },
-      "arrival_intent": "Understand how software design choices affect the people who use a system.",
-      "background": "Uses AI coding tools but has little experience tracing how software components affect one another.",
-      "desired_payoff": "A clear example of why a design choice matters in practice.",
-      "drawn_in_by": "Plain explanations tied to visible user consequences.",
-      "put_off_by": "Unexplained architecture terms or a long theory detour."
+      "intent": "Understand how software design choices affect the people who use a system.",
+      "context": "Uses AI coding tools but has little experience tracing how software components affect one another.",
+      "desired_outcome": "A clear example of why a design choice matters in practice.",
+      "engagement_cues": "Plain explanations tied to visible user consequences.",
+      "friction_cues": "Unexplained architecture terms or a long theory detour."
     },
     {
       "id": "craft-reader",
@@ -129,11 +129,11 @@
         "craft_experience": "practitioner",
         "process_interest": "alternatives"
       },
-      "arrival_intent": "See how the engineering choices shaped the finished system.",
-      "background": "Builds software and has worked through several architectural trade-offs.",
-      "desired_payoff": "A concrete account of constraints, alternatives, and why one design held up.",
-      "drawn_in_by": "Specific implementation decisions and evidence from their consequences.",
-      "put_off_by": "A polished result that hides the trade-offs that produced it."
+      "intent": "See how the engineering choices shaped the finished system.",
+      "context": "Builds software and has worked through several architectural trade-offs.",
+      "desired_outcome": "A concrete account of constraints, alternatives, and why one design held up.",
+      "engagement_cues": "Specific implementation decisions and evidence from their consequences.",
+      "friction_cues": "A polished result that hides the trade-offs that produced it."
     }
   ]
 }

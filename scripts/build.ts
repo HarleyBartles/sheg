@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import { cp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { respondentArchetypeGroups } from '../src/domain/respondents/archetype-catalogue.js';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -23,12 +24,14 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
     outdir: resolvedOutputDirectory,
   });
 
-  const dataDirectory = path.join(resolvedOutputDirectory, 'data');
+  const dataDirectory = path.join(resolvedOutputDirectory, 'data/respondent-archetypes');
   await mkdir(dataDirectory, { recursive: true });
-  await cp(
-    path.join(repositoryRoot, 'src/domain/readers/reader-archetypes.json'),
-    path.join(dataDirectory, 'reader-archetypes.json'),
-  );
+  for (const group of respondentArchetypeGroups) {
+    await cp(
+      path.join(repositoryRoot, 'src/domain/respondents/archetype-groups', group.filename),
+      path.join(dataDirectory, group.filename),
+    );
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildPlugin();

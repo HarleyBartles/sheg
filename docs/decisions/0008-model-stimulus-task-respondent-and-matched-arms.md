@@ -1,6 +1,6 @@
 # ADR-0008: Model stimulus, task, respondent, and matched arms
 
-- Status: Accepted
+- Status: Accepted, archetype taxonomy superseded by ADR-0009
 - Date: 2026-09-27
 - Supersedes: [ADR-0003](0003-use-domain-neutral-polling-primitives.md), [ADR-0007](0007-guide-archetypes-and-freeze-reader-cohorts.md)
 

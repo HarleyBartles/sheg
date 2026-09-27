@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LayaProvider, checkLayaFit, type FitMeasurer, type LayaConfig } from '../src/providers/laya.js';
-import type { DecisionRequest } from '../src/domain/decision/contract.js';
+import type { DecisionRequest } from '../src/domain/decision/decision.js';
 
 const config: LayaConfig = {
   kind: 'laya',

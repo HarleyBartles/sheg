@@ -1,6 +1,7 @@
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
-import { decisionRequestSchema, type DecisionProvider, type DecisionRequest, type DecisionResult } from '../domain/decision/contract.js';
+import { decisionRequestSchema, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
+import type { DecisionProvider } from '../domain/decision/provider.js';
 import { DecisionError, validateDecision } from '../domain/decision/validate.js';
 
 export type JevConfig = {

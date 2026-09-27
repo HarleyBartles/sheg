@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { DecisionRequest } from './contract.js';
+import type { DecisionRequest } from './decision.js';
 import type { RespondentPerspective, RespondentProfile } from '../respondents/profile.js';
 import type { StudyArm } from '../study/manifest.js';
 
@@ -11,7 +11,7 @@ export type PromptState = {
 };
 
 const promptContract = {
-  version: 3,
+  version: 4,
   stateFields: ['respondent.profile', 'encounteredItems', 'responseHistory'],
   onlyEncounteredItems: true,
   preserveEncounterOrder: true,
@@ -39,11 +39,11 @@ export function renderQuestion(
   });
   const state: PromptState = {
     respondent: { profile: {
-      arrival_intent: profile.arrival_intent,
-      background: profile.background,
-      desired_payoff: profile.desired_payoff,
-      drawn_in_by: profile.drawn_in_by,
-      put_off_by: profile.put_off_by,
+      intent: profile.intent,
+      context: profile.context,
+      desired_outcome: profile.desired_outcome,
+      engagement_cues: profile.engagement_cues,
+      friction_cues: profile.friction_cues,
     } },
     encounteredItems,
     responseHistory: history.map((event) => ({ ...event })),

@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { StudyInputError } from '../errors.js';
-import { loadCohort, type RespondentCohort, type RespondentProfile } from '../respondents/profile.js';
+import { loadCohort, type RespondentCohort } from '../respondents/cohort.js';
+import type { RespondentProfile } from '../respondents/profile.js';
 import { manifestSchema } from './manifest.js';
 import type { StudyManifest } from './manifest.js';
 

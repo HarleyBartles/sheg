@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { respondentCohortSchema } from '../src/domain/respondents/profile.js';
+import { respondentCohortSchema } from '../src/domain/respondents/cohort.js';
 import { loadStudy } from '../src/domain/study/load-study.js';
 import { manifestSchema, type StudyManifest, type StudyArm } from '../src/domain/study/manifest.js';
 
@@ -42,11 +42,11 @@ function study(arms: StudyArm[] = [comprehensionArm('control')]): StudyManifest 
 
 const respondent = {
   id: 'respondent-a',
-  arrival_intent: 'Find a defensible answer.',
-  background: 'Comfortable reading short explanatory text.',
-  desired_payoff: 'Understand what the passage supports.',
-  drawn_in_by: 'Clear evidence.',
-  put_off_by: 'Unsupported certainty.',
+  intent: 'Find a defensible answer.',
+  context: 'Comfortable reading short explanatory text.',
+  desired_outcome: 'Understand what the passage supports.',
+  engagement_cues: 'Clear evidence.',
+  friction_cues: 'Unsupported certainty.',
 };
 
 test('accepts a graph-free comprehension study with an unanswerable option and hidden answer key', () => {

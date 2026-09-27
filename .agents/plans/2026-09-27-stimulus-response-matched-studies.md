@@ -34,7 +34,7 @@
 - Pseudoreplication: checkpoint and report tests prove retries do not add respondent or response-cell counts and one profile is matched across arms.
 - False paired equivalence: comparison tests cover different comparison keys, shared option IDs, arm-only options, and incomplete task presentations.
 - Graph recovery: journey/checkpoint tests cover early exit, repeated task presentations after changed history, resume without replaying completed cells, and unfinished arm accounting.
-- Distribution drift: build/package tests prove generated schemas and `dist/` contain current study/respondent contracts, preserve the shipped reader-archetype assets, and omit stale reader cohort/profile formats.
+- Distribution drift: build/package tests prove generated schemas and `dist/` contain current study/respondent contracts, preserve the shipped respondent-archetype assets, and omit stale reader cohort/profile formats.
 
 ---
 
@@ -42,22 +42,22 @@
 
 **Files:**
 - Modify: `src/domain/study/manifest.ts`
-- Create: `src/domain/respondents/profile.ts` by moving and generalizing profile/cohort contracts from `src/domain/readers/profile.ts`
-- Create: `src/domain/readers/archetype.ts` to own the reusable reader-archetype contracts moved out of the profile module
-- Remove: `src/domain/readers/profile.ts` after imports migrate
+- Create: `src/domain/respondents/profile.ts` by moving and generalizing profile/cohort contracts from `src/domain/respondents/profile.ts`
+- Create: `src/domain/respondents/archetype.ts` to own the reusable respondent-archetype contracts moved out of the profile module
+- Remove: `src/domain/respondents/profile.ts` after imports migrate
 - Modify: `src/domain/study/load-study.ts`
-- Modify: `src/domain/readers/reader-archetypes.json` only if the profile vocabulary migration requires it; preserve substantive archetype content
+- Modify: `src/domain/respondents/archetype-groups/*.json` only if the profile vocabulary migration requires it; preserve substantive archetype content
 - Modify: `test/fixtures/article.json`, `test/fixtures/chapter.json`, `test/fixtures/cohort.json`
-- Modify: `test/study.test.ts`, `test/readers.test.ts`
-- Modify generated: `skills/simulated-reader-polling/assets/*.schema.json`
+- Modify: `test/study.test.ts`, `test/respondents.test.ts`
+- Modify generated: `skills/stimulus-response-polling/assets/*.schema.json`
 
-**Interfaces:** Replace `StudyManifest.items/decisions` with version `2.0` study metadata plus ordered `arms`. Each arm owns source references, text items, choice tasks, and a `presentation` discriminated union. `sequence` implicitly exposes ordered items then asks ordered tasks; `graph` owns graph nodes, transitions, entry node, and decision ceiling. A choice task has instructions, options keyed by stable IDs with descriptions, optional `comparisonKey`, and optional single `answerKeyOptionId`. Reusing a comparison key maps the same measured question across arms; reusing an option ID asserts semantic equivalence. Replace frozen cohort `2.0` (`readers`) with respondent cohort `3.0` (`respondents`), preserving ordered distinct profiles and optional reusable reader-archetype lineage. Export inferred types from the owning Zod modules.
+**Interfaces:** Replace `StudyManifest.items/decisions` with version `2.0` study metadata plus ordered `arms`. Each arm owns source references, text items, choice tasks, and a `presentation` discriminated union. `sequence` implicitly exposes ordered items then asks ordered tasks; `graph` owns graph nodes, transitions, entry node, and decision ceiling. A choice task has instructions, options keyed by stable IDs with descriptions, optional `comparisonKey`, and optional single `answerKeyOptionId`. Reusing a comparison key maps the same measured question across arms; reusing an option ID asserts semantic equivalence. Replace frozen cohort `2.0` (`readers`) with respondent cohort `3.0` (`respondents`), preserving ordered distinct profiles and optional reusable respondent-archetype lineage. Export inferred types from the owning Zod modules.
 
 - [x] Add RED contract tests for graph-free one-arm comprehension, two arms with the same external frozen respondent cohort, required unique option IDs, comparison keys, optional answer-key membership, explicit `unanswerable`, bounded text, unique IDs within their owner, and malformed/unreachable graph references.
 - [x] Run `npm test -- --test-name-pattern="study|cohort|respondent"`; confirm failures are due to missing v2 fields/validation.
 - [x] Implement strict Zod contracts and source validation for per-arm items. Preserve source hashing and graph termination invariants. Do not accept legacy v1 manifests or cohort v2.
 - [x] Migrate fixtures to the new contract; include an answerable and an unanswerable fixture, plus a matched pair whose response option IDs preserve semantic meaning across variants.
-- [x] Regenerate skill JSON Schema assets with `npm run contracts:build`; verify assets are named for respondent cohort/profile, retain reader-archetype schemas for the shipped reader family, and remove stale unreleased contract copies.
+- [x] Regenerate skill JSON Schema assets with `npm run contracts:build`; verify assets are named for respondent cohort/profile, retain respondent-archetype schemas for shipped respondent archetypes, and remove stale unreleased contract copies.
 - [x] Run focused tests, `npm run typecheck`, and `npm run lint`.
 
 ### Task 2: Render typed respondent tasks and execute arm journeys
@@ -124,7 +124,7 @@
 - Rename: `skills/simulated-reader-polling/` to `skills/stimulus-response-polling/`, updating its `SKILL.md` and workflow references
 - Modify: `docs/decisions/0003-use-domain-neutral-polling-primitives.md`, `docs/decisions/0007-guide-archetypes-and-freeze-reader-cohorts.md`; add a superseding ADR for stimulus-task-response and matched-arm semantics
 
-**Interfaces:** The skill routes users by task: build stimulus and respondent cohort; author a typed-choice task; define one or more arms; validate/trace; run; report/compare. It teaches answer-key privacy, distinct-profile interpretation, response-cell versus retry denominators, matched option IDs, and descriptive-only results. Reader journeys and reader archetypes remain available as a use case.
+**Interfaces:** The skill routes users by task: build stimulus and respondent cohort; author a typed-choice task; define one or more arms; validate/trace; run; report/compare. It teaches answer-key privacy, distinct-profile interpretation, response-cell versus retry denominators, matched option IDs, and descriptive-only results. Reading journeys remain available as a use case, and respondent archetypes are subject-neutral.
 
 - [x] Add documentation acceptance checks or focused assertions for required skill routing terms, v2 schema links, and absence of old input filenames/format references.
 - [x] Rewrite user-facing language to make respondent stimulus-response the product center, without suggesting one repeated profile call increases sample size.
@@ -154,3 +154,17 @@
 - Counts distinguish unique profiles, completed response cells, attempts/retries, exclusions, and unmatched arm outcomes.
 - Existing durable-run, safety, provider, MCP, and self-contained plugin behavior passes the full gate.
 - PR #1 remains a Draft and contains the complete implementation on its existing branch; no merge occurs.
+
+### Task 9: Generalize and group respondent archetypes
+
+**Files:**
+- Create: `src/domain/respondents/archetype.ts`, `src/domain/respondents/archetype-catalogue.ts`, and semantic group files under `src/domain/respondents/archetype-groups/`
+- Remove: `src/domain/readers/`
+- Regenerate: `skills/stimulus-response-polling/assets/respondent-archetype*.schema.json`
+- Update: plugin references, documentation, tests, and ADR index
+
+- [x] Replace reader-specific contract fields with generalized respondent perspective fields while preserving the 15 archetypes.
+- [x] Split the bundled set into four semantic groups; keep grouping non-exclusive and allow mixed/custom inputs.
+- [x] Rename consumer schema assets to respondent archetype terminology and regenerate them from the runtime schemas.
+- [x] Update every current source, skill, package, and documentation reference; retain reader terminology only where it describes the reading use case or historical decision context.
+- [x] Verify there are no imports or links targeting `src/domain/readers/`, rebuild clean `dist/`, and run the full validation gate.

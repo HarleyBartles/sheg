@@ -1,4 +1,12 @@
-import { decisionResultSchema, type DecisionRequest, type DecisionResult, type ValidationOptions } from './contract.js';
+import { decisionResultSchema, type DecisionRequest, type DecisionResult } from './decision.js';
+import type { ProviderKind } from './provider.js';
+
+type ValidationOptions = {
+  maxAttempts?: number;
+  provider?: ProviderKind;
+  model?: string;
+  checkpoint?: string;
+};
 
 export class DecisionError extends Error {
   constructor(message: string, options?: ErrorOptions) {

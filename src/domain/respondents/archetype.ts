@@ -3,14 +3,14 @@ import { z } from 'zod';
 const idSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 const proseSchema = z.string().trim().min(1).max(500);
 
-export const readerArchetypeSchema = z.object({
+export const respondentArchetypeSchema = z.object({
   id: idSchema,
   name: proseSchema,
-  arrival_intent: proseSchema,
-  background: proseSchema,
-  desired_payoff: proseSchema,
-  drawn_in_by: proseSchema,
-  put_off_by: proseSchema,
+  intent: proseSchema,
+  context: proseSchema,
+  desired_outcome: proseSchema,
+  engagement_cues: proseSchema,
+  friction_cues: proseSchema,
   invariants: z.array(proseSchema).min(2).max(6),
   variation_axes: z.array(z.object({
     id: idSchema,
@@ -30,12 +30,12 @@ export const readerArchetypeSchema = z.object({
   }
 });
 
-export const archetypeLibrarySchema = z.array(readerArchetypeSchema).min(1).superRefine((archetypes, context) => {
+export const respondentArchetypeLibrarySchema = z.array(respondentArchetypeSchema).min(1).superRefine((archetypes, context) => {
   const ids = archetypes.map((archetype) => archetype.id);
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: 'custom', message: 'Archetype IDs must be unique in a library.' });
   }
 });
 
-export type ReaderArchetype = z.infer<typeof readerArchetypeSchema>;
-export type ReaderArchetypeLibrary = z.infer<typeof archetypeLibrarySchema>;
+export type RespondentArchetype = z.infer<typeof respondentArchetypeSchema>;
+export type RespondentArchetypeLibrary = z.infer<typeof respondentArchetypeLibrarySchema>;

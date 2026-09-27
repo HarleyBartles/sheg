@@ -14,27 +14,27 @@
         "minLength": 1,
         "maxLength": 500
       },
-      "arrival_intent": {
+      "intent": {
         "type": "string",
         "minLength": 1,
         "maxLength": 500
       },
-      "background": {
+      "context": {
         "type": "string",
         "minLength": 1,
         "maxLength": 500
       },
-      "desired_payoff": {
+      "desired_outcome": {
         "type": "string",
         "minLength": 1,
         "maxLength": 500
       },
-      "drawn_in_by": {
+      "engagement_cues": {
         "type": "string",
         "minLength": 1,
         "maxLength": 500
       },
-      "put_off_by": {
+      "friction_cues": {
         "type": "string",
         "minLength": 1,
         "maxLength": 500
@@ -102,16 +102,16 @@
     "required": [
       "id",
       "name",
-      "arrival_intent",
-      "background",
-      "desired_payoff",
-      "drawn_in_by",
-      "put_off_by",
+      "intent",
+      "context",
+      "desired_outcome",
+      "engagement_cues",
+      "friction_cues",
       "invariants",
       "variation_axes"
     ],
     "additionalProperties": false
   },
-  "$id": "https://schemas.system-one-polling.dev/reader-archetype-library.schema.json",
-  "title": "Reader archetype library"
+  "$id": "https://schemas.system-one-polling.dev/respondent-archetype-library.schema.json",
+  "title": "Respondent archetype library"
 }
