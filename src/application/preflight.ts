@@ -1,7 +1,7 @@
 import { loadStudy } from '../infrastructure/study-loader.js';
 import { z } from 'zod';
 import { respondentProfileSchema } from '../domain/respondents/profile.js';
-import { walkStudyPackets, type PreflightPacket } from '../domain/journey/preflight.js';
+import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
 import type { ProviderContextFit } from '../domain/decision/provider.js';
 import { JevProvider, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type LayaConfig } from '../providers/laya.js';

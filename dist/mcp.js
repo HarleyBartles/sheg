@@ -36657,7 +36657,7 @@ function indexResponses(journeys) {
   return indexed;
 }
 
-// src/domain/journey/preflight.ts
+// src/domain/journey/packet-walker.ts
 import { createHash as createHash7 } from "node:crypto";
 var DEFAULT_MAX_PREFLIGHT_PACKETS = 1e5;
 var DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadRespondents } from '../src/domain/respondents/cohort.js';
-import { walkStudyPackets, type PreflightPacket } from '../src/domain/journey/preflight.js';
+import { walkStudyPackets, type PreflightPacket } from '../src/domain/journey/packet-walker.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 import type { StudyArm } from '../src/domain/study/arm.js';
 

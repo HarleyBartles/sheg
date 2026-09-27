@@ -75,7 +75,7 @@
 
 **Produces:** A pure exhaustive walker yielding each unique journey path and each request packet at every decision.
 
-**Files:** New `src/domain/journey/preflight.ts`, new `test/journey-preflight.test.ts`, and narrowly scoped exports in `src/domain/journey/` if required.
+**Files:** New `src/domain/journey/packet-walker.ts`, new `test/packet-walker.test.ts`, and narrowly scoped exports in `src/domain/journey/` if required.
 
 - [x] Implement deterministic traversal for sequence and graph presentations, starting from every arm and respondent in the supplied frozen cohort.
 - [x] At every choice, fork the journey state for every valid response and continue until terminal; preserve distinct path histories even where paths reconverge at the same node.
