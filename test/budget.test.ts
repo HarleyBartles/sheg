@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BudgetError, BudgetLedger } from '../src/infrastructure/budget-ledger.js';
+import { BudgetError, BudgetLedger } from '../src/domain/budget-ledger.js';
 
 const jevResult = (attempts: number, chargeUsd: number) => ({ attempts, chargeStatus: 'billed' as const, chargeUsd });
 

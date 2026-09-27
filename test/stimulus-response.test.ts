@@ -5,13 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { respondentCohortSchema } from '../src/domain/respondents/cohort.js';
-import { loadStudy } from '../src/domain/study/load-study.js';
-import { manifestSchema, type StudyManifest, type StudyArm } from '../src/domain/study/manifest.js';
+import { loadStudy } from '../src/infrastructure/study-loader.js';
+import type { StudyArm } from '../src/domain/study/arm.js';
+import { studyManifestSchema, type StudyManifest } from '../src/domain/study/study.js';
 
 const sourceText = 'The passage gives enough evidence to answer the question.';
 const sourceHash = createHash('sha256').update(sourceText).digest('hex');
 
-function comprehensionArm(id: string, text = sourceText) {
+function comprehensionArm(id: string, text = sourceText): StudyArm {
   return {
     id,
     label: id.toUpperCase(),
@@ -32,6 +33,7 @@ function comprehensionArm(id: string, text = sourceText) {
   };
 }
 
+
 function study(arms: StudyArm[] = [comprehensionArm('control')]): StudyManifest {
   return {
     version: '2.0',
@@ -50,7 +52,7 @@ const respondent = {
 };
 
 test('accepts a graph-free comprehension study with an unanswerable option and hidden answer key', () => {
-  const result = manifestSchema.safeParse(study());
+  const result = studyManifestSchema.safeParse(study());
   assert.equal(result.success, true, result.success ? '' : result.error.message);
 });
 
@@ -62,12 +64,12 @@ test('accepts a frozen cohort of distinct stimulus respondents', () => {
 test('accepts matched arms that share comparison and stable option identifiers', () => {
   const left = comprehensionArm('control');
   const right = comprehensionArm('revision', 'The revised passage gives clearer evidence for the answer.');
-  assert.equal(manifestSchema.safeParse(study([left, right])).success, true);
+  assert.equal(studyManifestSchema.safeParse(study([left, right])).success, true);
 });
 
 test('rejects an answer key that does not identify one offered option', () => {
   const arm = { ...comprehensionArm('control'), tasks: [{ ...comprehensionArm('control').tasks[0]!, answerKeyOptionId: 'missing' }] };
-  assert.equal(manifestSchema.safeParse(study([arm])).success, false);
+  assert.equal(studyManifestSchema.safeParse(study([arm])).success, false);
 });
 
 test('validates graph task transitions against stable offered option IDs', () => {
@@ -92,9 +94,9 @@ test('validates graph task transitions against stable offered option IDs', () =>
       ],
     },
   };
-  assert.equal(manifestSchema.safeParse(study([arm])).success, true);
+  assert.equal(studyManifestSchema.safeParse(study([arm])).success, true);
   arm.presentation.transitions[1]!.optionId = 'not-offered';
-  assert.equal(manifestSchema.safeParse(study([arm])).success, false);
+  assert.equal(studyManifestSchema.safeParse(study([arm])).success, false);
 });
 
 test('rejects duplicate respondent IDs in a frozen cohort', () => {

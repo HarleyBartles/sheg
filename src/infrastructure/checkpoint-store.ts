@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { JourneyResult } from '../domain/journey/run.js';
 import { decisionResultSchema, type DecisionResult } from '../domain/decision/decision.js';
-import type { BudgetSnapshot } from './budget-ledger.js';
+import type { BudgetSnapshot } from '../domain/budget-ledger.js';
 import { ProcessLock } from './process-lock.js';
 
 const providerConfigSchema = z.discriminatedUnion('kind', [

@@ -1,13 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadRespondents } from '../domain/respondents/cohort.js';
 import { traceStudy } from '../domain/journey/trace.js';
-import { loadStudy } from '../domain/study/load-study.js';
-import { RunManager, checkStudy, type RunConfig } from '../application/jobs.js';
+import { loadStudy } from '../infrastructure/study-loader.js';
+import { RunManager, checkStudy, type RunConfig } from '../application/run-manager.js';
 import { compareReports, getReport } from '../application/reports.js';
 
 const configSchema = z.object({
@@ -27,8 +25,7 @@ export function createPollingServer(manager = new RunManager()): McpServer {
   });
   server.registerTool('poll_trace', { description: 'Trace scripted option IDs through one frozen respondent and study arm without provider calls.', inputSchema: { manifestPath: z.string(), cohortPath: z.string(), armId: z.string(), respondentId: z.string(), choices: z.array(z.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
-    const cohort = loadRespondents(JSON.parse(await readFile(cohortPath, 'utf8')));
-    const profile = cohort.find((respondent) => respondent.id === respondentId);
+    const profile = study.respondents.find((respondent) => respondent.id === respondentId);
     const arm = study.manifest.arms.find((candidate) => candidate.id === armId);
     if (!profile || !arm) throw new Error('Arm or respondent ID is not in the study inputs.');
     return jsonResult(await traceStudy(arm, profile, choices));

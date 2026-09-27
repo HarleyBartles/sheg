@@ -1,4 +1,4 @@
-import { RunManager } from '../application/jobs.js';
+import { RunManager } from '../application/run-manager.js';
 
 const [outputDirectory, runId] = process.argv.slice(2);
 if (!outputDirectory || !runId) throw new Error('Usage: worker <output-directory> <run-id>');

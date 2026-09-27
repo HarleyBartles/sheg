@@ -47,7 +47,7 @@ fields. It does not receive archetype definitions, variation metadata, study
 purpose, or unexposed stimulus. The exact ordered cohort snapshot, concrete
 profiles, and prompt contract contribute to the stimulus fingerprint.
 
-The canonical archetype library lives under `src/domain/readers/` and the
+The canonical archetype library lives under `src/domain/respondents/` and the
 clean build copies it to `dist/data/` for the installed plugin skill to read.
 The harness does not require the bundled library to validate or run a cohort;
 user-authored archetypes and direct profiles remain first-class inputs.

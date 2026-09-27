@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` for this tightly coupled plan. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Artifact status:** completed-awaiting-retirement
+**Artifact status:** in-progress
 
 **Goal:** Replace the unreleased reader-only study contract with typed stimulus-task-response studies and matched A/B arms, then ship one complete comprehension-choice slice through the existing plugin.
 
@@ -41,11 +41,11 @@
 ### Task 1: Replace reader-only study and cohort contracts
 
 **Files:**
-- Modify: `src/domain/study/manifest.ts`
+- Create: `src/domain/study/stimulus.ts`, `task.ts`, `presentation.ts`, `arm.ts`, and `study.ts` for their respective schema and type ownership
 - Create: `src/domain/respondents/profile.ts` by moving and generalizing profile/cohort contracts from `src/domain/respondents/profile.ts`
 - Create: `src/domain/respondents/archetype.ts` to own the reusable respondent-archetype contracts moved out of the profile module
 - Remove: `src/domain/respondents/profile.ts` after imports migrate
-- Modify: `src/domain/study/load-study.ts`
+- Create: `src/infrastructure/study-loader.ts` for filesystem-backed JSON parsing, source resolution, hashing, and loaded-study assembly
 - Modify: `src/domain/respondents/archetype-groups/*.json` only if the profile vocabulary migration requires it; preserve substantive archetype content
 - Modify: `test/fixtures/article.json`, `test/fixtures/chapter.json`, `test/fixtures/cohort.json`
 - Modify: `test/study.test.ts`, `test/respondents.test.ts`
@@ -79,7 +79,7 @@
 ### Task 3: Model multi-arm runs, identity, budgets, and recovery
 
 **Files:**
-- Modify: `src/infrastructure/identity.ts`, `src/infrastructure/budget-ledger.ts`, `src/infrastructure/checkpoint-store.ts`, `src/infrastructure/process-lock.ts`
+- Modify: `src/infrastructure/identity.ts`, `src/domain/budget-ledger.ts`, `src/infrastructure/checkpoint-store.ts`, `src/infrastructure/process-lock.ts`
 - Modify: `src/application/jobs.ts`, `src/application/worker.ts`
 - Modify: `test/identity.test.ts`, `test/budget.test.ts`, `test/jobs.test.ts`
 
@@ -168,3 +168,22 @@
 - [x] Rename consumer schema assets to respondent archetype terminology and regenerate them from the runtime schemas.
 - [x] Update every current source, skill, package, and documentation reference; retain reader terminology only where it describes the reading use case or historical decision context.
 - [x] Verify there are no imports or links targeting `src/domain/readers/`, rebuild clean `dist/`, and run the full validation gate.
+
+### Task 10: Give study contract parts semantic modules
+
+**Files:** Split the former `src/domain/study/manifest.ts` across `stimulus.ts`, `task.ts`, `presentation.ts`, `arm.ts`, and `study.ts`. Move filesystem-backed loading from `src/domain/study/load-study.ts` to `src/infrastructure/study-loader.ts`.
+
+- [x] Put source references and text items in `stimulus.ts`, typed choice tasks in `task.ts`, and sequence/graph shapes in `presentation.ts`.
+- [x] Compose arm fields and cross-reference graph validation in `arm.ts`; keep the study envelope, arm uniqueness, and study-wide text limit in `study.ts`.
+- [x] Move JSON reading, source resolution and hashing, cohort loading, and loaded-input assembly into `infrastructure/study-loader.ts`; name its output `LoadedStudy`.
+- [x] Update contract/docs references, regenerate schemas, and verify typecheck, lint, tests, and clean package output.
+
+### Task 11: Audit source placement against module responsibility
+
+**Files:** `src/application/`, `src/domain/`, `src/entrypoints/`, `src/infrastructure/`, `src/providers/`
+
+- [x] Reuse the loaded frozen cohort in CLI and MCP trace paths instead of rereading and reparsing the cohort file.
+- [x] Move budget policy and reservation state out of infrastructure and into the domain.
+- [x] Rename generic `jobs.ts` and `errors.ts` modules to `run-manager.ts` and `study-input-error.ts`.
+- [x] Correct current documentation that still named the superseded reader directory.
+- [x] Run the complete build, contract generation, lint, typecheck, and test gates; verify no stale source paths remain.

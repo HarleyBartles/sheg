@@ -7,7 +7,7 @@ import test, { type TestContext } from 'node:test';
 import type { RunCheckpoint } from '../src/infrastructure/checkpoint-store.js';
 import { buildReport, compareReports, getReport } from '../src/application/reports.js';
 import { CheckpointStore, emptyBudgetSnapshot } from '../src/infrastructure/checkpoint-store.js';
-import { loadStudy } from '../src/domain/study/load-study.js';
+import { loadStudy } from '../src/infrastructure/study-loader.js';
 import { promptContractHash } from '../src/domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
 

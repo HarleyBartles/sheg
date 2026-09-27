@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { StudyInputError } from '../errors.js';
+import { StudyInputError } from '../study-input-error.js';
 import { respondentArchetypeLibrarySchema, type RespondentArchetype } from './archetype.js';
 import { respondentProfileSchema, type RespondentProfile } from './profile.js';
 

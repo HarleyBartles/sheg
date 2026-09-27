@@ -1,18 +1,18 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { StudyInputError } from '../errors.js';
-import { loadCohort, type RespondentCohort } from '../respondents/cohort.js';
-import type { RespondentProfile } from '../respondents/profile.js';
-import { manifestSchema } from './manifest.js';
-import type { StudyManifest } from './manifest.js';
+import { StudyInputError } from '../domain/study-input-error.js';
+import type { StudyManifest } from '../domain/study/study.js';
+import { studyManifestSchema } from '../domain/study/study.js';
+import { loadCohort, type RespondentCohort } from '../domain/respondents/cohort.js';
+import type { RespondentProfile } from '../domain/respondents/profile.js';
 
-export type StudySource = { readonly armId: string; readonly path: string; readonly sha256: string };
-export type Study = {
+export type VerifiedStudySource = { readonly armId: string; readonly path: string; readonly sha256: string };
+export type LoadedStudy = {
   readonly manifest: StudyManifest;
   readonly cohort: RespondentCohort;
   readonly respondents: readonly RespondentProfile[];
-  readonly sources: readonly StudySource[];
+  readonly sources: readonly VerifiedStudySource[];
   readonly manifestDirectory: string;
 };
 
@@ -33,7 +33,7 @@ async function parseJsonFile(filePath: string, label: string): Promise<unknown> 
   }
 }
 
-export async function loadStudy(manifestPath: string, cohortPath: string | undefined): Promise<Study> {
+export async function loadStudy(manifestPath: string, cohortPath: string | undefined): Promise<LoadedStudy> {
   if (!cohortPath) throw new StudyInputError('An explicit frozen cohort is required.');
 
   const absoluteManifestPath = path.resolve(manifestPath);
@@ -56,12 +56,12 @@ export async function loadStudy(manifestPath: string, cohortPath: string | undef
   if (!manifestJson || typeof manifestJson !== 'object' || !('version' in manifestJson) || manifestJson.version !== '2.0') {
     throw new StudyInputError('Only study contract version 2.0 is supported.');
   }
-  const parsedManifest = manifestSchema.safeParse(manifestJson);
+  const parsedManifest = studyManifestSchema.safeParse(manifestJson);
   if (!parsedManifest.success) {
     throw new StudyInputError(`Manifest is invalid: ${parsedManifest.error.issues.map((issue) => issue.message).join(' ')}`, { cause: parsedManifest.error });
   }
   const manifest = parsedManifest.data;
-  const sources: StudySource[] = [];
+  const sources: VerifiedStudySource[] = [];
   for (const arm of manifest.arms) {
     for (const source of arm.sources) {
       const resolvedPath = path.resolve(path.dirname(absoluteManifestPath), source.path);

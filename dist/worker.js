@@ -4,7 +4,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// src/application/jobs.ts
+// src/application/run-manager.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { mkdir as mkdir3 } from "node:fs/promises";
 import path4 from "node:path";
@@ -14073,7 +14073,7 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
   const outputVar = newVar(ctx);
   doc.write(`const ${outputVar} = [];`);
   for (let i = 0; i < items.length; i++) {
-    const itemSchema2 = items[i];
+    const itemSchema = items[i];
     if (i >= optoutStart) {
       doc.write(`if (${outputVar}.length === ${i}) {`);
       doc.indented((d) => {
@@ -14081,12 +14081,12 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
         d.indented((d2) => {
           const elemVar = newVar(ctx);
           d2.write(`const ${elemVar} = ${accessor}[${i}];`);
-          const elemOutput = compileChild(d2, ctx, itemSchema2, elemVar);
+          const elemOutput = compileChild(d2, ctx, itemSchema, elemVar);
           d2.write(`${outputVar}[${i}] = ${elemOutput};`);
         });
         d.write(`} else {`);
         d.indented((d2) => {
-          if (dropsWhenAbsent(itemSchema2)) {
+          if (dropsWhenAbsent(itemSchema)) {
             d2.write(`${outputVar}.length = ${i};`);
             return;
           }
@@ -14095,7 +14095,7 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
           d2.write(`const ${elemVar} = undefined;`);
           d2.write(`const ${branchVar} = (() => {`);
           d2.indented((d3) => {
-            const elemOutput = compileChild(d3, ctx, itemSchema2, elemVar);
+            const elemOutput = compileChild(d3, ctx, itemSchema, elemVar);
             d3.write(`return ${elemOutput};`);
           });
           d2.write(`})();`);
@@ -14108,7 +14108,7 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
     } else {
       const elemVar = newVar(ctx);
       doc.write(`const ${elemVar} = ${accessor}[${i}];`);
-      const elemOutput = compileChild(doc, ctx, itemSchema2, elemVar);
+      const elemOutput = compileChild(doc, ctx, itemSchema, elemVar);
       doc.write(`${outputVar}[${i}] = ${elemOutput};`);
     }
   }
@@ -19677,18 +19677,175 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// src/domain/study/load-study.ts
+// src/infrastructure/study-loader.ts
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-// src/domain/errors.ts
+// src/domain/study-input-error.ts
 var StudyInputError = class extends Error {
   constructor(message, options) {
     super(message, options);
     this.name = "StudyInputError";
   }
 };
+
+// src/domain/study/presentation.ts
+var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var nodeSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ id: identifier, kind: external_exports.literal("expose"), itemId: identifier }).strict(),
+  external_exports.object({ id: identifier, kind: external_exports.literal("ask"), taskId: identifier }).strict(),
+  external_exports.object({ id: identifier, kind: external_exports.literal("terminal"), outcome: identifier }).strict()
+]);
+var transitionSchema = external_exports.object({
+  fromNodeId: identifier,
+  optionId: identifier.optional(),
+  toNodeId: identifier
+}).strict();
+var presentationSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("graph"),
+    nodes: external_exports.array(nodeSchema).min(1),
+    transitions: external_exports.array(transitionSchema),
+    entryNodeId: identifier,
+    maxDecisions: external_exports.number().int().positive()
+  }).strict()
+]);
+
+// src/domain/study/stimulus.ts
+var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose = external_exports.string().trim().min(1);
+var sourceReferenceSchema = external_exports.object({
+  path: external_exports.string().min(1),
+  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var stimulusItemSchema = external_exports.object({
+  id: identifier2,
+  text: prose
+}).strict();
+
+// src/domain/study/task.ts
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose2 = external_exports.string().trim().min(1);
+var taskSchema = external_exports.object({
+  id: identifier3,
+  instructions: prose2,
+  options: external_exports.record(identifier3, prose2).refine((options) => Object.keys(options).length > 0, "A choice task requires at least one option."),
+  comparisonKey: identifier3.optional(),
+  answerKeyOptionId: identifier3.optional()
+}).strict().superRefine((task, context) => {
+  if (task.answerKeyOptionId && !(task.answerKeyOptionId in task.options)) {
+    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${task.answerKeyOptionId}.` });
+  }
+});
+
+// src/domain/study/arm.ts
+var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose3 = external_exports.string().trim().min(1);
+var studyArmSchema = external_exports.object({
+  id: identifier4,
+  label: prose3,
+  sources: external_exports.array(sourceReferenceSchema).min(1),
+  items: external_exports.array(stimulusItemSchema).min(1),
+  tasks: external_exports.array(taskSchema).min(1),
+  presentation: presentationSchema
+}).strict().superRefine((arm, context) => {
+  const presentation = arm.presentation;
+  const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
+  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
+  const itemIds = new Set(arm.items.map((item) => item.id));
+  const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
+  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
+  if (new Set(allIds).size !== allIds.length) {
+    context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
+  }
+  if (presentation.kind === "sequence") return;
+  const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
+  if (!nodesById.has(presentation.entryNodeId)) {
+    context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
+  }
+  for (const [index, node2] of presentation.nodes.entries()) {
+    if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
+    }
+    if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
+    }
+  }
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const [index, edge] of presentation.transitions.entries()) {
+    const source = nodesById.get(edge.fromNodeId);
+    if (!source) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
+      continue;
+    }
+    if (!nodesById.has(edge.toNodeId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
+    }
+    const edges = outgoing.get(edge.fromNodeId) ?? [];
+    outgoing.set(edge.fromNodeId, [...edges, edge]);
+    if (source.kind === "terminal") {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
+    }
+    if (source.kind === "expose" && edge.optionId !== void 0) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "optionId"], message: "Exposure transitions must be unconditional." });
+    }
+  }
+  for (const [index, node2] of presentation.nodes.entries()) {
+    const edges = outgoing.get(node2.id) ?? [];
+    if (node2.kind === "terminal") {
+      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Terminal nodes cannot have outgoing transitions." });
+      continue;
+    }
+    if (node2.kind === "expose") {
+      if (edges.length !== 1 || edges[0]?.optionId !== void 0) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
+      }
+      continue;
+    }
+    const task = taskById.get(node2.taskId);
+    const optionIds = Object.keys(task?.options ?? {});
+    const edgeOptionIds = edges.map((edge) => edge.optionId);
+    if (edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Task transitions must contain exactly one edge for every offered option and no others." });
+    }
+  }
+  if (nodesById.has(presentation.entryNodeId)) {
+    const visited = /* @__PURE__ */ new Set();
+    const pending = [presentation.entryNodeId];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
+    }
+    const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
+    if (unreachable.length > 0) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
+    }
+  }
+});
+
+// src/domain/study/study.ts
+var prose4 = external_exports.string().trim().min(1);
+var studyManifestSchema = external_exports.object({
+  version: external_exports.literal("2.0"),
+  study: external_exports.object({
+    title: prose4,
+    purpose: prose4
+  }).strict(),
+  arms: external_exports.array(studyArmSchema).min(1)
+}).strict().superRefine((study, context) => {
+  const armIds = study.arms.map((arm) => arm.id);
+  if (new Set(armIds).size !== armIds.length) {
+    context.addIssue({ code: "custom", path: ["arms"], message: "Arm IDs must be unique within a study." });
+  }
+  const visibleBytes = study.arms.reduce((total, arm) => total + arm.items.reduce((armTotal, item) => armTotal + Buffer.byteLength(item.text, "utf8"), 0), 0);
+  if (visibleBytes > 8e4) {
+    context.addIssue({ code: "custom", path: ["arms"], message: "Study stimulus text exceeds the 80 KB limit." });
+  }
+});
 
 // src/domain/respondents/archetype.ts
 var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
@@ -19793,150 +19950,7 @@ function loadCohort(input2) {
   return { archetypes: result.data.archetypes ?? [], respondents: result.data.respondents };
 }
 
-// src/domain/study/manifest.ts
-var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose = external_exports.string().trim().min(1);
-var sourceReferenceSchema = external_exports.object({
-  path: external_exports.string().min(1),
-  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-}).strict();
-var itemSchema = external_exports.object({
-  id: identifier,
-  text: prose
-}).strict();
-var taskSchema = external_exports.object({
-  id: identifier,
-  instructions: prose,
-  options: external_exports.record(identifier, prose).refine((options) => Object.keys(options).length > 0, "A choice task requires at least one option."),
-  comparisonKey: identifier.optional(),
-  answerKeyOptionId: identifier.optional()
-}).strict().superRefine((task, context) => {
-  if (task.answerKeyOptionId && !(task.answerKeyOptionId in task.options)) {
-    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${task.answerKeyOptionId}.` });
-  }
-});
-var nodeSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ id: identifier, kind: external_exports.literal("expose"), itemId: identifier }).strict(),
-  external_exports.object({ id: identifier, kind: external_exports.literal("ask"), taskId: identifier }).strict(),
-  external_exports.object({ id: identifier, kind: external_exports.literal("terminal"), outcome: identifier }).strict()
-]);
-var transitionSchema = external_exports.object({
-  fromNodeId: identifier,
-  optionId: identifier.optional(),
-  toNodeId: identifier
-}).strict();
-var presentationSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
-  external_exports.object({
-    kind: external_exports.literal("graph"),
-    nodes: external_exports.array(nodeSchema).min(1),
-    transitions: external_exports.array(transitionSchema),
-    entryNodeId: identifier,
-    maxDecisions: external_exports.number().int().positive()
-  }).strict()
-]);
-var armSchema = external_exports.object({
-  id: identifier,
-  label: prose,
-  sources: external_exports.array(sourceReferenceSchema).min(1),
-  items: external_exports.array(itemSchema).min(1),
-  tasks: external_exports.array(taskSchema).min(1),
-  presentation: presentationSchema
-}).strict().superRefine((arm, context) => {
-  const presentation = arm.presentation;
-  const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
-  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
-  const itemIds = new Set(arm.items.map((item) => item.id));
-  const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
-  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
-  if (new Set(allIds).size !== allIds.length) {
-    context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
-  }
-  if (presentation.kind === "sequence") return;
-  const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
-  if (!nodesById.has(presentation.entryNodeId)) {
-    context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
-  }
-  for (const [index, node2] of presentation.nodes.entries()) {
-    if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
-    }
-    if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
-    }
-  }
-  const outgoing = /* @__PURE__ */ new Map();
-  for (const [index, edge] of presentation.transitions.entries()) {
-    const source = nodesById.get(edge.fromNodeId);
-    if (!source) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
-      continue;
-    }
-    if (!nodesById.has(edge.toNodeId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
-    }
-    const edges = outgoing.get(edge.fromNodeId) ?? [];
-    outgoing.set(edge.fromNodeId, [...edges, edge]);
-    if (source.kind === "terminal") {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
-    }
-    if (source.kind === "expose" && edge.optionId !== void 0) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "optionId"], message: "Exposure transitions must be unconditional." });
-    }
-  }
-  for (const [index, node2] of presentation.nodes.entries()) {
-    const edges = outgoing.get(node2.id) ?? [];
-    if (node2.kind === "terminal") {
-      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Terminal nodes cannot have outgoing transitions." });
-      continue;
-    }
-    if (node2.kind === "expose") {
-      if (edges.length !== 1 || edges[0]?.optionId !== void 0) {
-        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
-      }
-      continue;
-    }
-    const task = taskById.get(node2.taskId);
-    const optionIds = Object.keys(task?.options ?? {});
-    const edgeOptionIds = edges.map((edge) => edge.optionId);
-    if (edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Task transitions must contain exactly one edge for every offered option and no others." });
-    }
-  }
-  if (nodesById.has(presentation.entryNodeId)) {
-    const visited = /* @__PURE__ */ new Set();
-    const pending = [presentation.entryNodeId];
-    while (pending.length > 0) {
-      const current = pending.pop();
-      if (visited.has(current)) continue;
-      visited.add(current);
-      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
-    }
-    const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
-    if (unreachable.length > 0) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
-    }
-  }
-});
-var manifestSchema = external_exports.object({
-  version: external_exports.literal("2.0"),
-  study: external_exports.object({
-    title: prose,
-    purpose: prose
-  }).strict(),
-  arms: external_exports.array(armSchema).min(1)
-}).strict().superRefine((study, context) => {
-  const armIds = study.arms.map((arm) => arm.id);
-  if (new Set(armIds).size !== armIds.length) {
-    context.addIssue({ code: "custom", path: ["arms"], message: "Arm IDs must be unique within a study." });
-  }
-  const visibleBytes = study.arms.reduce((total, arm) => total + arm.items.reduce((armTotal, item) => armTotal + Buffer.byteLength(item.text, "utf8"), 0), 0);
-  if (visibleBytes > 8e4) {
-    context.addIssue({ code: "custom", path: ["arms"], message: "Study stimulus text exceeds the 80 KB limit." });
-  }
-});
-
-// src/domain/study/load-study.ts
+// src/infrastructure/study-loader.ts
 var maximumManifestBytes = 2e5;
 async function parseJsonFile(filePath, label) {
   let bytes;
@@ -19974,7 +19988,7 @@ async function loadStudy(manifestPath, cohortPath) {
   if (!manifestJson || typeof manifestJson !== "object" || !("version" in manifestJson) || manifestJson.version !== "2.0") {
     throw new StudyInputError("Only study contract version 2.0 is supported.");
   }
-  const parsedManifest = manifestSchema.safeParse(manifestJson);
+  const parsedManifest = studyManifestSchema.safeParse(manifestJson);
   if (!parsedManifest.success) {
     throw new StudyInputError(`Manifest is invalid: ${parsedManifest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedManifest.error });
   }
@@ -20050,7 +20064,7 @@ function promptContractHash() {
   return createHash2("sha256").update(JSON.stringify(promptContract)).digest("hex");
 }
 
-// src/infrastructure/budget-ledger.ts
+// src/domain/budget-ledger.ts
 import { randomUUID } from "node:crypto";
 var BudgetError = class extends Error {
   constructor(message) {
@@ -21063,7 +21077,7 @@ function isUnsupported(error62) {
   return typeof error62 === "object" && error62 !== null && "message" in error62 && String(error62.message).includes("unsupported-input");
 }
 
-// src/application/jobs.ts
+// src/application/run-manager.ts
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
   cohortPath: external_exports.string().min(1),

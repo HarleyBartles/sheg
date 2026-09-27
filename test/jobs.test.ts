@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import test, { type TestContext } from 'node:test';
 import { CheckpointStore, emptyBudgetSnapshot, type RunCheckpoint } from '../src/infrastructure/checkpoint-store.js';
 import { ProcessLock, ProcessLockError } from '../src/infrastructure/process-lock.js';
-import { RunManager, checkStudy } from '../src/application/jobs.js';
+import { RunManager, checkStudy } from '../src/application/run-manager.js';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 
 async function tempDirectory(t: TestContext): Promise<string> {

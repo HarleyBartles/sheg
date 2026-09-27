@@ -1,10 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadRespondents } from '../domain/respondents/cohort.js';
 import { traceStudy } from '../domain/journey/trace.js';
-import { loadStudy } from '../domain/study/load-study.js';
-import { RunManager, checkStudy, type RunConfig } from '../application/jobs.js';
+import { loadStudy } from '../infrastructure/study-loader.js';
+import { RunManager, checkStudy, type RunConfig } from '../application/run-manager.js';
 import { compareReports, getReport } from '../application/reports.js';
 
 const manager = new RunManager();
@@ -22,7 +21,7 @@ export async function runCli(args: readonly string[], io = { out: (value: string
       const manifestPath = path.resolve(required(options, 'manifest'));
       const cohortPath = path.resolve(required(options, 'cohort'));
       const study = await loadStudy(manifestPath, cohortPath);
-      const profile = loadRespondents(JSON.parse(await readFile(cohortPath, 'utf8'))).find((respondent) => respondent.id === required(options, 'respondent'));
+      const profile = study.respondents.find((respondent) => respondent.id === required(options, 'respondent'));
       if (!profile) throw new Error('Respondent ID is not in the frozen cohort.');
       const choices = required(options, 'choices').split(',').filter(Boolean);
       const arm = study.manifest.arms.find((candidate) => candidate.id === required(options, 'arm'));

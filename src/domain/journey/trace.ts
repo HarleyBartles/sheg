@@ -1,5 +1,5 @@
 import type { RespondentProfile } from '../respondents/profile.js';
-import type { StudyArm } from '../study/manifest.js';
+import type { StudyArm } from '../study/arm.js';
 import { JourneyExecutionError, runJourney, type JourneyResult } from './run.js';
 
 export async function traceStudy(

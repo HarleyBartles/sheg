@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
-import { loadStudy } from '../domain/study/load-study.js';
+import { loadStudy } from '../infrastructure/study-loader.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
 import { CheckpointStore, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';

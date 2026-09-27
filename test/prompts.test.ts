@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadStudy } from '../src/domain/study/load-study.js';
+import { loadStudy } from '../src/infrastructure/study-loader.js';
 import { promptContractHash, renderQuestion } from '../src/domain/decision/prompt.js';
 import { fileURLToPath } from 'node:url';
 

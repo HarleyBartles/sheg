@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { type TestContext } from 'node:test';
-import { loadStudy } from '../src/domain/study/load-study.js';
+import { loadStudy } from '../src/infrastructure/study-loader.js';
 import { executionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
 
 const fixtureDirectory = fileURLToPath(new URL('./fixtures/', import.meta.url));

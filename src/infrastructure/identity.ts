@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { StudyManifest } from '../domain/study/manifest.js';
+import type { StudyManifest } from '../domain/study/study.js';
 import type { FrozenCohort } from '../domain/respondents/cohort.js';
 
 export type ExecutionProvider =

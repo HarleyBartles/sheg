@@ -1,58 +1,16 @@
 import { z } from 'zod';
+import { presentationSchema } from './presentation.js';
+import { sourceReferenceSchema, stimulusItemSchema } from './stimulus.js';
+import { taskSchema } from './task.js';
 
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const prose = z.string().trim().min(1);
 
-export const sourceReferenceSchema = z.object({
-  path: z.string().min(1),
-  sha256: z.string().regex(/^[a-f\d]{64}$/i),
-}).strict();
-
-const itemSchema = z.object({
-  id: identifier,
-  text: prose,
-}).strict();
-
-const taskSchema = z.object({
-  id: identifier,
-  instructions: prose,
-  options: z.record(identifier, prose).refine((options) => Object.keys(options).length > 0, 'A choice task requires at least one option.'),
-  comparisonKey: identifier.optional(),
-  answerKeyOptionId: identifier.optional(),
-}).strict().superRefine((task, context) => {
-  if (task.answerKeyOptionId && !(task.answerKeyOptionId in task.options)) {
-    context.addIssue({ code: 'custom', path: ['answerKeyOptionId'], message: `Answer key must identify an offered option. Unknown option ${task.answerKeyOptionId}.` });
-  }
-});
-
-const nodeSchema = z.discriminatedUnion('kind', [
-  z.object({ id: identifier, kind: z.literal('expose'), itemId: identifier }).strict(),
-  z.object({ id: identifier, kind: z.literal('ask'), taskId: identifier }).strict(),
-  z.object({ id: identifier, kind: z.literal('terminal'), outcome: identifier }).strict(),
-]);
-
-const transitionSchema = z.object({
-  fromNodeId: identifier,
-  optionId: identifier.optional(),
-  toNodeId: identifier,
-}).strict();
-
-const presentationSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('sequence') }).strict(),
-  z.object({
-    kind: z.literal('graph'),
-    nodes: z.array(nodeSchema).min(1),
-    transitions: z.array(transitionSchema),
-    entryNodeId: identifier,
-    maxDecisions: z.number().int().positive(),
-  }).strict(),
-]);
-
-const armSchema = z.object({
+export const studyArmSchema = z.object({
   id: identifier,
   label: prose,
   sources: z.array(sourceReferenceSchema).min(1),
-  items: z.array(itemSchema).min(1),
+  items: z.array(stimulusItemSchema).min(1),
   tasks: z.array(taskSchema).min(1),
   presentation: presentationSchema,
 }).strict().superRefine((arm, context) => {
@@ -141,23 +99,4 @@ const armSchema = z.object({
   }
 });
 
-export const manifestSchema = z.object({
-  version: z.literal('2.0'),
-  study: z.object({
-    title: prose,
-    purpose: prose,
-  }).strict(),
-  arms: z.array(armSchema).min(1),
-}).strict().superRefine((study, context) => {
-  const armIds = study.arms.map((arm) => arm.id);
-  if (new Set(armIds).size !== armIds.length) {
-    context.addIssue({ code: 'custom', path: ['arms'], message: 'Arm IDs must be unique within a study.' });
-  }
-  const visibleBytes = study.arms.reduce((total, arm) => total + arm.items.reduce((armTotal, item) => armTotal + Buffer.byteLength(item.text, 'utf8'), 0), 0);
-  if (visibleBytes > 80_000) {
-    context.addIssue({ code: 'custom', path: ['arms'], message: 'Study stimulus text exceeds the 80 KB limit.' });
-  }
-});
-
-export type StudyArm = z.infer<typeof armSchema>;
-export type StudyManifest = z.infer<typeof manifestSchema>;
+export type StudyArm = z.infer<typeof studyArmSchema>;

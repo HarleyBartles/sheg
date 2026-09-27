@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { loadStudy } from '../src/domain/study/load-study.js';
+import { loadStudy } from '../src/infrastructure/study-loader.js';
 
 const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url));
 async function copiedStudy(t: TestContext) {

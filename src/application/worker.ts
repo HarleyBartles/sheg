@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { BudgetLedger } from '../infrastructure/budget-ledger.js';
+import { BudgetLedger } from '../domain/budget-ledger.js';
 import { CheckpointStore, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import type { DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import { JourneyExecutionError, runJourney } from '../domain/journey/run.js';
-import { loadStudy } from '../domain/study/load-study.js';
+import { loadStudy } from '../infrastructure/study-loader.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 

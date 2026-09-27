@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DecisionRequest } from './decision.js';
 import type { RespondentPerspective, RespondentProfile } from '../respondents/profile.js';
-import type { StudyArm } from '../study/manifest.js';
+import type { StudyArm } from '../study/arm.js';
 
 export type ChoiceHistoryEvent = { taskId: string; choice: string };
 export type PromptState = {

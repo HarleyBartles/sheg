@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { respondentArchetypeLibrarySchema, respondentArchetypeSchema } from '../src/domain/respondents/archetype.js';
 import { respondentCohortSchema } from '../src/domain/respondents/cohort.js';
 import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
-import { manifestSchema } from '../src/domain/study/manifest.js';
+import { studyManifestSchema } from '../src/domain/study/study.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
@@ -15,7 +15,7 @@ const contracts: Array<{ filename: string; title: string; schema: z.ZodType; val
     'Respondent IDs are unique within the cohort.', 'Every archetypeId refers to an archetype included in the cohort snapshot.',
     'Archetype-derived respondents select exactly one declared value for every variation axis.',
   ] },
-  { filename: 'study-manifest.schema.json', title: 'Study manifest', schema: manifestSchema, validationRules: [
+  { filename: 'study-manifest.schema.json', title: 'Study manifest', schema: studyManifestSchema, validationRules: [
     'Each study contains one or more arms, each with its own stimulus, tasks, and presentation.',
     'Task option IDs are stable response values; answer keys are never sent to providers.',
     'Graph transitions cover every offered option exactly once; all nodes are reachable.',

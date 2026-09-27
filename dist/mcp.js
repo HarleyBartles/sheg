@@ -14125,7 +14125,7 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
   const outputVar = newVar(ctx);
   doc.write(`const ${outputVar} = [];`);
   for (let i = 0; i < items.length; i++) {
-    const itemSchema2 = items[i];
+    const itemSchema = items[i];
     if (i >= optoutStart) {
       doc.write(`if (${outputVar}.length === ${i}) {`);
       doc.indented((d) => {
@@ -14133,12 +14133,12 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
         d.indented((d2) => {
           const elemVar = newVar(ctx);
           d2.write(`const ${elemVar} = ${accessor}[${i}];`);
-          const elemOutput = compileChild(d2, ctx, itemSchema2, elemVar);
+          const elemOutput = compileChild(d2, ctx, itemSchema, elemVar);
           d2.write(`${outputVar}[${i}] = ${elemOutput};`);
         });
         d.write(`} else {`);
         d.indented((d2) => {
-          if (dropsWhenAbsent(itemSchema2)) {
+          if (dropsWhenAbsent(itemSchema)) {
             d2.write(`${outputVar}.length = ${i};`);
             return;
           }
@@ -14147,7 +14147,7 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
           d2.write(`const ${elemVar} = undefined;`);
           d2.write(`const ${branchVar} = (() => {`);
           d2.indented((d3) => {
-            const elemOutput = compileChild(d3, ctx, itemSchema2, elemVar);
+            const elemOutput = compileChild(d3, ctx, itemSchema, elemVar);
             d3.write(`return ${elemOutput};`);
           });
           d2.write(`})();`);
@@ -14160,7 +14160,7 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
     } else {
       const elemVar = newVar(ctx);
       doc.write(`const ${elemVar} = ${accessor}[${i}];`);
-      const elemOutput = compileChild(doc, ctx, itemSchema2, elemVar);
+      const elemOutput = compileChild(doc, ctx, itemSchema, elemVar);
       doc.write(`${outputVar}[${i}] = ${elemOutput};`);
     }
   }
@@ -34392,123 +34392,8 @@ function toError(value) {
 }
 
 // src/entrypoints/mcp.ts
-import { readFile as readFile4 } from "node:fs/promises";
 import path6 from "node:path";
 import { pathToFileURL } from "node:url";
-
-// src/domain/errors.ts
-var StudyInputError = class extends Error {
-  constructor(message, options) {
-    super(message, options);
-    this.name = "StudyInputError";
-  }
-};
-
-// src/domain/respondents/archetype.ts
-var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
-var proseSchema = external_exports.string().trim().min(1).max(500);
-var respondentArchetypeSchema = external_exports.object({
-  id: idSchema,
-  name: proseSchema,
-  intent: proseSchema,
-  context: proseSchema,
-  desired_outcome: proseSchema,
-  engagement_cues: proseSchema,
-  friction_cues: proseSchema,
-  invariants: external_exports.array(proseSchema).min(2).max(6),
-  variation_axes: external_exports.array(external_exports.object({
-    id: idSchema,
-    description: proseSchema,
-    values: external_exports.array(external_exports.object({ id: idSchema, description: proseSchema }).strict()).min(2).max(5)
-  }).strict()).min(2).max(4)
-}).strict().superRefine((archetype, context) => {
-  const axisIds = archetype.variation_axes.map((axis) => axis.id);
-  if (new Set(axisIds).size !== axisIds.length) {
-    context.addIssue({ code: "custom", path: ["variation_axes"], message: "Variation axis IDs must be unique." });
-  }
-  for (const [index, axis] of archetype.variation_axes.entries()) {
-    const valueIds = axis.values.map((value) => value.id);
-    if (new Set(valueIds).size !== valueIds.length) {
-      context.addIssue({ code: "custom", path: ["variation_axes", index, "values"], message: "Variation values must have unique IDs within their axis." });
-    }
-  }
-});
-var respondentArchetypeLibrarySchema = external_exports.array(respondentArchetypeSchema).min(1).superRefine((archetypes, context) => {
-  const ids = archetypes.map((archetype) => archetype.id);
-  if (new Set(ids).size !== ids.length) {
-    context.addIssue({ code: "custom", message: "Archetype IDs must be unique in a library." });
-  }
-});
-
-// src/domain/respondents/profile.ts
-var idSchema2 = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
-var proseSchema2 = external_exports.string().trim().min(1).max(500);
-var respondentProfileSchema = external_exports.object({
-  id: idSchema2,
-  archetypeId: idSchema2.optional(),
-  variation: external_exports.record(idSchema2, idSchema2).optional(),
-  intent: proseSchema2,
-  context: proseSchema2,
-  desired_outcome: proseSchema2,
-  engagement_cues: proseSchema2,
-  friction_cues: proseSchema2
-}).strict();
-
-// src/domain/respondents/cohort.ts
-var respondentCohortSchema = external_exports.object({
-  version: external_exports.literal("3.0"),
-  archetypes: respondentArchetypeLibrarySchema.optional(),
-  respondents: external_exports.array(respondentProfileSchema).min(1),
-  admission: external_exports.object({
-    rationale: external_exports.string().trim().min(1),
-    frozenAt: external_exports.string().datetime({ offset: true })
-  }).strict().optional()
-}).strict().superRefine((cohort, context) => {
-  const respondentIds = cohort.respondents.map((respondent) => respondent.id);
-  if (new Set(respondentIds).size !== respondentIds.length) {
-    context.addIssue({ code: "custom", path: ["respondents"], message: "Frozen cohort contains a duplicate respondent ID." });
-  }
-  const archetypes = new Map((cohort.archetypes ?? []).map((archetype) => [archetype.id, archetype]));
-  for (const [respondentIndex, respondent] of cohort.respondents.entries()) {
-    if (!respondent.archetypeId) {
-      if (respondent.variation) {
-        context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Variation values require an archetype reference." });
-      }
-      continue;
-    }
-    const archetype = archetypes.get(respondent.archetypeId);
-    if (!archetype) {
-      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "archetypeId"], message: `Unknown archetype: ${respondent.archetypeId}.` });
-      continue;
-    }
-    if (!respondent.variation) {
-      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Archetype-derived profiles must select a value for every variation axis." });
-      continue;
-    }
-    const expectedAxes = archetype.variation_axes.map((axis) => axis.id).sort();
-    const selectedAxes = Object.keys(respondent.variation).sort();
-    if (JSON.stringify(expectedAxes) !== JSON.stringify(selectedAxes)) {
-      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Variation selections must cover exactly the archetype variation axes." });
-      continue;
-    }
-    for (const axis of archetype.variation_axes) {
-      const selection = respondent.variation[axis.id];
-      if (!axis.values.some((value) => value.id === selection)) {
-        context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation", axis.id], message: `Unknown variation value for axis ${axis.id}.` });
-      }
-    }
-  }
-});
-function loadCohort(input2) {
-  const result = respondentCohortSchema.safeParse(input2);
-  if (!result.success) {
-    throw new StudyInputError(`Frozen respondent cohort is invalid: ${result.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: result.error });
-  }
-  return { archetypes: result.data.archetypes ?? [], respondents: result.data.respondents };
-}
-function loadRespondents(input2) {
-  return loadCohort(input2).respondents;
-}
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
@@ -34627,33 +34512,21 @@ async function traceStudy(arm, profile, scriptedChoices) {
   return result;
 }
 
-// src/domain/study/load-study.ts
+// src/infrastructure/study-loader.ts
 import { createHash as createHash2 } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-// src/domain/study/manifest.ts
-var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose = external_exports.string().trim().min(1);
-var sourceReferenceSchema = external_exports.object({
-  path: external_exports.string().min(1),
-  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-}).strict();
-var itemSchema = external_exports.object({
-  id: identifier,
-  text: prose
-}).strict();
-var taskSchema = external_exports.object({
-  id: identifier,
-  instructions: prose,
-  options: external_exports.record(identifier, prose).refine((options) => Object.keys(options).length > 0, "A choice task requires at least one option."),
-  comparisonKey: identifier.optional(),
-  answerKeyOptionId: identifier.optional()
-}).strict().superRefine((task, context) => {
-  if (task.answerKeyOptionId && !(task.answerKeyOptionId in task.options)) {
-    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${task.answerKeyOptionId}.` });
+// src/domain/study-input-error.ts
+var StudyInputError = class extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "StudyInputError";
   }
-});
+};
+
+// src/domain/study/presentation.ts
+var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 var nodeSchema = external_exports.discriminatedUnion("kind", [
   external_exports.object({ id: identifier, kind: external_exports.literal("expose"), itemId: identifier }).strict(),
   external_exports.object({ id: identifier, kind: external_exports.literal("ask"), taskId: identifier }).strict(),
@@ -34674,11 +34547,42 @@ var presentationSchema = external_exports.discriminatedUnion("kind", [
     maxDecisions: external_exports.number().int().positive()
   }).strict()
 ]);
-var armSchema = external_exports.object({
-  id: identifier,
-  label: prose,
+
+// src/domain/study/stimulus.ts
+var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose = external_exports.string().trim().min(1);
+var sourceReferenceSchema = external_exports.object({
+  path: external_exports.string().min(1),
+  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var stimulusItemSchema = external_exports.object({
+  id: identifier2,
+  text: prose
+}).strict();
+
+// src/domain/study/task.ts
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose2 = external_exports.string().trim().min(1);
+var taskSchema = external_exports.object({
+  id: identifier3,
+  instructions: prose2,
+  options: external_exports.record(identifier3, prose2).refine((options) => Object.keys(options).length > 0, "A choice task requires at least one option."),
+  comparisonKey: identifier3.optional(),
+  answerKeyOptionId: identifier3.optional()
+}).strict().superRefine((task, context) => {
+  if (task.answerKeyOptionId && !(task.answerKeyOptionId in task.options)) {
+    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${task.answerKeyOptionId}.` });
+  }
+});
+
+// src/domain/study/arm.ts
+var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose3 = external_exports.string().trim().min(1);
+var studyArmSchema = external_exports.object({
+  id: identifier4,
+  label: prose3,
   sources: external_exports.array(sourceReferenceSchema).min(1),
-  items: external_exports.array(itemSchema).min(1),
+  items: external_exports.array(stimulusItemSchema).min(1),
   tasks: external_exports.array(taskSchema).min(1),
   presentation: presentationSchema
 }).strict().superRefine((arm, context) => {
@@ -34757,13 +34661,16 @@ var armSchema = external_exports.object({
     }
   }
 });
-var manifestSchema = external_exports.object({
+
+// src/domain/study/study.ts
+var prose4 = external_exports.string().trim().min(1);
+var studyManifestSchema = external_exports.object({
   version: external_exports.literal("2.0"),
   study: external_exports.object({
-    title: prose,
-    purpose: prose
+    title: prose4,
+    purpose: prose4
   }).strict(),
-  arms: external_exports.array(armSchema).min(1)
+  arms: external_exports.array(studyArmSchema).min(1)
 }).strict().superRefine((study, context) => {
   const armIds = study.arms.map((arm) => arm.id);
   if (new Set(armIds).size !== armIds.length) {
@@ -34775,7 +34682,110 @@ var manifestSchema = external_exports.object({
   }
 });
 
-// src/domain/study/load-study.ts
+// src/domain/respondents/archetype.ts
+var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
+var proseSchema = external_exports.string().trim().min(1).max(500);
+var respondentArchetypeSchema = external_exports.object({
+  id: idSchema,
+  name: proseSchema,
+  intent: proseSchema,
+  context: proseSchema,
+  desired_outcome: proseSchema,
+  engagement_cues: proseSchema,
+  friction_cues: proseSchema,
+  invariants: external_exports.array(proseSchema).min(2).max(6),
+  variation_axes: external_exports.array(external_exports.object({
+    id: idSchema,
+    description: proseSchema,
+    values: external_exports.array(external_exports.object({ id: idSchema, description: proseSchema }).strict()).min(2).max(5)
+  }).strict()).min(2).max(4)
+}).strict().superRefine((archetype, context) => {
+  const axisIds = archetype.variation_axes.map((axis) => axis.id);
+  if (new Set(axisIds).size !== axisIds.length) {
+    context.addIssue({ code: "custom", path: ["variation_axes"], message: "Variation axis IDs must be unique." });
+  }
+  for (const [index, axis] of archetype.variation_axes.entries()) {
+    const valueIds = axis.values.map((value) => value.id);
+    if (new Set(valueIds).size !== valueIds.length) {
+      context.addIssue({ code: "custom", path: ["variation_axes", index, "values"], message: "Variation values must have unique IDs within their axis." });
+    }
+  }
+});
+var respondentArchetypeLibrarySchema = external_exports.array(respondentArchetypeSchema).min(1).superRefine((archetypes, context) => {
+  const ids = archetypes.map((archetype) => archetype.id);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: "custom", message: "Archetype IDs must be unique in a library." });
+  }
+});
+
+// src/domain/respondents/profile.ts
+var idSchema2 = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
+var proseSchema2 = external_exports.string().trim().min(1).max(500);
+var respondentProfileSchema = external_exports.object({
+  id: idSchema2,
+  archetypeId: idSchema2.optional(),
+  variation: external_exports.record(idSchema2, idSchema2).optional(),
+  intent: proseSchema2,
+  context: proseSchema2,
+  desired_outcome: proseSchema2,
+  engagement_cues: proseSchema2,
+  friction_cues: proseSchema2
+}).strict();
+
+// src/domain/respondents/cohort.ts
+var respondentCohortSchema = external_exports.object({
+  version: external_exports.literal("3.0"),
+  archetypes: respondentArchetypeLibrarySchema.optional(),
+  respondents: external_exports.array(respondentProfileSchema).min(1),
+  admission: external_exports.object({
+    rationale: external_exports.string().trim().min(1),
+    frozenAt: external_exports.string().datetime({ offset: true })
+  }).strict().optional()
+}).strict().superRefine((cohort, context) => {
+  const respondentIds = cohort.respondents.map((respondent) => respondent.id);
+  if (new Set(respondentIds).size !== respondentIds.length) {
+    context.addIssue({ code: "custom", path: ["respondents"], message: "Frozen cohort contains a duplicate respondent ID." });
+  }
+  const archetypes = new Map((cohort.archetypes ?? []).map((archetype) => [archetype.id, archetype]));
+  for (const [respondentIndex, respondent] of cohort.respondents.entries()) {
+    if (!respondent.archetypeId) {
+      if (respondent.variation) {
+        context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Variation values require an archetype reference." });
+      }
+      continue;
+    }
+    const archetype = archetypes.get(respondent.archetypeId);
+    if (!archetype) {
+      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "archetypeId"], message: `Unknown archetype: ${respondent.archetypeId}.` });
+      continue;
+    }
+    if (!respondent.variation) {
+      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Archetype-derived profiles must select a value for every variation axis." });
+      continue;
+    }
+    const expectedAxes = archetype.variation_axes.map((axis) => axis.id).sort();
+    const selectedAxes = Object.keys(respondent.variation).sort();
+    if (JSON.stringify(expectedAxes) !== JSON.stringify(selectedAxes)) {
+      context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation"], message: "Variation selections must cover exactly the archetype variation axes." });
+      continue;
+    }
+    for (const axis of archetype.variation_axes) {
+      const selection = respondent.variation[axis.id];
+      if (!axis.values.some((value) => value.id === selection)) {
+        context.addIssue({ code: "custom", path: ["respondents", respondentIndex, "variation", axis.id], message: `Unknown variation value for axis ${axis.id}.` });
+      }
+    }
+  }
+});
+function loadCohort(input2) {
+  const result = respondentCohortSchema.safeParse(input2);
+  if (!result.success) {
+    throw new StudyInputError(`Frozen respondent cohort is invalid: ${result.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: result.error });
+  }
+  return { archetypes: result.data.archetypes ?? [], respondents: result.data.respondents };
+}
+
+// src/infrastructure/study-loader.ts
 var maximumManifestBytes = 2e5;
 async function parseJsonFile(filePath, label) {
   let bytes;
@@ -34813,7 +34823,7 @@ async function loadStudy(manifestPath, cohortPath) {
   if (!manifestJson || typeof manifestJson !== "object" || !("version" in manifestJson) || manifestJson.version !== "2.0") {
     throw new StudyInputError("Only study contract version 2.0 is supported.");
   }
-  const parsedManifest = manifestSchema.safeParse(manifestJson);
+  const parsedManifest = studyManifestSchema.safeParse(manifestJson);
   if (!parsedManifest.success) {
     throw new StudyInputError(`Manifest is invalid: ${parsedManifest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedManifest.error });
   }
@@ -34846,12 +34856,12 @@ async function loadStudy(manifestPath, cohortPath) {
   };
 }
 
-// src/application/jobs.ts
+// src/application/run-manager.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { mkdir as mkdir3 } from "node:fs/promises";
 import path4 from "node:path";
 
-// src/infrastructure/budget-ledger.ts
+// src/domain/budget-ledger.ts
 import { randomUUID } from "node:crypto";
 var BudgetError = class extends Error {
   constructor(message) {
@@ -35808,7 +35818,7 @@ function isUnsupported(error62) {
   return typeof error62 === "object" && error62 !== null && "message" in error62 && String(error62.message).includes("unsupported-input");
 }
 
-// src/application/jobs.ts
+// src/application/run-manager.ts
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
   cohortPath: external_exports.string().min(1),
@@ -36172,8 +36182,7 @@ function createPollingServer(manager = new RunManager()) {
   });
   server.registerTool("poll_trace", { description: "Trace scripted option IDs through one frozen respondent and study arm without provider calls.", inputSchema: { manifestPath: external_exports.string(), cohortPath: external_exports.string(), armId: external_exports.string(), respondentId: external_exports.string(), choices: external_exports.array(external_exports.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
-    const cohort = loadRespondents(JSON.parse(await readFile4(cohortPath, "utf8")));
-    const profile = cohort.find((respondent) => respondent.id === respondentId);
+    const profile = study.respondents.find((respondent) => respondent.id === respondentId);
     const arm = study.manifest.arms.find((candidate) => candidate.id === armId);
     if (!profile || !arm) throw new Error("Arm or respondent ID is not in the study inputs.");
     return jsonResult(await traceStudy(arm, profile, choices));
