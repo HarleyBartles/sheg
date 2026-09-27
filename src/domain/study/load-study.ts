@@ -17,7 +17,10 @@ export type Study = {
 };
 
 const maximumManifestBytes = 200_000;
-const archetypeCatalogueUrl = new URL('../../../skills/simulated-reader-polling/assets/reader-archetypes.json', import.meta.url);
+const archetypeCatalogueUrls = [
+  new URL('../../../skills/simulated-reader-polling/assets/reader-archetypes.json', import.meta.url),
+  new URL('./skills/simulated-reader-polling/assets/reader-archetypes.json', import.meta.url),
+];
 
 async function parseJsonFile(filePath: string, label: string): Promise<unknown> {
   let bytes: Buffer;
@@ -80,7 +83,16 @@ export async function loadStudy(manifestPath: string, cohortPath: string | undef
 
   const cohortJson = await parseJsonFile(path.resolve(cohortPath), 'Frozen cohort');
   const profiles: readonly ReaderProfile[] = loadProfiles(cohortJson);
-  const catalogueJson = await parseJsonFile(fileURLToPath(archetypeCatalogueUrl), 'Bundled archetype catalogue');
+  let catalogueJson: unknown;
+  let catalogueRead = false;
+  for (const catalogueUrl of archetypeCatalogueUrls) {
+    try {
+      catalogueJson = await parseJsonFile(fileURLToPath(catalogueUrl), 'Bundled archetype catalogue');
+      catalogueRead = true;
+      break;
+    } catch { /* Try the distribution-relative asset location next. */ }
+  }
+  if (!catalogueRead) throw new StudyInputError('Bundled archetype catalogue is missing or unreadable.');
   const catalogue = z.array(z.object({ id: z.string() }).passthrough()).safeParse(catalogueJson);
   if (!catalogue.success) {
     throw new StudyInputError('Bundled archetype catalogue is invalid.', { cause: catalogue.error });
