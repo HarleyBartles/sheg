@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { DecisionRequest } from '../../domain/decision/decision.js';
 import type { ProviderContextFit } from '../../domain/decision/provider.js';
@@ -10,13 +10,15 @@ import { encodeWithData, parseTokenizerJson, type TokenizerData, type TokenizerL
 export const LAYA_TS_SOURCE_REVISION = 'ec8409e542941bb4bb649d5fec00d4cec96ae024';
 export const LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
 
-const tokenizerCache = new Map<string, Promise<{ data: TokenizerData; sha256: string }>>();
+const tokenizerCache = new Map<string, { signature: string; loaded: Promise<{ data: TokenizerData; sha256: string }> }>();
 
-function tokenizerPromise(config: LayaConfig): Promise<{ data: TokenizerData; sha256: string }> {
+async function tokenizerPromise(config: LayaConfig): Promise<{ data: TokenizerData; sha256: string }> {
   const absolutePath = path.resolve(config.tokenizerJsonPath);
   const key = `${absolutePath}:${config.tokenizerSha256.toLowerCase()}`;
+  const metadata = await stat(absolutePath, { bigint: true });
+  const signature = `${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`;
   const existing = tokenizerCache.get(key);
-  if (existing) return existing;
+  if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile(absolutePath);
     const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -31,7 +33,7 @@ function tokenizerPromise(config: LayaConfig): Promise<{ data: TokenizerData; sh
     if (!data) throw new Error('tokenizer-json-unsupported');
     return { data, sha256 };
   })();
-  tokenizerCache.set(key, loaded);
+  tokenizerCache.set(key, { signature, loaded });
   return loaded;
 }
 

@@ -94,6 +94,13 @@ test('returns incomplete rather than dropping work at the packet ceiling or on a
   assert.equal(packets.length, 1);
   assert.match(limited.incompleteReason ?? '', /packet limit/i);
 
+  const retained: PreflightPacket[] = [];
+  const byteLimited = walkStudyPackets([arm], [profile], (packet) => retained.push(packet), { maxPacketBytes: 1 });
+  assert.equal(byteLimited.status, 'incomplete');
+  assert.equal(byteLimited.packetCount, 0);
+  assert.equal(retained.length, 0);
+  assert.match(byteLimited.incompleteReason ?? '', /byte limit/i);
+
   const graph = structuredClone(arm.presentation);
   assert.equal(graph.kind, 'graph');
   graph.transitions.find((edge) => edge.fromNodeId === 'show-symptom')!.toNodeId = 'show-symptom';

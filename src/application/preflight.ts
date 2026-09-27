@@ -5,6 +5,8 @@ import { walkStudyPackets, type PreflightPacket } from '../domain/journey/prefli
 import type { ProviderContextFit } from '../domain/decision/provider.js';
 import { JevProvider, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type LayaConfig } from '../providers/laya.js';
+import { promptContractHash } from '../domain/decision/prompt.js';
+import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 
 export type PreflightProviderConfig = JevConfig | LayaConfig;
 export type StudyPreflightInput = {
@@ -27,6 +29,8 @@ export const preflightInputSchema = z.object({
 
 export type ProviderStudyFit = {
   provider: string;
+  executionFingerprint: string;
+  tokenizerSha256: string | null;
   status: 'fit' | 'does-not-fit' | 'unverified';
   basis: 'frozen-cohort' | 'synthetic-profile';
   configuration: 'configured' | 'incomplete';
@@ -43,10 +47,12 @@ export type ProviderStudyFit = {
   incompleteReason?: string;
 };
 
-export async function preflightStudy(input: StudyPreflightInput): Promise<{ provisional: boolean; mode: 'frozen-cohort' | 'maximum-profile'; providers: ProviderStudyFit[] }> {
+export async function preflightStudy(input: StudyPreflightInput): Promise<{ provisional: boolean; mode: 'frozen-cohort' | 'maximum-profile'; inputFingerprint: string; compilerFingerprint: string; providers: ProviderStudyFit[] }> {
   const config = preflightInputSchema.parse(input);
   const study = await loadStudy(config.manifestPath, config.cohortPath, { allowMissingCohort: config.mode === 'maximum-profile' });
   const respondents = config.mode === 'maximum-profile' ? [maximumProfile()] : study.respondents;
+  const compilerFingerprint = promptContractHash();
+  const inputFingerprint = stimulusFingerprint(study.manifest, { archetypes: study.cohort.archetypes, respondents }, compilerFingerprint);
   const packets: PreflightPacket[] = [];
   const traversal = walkStudyPackets(study.manifest.arms, respondents, (packet) => { packets.push(packet); }, config.maxPackets === undefined ? {} : { maxPackets: config.maxPackets });
   const results: ProviderStudyFit[] = [];
@@ -82,6 +88,10 @@ export async function preflightStudy(input: StudyPreflightInput): Promise<{ prov
     const complete = traversal.status === 'complete';
     results.push({
       provider: providerConfig.kind === 'jev' ? providerConfig.model : providerConfig.checkpoint,
+      executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === 'jev'
+        ? { kind: 'jev', model: providerConfig.model }
+        : { kind: 'laya', checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...(providerConfig.precision === undefined ? {} : { precision: providerConfig.precision }) }),
+      tokenizerSha256: providerConfig.kind === 'laya' ? providerConfig.tokenizerSha256 : null,
       status: !complete || unavailable.length ? 'unverified' : overflows.length ? 'does-not-fit' : 'fit',
       basis: config.mode === 'maximum-profile' ? 'synthetic-profile' : 'frozen-cohort',
       configuration: providerConfig.kind === 'jev'
@@ -93,7 +103,7 @@ export async function preflightStudy(input: StudyPreflightInput): Promise<{ prov
       ...(traversal.incompleteReason === undefined ? {} : { incompleteReason: traversal.incompleteReason }),
     });
   }
-  return { provisional: config.mode === 'maximum-profile', mode: config.mode, providers: results };
+  return { provisional: config.mode === 'maximum-profile', mode: config.mode, inputFingerprint, compilerFingerprint, providers: results };
 }
 
 function maximumProfile() {

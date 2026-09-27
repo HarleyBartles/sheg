@@ -32,6 +32,10 @@ Results name the respondent, arm, path, and decision for each overflowing
 packet. Preflight does not create a run or contact an inference endpoint.
 `configuration` reports whether required settings or Jev credentials are
 present; `availability` is unverified because no endpoint is contacted.
+The result includes input and provider execution fingerprints so a saved fit
+can be matched to its study, respondent basis, compiler, and provider settings.
+Traversal stops as unverified at 100,000 packets or 16 MiB of serialized
+packet data.
 
 Laya uses the pinned tokenizer and configured 1,024-token limit. Jev's
 `typesafe/jev-1.13` estimate is `ceil(UTF-8 request bytes / 3)` with a 20%

@@ -20900,7 +20900,7 @@ function retryDelayMs(attempt) {
 
 // src/providers/laya/context-fit.ts
 import { createHash as createHash4 } from "node:crypto";
-import { readFile as readFile4 } from "node:fs/promises";
+import { readFile as readFile4, stat } from "node:fs/promises";
 import path4 from "node:path";
 
 // src/providers/laya/vendor/sequence.ts
@@ -21129,11 +21129,13 @@ function parseTokenizerJson(raw) {
 var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
 var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
 var tokenizerCache = /* @__PURE__ */ new Map();
-function tokenizerPromise(config2) {
+async function tokenizerPromise(config2) {
   const absolutePath = path4.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
+  const metadata = await stat(absolutePath, { bigint: true });
+  const signature = `${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`;
   const existing = tokenizerCache.get(key);
-  if (existing) return existing;
+  if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile4(absolutePath);
     const sha256 = createHash4("sha256").update(bytes).digest("hex");
@@ -21148,7 +21150,7 @@ function tokenizerPromise(config2) {
     if (!data) throw new Error("tokenizer-json-unsupported");
     return { data, sha256 };
   })();
-  tokenizerCache.set(key, loaded);
+  tokenizerCache.set(key, { signature, loaded });
   return loaded;
 }
 function unavailable(config2, reason, details = {}) {

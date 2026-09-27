@@ -5,6 +5,7 @@ import type { RespondentProfile } from '../respondents/profile.js';
 import { studyArmSchema, type StudyArm } from '../study/arm.js';
 
 export const DEFAULT_MAX_PREFLIGHT_PACKETS = 100_000;
+export const DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
 
 export type PreflightPacket = {
   packetId: string;
@@ -23,7 +24,7 @@ export type JourneyWalkResult = {
   incompleteReason?: string;
 };
 
-export type JourneyWalkOptions = { maxPackets?: number };
+export type JourneyWalkOptions = { maxPackets?: number; maxPacketBytes?: number };
 type PathChoice = { nodeId: string; choiceId: string };
 export type PreflightPacketVisitor = (packet: PreflightPacket) => void;
 
@@ -38,7 +39,9 @@ export function walkStudyPackets(
   options: JourneyWalkOptions = {},
 ): JourneyWalkResult {
   const maxPackets = options.maxPackets ?? DEFAULT_MAX_PREFLIGHT_PACKETS;
+  const maxPacketBytes = options.maxPacketBytes ?? DEFAULT_MAX_PREFLIGHT_PACKET_BYTES;
   let packetCount = 0;
+  let packetBytes = 0;
   let terminalJourneyCount = 0;
   let incompleteReason: string | undefined;
   let stopped = false;
@@ -50,6 +53,9 @@ export function walkStudyPackets(
 
   if (!Number.isSafeInteger(maxPackets) || maxPackets < 0) {
     markIncomplete('Preflight packet limit must be a non-negative safe integer.');
+  }
+  if (!Number.isSafeInteger(maxPacketBytes) || maxPacketBytes < 0 || maxPacketBytes > DEFAULT_MAX_PREFLIGHT_PACKET_BYTES) {
+    markIncomplete(`Preflight byte limit must be between 0 and ${DEFAULT_MAX_PREFLIGHT_PACKET_BYTES}.`);
   }
   if (arms.length === 0 || respondents.length === 0) {
     markIncomplete('Preflight requires at least one study arm and one respondent.');
@@ -70,8 +76,15 @@ export function walkStudyPackets(
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
     const packetId = `packet-${createHash('sha256').update(identity).digest('hex')}`;
-    visitPacket({ packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request });
+    const packet = { packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request };
+    const size = Buffer.byteLength(JSON.stringify(packet), 'utf8');
+    if (packetBytes + size > maxPacketBytes) {
+      markIncomplete(`Preflight packet byte limit (${maxPacketBytes}) reached before traversal completed.`);
+      return;
+    }
+    visitPacket(packet);
     packetCount += 1;
+    packetBytes += size;
   };
 
   for (const arm of arms) {

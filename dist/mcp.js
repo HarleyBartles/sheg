@@ -35693,7 +35693,7 @@ function retryDelayMs(attempt) {
 
 // src/providers/laya/context-fit.ts
 import { createHash as createHash4 } from "node:crypto";
-import { readFile as readFile4 } from "node:fs/promises";
+import { readFile as readFile4, stat } from "node:fs/promises";
 import path4 from "node:path";
 
 // src/providers/laya/vendor/sequence.ts
@@ -35922,11 +35922,13 @@ function parseTokenizerJson(raw) {
 var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
 var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
 var tokenizerCache = /* @__PURE__ */ new Map();
-function tokenizerPromise(config2) {
+async function tokenizerPromise(config2) {
   const absolutePath = path4.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
+  const metadata = await stat(absolutePath, { bigint: true });
+  const signature = `${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`;
   const existing = tokenizerCache.get(key);
-  if (existing) return existing;
+  if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile4(absolutePath);
     const sha256 = createHash4("sha256").update(bytes).digest("hex");
@@ -35941,7 +35943,7 @@ function tokenizerPromise(config2) {
     if (!data) throw new Error("tokenizer-json-unsupported");
     return { data, sha256 };
   })();
-  tokenizerCache.set(key, loaded);
+  tokenizerCache.set(key, { signature, loaded });
   return loaded;
 }
 function unavailable(config2, reason, details = {}) {
@@ -36658,12 +36660,15 @@ function indexResponses(journeys) {
 // src/domain/journey/preflight.ts
 import { createHash as createHash7 } from "node:crypto";
 var DEFAULT_MAX_PREFLIGHT_PACKETS = 1e5;
+var DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
 function pathIdentity(choices) {
   return choices.length === 0 ? "root" : choices.map(({ nodeId, choiceId }) => `${nodeId}=${choiceId}`).join(">");
 }
 function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
   const maxPackets = options.maxPackets ?? DEFAULT_MAX_PREFLIGHT_PACKETS;
+  const maxPacketBytes = options.maxPacketBytes ?? DEFAULT_MAX_PREFLIGHT_PACKET_BYTES;
   let packetCount = 0;
+  let packetBytes = 0;
   let terminalJourneyCount = 0;
   let incompleteReason;
   let stopped = false;
@@ -36673,6 +36678,9 @@ function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
   };
   if (!Number.isSafeInteger(maxPackets) || maxPackets < 0) {
     markIncomplete("Preflight packet limit must be a non-negative safe integer.");
+  }
+  if (!Number.isSafeInteger(maxPacketBytes) || maxPacketBytes < 0 || maxPacketBytes > DEFAULT_MAX_PREFLIGHT_PACKET_BYTES) {
+    markIncomplete(`Preflight byte limit must be between 0 and ${DEFAULT_MAX_PREFLIGHT_PACKET_BYTES}.`);
   }
   if (arms.length === 0 || respondents.length === 0) {
     markIncomplete("Preflight requires at least one study arm and one respondent.");
@@ -36692,8 +36700,15 @@ function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
     const packetId = `packet-${createHash7("sha256").update(identity).digest("hex")}`;
-    visitPacket({ packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request });
+    const packet = { packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request };
+    const size = Buffer.byteLength(JSON.stringify(packet), "utf8");
+    if (packetBytes + size > maxPacketBytes) {
+      markIncomplete(`Preflight packet byte limit (${maxPacketBytes}) reached before traversal completed.`);
+      return;
+    }
+    visitPacket(packet);
     packetCount += 1;
+    packetBytes += size;
   };
   for (const arm of arms) {
     if (stopped) break;
@@ -36823,6 +36838,8 @@ async function preflightStudy(input2) {
   const config2 = preflightInputSchema.parse(input2);
   const study = await loadStudy(config2.manifestPath, config2.cohortPath, { allowMissingCohort: config2.mode === "maximum-profile" });
   const respondents = config2.mode === "maximum-profile" ? [maximumProfile()] : study.respondents;
+  const compilerFingerprint = promptContractHash();
+  const inputFingerprint = stimulusFingerprint(study.manifest, { archetypes: study.cohort.archetypes, respondents }, compilerFingerprint);
   const packets = [];
   const traversal = walkStudyPackets(study.manifest.arms, respondents, (packet) => {
     packets.push(packet);
@@ -36860,6 +36877,8 @@ async function preflightStudy(input2) {
     const complete = traversal.status === "complete";
     results.push({
       provider: providerConfig.kind === "jev" ? providerConfig.model : providerConfig.checkpoint,
+      executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === "jev" ? { kind: "jev", model: providerConfig.model } : { kind: "laya", checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...providerConfig.precision === void 0 ? {} : { precision: providerConfig.precision } }),
+      tokenizerSha256: providerConfig.kind === "laya" ? providerConfig.tokenizerSha256 : null,
       status: !complete || unavailable2.length ? "unverified" : overflows.length ? "does-not-fit" : "fit",
       basis: config2.mode === "maximum-profile" ? "synthetic-profile" : "frozen-cohort",
       configuration: providerConfig.kind === "jev" ? process.env[providerConfig.keyEnv] ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
@@ -36876,7 +36895,7 @@ async function preflightStudy(input2) {
       ...traversal.incompleteReason === void 0 ? {} : { incompleteReason: traversal.incompleteReason }
     });
   }
-  return { provisional: config2.mode === "maximum-profile", mode: config2.mode, providers: results };
+  return { provisional: config2.mode === "maximum-profile", mode: config2.mode, inputFingerprint, compilerFingerprint, providers: results };
 }
 function maximumProfile() {
   const text = "\u6F22".repeat(300);

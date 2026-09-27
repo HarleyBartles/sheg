@@ -50,10 +50,11 @@ credentials may be present while a study overflows. Availability is unverified
 because preflight does not contact a provider. Fit covers every request scenario
 in scope under the configured context and request-shape limits.
 
-The result is tied to the study fingerprint, respondent cohort fingerprint (if
-present), prompt/context compiler version, provider/model/checkpoint identity,
-and effective limit. A fit result is not carried to a changed study, cohort,
-compiler, or provider configuration.
+The result reports an input fingerprint covering the study, frozen cohort or
+synthetic profile, and prompt compiler hash. Each provider result reports an
+execution fingerprint covering those inputs plus its model or checkpoint and
+context settings, including Laya's tokenizer digest. A fit result is not
+carried to a changed study, respondent basis, compiler, or provider setting.
 
 With a frozen cohort, preflight evaluates every respondent in that cohort. Before
 a cohort is frozen, it evaluates one synthetic profile filling the 1,500-character
@@ -146,8 +147,9 @@ remain within limits at each decision depth. These are exhaustive counts, not
 predictions of respondent likelihood.
 
 If traversal or measurement cannot complete, the result is `unverified`, never
-`fits`. The implementation may impose an explicit work ceiling to protect the
-host, but reaching it must identify incomplete coverage and block a fit claim.
+`fits`. The walker defaults to ceilings of 100,000 packets and 16 MiB of
+serialized packet data. Reaching either ceiling identifies incomplete coverage
+and blocks a fit claim.
 For `maximum-profile`, a green result applies only to its named synthetic sample.
 
 ## Provider measurement and runtime enforcement

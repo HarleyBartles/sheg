@@ -76,3 +76,20 @@ test('provider context fit stays distinct from missing credentials and unverifie
   assert.equal(result.providers[0]?.configuration, 'incomplete');
   assert.equal(result.providers[0]?.availability, 'unverified');
 });
+
+test('preflight identities change with the respondent basis and provider context settings', async () => {
+  const manifestPath = path.join(fixtures, 'article.json');
+  const cohortPath = path.join(fixtures, 'cohort.json');
+  const provider = { kind: 'laya' as const, baseUrl: 'http://127.0.0.1:8787', checkpoint: 'fixture', contextLimit: 1024, headLimit: 192, tokenizerJsonPath, tokenizerSha256, timeoutMs: 1000 };
+  const frozen = await preflightStudy({ manifestPath, cohortPath, providers: [provider] });
+  const synthetic = await preflightStudy({ manifestPath, mode: 'maximum-profile', providers: [provider] });
+  const differentLimit = await preflightStudy({ manifestPath, cohortPath, providers: [{ ...provider, contextLimit: 1023 }] });
+
+  assert.match(frozen.inputFingerprint, /^[a-f\d]{64}$/);
+  assert.match(frozen.compilerFingerprint, /^[a-f\d]{64}$/);
+  assert.match(frozen.providers[0]!.executionFingerprint, /^[a-f\d]{64}$/);
+  assert.equal(frozen.providers[0]!.tokenizerSha256, tokenizerSha256);
+  assert.notEqual(frozen.inputFingerprint, synthetic.inputFingerprint);
+  assert.equal(frozen.inputFingerprint, differentLimit.inputFingerprint);
+  assert.notEqual(frozen.providers[0]!.executionFingerprint, differentLimit.providers[0]!.executionFingerprint);
+});
