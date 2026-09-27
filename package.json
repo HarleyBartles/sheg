@@ -6,6 +6,7 @@
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test scripts",
+    "verify": "npm run lint && npm run typecheck && npm test && node --import tsx scripts/check-generated.ts",
     "contracts:build": "node --import tsx scripts/generate-contracts.ts",
     "build": "node --import tsx scripts/build.ts",
     "start": "node dist/mcp.js"

@@ -30,6 +30,7 @@ history. Routine implementation details belong in code or the active plan.
 
 ## Local verification
 
-Run `npm run lint`, `npm run typecheck`, and `npm test` for TypeScript changes.
-The tracked `.githooks/pre-commit` runs lint and the recursive test suite on
-commits once tests exist.
+Run `npm run verify` before publishing changes. The tracked
+`.githooks/pre-commit` runs that command against the staged snapshot with a
+clean dependency install; hosted CI runs the same command on the PR merge
+commit.

@@ -1,16 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root=$(git rev-parse --show-toplevel)
-cd "$repo_root"
-
-echo "Running repository TypeScript lint before commit."
-npm run lint
-
-if ! find test -type f -name '*.test.ts' -print -quit 2>/dev/null | grep -q .; then
-  echo "No TypeScript tests found; skipping pre-commit test run."
-  exit 0
-fi
-
-echo "Running repository TypeScript tests before commit."
-npm test
+cd "$(git rev-parse --show-toplevel)"
+node scripts/verify-staged.mjs
