@@ -107,11 +107,18 @@ test('rejects reports when the manifest changes after the run', async (t) => {
 test('includes a declared comparison task when neither arm produced a response', async (t) => {
   const { checkpoint } = await setup(t);
   for (const journey of checkpoint.journeys) { journey.decisions = []; journey.presentedTaskIds = []; }
+  for (const armId of ['original', 'revised']) {
+    const journey = checkpoint.journeys.find((cell) => cell.armId === armId && cell.respondentId === 'curious-outside-reader')!;
+    journey.presentedTaskIds = ['entry-response', 'entry-response'];
+  }
   const report = await buildReport(checkpoint);
   const comparison = compareReports(report, 'original', 'revised');
-  assert.equal(comparison.comparisonTasks.length, 1);
+  assert.equal(comparison.comparisonTasks.length, 2);
   assert.equal(comparison.comparisonTasks[0]?.leftResponses, 0);
   assert.equal(comparison.comparisonTasks[0]?.rightResponses, 0);
+  assert.equal(comparison.comparisonTasks[1]?.occurrence, 2);
+  assert.equal(comparison.comparisonTasks[1]?.leftResponses, 0);
+  assert.equal(comparison.comparisonTasks[1]?.rightResponses, 0);
 });
 test('getReport reads the durable checkpoint through the checkpoint store', async (t) => {
   const { directory, checkpoint } = await setup(t);

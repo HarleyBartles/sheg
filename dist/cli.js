@@ -21372,7 +21372,7 @@ function compareReports(report, leftArmId, rightArmId) {
   });
   const comparisonKeys = /* @__PURE__ */ new Set([
     ...[...left.journeys, ...right.journeys].flatMap((journey) => journey.responses.filter((response) => response.comparisonKey).map((response) => `${response.comparisonKey}:${response.occurrence}`)),
-    ...[...left.tasks, ...right.tasks].flatMap((task) => task.comparisonKey ? [`${task.comparisonKey}:1`] : [])
+    ...[left, right].flatMap((arm) => arm.tasks.flatMap((task) => task.comparisonKey ? (arm.taskResponses[task.id]?.occurrences ?? []).map((occurrence) => `${task.comparisonKey}:${occurrence.occurrence}`) : []))
   ]);
   const leftResponseByCell = indexResponses(left.journeys);
   const rightResponseByCell = indexResponses(right.journeys);
