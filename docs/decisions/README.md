@@ -3,7 +3,7 @@
 This directory records durable decisions for Sheg: the context in
 which each decision was made, the alternatives considered, and its consequences.
 The records are part of the repository so future contributors can read them
-alongside the code and planning artifacts.
+alongside the code.
 
 ## Records
 
@@ -23,8 +23,9 @@ alongside the code and planning artifacts.
 
 Create one numbered record for each consequential decision. Include its status,
 context, considered options, decision, and consequences. Keep implementation
-plans in `.agents/plans/`; this directory records why the durable choices were
-made. When a decision changes, add a new record that supersedes the old one
+plans as temporary working files; this directory records why the durable
+choices were made. Completed plans remain in Git history. When a decision
+changes, add a new record that supersedes the old one
 instead of rewriting history. Update this index in the same change.
 
 Use [the template](template.md) for new records. Not every implementation choice

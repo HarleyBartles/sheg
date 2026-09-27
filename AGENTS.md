@@ -1,9 +1,5 @@
 # Repository agent orientation
 
-Before a substantial change, read the relevant approved design in
-`.agents/specs/` and the active implementation plan in `.agents/plans/`. Use
-those files for current requirements, task order, and verification.
-
 ## Repository surfaces
 
 - `src/domain/` owns study, respondent, decision, and journey contracts and behavior.
