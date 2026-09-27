@@ -40,6 +40,7 @@ export class BudgetLedger {
   private reservedCalls = 0;
   private billedUsd = 0;
   private reservedUsd = 0;
+  private unpricedReservations = 0;
   private blocked = false;
   private queue: Promise<void> = Promise.resolve();
 
@@ -50,6 +51,25 @@ export class BudgetLedger {
     if (limits.maxUsd !== undefined && (!Number.isFinite(limits.maxUsd) || limits.maxUsd < 0)) {
       throw new BudgetError('Spend limit must be finite and nonnegative.');
     }
+  }
+
+  static restore(snapshot: BudgetSnapshot): BudgetLedger {
+    const ledger = new BudgetLedger({ maxCalls: snapshot.maxCalls, ...(snapshot.maxUsd === undefined ? {} : { maxUsd: snapshot.maxUsd }) });
+    ledger.usedCalls = snapshot.usedCalls;
+    ledger.reservedCalls = snapshot.reservedCalls;
+    ledger.billedUsd = snapshot.billedUsd;
+    ledger.reservedUsd = snapshot.reservedUsd;
+    ledger.unpricedReservations = snapshot.unpricedReservations;
+    ledger.blocked = snapshot.blocked;
+    return ledger;
+  }
+
+  markInterruptedReservationsUnpriced(): void {
+    if (this.reservedCalls === 0) return;
+    this.usedCalls += this.reservedCalls;
+    this.reservedCalls = 0;
+    this.unpricedReservations += 1;
+    this.blocked = true;
   }
 
   reserve(maxAttempts: number, maxPerCallUsd?: number): Promise<Reservation> {
@@ -113,9 +133,9 @@ export class BudgetLedger {
         this.billedUsd += evidence.chargeUsd!;
       } else if (evidence.chargeStatus === 'unknown') {
         const uncertainUsd = stored.perCallUsd * evidence.attempts;
-        stored.reservedUsd = uncertainUsd;
-        stored.state = 'unpriced';
+        this.reservations.delete(reservation.id);
         this.reservedUsd += uncertainUsd;
+        this.unpricedReservations += 1;
         this.blocked = true;
         return;
       }
@@ -126,17 +146,16 @@ export class BudgetLedger {
   reconcile(unpricedUsd: number): Promise<void> {
     return this.serialized(() => {
       if (!Number.isFinite(unpricedUsd) || unpricedUsd < 0) throw new BudgetError('Reconciled charges must be finite and nonnegative.');
-      const pending = [...this.reservations.values()].filter((entry) => entry.state === 'unpriced');
-      if (pending.length === 0) throw new BudgetError('There are no unpriced reservations to reconcile.');
-      this.reservedUsd -= pending.reduce((sum, entry) => sum + entry.reservedUsd, 0);
-      for (const entry of pending) this.reservations.delete(entry.reservation.id);
+      if (this.unpricedReservations === 0) throw new BudgetError('There are no unpriced reservations to reconcile.');
+      if (this.reservedCalls > 0) throw new BudgetError('Cannot reconcile while calls are in flight.');
+      this.reservedUsd = 0;
       this.billedUsd += unpricedUsd;
+      this.unpricedReservations = 0;
       this.blocked = false;
     });
   }
 
   snapshot(): BudgetSnapshot {
-    const unpricedReservations = [...this.reservations.values()].filter((entry) => entry.state === 'unpriced').length;
     return {
       maxCalls: this.limits.maxCalls,
       ...(this.limits.maxUsd === undefined ? {} : { maxUsd: this.limits.maxUsd }),
@@ -145,7 +164,7 @@ export class BudgetLedger {
       remainingCalls: this.limits.maxCalls - this.usedCalls - this.reservedCalls,
       billedUsd: this.billedUsd,
       reservedUsd: this.reservedUsd,
-      unpricedReservations,
+      unpricedReservations: this.unpricedReservations,
       overspendUsd: this.limits.maxUsd === undefined ? 0 : Math.max(0, this.billedUsd - this.limits.maxUsd),
       blocked: this.blocked,
     };
