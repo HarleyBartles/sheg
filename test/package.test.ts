@@ -86,7 +86,11 @@ async function assertSkillLinksResolve(skillDirectory: string, pluginDirectory: 
       const localPath = target.split('#', 1)[0]?.split('?', 1)[0];
       if (!localPath) continue;
       const resolvedPath = path.resolve(path.dirname(markdownPath), localPath);
-      assert.ok(resolvedPath.startsWith(pluginDirectory), `Skill link escapes plugin: ${target}`);
+      const pluginRelativePath = path.relative(pluginDirectory, resolvedPath);
+      assert.ok(
+        !path.isAbsolute(pluginRelativePath) && pluginRelativePath !== '..' && !pluginRelativePath.startsWith(`..${path.sep}`),
+        `Skill link escapes plugin: ${target}`,
+      );
       assert.equal(await exists(resolvedPath), true, `Broken packaged skill link in ${relativePath}: ${target}`);
     }
   }
