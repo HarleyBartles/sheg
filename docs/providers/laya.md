@@ -2,6 +2,10 @@
 
 The harness talks to a running Laya service over its local HTTP API. It does not start Python, download weights, or select a checkpoint implicitly. The operator starts and configures the local service separately.
 
+## Configuration
+
+Configure a running `/v1/systemone` endpoint with the intended checkpoint, context limit, timeout, and precision provenance. The adapter refuses inference unless a checkpoint-matched `FitMeasurer` is available. It does not assume a built-in tokenizer or launch a local model. Live Laya/GPU verification is an opt-in operator action after a compatible fit measurer is available.
+
 ## Wire contract observed
 
 The Laya service exposes `POST /v1/systemone`. The request carries an explicit `model`, `state`, and `questions` map. A choice question has `type: "choice"`, `instructions`, and a `criteria` map. A successful response has a top-level `model`, `answers`, `usage`, and `routing`; a choice answer carries `choice`, `probabilities`, and optionally `confidence`. `routing.model` identifies the selected checkpoint. The top-level model can be the generic `laya-rl-agent`, so the adapter checks the routed checkpoint rather than treating that generic name as the checkpoint identity.
@@ -25,4 +29,4 @@ No production `FitMeasurer` is bundled yet. The upstream [laya-ts source package
 - A transport failure has unknown execution status. HTTP and invalid-response failures are not retried; the adapter makes at most one inference request.
 - The configured checkpoint is sent explicitly. The adapter rejects a response routed to another checkpoint and never falls back to a different provider.
 
-Routine tests use fake transport and do not download weights or start a GPU runtime. The opt-in service smoke test remains a separate operator action after a compatible fit measurer is available.
+Routine tests use fake transport and do not download weights or start a GPU runtime.

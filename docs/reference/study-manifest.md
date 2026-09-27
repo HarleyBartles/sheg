@@ -1,6 +1,6 @@
 # Study manifest reference
 
-The standalone manifest is strict JSON with `version: "1.0"`. See the runnable [article fixture](../test/fixtures/article.json), [chapter fixture](../test/fixtures/chapter.json), and companion [frozen cohort](../test/fixtures/cohort.json).
+The standalone manifest is strict JSON with `version: "1.0"`. See the runnable [article fixture](../../test/fixtures/article.json), [chapter fixture](../../test/fixtures/chapter.json), and companion [frozen cohort](../../test/fixtures/cohort.json).
 
 ## Fields
 

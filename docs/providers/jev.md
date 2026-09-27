@@ -1,5 +1,9 @@
 # Jev wire contract
 
+## Configuration
+
+Set the environment variable named by `keyEnv` in the environment launching Codex. Never put the secret in a manifest, plugin file, or chat. Every hosted run requires `maxUsd` and `maxPerCallUsd`. Routine checks use fake transports and make no paid provider calls.
+
 ## Evidence checked
 
 Checked 2026-09-27 against OpenRouter's current Decisions API reference and

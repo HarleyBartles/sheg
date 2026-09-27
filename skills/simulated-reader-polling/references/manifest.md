@@ -8,4 +8,4 @@ The cohort contains an ordered `readers` list with `id`, `archetypeId`, and `pro
 
 Only item text reached through expose nodes becomes reader stimulus. Source paths and hashes are integrity evidence. Source documents are not automatically passed to a model.
 
-See the repository's [study manifest reference](../../../docs/study-manifest.md) for complete field definitions and examples.
+See the repository's [study manifest reference](../../../docs/reference/study-manifest.md) for complete field definitions and examples.

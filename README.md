@@ -8,7 +8,7 @@ An ambient Codex plugin and standalone Node.js 24 harness for bounded simulated-
 - Runs frozen simulated-reader cohorts with bounded decisions, durable checkpoints, call and spend controls, resume, reports, and matched comparisons.
 - Exposes the same job core through a CLI and eight MCP tools.
 
-Poll responses are simulated judgments. They are not observed readership, accuracy, calibration, or publication scores. Review the [skill](skills/simulated-reader-polling/SKILL.md) and [manifest reference](docs/study-manifest.md) before using the harness.
+Poll responses are simulated judgments. They are not observed readership, accuracy, calibration, or publication scores. Review the [skill](skills/simulated-reader-polling/SKILL.md) and [manifest reference](docs/reference/study-manifest.md) before using the harness.
 
 ## Development
 
@@ -35,4 +35,4 @@ node dist/cli.js status --output ./runs --run-id <run-id>
 node dist/cli.js report --output ./runs --run-id <run-id>
 ```
 
-See [Codex installation and provider setup](docs/install-codex.md) for the plugin workflow, Jev key configuration, and local Laya fit requirements.
+See the [documentation index](docs/README.md) for the [Codex plugin installation guide](docs/guides/installing-codex-plugin.md) and provider references.

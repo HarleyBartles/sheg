@@ -22,9 +22,6 @@ npm run build
 
 Commit source and generated `dist/` together. Refresh the local marketplace plugin and restart Codex to load the updated package. The server launches as `node ${PLUGIN_ROOT}/dist/mcp.js`.
 
-## Provider setup
+## Provider configuration
 
-- **Jev:** Set the environment variable named by the provider's `keyEnv` in the environment launching Codex. Never put the secret in a manifest, plugin file, or chat. Configure both `maxUsd` and `maxPerCallUsd` for each hosted run.
-- **Laya:** Configure a running `/v1/systemone` endpoint, exact checkpoint identity, context limit, and precision provenance. The current adapter refuses inference unless a checkpoint-matched `FitMeasurer` is available. It does not assume a built-in tokenizer or launch GPU models.
-
-Routine checks use fake transports and make no paid provider calls. Live Laya/GPU verification is opt-in.
+Configure each provider using its dedicated reference: [Jev](../providers/jev.md) or [local Laya](../providers/laya.md).
