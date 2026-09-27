@@ -62,6 +62,21 @@ test('compares two arms within the same run by respondent and comparison key', a
   assert.deepEqual(comparison.taskChanges[0]?.fields, ['options']);
   assert.throws(() => compareReports(report, 'original', 'missing'), /both arm IDs/i);
 });
+test('aligns repeated task presentations by occurrence order and counts only shared-option pairs', async (t) => {
+  const { checkpoint } = await setup(t);
+  for (const armId of ['original', 'revised']) {
+    const journey = checkpoint.journeys.find((cell) => cell.armId === armId && cell.respondentId === 'curious-outside-reader')!;
+    journey.decisions.push({ decisionId: 'entry-response', requestFingerprint: 'f'.repeat(64), result: decision('leave') });
+    journey.presentedTaskIds.push('entry-response');
+  }
+  const report = await buildReport(checkpoint);
+  const summary = compareReports(report, 'original', 'revised').comparisonTasks;
+  assert.equal(summary.length, 2);
+  assert.equal(summary[0]?.occurrence, 1);
+  assert.equal(summary[0]?.unpairedResponses, 1);
+  assert.equal(summary[1]?.occurrence, 2);
+  assert.deepEqual(summary[1]?.optionTransitions, { leave: { leave: 1 } });
+});
 test('getReport reads the durable checkpoint through the checkpoint store', async (t) => {
   const { directory, checkpoint } = await setup(t);
   await new CheckpointStore(directory).create(checkpoint);
