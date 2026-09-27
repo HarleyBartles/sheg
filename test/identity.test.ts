@@ -18,20 +18,21 @@ async function studyFixture(t: TestContext) {
 
 test('provider changes preserve stimulus identity and change execution identity', async (t) => {
   const study = await studyFixture(t);
-  const stimulus = stimulusFingerprint(study.manifest, study.profiles, 'prompt-v1');
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1');
   const jev = executionFingerprint(stimulus, { kind: 'jev', model: 'jev-latest' });
   const laya = executionFingerprint(stimulus, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024 });
-  assert.equal(stimulusFingerprint(study.manifest, study.profiles, 'prompt-v1'), stimulus);
+  assert.equal(stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1'), stimulus);
   assert.notEqual(jev, laya);
 });
 
 test('cohort order, source hashes, prompt contract, checkpoint, and precision affect the relevant fingerprints', async (t) => {
   const study = await studyFixture(t);
-  const base = stimulusFingerprint(study.manifest, study.profiles, 'prompt-v1');
-  assert.notEqual(stimulusFingerprint(study.manifest, [...study.profiles].reverse(), 'prompt-v1'), base);
-  assert.notEqual(stimulusFingerprint(study.manifest, [{ ...study.profiles[0]!, background: 'Has substantial hands-on experience.' }, study.profiles[1]!], 'prompt-v1'), base);
-  assert.notEqual(stimulusFingerprint({ ...study.manifest, sources: study.manifest.sources.map((source) => ({ ...source, sha256: 'a'.repeat(64) })) }, study.profiles, 'prompt-v1'), base);
-  assert.notEqual(stimulusFingerprint(study.manifest, study.profiles, 'prompt-v2'), base);
+  const base = stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1');
+  assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, readers: [...study.profiles].reverse() }, 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, readers: [{ ...study.profiles[0]!, background: 'Has substantial hands-on experience.' }, study.profiles[1]!] }, 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint(study.manifest, { ...study.cohort, archetypes: study.cohort.archetypes.map((archetype, index) => index === 0 ? { ...archetype, invariants: ['A changed invariant.', ...archetype.invariants.slice(1)] } : archetype) }, 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint({ ...study.manifest, sources: study.manifest.sources.map((source) => ({ ...source, sha256: 'a'.repeat(64) })) }, study.cohort, 'prompt-v1'), base);
+  assert.notEqual(stimulusFingerprint(study.manifest, study.cohort, 'prompt-v2'), base);
 
   const checkpoint = executionFingerprint(base, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024 });
   assert.notEqual(executionFingerprint(base, { kind: 'laya', checkpoint: 'multilingual', contextLimit: 1024 }), checkpoint);
@@ -40,7 +41,7 @@ test('cohort order, source hashes, prompt contract, checkpoint, and precision af
 
 test('execution fingerprint never includes credentials or transport-only settings', async (t) => {
   const study = await studyFixture(t);
-  const stimulus = stimulusFingerprint(study.manifest, study.profiles, 'prompt-v1');
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1');
   const first = executionFingerprint(stimulus, { kind: 'jev', model: 'jev-latest', keyEnv: 'JEV_API_KEY', endpoint: 'https://api.example' });
   const second = executionFingerprint(stimulus, { kind: 'jev', model: 'jev-latest', keyEnv: 'OTHER_KEY', endpoint: 'https://other.example' });
   assert.equal(first, second);
@@ -51,7 +52,7 @@ test('canonical object key order does not change the stimulus fingerprint', asyn
   const study = await studyFixture(t);
   const reordered = { ...study.manifest, study: { purpose: study.manifest.study.purpose, title: study.manifest.study.title } };
   assert.equal(
-    stimulusFingerprint(study.manifest, study.profiles, 'prompt-v1'),
-    stimulusFingerprint(reordered, study.profiles, 'prompt-v1'),
+    stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1'),
+    stimulusFingerprint(reordered, study.cohort, 'prompt-v1'),
   );
 });

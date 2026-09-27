@@ -19786,9 +19786,6 @@ function loadCohort(input2) {
   }
   return { archetypes: result.data.archetypes ?? [], readers: result.data.readers };
 }
-function loadProfiles(input2) {
-  return loadCohort(input2).readers;
-}
 
 // src/domain/study/manifest.ts
 var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -19968,9 +19965,11 @@ async function loadStudy(manifestPath, cohortPath) {
     sources.push({ path: resolvedPath, sha256: actualHash });
   }
   const cohortJson = await parseJsonFile(path.resolve(cohortPath), "Frozen cohort");
-  const profiles = loadProfiles(cohortJson);
+  const cohort = loadCohort(cohortJson);
+  const profiles = cohort.readers;
   return {
     manifest,
+    cohort,
     profiles,
     sources,
     manifestDirectory: path.dirname(absoluteManifestPath)
@@ -20923,7 +20922,7 @@ var RunCancelled = class extends Error {
 };
 async function runWorker(store, checkpoint, provider, restoredBudget) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.profiles, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   const execution = executionFingerprint(stimulus, identityProvider);
   if (stimulus !== checkpoint.stimulusFingerprint || execution !== checkpoint.executionFingerprint) {
@@ -21093,7 +21092,7 @@ async function checkStudy(config2) {
   const parsed = configSchema.parse(config2);
   const normalized = { ...parsed, manifestPath: path4.resolve(parsed.manifestPath), cohortPath: path4.resolve(parsed.cohortPath), outputDirectory: path4.resolve(parsed.outputDirectory) };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.profiles, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === "laya" ? { kind: "laya", checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...normalized.provider.precision === void 0 ? {} : { precision: normalized.provider.precision } } : normalized.provider;
   return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider) };
 }

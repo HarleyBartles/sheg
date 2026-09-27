@@ -18,12 +18,13 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   });
   const plugin = path.join(sandbox, 'installed', 'system-one-polling');
   await mkdir(path.dirname(plugin), { recursive: true });
-  for (const item of ['plugin.json', 'mcp.json', 'dist', 'contracts']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
+  for (const item of ['plugin.json', 'mcp.json', 'dist']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
   await cp(path.resolve('skills/simulated-reader-polling/SKILL.md'), path.join(plugin, 'skills/simulated-reader-polling/SKILL.md'), { recursive: true });
   await cp(path.resolve('skills/simulated-reader-polling/references'), path.join(plugin, 'skills/simulated-reader-polling/references'), { recursive: true });
+  await cp(path.resolve('skills/simulated-reader-polling/assets'), path.join(plugin, 'skills/simulated-reader-polling/assets'), { recursive: true });
   assert.equal(await exists(path.join(plugin, 'dist/data/reader-archetypes.json')), true);
-  for (const contract of ['reader-archetype.schema.json', 'reader-profile.schema.json', 'frozen-cohort.schema.json', 'study-manifest.schema.json']) {
-    assert.equal(await exists(path.join(plugin, 'contracts', contract)), true);
+  for (const contract of ['reader-archetype.schema.json', 'reader-archetype-library.schema.json', 'reader-profile.schema.json', 'frozen-cohort.schema.json', 'study-manifest.schema.json']) {
+    assert.equal(await exists(path.join(plugin, 'skills/simulated-reader-polling/assets', contract)), true);
   }
   assert.equal(await exists(path.join(plugin, 'dist/skills/simulated-reader-polling/assets/reader-archetypes.json')), false);
   assert.equal(await exists(path.join(plugin, 'node_modules')), false);

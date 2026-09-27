@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { StudyManifest } from '../domain/study/manifest.js';
-import type { ReaderProfile } from '../domain/readers/profile.js';
+import type { FrozenCohort } from '../domain/readers/profile.js';
 
 export type ExecutionProvider =
   | { kind: 'jev'; model: string; keyEnv?: string; endpoint?: string; timeoutMs?: number }
@@ -8,7 +8,7 @@ export type ExecutionProvider =
 
 export function stimulusFingerprint(
   study: StudyManifest,
-  cohort: readonly ReaderProfile[],
+  cohort: FrozenCohort,
   promptContractHash: string,
 ): string {
   if (!promptContractHash) throw new TypeError('Prompt contract hash is required.');

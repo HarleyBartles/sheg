@@ -212,6 +212,7 @@
   "title": "Frozen reader cohort",
   "x-validation-rules": [
     "Text fields must contain non-whitespace content; surrounding whitespace is trimmed by runtime validation.",
+    "Archetype IDs are unique within the cohort snapshot.",
     "Reader IDs are unique within the cohort.",
     "Every archetypeId refers to an archetype included in the cohort snapshot.",
     "Profiles without archetypeId cannot include variation selections.",

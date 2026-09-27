@@ -7,8 +7,8 @@ Choose the workflow by the evidence the user wants. Mentioning a poll does not b
 
 | User goal | Read before acting | Tools |
 | --- | --- | --- |
-| Write or review archetypes; expand them into a poll-specific cohort; or author profiles directly | [Archetypes and cohorts](references/archetypes-and-cohorts.md); also [study inputs](references/manifest.md) when fields matter | `poll_check` after the cohort is authored |
-| Validate study inputs or inspect a route | [Prepare and trace](references/prepare-and-trace.md); also [study inputs](references/manifest.md) when field definitions matter | `poll_check`, `poll_trace` |
+| Write or review archetypes; expand them into a poll-specific cohort; or author profiles directly | [Archetypes and cohorts](references/archetypes-and-cohorts.md); use its linked archetype, profile, and cohort schemas | `poll_check` after the cohort is authored |
+| Validate study inputs or inspect a route | [Prepare and trace](references/prepare-and-trace.md); use the [study manifest](assets/study-manifest.schema.json) and [frozen cohort](assets/frozen-cohort.schema.json) schemas for file shape | `poll_check`, `poll_trace` |
 | Start or manage a poll | [Run and recovery](references/run-and-recovery.md); for a new run, also [prepare and trace](references/prepare-and-trace.md) | `poll_start`, `poll_status`, `poll_cancel`, `poll_resume` |
 | Report or compare runs | [Interpret results](references/interpret-results.md); check `poll_status` first if completion is unknown, using [run and recovery](references/run-and-recovery.md) | `poll_status`, `poll_report`, `poll_compare` |
 

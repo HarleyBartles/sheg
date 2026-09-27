@@ -44,8 +44,8 @@ strong.
 
 The polling prompt receives only each reader's five concrete perspective
 fields. It does not receive archetype definitions, variation metadata, study
-purpose, or unexposed stimulus. The exact ordered concrete profiles and prompt
-contract contribute to the stimulus fingerprint.
+purpose, or unexposed stimulus. The exact ordered cohort snapshot, concrete
+profiles, and prompt contract contribute to the stimulus fingerprint.
 
 The canonical archetype library lives under `src/domain/readers/` and the
 clean build copies it to `dist/data/` for the installed plugin skill to read.
@@ -53,11 +53,12 @@ The harness does not require the bundled library to validate or run a cohort;
 user-authored archetypes and direct profiles remain first-class inputs.
 
 Publish archetype, reader profile, frozen cohort, and study manifest shapes as
-machine-readable JSON Schema assets under `contracts/`. Skill references teach
-authoring and expansion workflows and link to those assets; they do not own or
-duplicate the normative contract. Runtime Zod schemas generate the JSON Schema
-assets, while cross-record rules remain explicitly listed and enforced by the
-runtime validators.
+machine-readable JSON Schema assets directly under the skill's `assets/`
+directory, so each consumer receives the contracts alongside the skill that
+uses them. Skill references teach authoring and expansion workflows and link
+to those assets; they do not own or duplicate the normative contract. Runtime
+Zod schemas generate the JSON Schema assets, while cross-record rules remain
+explicitly listed and enforced by the runtime validators.
 
 ## Consequences
 

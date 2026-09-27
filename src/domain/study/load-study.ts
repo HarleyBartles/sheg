@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { StudyInputError } from '../errors.js';
-import { loadProfiles, type ReaderProfile } from '../readers/profile.js';
+import { loadCohort, type FrozenCohort, type ReaderProfile } from '../readers/profile.js';
 import { manifestSchema } from './manifest.js';
 import type { StudyManifest } from './manifest.js';
 
 export type StudySource = { readonly path: string; readonly sha256: string };
 export type Study = {
   readonly manifest: StudyManifest;
+  readonly cohort: FrozenCohort;
   readonly profiles: readonly ReaderProfile[];
   readonly sources: readonly StudySource[];
   readonly manifestDirectory: string;
@@ -76,10 +77,12 @@ export async function loadStudy(manifestPath: string, cohortPath: string | undef
   }
 
   const cohortJson = await parseJsonFile(path.resolve(cohortPath), 'Frozen cohort');
-  const profiles: readonly ReaderProfile[] = loadProfiles(cohortJson);
+  const cohort = loadCohort(cohortJson);
+  const profiles = cohort.readers;
 
   return {
     manifest,
+    cohort,
     profiles,
     sources,
     manifestDirectory: path.dirname(absoluteManifestPath),

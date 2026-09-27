@@ -4,6 +4,7 @@ import test from 'node:test';
 import { archetypeLibrarySchema, loadCohort } from '../src/domain/readers/profile.js';
 
 const libraryUrl = new URL('../src/domain/readers/reader-archetypes.json', import.meta.url);
+const schemaAssets = new URL('../skills/simulated-reader-polling/assets/', import.meta.url);
 
 function reader(id: string, archetypeId?: string, variation?: Record<string, string>) {
   return {
@@ -27,6 +28,20 @@ test('the shipped archetype library follows the authoring contract', async () =>
   const parsed = archetypeLibrarySchema.safeParse(input);
   assert.equal(parsed.success, true, parsed.success ? '' : parsed.error.message);
   if (parsed.success) assert.ok(parsed.data.length >= 8);
+});
+
+test('published schemas carry constraints that consumers can validate directly', async () => {
+  const manifest = JSON.parse(await readFile(new URL('study-manifest.schema.json', schemaAssets), 'utf8')) as {
+    properties: { decisions: { items: { properties: { criteria: { minProperties?: number } } } } };
+    'x-validation-rules': string[];
+  };
+  const cohort = JSON.parse(await readFile(new URL('frozen-cohort.schema.json', schemaAssets), 'utf8')) as {
+    'x-validation-rules': string[];
+  };
+
+  assert.equal(manifest.properties.decisions.items.properties.criteria.minProperties, 1);
+  assert.ok(manifest['x-validation-rules'].some((rule) => rule.includes('criteria object')));
+  assert.ok(cohort['x-validation-rules'].some((rule) => rule.includes('Archetype IDs are unique')));
 });
 
 test('cohort can mix shipped and custom archetypes with concrete varied profiles', async () => {

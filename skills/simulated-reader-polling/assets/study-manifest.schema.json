@@ -91,7 +91,8 @@
             "additionalProperties": {
               "type": "string",
               "minLength": 1
-            }
+            },
+            "minProperties": 1
           }
         },
         "required": [
@@ -231,6 +232,7 @@
   "title": "Study manifest",
   "x-validation-rules": [
     "Text fields must contain non-whitespace content; surrounding whitespace is trimmed by runtime validation.",
+    "Every decision criteria object contains at least one choice.",
     "Item, decision, and node IDs are unique across the manifest.",
     "The entry node and every node reference resolve.",
     "Terminal nodes have no outgoing transitions.",

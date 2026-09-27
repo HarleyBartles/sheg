@@ -39,7 +39,7 @@ export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
   const parsed = configSchema.parse(config);
   const normalized: ParsedConfig = { ...parsed, manifestPath: path.resolve(parsed.manifestPath), cohortPath: path.resolve(parsed.cohortPath), outputDirectory: path.resolve(parsed.outputDirectory) };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.profiles, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === 'laya'
     ? { kind: 'laya' as const, checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...(normalized.provider.precision === undefined ? {} : { precision: normalized.provider.precision }) }
     : normalized.provider;

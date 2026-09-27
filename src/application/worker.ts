@@ -20,7 +20,7 @@ export async function runWorker(
   restoredBudget?: BudgetLedger,
 ): Promise<RunCheckpoint> {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.profiles, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === 'laya'
     ? { kind: 'laya' as const, checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...(checkpoint.provider.precision === undefined ? {} : { precision: checkpoint.provider.precision }) }
     : checkpoint.provider;
