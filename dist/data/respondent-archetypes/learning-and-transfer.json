@@ -1,0 +1,206 @@
+[
+  {
+    "id": "curious-outsider",
+    "intent": "Understand why an unfamiliar practice or problem matters without becoming a specialist.",
+    "context": "Intelligent reader with little prior knowledge of this article's technical or design domain.",
+    "desired_outcome": "A clear mental picture and a reason to care that can be retold in ordinary language.",
+    "engagement_cues": "Concrete examples and terms introduced when their meaning becomes necessary.",
+    "friction_cues": "Insider shorthand that makes entry impossible, or a remedial lecture that stalls the story.",
+    "name": "Curious outsider",
+    "invariants": [
+      "Wants to understand why the subject matters without becoming a specialist.",
+      "Needs unfamiliar terms and practices introduced when they become useful."
+    ],
+    "variation_axes": [
+      {
+        "id": "subject_familiarity",
+        "description": "The reader’s starting familiarity with the poll subject.",
+        "values": [
+          {
+            "id": "newcomer",
+            "description": "Little prior knowledge of the subject."
+          },
+          {
+            "id": "adjacent",
+            "description": "Understands a neighboring field or practice."
+          },
+          {
+            "id": "working_knowledge",
+            "description": "Knows common terms but not specialist detail."
+          }
+        ]
+      },
+      {
+        "id": "explanation_tolerance",
+        "description": "How the reader prefers unfamiliar ideas to be made clear.",
+        "values": [
+          {
+            "id": "concrete_first",
+            "description": "Needs examples before abstractions."
+          },
+          {
+            "id": "analogy_welcome",
+            "description": "Uses a careful analogy as a bridge."
+          },
+          {
+            "id": "terms_ready",
+            "description": "Can follow terms once briefly defined."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "practical-borrower",
+    "intent": "Take one usable move from this article into a problem I already have.",
+    "context": "Has a live task and little need for a complete philosophy of the subject.",
+    "desired_outcome": "A next step with enough conditions to know when to try it.",
+    "engagement_cues": "A concrete move, what it changed and the constraint that made it appropriate.",
+    "friction_cues": "Insight that never becomes actionable, or a universal recipe detached from its case.",
+    "name": "Practical borrower",
+    "invariants": [
+      "Has a real problem and looks for a usable move.",
+      "Needs conditions that distinguish a suitable application from a universal recipe."
+    ],
+    "variation_axes": [
+      {
+        "id": "task_urgency",
+        "description": "How soon the reader hopes to apply an idea.",
+        "values": [
+          {
+            "id": "exploratory",
+            "description": "Gathering ideas for a future task."
+          },
+          {
+            "id": "active",
+            "description": "Working on a related task now."
+          },
+          {
+            "id": "immediate",
+            "description": "Needs to make a near-term decision."
+          }
+        ]
+      },
+      {
+        "id": "transfer_style",
+        "description": "What form of practical takeaway best supports the reader.",
+        "values": [
+          {
+            "id": "example",
+            "description": "A worked example to adapt."
+          },
+          {
+            "id": "checklist",
+            "description": "A short sequence of checks."
+          },
+          {
+            "id": "decision_rule",
+            "description": "A rule for choosing when to use an approach."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "model-builder",
+    "intent": "Leave with a way to reason about similar decisions, not merely copy this solution.",
+    "context": "Comfortable with complexity and interested in transferable distinctions.",
+    "desired_outcome": "A decision rule that survives outside the author's exact circumstances.",
+    "engagement_cues": "Competing options, governing constraints and why one consideration outranked another.",
+    "friction_cues": "A list of tactics with no principle connecting them, or an aphorism with no test.",
+    "name": "Model builder",
+    "invariants": [
+      "Looks for distinctions that transfer beyond the current example.",
+      "Wants competing options and constraints connected to a defensible principle."
+    ],
+    "variation_axes": [
+      {
+        "id": "systems_familiarity",
+        "description": "How much experience the reader has modeling interacting systems.",
+        "values": [
+          {
+            "id": "newcomer",
+            "description": "Understands examples better than abstract system models."
+          },
+          {
+            "id": "practiced",
+            "description": "Can reason about connected parts and their effects."
+          },
+          {
+            "id": "expert",
+            "description": "Regularly builds or evaluates formal models."
+          }
+        ]
+      },
+      {
+        "id": "transfer_depth",
+        "description": "How far beyond the immediate case the reader seeks a reusable idea.",
+        "values": [
+          {
+            "id": "nearby",
+            "description": "Wants to adapt the move to a similar case."
+          },
+          {
+            "id": "principle",
+            "description": "Wants a rule that generalizes across contexts."
+          },
+          {
+            "id": "framework",
+            "description": "Wants a model for reasoning about a class of decisions."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "counterexample-hunter",
+    "intent": "Test where the apparent lesson stops being true.",
+    "context": "Enjoys a strong argument enough to push it against difficult cases.",
+    "desired_outcome": "A claim whose boundaries become sharper under pressure.",
+    "engagement_cues": "Visible assumptions, counterpressure and a concession that improves the argument.",
+    "friction_cues": "A local success inflated into a rule for everyone.",
+    "name": "Counterexample hunter",
+    "invariants": [
+      "Tests where a promising claim stops being true.",
+      "Treats explicit limits as a way to sharpen an argument rather than weaken it."
+    ],
+    "variation_axes": [
+      {
+        "id": "counterpressure_style",
+        "description": "The kind of pressure the reader first applies to a claim.",
+        "values": [
+          {
+            "id": "edge_case",
+            "description": "Looks for an exceptional case."
+          },
+          {
+            "id": "ordinary_case",
+            "description": "Tests the claim against common conditions."
+          },
+          {
+            "id": "adversarial_case",
+            "description": "Constructs a difficult opposing scenario."
+          }
+        ]
+      },
+      {
+        "id": "evidence_expectation",
+        "description": "What helps the reader decide whether a boundary is credible.",
+        "values": [
+          {
+            "id": "mechanism",
+            "description": "A causal explanation."
+          },
+          {
+            "id": "comparison",
+            "description": "A contrast with a case where the claim fails."
+          },
+          {
+            "id": "concession",
+            "description": "A clear statement of where the claim does not apply."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,169 @@
+{
+  "version": "2.0",
+  "study": {
+    "title": "A repair that made the system smaller",
+    "purpose": "Explore how readers respond to a practical repair story."
+  },
+  "arms": [
+    {
+      "id": "original",
+      "label": "Original",
+      "sources": [
+        {
+          "path": "article-source.md",
+          "sha256": "dc6bb97ebce3cd0c42945143c1eb230a74377111308d8b8563652898d996daf5"
+        }
+      ],
+      "items": [
+        {
+          "id": "symptom",
+          "text": "The dashboard said the repair worked, but users still could not complete the task."
+        },
+        {
+          "id": "investigation",
+          "text": "A maintainer traced the mismatch to a state update that ran in the wrong order."
+        },
+        {
+          "id": "repair",
+          "text": "The team replaced the hidden coupling with one explicit transition."
+        },
+        {
+          "id": "test-notes",
+          "text": "They replayed the failed sequence against the new transition."
+        }
+      ],
+      "tasks": [
+        {
+          "id": "entry-response",
+          "instructions": "After the opening, decide whether to continue or stop.",
+          "options": {
+            "continue": "Continue to the next item.",
+            "leave": "Stop reading now."
+          }
+        },
+        {
+          "id": "investigation-response",
+          "instructions": "Choose what to read next.",
+          "options": {
+            "continue": "Continue to the repair.",
+            "open-notes": "Read the optional test notes.",
+            "leave": "Stop reading now."
+          }
+        },
+        {
+          "id": "notes-response",
+          "instructions": "After the notes, decide whether to continue.",
+          "options": {
+            "continue": "Continue to the repair.",
+            "leave": "Stop reading now."
+          }
+        }
+      ],
+      "presentation": {
+        "kind": "graph",
+        "nodes": [
+          {
+            "id": "show-symptom",
+            "kind": "expose",
+            "itemId": "symptom"
+          },
+          {
+            "id": "choose-entry",
+            "kind": "ask",
+            "taskId": "entry-response"
+          },
+          {
+            "id": "show-investigation",
+            "kind": "expose",
+            "itemId": "investigation"
+          },
+          {
+            "id": "choose-investigation",
+            "kind": "ask",
+            "taskId": "investigation-response"
+          },
+          {
+            "id": "show-notes",
+            "kind": "expose",
+            "itemId": "test-notes"
+          },
+          {
+            "id": "choose-notes",
+            "kind": "ask",
+            "taskId": "notes-response"
+          },
+          {
+            "id": "show-repair",
+            "kind": "expose",
+            "itemId": "repair"
+          },
+          {
+            "id": "completed",
+            "kind": "terminal",
+            "outcome": "completed"
+          },
+          {
+            "id": "left",
+            "kind": "terminal",
+            "outcome": "left-early"
+          }
+        ],
+        "transitions": [
+          {
+            "fromNodeId": "show-symptom",
+            "toNodeId": "choose-entry"
+          },
+          {
+            "fromNodeId": "choose-entry",
+            "toNodeId": "show-investigation",
+            "optionId": "continue"
+          },
+          {
+            "fromNodeId": "choose-entry",
+            "toNodeId": "left",
+            "optionId": "leave"
+          },
+          {
+            "fromNodeId": "show-investigation",
+            "toNodeId": "choose-investigation"
+          },
+          {
+            "fromNodeId": "choose-investigation",
+            "toNodeId": "show-repair",
+            "optionId": "continue"
+          },
+          {
+            "fromNodeId": "choose-investigation",
+            "toNodeId": "show-notes",
+            "optionId": "open-notes"
+          },
+          {
+            "fromNodeId": "choose-investigation",
+            "toNodeId": "left",
+            "optionId": "leave"
+          },
+          {
+            "fromNodeId": "show-notes",
+            "toNodeId": "choose-notes"
+          },
+          {
+            "fromNodeId": "choose-notes",
+            "toNodeId": "show-repair",
+            "optionId": "continue"
+          },
+          {
+            "fromNodeId": "choose-notes",
+            "toNodeId": "left",
+            "optionId": "leave"
+          },
+          {
+            "fromNodeId": "show-repair",
+            "toNodeId": "completed"
+          }
+        ],
+        "entryNodeId": "show-symptom",
+        "maxDecisions": 8
+      }
+    }
+  ]
+}

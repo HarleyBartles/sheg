@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "sheg",
+  "version": "0.1.0",
+  "description": "Run structured stimulus-task-response polls against simulated respondent cohorts using Jev.",
+  "author": {
+    "name": "Harley Bartles",
+    "url": "https://github.com/HarleyBartles"
+  },
+  "repository": "https://github.com/HarleyBartles/sheg",
+  "license": "MIT",
+  "keywords": ["polling", "stimulus response", "comprehension", "matched studies", "system one", "jev", "simulation"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Sheg",
+        "shortDescription": "Run bounded stimulus-response studies.",
+        "longDescription": "Prepare bounded text stimuli, typed tasks, and distinct simulated respondents. Run Jev polls across matched study arms and inspect descriptive response evidence.",
+        "developerName": "Harley Bartles",
+        "category": "Research",
+        "capabilities": ["Read", "Write"]
+      }
+    }
+  }
+}

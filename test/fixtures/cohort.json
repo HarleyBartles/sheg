@@ -1,0 +1,139 @@
+{
+  "version": "3.0",
+  "archetypes": [
+    {
+      "id": "craft-admirer",
+      "intent": "Watch a person make a thing and discover why its final shape works.",
+      "context": "Interested in process and decisions across writing, visual design, software or other crafts.",
+      "desired_outcome": "The constraints, rejected routes and particular choice become visible in the finished object.",
+      "engagement_cues": "Material details, alternatives and the moment a better question changes the work.",
+      "friction_cues": "A reveal of the final artefact that skips the thinking that made it possible.",
+      "name": "Craft admirer",
+      "invariants": [
+        "Looks for the choices and constraints that shaped the finished work.",
+        "Values process details when they explain why the result has its particular form."
+      ],
+      "variation_axes": [
+        {
+          "id": "craft_experience",
+          "description": "How directly the reader practices a relevant craft.",
+          "values": [
+            {
+              "id": "observer",
+              "description": "Enjoys finished work without making similar things."
+            },
+            {
+              "id": "curious",
+              "description": "Has tried related creative or technical work."
+            },
+            {
+              "id": "practitioner",
+              "description": "Regularly makes work in a related craft."
+            }
+          ]
+        },
+        {
+          "id": "process_interest",
+          "description": "Which part of making most interests the reader.",
+          "values": [
+            {
+              "id": "constraints",
+              "description": "Limits and available materials."
+            },
+            {
+              "id": "alternatives",
+              "description": "Rejected approaches and trade-offs."
+            },
+            {
+              "id": "refinement",
+              "description": "Iteration and the final shaping choices."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "curious-outsider",
+      "intent": "Understand why an unfamiliar practice or problem matters without becoming a specialist.",
+      "context": "Intelligent reader with little prior knowledge of this article's technical or design domain.",
+      "desired_outcome": "A clear mental picture and a reason to care that can be retold in ordinary language.",
+      "engagement_cues": "Concrete examples and terms introduced when their meaning becomes necessary.",
+      "friction_cues": "Insider shorthand that makes entry impossible, or a remedial lecture that stalls the story.",
+      "name": "Curious outsider",
+      "invariants": [
+        "Wants to understand why the subject matters without becoming a specialist.",
+        "Needs unfamiliar terms and practices introduced when they become useful."
+      ],
+      "variation_axes": [
+        {
+          "id": "subject_familiarity",
+          "description": "The reader’s starting familiarity with the poll subject.",
+          "values": [
+            {
+              "id": "newcomer",
+              "description": "Little prior knowledge of the subject."
+            },
+            {
+              "id": "adjacent",
+              "description": "Understands a neighboring field or practice."
+            },
+            {
+              "id": "working_knowledge",
+              "description": "Knows common terms but not specialist detail."
+            }
+          ]
+        },
+        {
+          "id": "explanation_tolerance",
+          "description": "How the reader prefers unfamiliar ideas to be made clear.",
+          "values": [
+            {
+              "id": "concrete_first",
+              "description": "Needs examples before abstractions."
+            },
+            {
+              "id": "analogy_welcome",
+              "description": "Uses a careful analogy as a bridge."
+            },
+            {
+              "id": "terms_ready",
+              "description": "Can follow terms once briefly defined."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "admission": {
+    "rationale": "One newcomer tests accessible explanation while one practitioner attends to concrete craft and trade-offs.",
+    "frozenAt": "2026-09-27T10:00:00Z"
+  },
+  "respondents": [
+    {
+      "id": "curious-outside-reader",
+      "archetypeId": "curious-outsider",
+      "variation": {
+        "subject_familiarity": "newcomer",
+        "explanation_tolerance": "concrete_first"
+      },
+      "intent": "Understand how software design choices affect the people who use a system.",
+      "context": "Uses AI coding tools but has little experience tracing how software components affect one another.",
+      "desired_outcome": "A clear example of why a design choice matters in practice.",
+      "engagement_cues": "Plain explanations tied to visible user consequences.",
+      "friction_cues": "Unexplained architecture terms or a long theory detour."
+    },
+    {
+      "id": "craft-reader",
+      "archetypeId": "craft-admirer",
+      "variation": {
+        "craft_experience": "practitioner",
+        "process_interest": "alternatives"
+      },
+      "intent": "See how the engineering choices shaped the finished system.",
+      "context": "Builds software and has worked through several architectural trade-offs.",
+      "desired_outcome": "A concrete account of constraints, alternatives, and why one design held up.",
+      "engagement_cues": "Specific implementation decisions and evidence from their consequences.",
+      "friction_cues": "A polished result that hides the trade-offs that produced it."
+    }
+  ]
+}

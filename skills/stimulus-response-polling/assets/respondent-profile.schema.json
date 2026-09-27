@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "archetypeId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "variation": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      }
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "desired_outcome": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "engagement_cues": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "friction_cues": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "id",
+    "intent",
+    "context",
+    "desired_outcome",
+    "engagement_cues",
+    "friction_cues"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:sheg:schema:respondent-profile.schema.json",
+  "title": "Respondent profile"
+}

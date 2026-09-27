@@ -1,0 +1,119 @@
+{
+  "version": "2.0",
+  "study": {
+    "title": "The station letter",
+    "purpose": "Explore how readers respond to a chapter excerpt."
+  },
+  "arms": [
+    {
+      "id": "original",
+      "label": "Original",
+      "sources": [
+        {
+          "path": "chapter-source.md",
+          "sha256": "b46ce561b6ae6c8898b58e9882a3f33157685ef288b182a37355ac55509c48bf"
+        }
+      ],
+      "items": [
+        {
+          "id": "arrival",
+          "text": "Mara arrived at the station after the last train."
+        },
+        {
+          "id": "letter",
+          "text": "The unopened letter carried her brother's seal."
+        },
+        {
+          "id": "revelation",
+          "text": "Inside, she learned why he had left the coast."
+        }
+      ],
+      "tasks": [
+        {
+          "id": "chapter-pacing",
+          "instructions": "Choose how you would respond at this point in the chapter.",
+          "options": {
+            "continue": "Read the next passage.",
+            "stop": "Stop here."
+          }
+        }
+      ],
+      "presentation": {
+        "kind": "graph",
+        "nodes": [
+          {
+            "id": "show-arrival",
+            "kind": "expose",
+            "itemId": "arrival"
+          },
+          {
+            "id": "choose-after-arrival",
+            "kind": "ask",
+            "taskId": "chapter-pacing"
+          },
+          {
+            "id": "show-letter",
+            "kind": "expose",
+            "itemId": "letter"
+          },
+          {
+            "id": "choose-after-letter",
+            "kind": "ask",
+            "taskId": "chapter-pacing"
+          },
+          {
+            "id": "show-revelation",
+            "kind": "expose",
+            "itemId": "revelation"
+          },
+          {
+            "id": "chapter-ended",
+            "kind": "terminal",
+            "outcome": "chapter-ended"
+          },
+          {
+            "id": "stopped",
+            "kind": "terminal",
+            "outcome": "stopped"
+          }
+        ],
+        "transitions": [
+          {
+            "fromNodeId": "show-arrival",
+            "toNodeId": "choose-after-arrival"
+          },
+          {
+            "fromNodeId": "choose-after-arrival",
+            "toNodeId": "show-letter",
+            "optionId": "continue"
+          },
+          {
+            "fromNodeId": "choose-after-arrival",
+            "toNodeId": "stopped",
+            "optionId": "stop"
+          },
+          {
+            "fromNodeId": "show-letter",
+            "toNodeId": "choose-after-letter"
+          },
+          {
+            "fromNodeId": "choose-after-letter",
+            "toNodeId": "show-revelation",
+            "optionId": "continue"
+          },
+          {
+            "fromNodeId": "choose-after-letter",
+            "toNodeId": "stopped",
+            "optionId": "stop"
+          },
+          {
+            "fromNodeId": "show-revelation",
+            "toNodeId": "chapter-ended"
+          }
+        ],
+        "entryNodeId": "show-arrival",
+        "maxDecisions": 4
+      }
+    }
+  ]
+}
