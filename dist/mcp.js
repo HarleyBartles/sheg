@@ -34893,8 +34893,8 @@ async function parseJsonFile(filePath, label) {
     throw new StudyInputError(`${label} must be valid UTF-8 JSON.`, { cause: error62 });
   }
 }
-async function loadStudy(manifestPath, cohortPath) {
-  if (!cohortPath) throw new StudyInputError("An explicit frozen cohort is required.");
+async function loadStudy(manifestPath, cohortPath, options = {}) {
+  if (!cohortPath && !options.allowMissingCohort) throw new StudyInputError("An explicit frozen cohort is required.");
   const absoluteManifestPath = path.resolve(manifestPath);
   let manifestBytes;
   try {
@@ -34937,8 +34937,7 @@ async function loadStudy(manifestPath, cohortPath) {
       sources.push({ armId: arm.id, path: resolvedPath, sha256: actualHash });
     }
   }
-  const cohortJson = await parseJsonFile(path.resolve(cohortPath), "Frozen respondent cohort");
-  const cohort = loadCohort(cohortJson);
+  const cohort = cohortPath ? loadCohort(await parseJsonFile(path.resolve(cohortPath), "Frozen respondent cohort")) : { archetypes: [], respondents: [] };
   return {
     manifest,
     cohort,
@@ -36280,7 +36279,13 @@ var configSchema = external_exports.object({
 });
 async function checkStudy(config2) {
   const parsed = configSchema.parse(config2);
-  const normalized = { ...parsed, manifestPath: path5.resolve(parsed.manifestPath), cohortPath: path5.resolve(parsed.cohortPath), outputDirectory: path5.resolve(parsed.outputDirectory) };
+  const normalized = {
+    ...parsed,
+    manifestPath: path5.resolve(parsed.manifestPath),
+    cohortPath: path5.resolve(parsed.cohortPath),
+    outputDirectory: path5.resolve(parsed.outputDirectory),
+    provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path5.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
+  };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === "laya" ? { kind: "laya", checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...normalized.provider.precision === void 0 ? {} : { precision: normalized.provider.precision } } : normalized.provider;
@@ -36769,18 +36774,22 @@ function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
 // src/application/preflight.ts
 var preflightInputSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
-  cohortPath: external_exports.string().min(1),
+  cohortPath: external_exports.string().min(1).optional(),
+  mode: external_exports.enum(["frozen-cohort", "maximum-profile"]).default("frozen-cohort"),
   providers: external_exports.array(external_exports.discriminatedUnion("kind", [
     external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict(),
     external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
   ])).min(1),
   maxPackets: external_exports.number().int().nonnegative().optional()
-}).strict();
+}).strict().superRefine((input2, context) => {
+  if (input2.mode === "frozen-cohort" && !input2.cohortPath) context.addIssue({ code: "custom", path: ["cohortPath"], message: "Frozen-cohort preflight requires a cohort path." });
+});
 async function preflightStudy(input2) {
   const config2 = preflightInputSchema.parse(input2);
-  const study = await loadStudy(config2.manifestPath, config2.cohortPath);
+  const study = await loadStudy(config2.manifestPath, config2.cohortPath, { allowMissingCohort: config2.mode === "maximum-profile" });
+  const respondents = config2.mode === "maximum-profile" ? [maximumProfile()] : study.respondents;
   const packets = [];
-  const traversal = walkStudyPackets(study.manifest.arms, study.respondents, (packet) => {
+  const traversal = walkStudyPackets(study.manifest.arms, respondents, (packet) => {
     packets.push(packet);
   }, config2.maxPackets === void 0 ? {} : { maxPackets: config2.maxPackets });
   const results = [];
@@ -36829,7 +36838,11 @@ async function preflightStudy(input2) {
       ...traversal.incompleteReason === void 0 ? {} : { incompleteReason: traversal.incompleteReason }
     });
   }
-  return { provisional: false, providers: results };
+  return { provisional: config2.mode === "maximum-profile", mode: config2.mode, providers: results };
+}
+function maximumProfile() {
+  const text = "\u6F22".repeat(300);
+  return respondentProfileSchema.parse({ id: "maximum-profile", intent: text, context: text, desired_outcome: text, engagement_cues: text, friction_cues: text });
 }
 function packetRef(packet) {
   return { packetId: packet.packetId, respondentId: packet.respondentId, armId: packet.armId, pathId: packet.pathId, decisionIndex: packet.decisionIndex, nodeId: packet.nodeId };
@@ -36855,7 +36868,7 @@ function createPollingServer(manager = new RunManager()) {
     const checked = await checkStudy(config2);
     return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint });
   });
-  server.registerTool("poll_preflight", { description: "Measure every reachable decision packet for a frozen cohort against configured providers without inference calls or run creation.", inputSchema: preflightInputSchema.shape }, async (input2) => jsonResult(await preflightStudy(input2)));
+  server.registerTool("poll_preflight", { description: "Measure every reachable decision packet for a frozen cohort or maximum valid profile envelope against configured providers without inference calls or run creation.", inputSchema: preflightInputSchema.shape }, async (input2) => jsonResult(await preflightStudy(input2)));
   server.registerTool("poll_trace", { description: "Trace scripted option IDs through one frozen respondent and study arm without provider calls.", inputSchema: { manifestPath: external_exports.string(), cohortPath: external_exports.string(), armId: external_exports.string(), respondentId: external_exports.string(), choices: external_exports.array(external_exports.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
     const profile = study.respondents.find((respondent) => respondent.id === respondentId);

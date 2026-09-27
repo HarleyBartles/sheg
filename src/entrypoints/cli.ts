@@ -17,7 +17,8 @@ export async function runCli(args: readonly string[], io = { out: (value: string
     if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
     if (command === 'preflight') {
       const providers = JSON.parse(await readFile(required(options, 'providers'), 'utf8')) as PreflightProviderConfig[];
-      result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), cohortPath: path.resolve(required(options, 'cohort')), providers });
+      const mode = options.mode === 'maximum-profile' ? 'maximum-profile' : 'frozen-cohort';
+      result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), ...(options.cohort === undefined ? {} : { cohortPath: path.resolve(options.cohort) }), mode, providers });
     }
     else if (command === 'check' || command === 'start') {
       const config = JSON.parse(await readFile(required(options, 'config'), 'utf8')) as RunConfig;
@@ -51,7 +52,7 @@ export async function runCli(args: readonly string[], io = { out: (value: string
 
 const helpText = `sheg <command>
 Commands:
-  preflight --manifest <json> --cohort <json> --providers <json-file>  Measure every reachable packet
+  preflight --manifest <json> [--cohort <json>] [--mode frozen-cohort|maximum-profile] --providers <json-file>
   check --config <json>                         Validate study and provider configuration
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>
   start --config <json>                         Start a durable run

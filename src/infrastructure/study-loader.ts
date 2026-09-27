@@ -33,9 +33,8 @@ async function parseJsonFile(filePath: string, label: string): Promise<unknown> 
   }
 }
 
-export async function loadStudy(manifestPath: string, cohortPath: string | undefined): Promise<LoadedStudy> {
-  if (!cohortPath) throw new StudyInputError('An explicit frozen cohort is required.');
-
+export async function loadStudy(manifestPath: string, cohortPath: string | undefined, options: { allowMissingCohort?: boolean } = {}): Promise<LoadedStudy> {
+  if (!cohortPath && !options.allowMissingCohort) throw new StudyInputError('An explicit frozen cohort is required.');
   const absoluteManifestPath = path.resolve(manifestPath);
   let manifestBytes: Buffer;
   try {
@@ -79,8 +78,9 @@ export async function loadStudy(manifestPath: string, cohortPath: string | undef
     }
   }
 
-  const cohortJson = await parseJsonFile(path.resolve(cohortPath), 'Frozen respondent cohort');
-  const cohort = loadCohort(cohortJson);
+  const cohort = cohortPath
+    ? loadCohort(await parseJsonFile(path.resolve(cohortPath), 'Frozen respondent cohort'))
+    : { archetypes: [], respondents: [] };
 
   return {
     manifest,

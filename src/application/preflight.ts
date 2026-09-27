@@ -1,5 +1,6 @@
 import { loadStudy } from '../infrastructure/study-loader.js';
 import { z } from 'zod';
+import { respondentProfileSchema } from '../domain/respondents/profile.js';
 import { walkStudyPackets, type PreflightPacket } from '../domain/journey/preflight.js';
 import type { ProviderContextFit } from '../domain/decision/provider.js';
 import { JevProvider, type JevConfig } from '../providers/jev.js';
@@ -8,18 +9,21 @@ import { LayaProvider, type LayaConfig } from '../providers/laya.js';
 export type PreflightProviderConfig = JevConfig | LayaConfig;
 export type StudyPreflightInput = {
   manifestPath: string;
-  cohortPath: string;
+  cohortPath?: string;
+  mode?: 'frozen-cohort' | 'maximum-profile';
   providers: readonly PreflightProviderConfig[];
   maxPackets?: number;
 };
 
 export const preflightInputSchema = z.object({
-  manifestPath: z.string().min(1), cohortPath: z.string().min(1),
+  manifestPath: z.string().min(1), cohortPath: z.string().min(1).optional(), mode: z.enum(['frozen-cohort', 'maximum-profile']).default('frozen-cohort'),
   providers: z.array(z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('jev'), model: z.string().min(1), keyEnv: z.string().min(1), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict(),
     z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
   ])).min(1), maxPackets: z.number().int().nonnegative().optional(),
-}).strict();
+}).strict().superRefine((input, context) => {
+  if (input.mode === 'frozen-cohort' && !input.cohortPath) context.addIssue({ code: 'custom', path: ['cohortPath'], message: 'Frozen-cohort preflight requires a cohort path.' });
+});
 
 export type ProviderStudyFit = {
   provider: string;
@@ -36,11 +40,12 @@ export type ProviderStudyFit = {
   incompleteReason?: string;
 };
 
-export async function preflightStudy(input: StudyPreflightInput): Promise<{ provisional: false; providers: ProviderStudyFit[] }> {
+export async function preflightStudy(input: StudyPreflightInput): Promise<{ provisional: boolean; mode: 'frozen-cohort' | 'maximum-profile'; providers: ProviderStudyFit[] }> {
   const config = preflightInputSchema.parse(input);
-  const study = await loadStudy(config.manifestPath, config.cohortPath);
+  const study = await loadStudy(config.manifestPath, config.cohortPath, { allowMissingCohort: config.mode === 'maximum-profile' });
+  const respondents = config.mode === 'maximum-profile' ? [maximumProfile()] : study.respondents;
   const packets: PreflightPacket[] = [];
-  const traversal = walkStudyPackets(study.manifest.arms, study.respondents, (packet) => { packets.push(packet); }, config.maxPackets === undefined ? {} : { maxPackets: config.maxPackets });
+  const traversal = walkStudyPackets(study.manifest.arms, respondents, (packet) => { packets.push(packet); }, config.maxPackets === undefined ? {} : { maxPackets: config.maxPackets });
   const results: ProviderStudyFit[] = [];
 
   for (const providerConfig of config.providers) {
@@ -80,7 +85,12 @@ export async function preflightStudy(input: StudyPreflightInput): Promise<{ prov
       ...(traversal.incompleteReason === undefined ? {} : { incompleteReason: traversal.incompleteReason }),
     });
   }
-  return { provisional: false, providers: results };
+  return { provisional: config.mode === 'maximum-profile', mode: config.mode, providers: results };
+}
+
+function maximumProfile() {
+  const text = '漢'.repeat(300);
+  return respondentProfileSchema.parse({ id: 'maximum-profile', intent: text, context: text, desired_outcome: text, engagement_cues: text, friction_cues: text });
 }
 
 function packetRef(packet: PreflightPacket): NonNullable<ProviderStudyFit['maximumPacket']> {

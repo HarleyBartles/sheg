@@ -24,7 +24,7 @@ export function createPollingServer(manager = new RunManager()): McpServer {
     const checked = await checkStudy(config as RunConfig);
     return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint });
   });
-  server.registerTool('poll_preflight', { description: 'Measure every reachable decision packet for a frozen cohort against configured providers without inference calls or run creation.', inputSchema: preflightInputSchema.shape }, async (input) => jsonResult(await preflightStudy(input as StudyPreflightInput)));
+  server.registerTool('poll_preflight', { description: 'Measure every reachable decision packet for a frozen cohort or maximum valid profile envelope against configured providers without inference calls or run creation.', inputSchema: preflightInputSchema.shape }, async (input) => jsonResult(await preflightStudy(input as StudyPreflightInput)));
   server.registerTool('poll_trace', { description: 'Trace scripted option IDs through one frozen respondent and study arm without provider calls.', inputSchema: { manifestPath: z.string(), cohortPath: z.string(), armId: z.string(), respondentId: z.string(), choices: z.array(z.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
     const profile = study.respondents.find((respondent) => respondent.id === respondentId);

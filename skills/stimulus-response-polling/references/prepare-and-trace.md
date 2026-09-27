@@ -12,10 +12,15 @@ Prefer `sequence` when the study presents all bounded items then asks its tasks.
 # Provider context preflight
 
 Run `poll_preflight` with the study manifest, frozen cohort, and every configured
-provider you want to compare. The CLI equivalent is:
+provider you want to compare. To check the full schema-sized profile envelope,
+omit the cohort and select `maximum-profile`; it uses one synthetic profile
+with 1,500 characters across the allowed prose fields. This is a provisional
+sample, not a proof that every valid character mix has the same token cost. The
+CLI equivalent is:
 
 ```sh
 sheg preflight --manifest study.json --cohort cohort.json --providers providers.json
+sheg preflight --manifest study.json --mode maximum-profile --providers providers.json
 ```
 
 Preflight follows every valid response path for every respondent and arm. One

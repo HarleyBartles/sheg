@@ -39,3 +39,14 @@ test('an unavailable provider measurement or incomplete traversal cannot report 
   assert.equal(result.providers[0]?.complete, false);
   assert.equal(result.providers[0]?.unavailable.length, 0);
 });
+
+test('maximum-profile mode exercises the full aggregate prose allowance and labels results provisional', async () => {
+  const result = await preflightStudy({
+    manifestPath: path.join(fixtures, 'article.json'), mode: 'maximum-profile',
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+  });
+  assert.equal(result.provisional, true);
+  assert.equal(result.mode, 'maximum-profile');
+  assert.equal(result.providers[0]?.status, 'fit');
+  assert.equal(result.providers[0]?.packetCount, 3);
+});

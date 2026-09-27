@@ -37,7 +37,8 @@ export type JobOptions = { measureLayaFit?: FitMeasurer; providerFactory?: (conf
 
 export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
   const parsed = configSchema.parse(config);
-  const normalized: ParsedConfig = { ...parsed, manifestPath: path.resolve(parsed.manifestPath), cohortPath: path.resolve(parsed.cohortPath), outputDirectory: path.resolve(parsed.outputDirectory) };
+  const normalized: ParsedConfig = { ...parsed, manifestPath: path.resolve(parsed.manifestPath), cohortPath: path.resolve(parsed.cohortPath), outputDirectory: path.resolve(parsed.outputDirectory),
+    provider: parsed.provider.kind === 'laya' ? { ...parsed.provider, tokenizerJsonPath: path.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === 'laya'

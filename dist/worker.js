@@ -20016,8 +20016,8 @@ async function parseJsonFile(filePath, label) {
     throw new StudyInputError(`${label} must be valid UTF-8 JSON.`, { cause: error62 });
   }
 }
-async function loadStudy(manifestPath, cohortPath) {
-  if (!cohortPath) throw new StudyInputError("An explicit frozen cohort is required.");
+async function loadStudy(manifestPath, cohortPath, options = {}) {
+  if (!cohortPath && !options.allowMissingCohort) throw new StudyInputError("An explicit frozen cohort is required.");
   const absoluteManifestPath = path.resolve(manifestPath);
   let manifestBytes;
   try {
@@ -20060,8 +20060,7 @@ async function loadStudy(manifestPath, cohortPath) {
       sources.push({ armId: arm.id, path: resolvedPath, sha256: actualHash });
     }
   }
-  const cohortJson = await parseJsonFile(path.resolve(cohortPath), "Frozen respondent cohort");
-  const cohort = loadCohort(cohortJson);
+  const cohort = cohortPath ? loadCohort(await parseJsonFile(path.resolve(cohortPath), "Frozen respondent cohort")) : { archetypes: [], respondents: [] };
   return {
     manifest,
     cohort,
@@ -21539,7 +21538,13 @@ var configSchema = external_exports.object({
 });
 async function checkStudy(config2) {
   const parsed = configSchema.parse(config2);
-  const normalized = { ...parsed, manifestPath: path5.resolve(parsed.manifestPath), cohortPath: path5.resolve(parsed.cohortPath), outputDirectory: path5.resolve(parsed.outputDirectory) };
+  const normalized = {
+    ...parsed,
+    manifestPath: path5.resolve(parsed.manifestPath),
+    cohortPath: path5.resolve(parsed.cohortPath),
+    outputDirectory: path5.resolve(parsed.outputDirectory),
+    provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path5.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
+  };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === "laya" ? { kind: "laya", checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...normalized.provider.precision === void 0 ? {} : { precision: normalized.provider.precision } } : normalized.provider;
