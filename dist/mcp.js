@@ -36615,6 +36615,226 @@ function indexResponses(journeys) {
   return indexed;
 }
 
+// src/domain/journey/preflight.ts
+import { createHash as createHash7 } from "node:crypto";
+var DEFAULT_MAX_PREFLIGHT_PACKETS = 1e5;
+function pathIdentity(choices) {
+  return choices.length === 0 ? "root" : choices.map(({ nodeId, choiceId }) => `${nodeId}=${choiceId}`).join(">");
+}
+function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
+  const maxPackets = options.maxPackets ?? DEFAULT_MAX_PREFLIGHT_PACKETS;
+  let packetCount = 0;
+  let terminalJourneyCount = 0;
+  let incompleteReason;
+  let stopped = false;
+  const markIncomplete = (reason) => {
+    incompleteReason ??= reason;
+    stopped = true;
+  };
+  if (!Number.isSafeInteger(maxPackets) || maxPackets < 0) {
+    markIncomplete("Preflight packet limit must be a non-negative safe integer.");
+  }
+  if (arms.length === 0 || respondents.length === 0) {
+    markIncomplete("Preflight requires at least one study arm and one respondent.");
+  }
+  const emitPacket = (arm, respondent, taskId, nodeId, decisionIndex, choices, events) => {
+    if (packetCount >= maxPackets) {
+      markIncomplete(`Preflight packet limit (${maxPackets}) reached before traversal completed.`);
+      return;
+    }
+    const pathId = pathIdentity(choices);
+    let request;
+    try {
+      request = compileDecisionPacket(arm, respondent, taskId, events);
+    } catch (error62) {
+      markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error62 instanceof Error ? error62.message : String(error62)}`);
+      return;
+    }
+    const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
+    const packetId = `packet-${createHash7("sha256").update(identity).digest("hex")}`;
+    visitPacket({ packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request });
+    packetCount += 1;
+  };
+  for (const arm of arms) {
+    if (stopped) break;
+    const validation = studyArmSchema.safeParse(arm);
+    if (!validation.success) {
+      markIncomplete(`Study arm ${arm.id} is invalid: ${validation.error.issues.map((issue2) => issue2.message).join(" ")}`);
+      break;
+    }
+    for (const respondent of respondents) {
+      if (stopped) break;
+      const events = [];
+      const choices = [];
+      if (arm.presentation.kind === "sequence") {
+        for (const item of arm.items) {
+          events.push({ type: "exposure", sequence: events.length, nodeId: `sequence-expose-${item.id}`, itemId: item.id });
+        }
+        const visitTask = (taskIndex) => {
+          if (stopped) return;
+          const task = arm.tasks[taskIndex];
+          if (!task) {
+            terminalJourneyCount += 1;
+            return;
+          }
+          const decisionIndex = taskIndex + 1;
+          const nodeId = `sequence-ask-${task.id}`;
+          emitPacket(arm, respondent, task.id, nodeId, decisionIndex, choices, events);
+          if (stopped) return;
+          for (const choiceId of Object.keys(task.options)) {
+            choices.push({ nodeId, choiceId });
+            events.push({ type: "choice", sequence: events.length, nodeId, taskId: task.id, choice: choiceId });
+            visitTask(taskIndex + 1);
+            events.pop();
+            choices.pop();
+            if (stopped) return;
+          }
+        };
+        visitTask(0);
+        continue;
+      }
+      const graph = arm.presentation;
+      const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+      const activeNodes = /* @__PURE__ */ new Set();
+      const visitNode = (nodeId, decisionCount) => {
+        if (stopped) return;
+        if (activeNodes.has(nodeId)) {
+          markIncomplete(`Encountered a graph cycle at node ${nodeId} in ${respondent.id}/${arm.id}.`);
+          return;
+        }
+        const node2 = nodes.get(nodeId);
+        if (!node2) {
+          markIncomplete(`Graph references unknown node ${nodeId} in ${respondent.id}/${arm.id}.`);
+          return;
+        }
+        if (node2.kind === "terminal") {
+          terminalJourneyCount += 1;
+          return;
+        }
+        activeNodes.add(nodeId);
+        if (node2.kind === "expose") {
+          const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+          if (!edge) {
+            markIncomplete(`Exposure node ${node2.id} has no transition in ${respondent.id}/${arm.id}.`);
+          } else {
+            events.push({ type: "exposure", sequence: events.length, nodeId, itemId: node2.itemId });
+            visitNode(edge.toNodeId, decisionCount);
+            events.pop();
+          }
+          activeNodes.delete(nodeId);
+          return;
+        }
+        if (decisionCount >= graph.maxDecisions) {
+          markIncomplete(`Decision bound reached before terminal at node ${nodeId} in ${respondent.id}/${arm.id}.`);
+          activeNodes.delete(nodeId);
+          return;
+        }
+        const task = arm.tasks.find((candidate) => candidate.id === node2.taskId);
+        if (!task) {
+          markIncomplete(`Ask node ${nodeId} references unknown task ${node2.taskId} in ${respondent.id}/${arm.id}.`);
+          activeNodes.delete(nodeId);
+          return;
+        }
+        emitPacket(arm, respondent, task.id, nodeId, decisionCount + 1, choices, events);
+        if (stopped) {
+          activeNodes.delete(nodeId);
+          return;
+        }
+        for (const choiceId of Object.keys(task.options)) {
+          const edge = graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choiceId);
+          if (!edge) {
+            markIncomplete(`Ask node ${nodeId} has no transition for choice ${choiceId} in ${respondent.id}/${arm.id}.`);
+            break;
+          }
+          choices.push({ nodeId, choiceId });
+          events.push({ type: "choice", sequence: events.length, nodeId, taskId: task.id, choice: choiceId });
+          visitNode(edge.toNodeId, decisionCount + 1);
+          events.pop();
+          choices.pop();
+          if (stopped) break;
+        }
+        activeNodes.delete(nodeId);
+      };
+      visitNode(graph.entryNodeId, 0);
+    }
+  }
+  return {
+    status: incompleteReason === void 0 ? "complete" : "incomplete",
+    packetCount,
+    terminalJourneyCount,
+    ...incompleteReason === void 0 ? {} : { incompleteReason }
+  };
+}
+
+// src/application/preflight.ts
+var preflightInputSchema = external_exports.object({
+  manifestPath: external_exports.string().min(1),
+  cohortPath: external_exports.string().min(1),
+  providers: external_exports.array(external_exports.discriminatedUnion("kind", [
+    external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict(),
+    external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
+  ])).min(1),
+  maxPackets: external_exports.number().int().nonnegative().optional()
+}).strict();
+async function preflightStudy(input2) {
+  const config2 = preflightInputSchema.parse(input2);
+  const study = await loadStudy(config2.manifestPath, config2.cohortPath);
+  const packets = [];
+  const traversal = walkStudyPackets(study.manifest.arms, study.respondents, (packet) => {
+    packets.push(packet);
+  }, config2.maxPackets === void 0 ? {} : { maxPackets: config2.maxPackets });
+  const results = [];
+  for (const providerConfig of config2.providers) {
+    const provider = providerConfig.kind === "jev" ? new JevProvider(providerConfig) : new LayaProvider(providerConfig);
+    const overflows = [];
+    const unavailable2 = [];
+    let maximumTokens = null;
+    let maximumPacket = null;
+    let measurementMethod = null;
+    let effectiveLimit = null;
+    for (const packet of packets) {
+      if (!provider.measure) {
+        unavailable2.push({ ...packetRef(packet), reason: "provider-measurement-unavailable" });
+        break;
+      }
+      let fit;
+      try {
+        fit = await provider.measure(packet.request);
+      } catch (error62) {
+        unavailable2.push({ ...packetRef(packet), reason: error62 instanceof Error ? error62.message : "measurement-failed" });
+        continue;
+      }
+      measurementMethod ??= fit.method;
+      effectiveLimit ??= fit.effectiveLimit;
+      if (fit.status === "unavailable") unavailable2.push({ ...packetRef(packet), reason: fit.reason ?? "measurement-unavailable" });
+      else if (fit.status === "overflow") overflows.push({ ...packetRef(packet), tokens: fit.tokens, effectiveLimit: fit.effectiveLimit, ...fit.reason === void 0 ? {} : { reason: fit.reason } });
+      if (fit.status !== "unavailable" && (maximumTokens === null || fit.tokens > maximumTokens)) {
+        maximumTokens = fit.tokens;
+        maximumPacket = packetRef(packet);
+      }
+    }
+    const complete = traversal.status === "complete";
+    results.push({
+      provider: providerConfig.kind === "jev" ? providerConfig.model : providerConfig.checkpoint,
+      status: !complete || unavailable2.length ? "unverified" : overflows.length ? "does-not-fit" : "fit",
+      complete,
+      packetCount: traversal.packetCount,
+      terminalJourneyCount: traversal.terminalJourneyCount,
+      measurementMethod,
+      effectiveLimit,
+      maximumTokens,
+      maximumPacket,
+      overflows,
+      unavailable: unavailable2,
+      ...traversal.incompleteReason === void 0 ? {} : { incompleteReason: traversal.incompleteReason }
+    });
+  }
+  return { provisional: false, providers: results };
+}
+function packetRef(packet) {
+  return { packetId: packet.packetId, respondentId: packet.respondentId, armId: packet.armId, pathId: packet.pathId, decisionIndex: packet.decisionIndex, nodeId: packet.nodeId };
+}
+
 // src/entrypoints/mcp.ts
 var configSchema2 = external_exports.object({
   manifestPath: external_exports.string(),
@@ -36635,6 +36855,7 @@ function createPollingServer(manager = new RunManager()) {
     const checked = await checkStudy(config2);
     return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint });
   });
+  server.registerTool("poll_preflight", { description: "Measure every reachable decision packet for a frozen cohort against configured providers without inference calls or run creation.", inputSchema: preflightInputSchema.shape }, async (input2) => jsonResult(await preflightStudy(input2)));
   server.registerTool("poll_trace", { description: "Trace scripted option IDs through one frozen respondent and study arm without provider calls.", inputSchema: { manifestPath: external_exports.string(), cohortPath: external_exports.string(), armId: external_exports.string(), respondentId: external_exports.string(), choices: external_exports.array(external_exports.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
     const profile = study.respondents.find((respondent) => respondent.id === respondentId);

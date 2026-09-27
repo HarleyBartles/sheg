@@ -14,7 +14,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   t.after(async () => { await client.close(); });
   await client.connect(transport);
   const listed = await client.listTools();
-  for (const name of ['poll_check', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_reconcile', 'poll_resume', 'poll_report', 'poll_compare']) {
+  for (const name of ['poll_check', 'poll_preflight', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_reconcile', 'poll_resume', 'poll_report', 'poll_compare']) {
     assert.ok(listed.tools.some((tool) => tool.name === name), `Missing ${name}`);
   }
   const checked = await client.callTool({ name: 'poll_check', arguments: { config: {
@@ -24,6 +24,12 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   } } });
   assert.equal(checked.isError ?? false, false);
   assert.equal((checked.structuredContent as { valid?: boolean }).valid, true);
+  const preflight = await client.callTool({ name: 'poll_preflight', arguments: {
+    manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+  } });
+  assert.equal(preflight.isError ?? false, false);
+  assert.equal((preflight.structuredContent as { providers: Array<{ status: string }> }).providers[0]?.status, 'fit');
   const trace = await client.callTool({ name: 'poll_trace', arguments: {
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), armId: 'original', respondentId: 'curious-outside-reader', choices: ['continue', 'continue'],
   } });
