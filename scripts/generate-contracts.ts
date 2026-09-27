@@ -7,6 +7,7 @@ import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
+const schemaBaseUri = 'https://schemas.system-one-polling.dev/';
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
   { filename: 'respondent-archetype.schema.json', title: 'Respondent archetype', schema: respondentArchetypeSchema },
   { filename: 'respondent-archetype-library.schema.json', title: 'Respondent archetype library', schema: respondentArchetypeLibrarySchema },
@@ -33,7 +34,15 @@ for (const contract of contracts) {
     const options = tasks.items.properties.options as Record<string, unknown>;
     options.minProperties = 1;
   }
-  schema.$id = `https://schemas.system-one-polling.dev/${contract.filename}`;
+  schema.$id = `${schemaBaseUri}${contract.filename}`;
+  if (contract.filename === 'respondent-archetype-library.schema.json') {
+    schema.items = { $ref: `${schemaBaseUri}respondent-archetype.schema.json` };
+  }
+  if (contract.filename === 'respondent-cohort.schema.json') {
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+    properties.archetypes = { $ref: `${schemaBaseUri}respondent-archetype-library.schema.json` };
+    (properties.respondents as { items: Record<string, unknown> }).items = { $ref: `${schemaBaseUri}respondent-profile.schema.json` };
+  }
   schema.title = contract.title;
   if (contract.validationRules) schema['x-validation-rules'] = contract.validationRules;
   await writeFile(resolve(contractDirectory, contract.filename), `${JSON.stringify(schema, null, 2)}\n`);

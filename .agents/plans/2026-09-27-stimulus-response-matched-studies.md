@@ -187,3 +187,12 @@
 - [x] Rename generic `jobs.ts` and `errors.ts` modules to `run-manager.ts` and `study-input-error.ts`.
 - [x] Correct current documentation that still named the superseded reader directory.
 - [x] Run the complete build, contract generation, lint, typecheck, and test gates; verify no stale source paths remain.
+
+### Task 12: Compose public respondent schemas through references
+
+**Files:** `scripts/generate-contracts.ts`, respondent schema assets, `test/respondents.test.ts`, and `docs/reference/data-contracts.md`
+
+- [x] Make the archetype library array reference the standalone archetype schema.
+- [x] Make cohort archetypes and respondents reference the archetype-library and respondent-profile schemas respectively.
+- [x] Document that consumers should load the referenced schema assets into their validator.
+- [x] Regenerate contracts and run the complete validation gate.
