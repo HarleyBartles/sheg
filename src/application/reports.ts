@@ -94,6 +94,31 @@ export function compareReports(report: PollingReport, leftArmId: string, rightAr
     });
     return [{ respondentId: journey.respondentId, taskComparisons }];
   });
+  const comparisonKeys = new Set([...left.journeys, ...right.journeys].flatMap((journey) => journey.responses.filter((response) => response.comparisonKey).map((response) => `${response.comparisonKey}:${response.occurrence}`)));
+  const leftResponseByCell = indexResponses(left.journeys);
+  const rightResponseByCell = indexResponses(right.journeys);
+  const comparisonRespondentIds = new Set([...left.journeys, ...right.journeys].map((journey) => journey.respondentId));
+  const comparisonTasks = [...comparisonKeys].sort().map((key) => {
+    const [comparisonKey = '', occurrenceText = '1'] = key.split(':');
+    const occurrence = Number(occurrenceText);
+    const optionTransitions: Record<string, Record<string, number>> = {};
+    let leftResponses = 0; let rightResponses = 0; let pairedResponses = 0; let comparableResponses = 0;
+    for (const respondentId of comparisonRespondentIds) {
+      const cellKey = `${respondentId}\0${comparisonKey}\0${occurrence}`;
+      const leftResponse = leftResponseByCell.get(cellKey);
+      const rightResponse = rightResponseByCell.get(cellKey);
+      if (leftResponse) leftResponses += 1;
+      if (rightResponse) rightResponses += 1;
+      if (!leftResponse || !rightResponse) continue;
+      pairedResponses += 1;
+      const commonOptionIds = leftResponse.optionIds.filter((id) => rightResponse.optionIds.includes(id));
+      if (!commonOptionIds.includes(leftResponse.choice) || !commonOptionIds.includes(rightResponse.choice)) continue;
+      comparableResponses += 1;
+      const row = optionTransitions[leftResponse.choice] ??= {};
+      row[rightResponse.choice] = (row[rightResponse.choice] ?? 0) + 1;
+    }
+    return { comparisonKey, occurrence, leftResponses, rightResponses, pairedResponses, comparableResponses, unpairedResponses: pairedResponses - comparableResponses, leftOnlyResponses: Math.max(0, leftResponses - pairedResponses), rightOnlyResponses: Math.max(0, rightResponses - pairedResponses), optionTransitions };
+  });
   const leftByItem = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
   const rightByItem = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
   const itemChanges = [...new Set([...leftByItem.keys(), ...rightByItem.keys()])].flatMap((id) => leftByItem.get(id) === rightByItem.get(id) ? [] : [{ id, leftText: leftByItem.get(id) ?? null, rightText: rightByItem.get(id) ?? null }]);
@@ -108,5 +133,16 @@ export function compareReports(report: PollingReport, leftArmId: string, rightAr
     const fields = (['instructions', 'options'] as const).filter((field) => JSON.stringify(leftTask[field]) !== JSON.stringify(rightTask[field]));
     return fields.length ? [{ comparisonKey: key, fields }] : [];
   });
-  return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, matched };
+  return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, comparisonTasks, matched };
+}
+
+function indexResponses(journeys: PollingReport['arms'][number]['journeys']): Map<string, PollingReport['arms'][number]['journeys'][number]['responses'][number]> {
+  const indexed = new Map<string, PollingReport['arms'][number]['journeys'][number]['responses'][number]>();
+  for (const journey of journeys) {
+    for (const response of journey.responses) {
+      if (!response.comparisonKey) continue;
+      indexed.set(`${journey.respondentId}\0${response.comparisonKey}\0${response.occurrence}`, response);
+    }
+  }
+  return indexed;
 }

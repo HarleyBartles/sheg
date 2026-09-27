@@ -15,6 +15,7 @@ async function setup(t: TestContext) {
   const original = JSON.parse(await readFile(manifestPath, 'utf8'));
   original.arms[0].tasks[0].comparisonKey = 'entry-choice'; original.arms[0].tasks[0].answerKeyOptionId = 'unanswerable'; original.arms[0].tasks[0].options.unanswerable = 'There is not enough information to decide.'; original.arms[0].presentation = { kind: 'sequence' };
   const revised = structuredClone(original.arms[0]); revised.tasks[0].comparisonKey = 'entry-choice'; revised.tasks[0].answerKeyOptionId = 'continue'; revised.tasks[0].options['clarify'] = 'Ask for a clearer explanation.'; revised.presentation = { kind: 'sequence' }; revised.id = 'revised'; revised.label = 'Revised'; revised.items[0].text += ' Clearer.'; revised.sources = [{ path: 'unused.md', sha256: 'c'.repeat(64) }];
+  delete revised.tasks[0].options.unanswerable;
   await writeFile(path.join(directory, 'study.json'), JSON.stringify({ ...original, arms: [original.arms[0], revised] }));
   const checkpoint: RunCheckpoint = {
     formatVersion: 2, runId: '53a0c895-695b-4bb5-a5e5-b9304fc8b2aa', status: 'completed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -53,6 +54,10 @@ test('compares two arms within the same run by respondent and comparison key', a
   const comparison = compareReports(report, 'original', 'revised');
   assert.equal(comparison.matchedRespondents, 2);
   assert.equal(comparison.matched[0]?.taskComparisons[0]?.agreement, false);
+  assert.equal(comparison.comparisonTasks[0]?.leftResponses, 1);
+  assert.equal(comparison.comparisonTasks[0]?.rightResponses, 1);
+  assert.equal(comparison.comparisonTasks[0]?.unpairedResponses, 1);
+  assert.deepEqual(comparison.comparisonTasks[0]?.optionTransitions, {});
   assert.equal(comparison.itemChanges.length, 1);
   assert.deepEqual(comparison.taskChanges[0]?.fields, ['options']);
   assert.throws(() => compareReports(report, 'original', 'missing'), /both arm IDs/i);
