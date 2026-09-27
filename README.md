@@ -22,7 +22,7 @@ npm test
 npm run build
 ```
 
-The build bundles runnable MCP and CLI JavaScript and copies the domain-owned reader archetype catalogue from `src/domain/readers/` into `dist/data/`. Keep generated runtime files committed with their sources.
+The build removes and recreates `dist/`, bundles runnable MCP and CLI JavaScript, and copies the domain-owned reader archetype catalogue from `src/domain/readers/` into `dist/data/`. Keep generated runtime files committed with their sources.
 
 ## CLI
 
