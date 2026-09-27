@@ -1,0 +1,233 @@
+# Study context compilation and provider preflight
+
+- Status: Draft for review
+- Date: 2026-09-27
+- Related decision: Proposed ADR-0010
+
+## Purpose
+
+Let a study author see which configured decision providers can run the study
+before inference begins. The report must find any context overflow reachable
+through any respondent journey, rather than sampling likely journeys or waiting
+for a live call to fail.
+
+The first supported provider ceilings are the pinned Laya configuration's
+1,024-token input limit and Jev 1.13's published 32K context window. These are
+provider/model limits, not study-wide limits. Preflight measures each rendered
+decision request against the selected provider's effective limit.
+
+## Observable problem and repository baseline
+
+The study contract already supports `sequence` and bounded `graph` presentation
+modes, respondent profiles, typed choice tasks, and a frozen cohort. The graph
+runner follows the respondent's selected option at each ask node and records
+exposure and choice events. The current prompt renderer sends every encountered
+stimulus text and the complete prior choice list with each request, so requests
+grow over a journey.
+
+The provider adapters each send one choice decision per request. Laya has a
+fit-measurer hook but no production measurer in the adapter. Jev records
+provider-reported input usage after inference, which cannot prevent an oversized
+call. The graph validator verifies references and option transitions, but does
+not reject cycles or ensure every branch reaches a terminal node. The runner's
+`maxDecisions` escape can return `decision-limit`, and does not stop an
+exposure-only loop.
+
+Relevant ownership remains in the existing domain boundaries: graph and
+respondent contracts in `src/domain/study/` and
+`src/domain/respondents/`, path execution in `src/domain/journey/`, shared
+request construction and compact state in `src/domain/decision/` or a narrowly
+owned application service, and provider-specific measurement/enforcement in
+`src/providers/`. Consumer schemas under
+`skills/stimulus-response-polling/assets/` are generated from runtime schemas.
+
+## Product behavior
+
+Preflight is read-only and makes no inference calls. It may use non-inference
+health or capability checks. It reports three distinct questions per provider:
+
+1. **Supported:** the provider accepts the study's task and presentation
+   features.
+2. **Configured and available:** required endpoint/checkpoint or hosted
+   credentials/model configuration are present. A non-inference health or
+   capability probe may report reachability separately. If a provider offers
+   no non-inference probe, report availability as unverified rather than
+   treating configuration as proof of reachability.
+3. **Fits:** every request scenario in scope is within the provider's effective
+   context and request-shape limits.
+
+The result is tied to the study fingerprint, respondent cohort fingerprint (if
+present), prompt/context compiler version, provider/model/checkpoint identity,
+and effective limit. A fit result is not carried to a changed study, cohort,
+compiler, or provider configuration.
+
+With a frozen cohort, preflight evaluates every respondent in that cohort. Before
+a cohort is frozen, it evaluates the schema's maximum valid profile envelope
+and labels the result provisional. The provisional result may be green only
+when the provider's measurement can conservatively account for every allowed
+profile value; otherwise it is marked unverified until a cohort is supplied.
+
+The author may choose any provider that is supported, configured, and fits.
+Provider selection is fixed for a run and shared across all arms. The run does
+not switch providers partway through a journey or silently fall back after a
+fit/runtime failure. Jev's configured run and per-call monetary budgets remain
+required. Preflight itself does not consume those budgets.
+
+## Deterministic context compilation
+
+The journey event stream is the source of truth. Compaction is a deterministic,
+versioned projection of that history; it does not rewrite or discard recorded
+events.
+
+Each decision request contains:
+
+- the respondent's bounded five-field perspective;
+- the stimulus text explicitly in scope for the current decision;
+- the current task instructions and all offered option IDs and descriptions;
+- a compact ordered trajectory summary derived from prior exposure and choice
+  events.
+
+Stimulus inclusion follows the presentation mode so an author can predict what
+the model sees. In `sequence` mode, every stimulus item remains in scope for
+each task, preserving the current comprehension-study behavior. In `graph`
+mode, a decision receives the full text of items exposed since the previous
+decision (or since journey start for its first decision). Older exposure text
+is omitted from later packets and represented by the trajectory summary. If a
+later task needs an earlier item's full wording again, the graph must expose
+that item again before the task. The event log records the repeated exposure.
+Preflight and runtime use this same rule. This lets graph authors pace text in
+segments and deliberately control the current stimulus window; sequence mode
+may correctly be reported as too large for Laya when all items cannot fit.
+
+The trajectory summary states reading progress and preserves each earlier
+choice's task identity, selected option identity, and selected option meaning.
+It records which stimulus items had been exposed before that choice, without
+repeating the full text of every earlier stimulus. Summary metadata records the
+number of exposure and decision events represented, the covered event range,
+and the compact summary's serialized size. The measured summary/request token
+counts are retained in preflight/run metadata; the model-facing progress fields
+describe what the respondent has seen and chosen.
+
+The compiler must not use a generative model to summarize history. This keeps
+preflight reproducible and avoids adding an unmeasured summarization call. The
+graph exposure rule is structural and does not infer relevance from prose or
+silently omit text that the author chose to expose for the current decision.
+
+Profile prose retains a 500-character per-field ceiling and gains a
+provider-neutral aggregate ceiling of 1,500 characters across the five prose
+fields. Runtime validation and generated consumer schemas enforce the same
+limits. This bounds pathological profiles while the provider-specific
+preflight remains authoritative for actual token fit. Provider-specific larger
+profile modes and charge-based profile expansion are deferred; they must not
+make one frozen cohort differ across matched arms or provider comparisons in
+this first slice.
+
+## Exhaustive graph preflight
+
+Graph studies must be loop-free, and every option branch must reach a terminal
+node without exceeding `maxDecisions`. Validation rejects a cycle, an
+unterminated branch, or a branch that would be cut off by the decision limit.
+The journey runner treats reaching a decision limit without a terminal as an
+invalid study/runtime error, not a successful journey outcome.
+
+For each arm and each respondent, the walker starts at the entry node with an
+empty event history. Exposure nodes add their item to that path's event state.
+At each ask node, the walker compiles and measures the exact request that
+execution would send. It then follows every offered option's transition,
+appending that option's choice event, until each branch reaches a terminal.
+Sequence presentations have one deterministic path and are measured at every
+task request. The walk preserves distinct path histories even when branches
+reconverge at the same node, since their compact summaries may differ.
+
+For every scenario the preflight records the respondent, arm, path, decision
+node, provider identity, measured tokens, effective limit, and fit result. A
+provider receives a whole-study `fits` result only after every required scenario
+has been measured and every request fits. If any scenario exceeds the limit,
+the result identifies the earliest failing node on each affected path and the
+measured amount over limit. Reports may show how many respondent/path scenarios
+remain within limits at each decision depth. These are exhaustive counts, not
+predictions of respondent likelihood.
+
+If traversal or measurement cannot complete, the result is `unverified`, never
+`fits`. The implementation may impose an explicit work ceiling to protect the
+host, but reaching it must identify incomplete coverage and block a whole-study
+fit claim. There is no sampling-based green result.
+
+## Provider measurement and runtime enforcement
+
+Each adapter owns measurement of its final provider request and applies the
+provider's actual constraints:
+
+- **Laya:** use the configured checkpoint's tokenizer, question/options
+  rendering, instruction/head limits, option caps, and effective 1,024-token
+  input budget. A checkpoint or limit mismatch, unavailable measurement, any
+  would-be clipping, or an over-limit request rejects inference before the
+  model is called. Enforcement must share the exact sequence builder with
+  inference to avoid a preflight/inference mismatch.
+- **Jev:** measure the final Decisions API request against the configured Jev
+  model's 32K context. Include state, instructions, criteria, serialization, and
+  any fixed provider framing represented by the adapter's measurement
+  contract. The 32K limit is attached to the pinned model identity; a moving
+  alias must refresh model metadata before it can claim fit.
+
+The request compiler and graph walker are provider-neutral. Provider adapters
+must not truncate or drop state to fit. Runtime admission repeats the same
+measurement immediately before each inference request. A preflight result is a
+planning snapshot; runtime admission protects against changed configuration and
+request drift. The run fails clearly before an unsupported inference call and
+does not silently reroute.
+
+## User-facing report
+
+For each provider, show support, configuration/availability, fit status, the
+model/checkpoint and limit used, and the cohort or provisional-profile scope.
+For an overflow, show the request node, respondent/path coverage, measured
+tokens, effective limit, and how far through the graph the provider remains
+usable. For incomplete measurement or traversal, explain what prevented a
+verified result. The user can then reduce or restructure the study for Laya,
+or choose Jev for the full study when it is configured and all requests fit.
+
+## Invariants
+
+- The event log remains canonical; compact state is derived and reproducible.
+- Every reachable decision request is measured before a provider can be called
+  as fitting the complete study.
+- A single overflowing request makes whole-study fit false for that provider.
+- No inference request silently truncates, drops, or rewrites authored context.
+- Preflight and execution use the same request compiler and provider rendering.
+- Every graph branch terminates at a terminal node within the declared decision
+  bound.
+- Provider choice is explicit and stable across a run and its arms.
+- Provider-specific token counts and limits never become a universal schema
+  limit for stimulus text.
+- An incomplete walk or unknown measurement can never be reported as fit.
+
+## Non-goals
+
+- Raising Laya's 1,024-token limit or making GPU hardware change that limit.
+- Automatically choosing a provider or changing providers mid-run.
+- Automatically rewriting, summarizing, or trimming study content.
+- Supporting free-form generated responses; the initial task remains finite
+  choice.
+- Raising profile limits specifically for Jev in this first slice.
+- Claiming that simulated choices are human-reader evidence.
+
+## Validation and implementation handoff
+
+Implementation must prove that the exhaustive walker covers every option path
+and respondent, rejects cycles and nonterminal branches, preserves path-specific
+history through reconvergent nodes, and stops a provider run before any
+over-limit request. Tests must verify that preflight and execution compile the
+same packet and use provider-specific limits, including Laya's question-head
+and option caps. Consumer schema generation must reflect both profile length
+constraints. A deterministic fixture should demonstrate a graph where Laya
+overflows on reachable later nodes while Jev's requests remain within 32K,
+without making a live paid Jev call.
+
+Live Laya verification uses the pinned local checkpoint and GPU runtime when
+available. Jev wire tests use a fake transport; live Jev calls are not required
+to validate schema or deterministic fit behavior.
+
+The implementation plan must account for graph validation and runtime changes,
+shared compact-state construction, provider measurement contracts, both
+preflight modes, generated schemas, report output, and provider documentation.
