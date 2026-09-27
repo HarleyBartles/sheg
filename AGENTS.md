@@ -14,6 +14,8 @@ those files for current requirements, task order, and verification.
   modules.
 - `test/` is the separate Node test tree. Keep behavior tests grouped by the
   responsibility they exercise.
+- `docs/` holds verified provider wire notes and operational details; check
+  these before changing an external adapter.
 - `skills/simulated-reader-polling/` is the user-facing Codex skill. Plugin
   metadata and packaged runtime are at the repository root when introduced.
 - `adr/README.md` indexes durable architecture decisions; `adr/template.md`

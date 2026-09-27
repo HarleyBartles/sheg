@@ -22,6 +22,7 @@ export const decisionRequestSchema = z.object({
 export const decisionResultSchema = z.object({
   choice: z.string().min(1),
   probabilities: z.record(z.string(), z.number().finite().min(0).max(1)),
+  confidence: z.number().finite().min(0).max(1).optional(),
   attempts: z.number().int().positive(),
   provider: z.enum(['jev', 'laya']),
   model: z.string().min(1),

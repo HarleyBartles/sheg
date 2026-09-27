@@ -37,6 +37,17 @@ test('accepts a complete finite distribution within the documented normalization
   assert.equal(accepted.probabilities.leave, 0.3);
 });
 
+test('preserves provider confidence as a separate signal from the choice distribution', () => {
+  const accepted = validateDecision(request, { ...result(), confidence: 0.67 });
+  assert.equal(accepted.confidence, 0.67);
+});
+
+test('rejects confidence outside its finite zero-to-one range', () => {
+  for (const confidence of [Number.NaN, Number.POSITIVE_INFINITY, -0.01, 1.01, 'high']) {
+    assert.throws(() => validateDecision(request, { ...result(), confidence }), DecisionError);
+  }
+});
+
 test('rejects choices outside the offered labels and incomplete or unnormalized distributions', () => {
   for (const invalid of [
     result({ choice: 'maybe' }),

@@ -82,7 +82,7 @@ Every traversal is bounded by `maxDecisions`, including cyclic graphs. Exposure 
 
 **Files:** Create `src/domain/decision/contract.ts`, `src/domain/decision/validate.ts`, `src/domain/decision/prompt.ts`, `test/decision.test.ts`, `test/prompts.test.ts`. The shared contract module also owns runtime Zod schemas; do not split out an otherwise type-only file.
 
-**Interfaces:** Consumes domain-neutral `Study` graph definitions, the current decision node, encountered item IDs, chronological choice history, and `ReaderProfile`; produces a future-blind `DecisionRequest`, `DecisionResult { choice, probabilities, attempts, provider, model, latencyMs, usage, chargeStatus, chargeUsd? }`, `DecisionProvider.decide(request, maxAttempts)`, `validateDecision`, `renderQuestion`, and a stable `promptContractHash`.
+**Interfaces:** Consumes domain-neutral `Study` graph definitions, the current decision node, encountered item IDs, chronological choice history, and `ReaderProfile`; produces a future-blind `DecisionRequest`, `DecisionResult { choice, probabilities, confidence?, attempts, provider, model, latencyMs, usage, chargeStatus, chargeUsd? }`, `DecisionProvider.decide(request, maxAttempts)`, `validateDecision`, `renderQuestion`, and a stable `promptContractHash`.
 
 - [x] Write RED tests showing that unexposed item text never appears, history remains chronological, and study purpose never enters reader state. Cover unknown labels, missing probability entries, nonfinite or negative values, wrong identity, and absent required billing evidence with one accepted result fixture.
 - [x] Run the focused Node tests; implement the smallest renderer and validator satisfying them. Hash a declared prompt-contract version plus renderer-controlled decision semantics, rather than an arbitrary source-file checksum. Add pinned ESLint/typescript-eslint flat configuration and a `lint` script; update the tracked pre-commit hook to run lint and then recursive tests. Run lint, focused tests, typecheck, and a normal commit through the hook; commit.
@@ -98,12 +98,12 @@ Every traversal is bounded by `maxDecisions`, including cyclic graphs. Exposure 
 
 ### Task 5: Hosted Jev adapter and observed attempts
 
-**Files:** Create `src/providers/jev.ts`, `test/jev.test.ts`; update package dependencies and lockfile.
+**Files:** Create `src/providers/jev.ts`, `test/jev.test.ts`, and `docs/jev-wire.md`; add dependencies only if SDK use is justified by observed retry and usage behavior.
 
 **Interfaces:** Produces `JevConfig { kind: "jev", model, keyEnv, endpoint, timeoutMs }` and `JevProvider` implementing Task 3's provider contract. On failure, return a typed error with actual attempted wire calls and `chargeStatus: "unknown"` when billing cannot be established.
 
-- [ ] Verify the current OpenRouter Decisions API request/response, SDK retry hooks, and usage evidence in official docs or installed SDK source before selecting SDK versus direct HTTP. Record the chosen wire contract in `docs/jev-wire.md`. Do not inherit the trial's Python SDK assumptions.
-- [ ] Write fake-transport RED tests for typed choice payload, full distribution, selected model, successful billed cost, token/latency evidence when supplied, retryable status and connection errors, non-retryable auth failure, hard attempt cap, and no leaked key. Implement retries in an observable wrapper if the SDK cannot expose physical attempts. Run focused tests and typecheck; commit. Routine checks use no hosted key.
+- [x] Verify the current OpenRouter Decisions API request/response, SDK retry hooks, and usage evidence in official docs or installed SDK source before selecting SDK versus direct HTTP. Record the chosen wire contract in `docs/jev-wire.md`. Do not inherit the trial's Python SDK assumptions. Selected explicit `fetch` transport so physical attempts remain directly observable; no SDK dependency is needed.
+- [x] Write fake-transport RED tests for typed choice payload, full distribution, selected model, successful billed cost, token/latency evidence when supplied, retryable status and connection errors, non-retryable auth failure, hard attempt cap, and no leaked key. Implement retries in an observable wrapper if the SDK cannot expose physical attempts. Preserve Jev's optional confidence separately from its choice distribution. Run focused tests and typecheck; commit. Routine checks use no hosted key. Verified with 34 passing tests, ESLint, and TypeScript typecheck using fake transport only.
 
 ### Task 6: Local Laya adapter and measured context fit
 
@@ -138,7 +138,7 @@ Every traversal is bounded by `maxDecisions`, including cyclic graphs. Exposure 
 
 **Interfaces:** `buildReport(checkpoint)`, `getReport(outputDir, runId)` via Task 8's checkpoint store, and `compareReports(left, right)` return JSON-safe evidence. Comparison requires equal stimulus fingerprint and aligns only common completed `(readerId, journeyId)` keys.
 
-- [ ] Write RED tests for completed versus intended denominators, terminal outcome and archetype breakdowns, generic per-item exposure, ordered events, attempts, latency, tokens, billed/unknown charge, unknown Laya revision, failed/unsupported journey counts, and mismatch on cohort order or prompt contract.
+- [ ] Write RED tests for completed versus intended denominators, terminal outcome and archetype breakdowns, generic per-item exposure, ordered events, attempts, latency, tokens, provider confidence without cross-provider conflation, billed/unknown charge, unknown Laya revision, failed/unsupported journey counts, and mismatch on cohort order or prompt contract.
 - [ ] Implement summaries from completed records while keeping exclusions visible. Label Jev/Laya comparison as agreement or divergence, never accuracy, calibration, readership, or publication score. Run focused tests and typecheck; inspect one example JSON report; commit.
 
 ### Task 10: CLI and MCP over the shared job core

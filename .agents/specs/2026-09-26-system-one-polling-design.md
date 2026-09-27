@@ -28,7 +28,7 @@ The durable archetype pool is bundled with the plugin. Study-specific profiles a
 
 ## Decision contract and providers
 
-The harness sends a provider-neutral decision request containing the reader state, one bounded typed question, and the offered criteria. The response contains the selected allowed label, the complete finite probability distribution over offered labels, attempted wire-call count, model and provider identity, latency, and any reported token and monetary usage. An absent local provider charge is represented as not billed by that provider, not invented OpenRouter usage or a claim that hardware has no cost. The harness rejects unknown labels, malformed probabilities, identity mismatches, missing required evidence, and provider errors before recording a choice.
+The harness sends a provider-neutral decision request containing the reader state, one bounded typed question, and the offered criteria. The response contains the selected allowed label, the complete finite probability distribution over offered labels, optional provider confidence as a distinct signal, attempted wire-call count, model and provider identity, latency, and any reported token and monetary usage. Preserve provider confidence without comparing its meaning across Jev and Laya or treating it as accuracy. An absent local provider charge is represented as not billed by that provider, not invented OpenRouter usage or a claim that hardware has no cost. The harness rejects unknown labels, malformed probabilities, identity mismatches, missing required evidence, and provider errors before recording a choice.
 
 The first release has two explicit adapters:
 

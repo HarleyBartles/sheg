@@ -54,6 +54,7 @@ export function validateDecision(
   return {
     choice: decision.choice,
     probabilities: decision.probabilities,
+    ...(decision.confidence === undefined ? {} : { confidence: decision.confidence }),
     attempts: decision.attempts,
     provider: decision.provider,
     model: decision.model,
