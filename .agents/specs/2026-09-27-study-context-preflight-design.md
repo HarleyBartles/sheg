@@ -6,10 +6,10 @@
 
 ## Purpose
 
-Let a study author see which configured decision providers can run the study
-before inference begins. The report must find any context overflow reachable
-through any respondent journey, rather than sampling likely journeys or waiting
-for a live call to fail.
+Give a study author a practical estimate of which configured decision providers
+can run the study before inference begins. The report finds context overflow on
+every reachable respondent journey under declared provider settings. It is
+planning guidance, with field testing as the next step for a promising design.
 
 The first supported provider ceilings are the pinned Laya configuration's
 1,024-token input limit and Jev 1.13's published 32K context window. These are
@@ -43,18 +43,12 @@ owned application service, and provider-specific measurement/enforcement in
 
 ## Product behavior
 
-Preflight is read-only and makes no inference calls. It may use non-inference
-health or capability checks. It reports three distinct questions per provider:
-
-1. **Supported:** the provider accepts the study's task and presentation
-   features.
-2. **Configured and available:** required endpoint/checkpoint or hosted
-   credentials/model configuration are present. A non-inference health or
-   capability probe may report reachability separately. If a provider offers
-   no non-inference probe, report availability as unverified rather than
-   treating configuration as proof of reachability.
-3. **Fits:** every request scenario in scope is within the provider's effective
-   context and request-shape limits.
+Preflight is read-only and makes no inference calls. The current typed-choice
+study contract accepts Jev and Laya provider configurations. It reports
+configuration and context fit separately: required settings and hosted
+credentials may be present while a study overflows. Availability is unverified
+because preflight does not contact a provider. Fit covers every request scenario
+in scope under the configured context and request-shape limits.
 
 The result is tied to the study fingerprint, respondent cohort fingerprint (if
 present), prompt/context compiler version, provider/model/checkpoint identity,
@@ -62,12 +56,12 @@ and effective limit. A fit result is not carried to a changed study, cohort,
 compiler, or provider configuration.
 
 With a frozen cohort, preflight evaluates every respondent in that cohort. Before
-a cohort is frozen, it evaluates the schema's maximum valid profile envelope
-and labels the result provisional. The provisional result may be green only
-when the provider's measurement can conservatively account for every allowed
-profile value; otherwise it is marked unverified until a cohort is supplied.
+a cohort is frozen, it evaluates one synthetic profile filling the 1,500-character
+aggregate prose allowance. A provisional `fit` describes only this sample's
+packets; different valid wording can consume more tokens.
 
-The author may choose any provider that is supported, configured, and fits.
+The author may choose a provider with complete configuration and a fitting
+study under its declared limits.
 Provider selection is fixed for a run and shared across all arms. The run does
 not switch providers partway through a journey or silently fall back after a
 fit/runtime failure. Jev's configured run and per-call monetary budgets remain
@@ -116,9 +110,10 @@ silently omit text that the author chose to expose for the current decision.
 
 Profile prose retains a 500-character per-field ceiling and gains a
 provider-neutral aggregate ceiling of 1,500 characters across the five prose
-fields. Runtime validation and generated consumer schemas enforce the same
-limits. This bounds pathological profiles while the provider-specific
-preflight remains authoritative for actual token fit. Provider-specific larger
+fields. Runtime validation enforces both. Standard JSON Schema enforces the
+per-field ceiling; its `x-validation-rules` records the aggregate rule for
+consumers that also run Sheg validation. This bounds pathological profiles while
+provider-specific preflight estimates context fit. Provider-specific larger
 profile modes and charge-based profile expansion are deferred; they must not
 make one frozen cohort differ across matched arms or provider comparisons in
 this first slice.
@@ -152,20 +147,21 @@ predictions of respondent likelihood.
 
 If traversal or measurement cannot complete, the result is `unverified`, never
 `fits`. The implementation may impose an explicit work ceiling to protect the
-host, but reaching it must identify incomplete coverage and block a whole-study
-fit claim. There is no sampling-based green result.
+host, but reaching it must identify incomplete coverage and block a fit claim.
+For `maximum-profile`, a green result applies only to its named synthetic sample.
 
 ## Provider measurement and runtime enforcement
 
 Each adapter owns measurement of its final provider request and applies the
-provider's actual constraints:
+configured provider constraints:
 
-- **Laya:** use the configured checkpoint's tokenizer, question/options
-  rendering, instruction/head limits, option caps, and effective 1,024-token
-  input budget. A checkpoint or limit mismatch, unavailable measurement, any
-  would-be clipping, or an over-limit request rejects inference before the
-  model is called. Enforcement must share the exact sequence builder with
-  inference to avoid a preflight/inference mismatch.
+- **Laya:** use the operator-supplied tokenizer asset and digest for the
+  configured checkpoint, question/options rendering, declared instruction/head
+  limits, option caps, and declared 1,024-token input budget. Missing local
+  measurement, a tokenizer digest mismatch, locally detected clipping, or an
+  over-limit request rejects inference before the model is called. The local
+  sequence builder follows the pinned upstream implementation. The service's
+  actual checkpoint and limits remain deployment assumptions to field test.
 - **Jev:** estimate the final serialized Decisions API request against the
   configured Jev model's 32K context. Use a conservative one token per three
   UTF-8 bytes estimate, rounded up, and reserve 20% of the published context
@@ -176,15 +172,15 @@ provider's actual constraints:
   a moving alias must refresh model metadata before it can claim fit.
 
 The request compiler and graph walker are provider-neutral. Provider adapters
-must not truncate or drop state to fit. Runtime admission repeats the same
+must not truncate or drop state to fit. Runtime admission repeats the same local
 measurement immediately before each inference request. A preflight result is a
-planning snapshot; runtime admission protects against changed configuration and
-request drift. The run fails clearly before an unsupported inference call and
-does not silently reroute.
+planning snapshot under declared settings. The run records a context failure
+with the task, measured amount, limit, and reason for field notes and iteration.
+It does not silently reroute.
 
 ## User-facing report
 
-For each provider, show support, configuration/availability, fit status, the
+For each provider, show configuration/availability, fit status, the
 model/checkpoint and limit used, and the cohort or provisional-profile scope.
 For an overflow, show the request node, respondent/path coverage, measured
 tokens, effective limit, and how far through the graph the provider remains

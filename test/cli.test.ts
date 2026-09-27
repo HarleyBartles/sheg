@@ -43,6 +43,15 @@ test('CLI preflight reports fit for every packet without provider calls', async 
   assert.ok((result.providers[0]?.packetCount ?? 0) > 0);
 });
 
+test('CLI preflight rejects an unknown mode instead of selecting frozen-cohort', async () => {
+  const errors: string[] = [];
+  const status = await runCli(['preflight', '--mode', 'maximum-profiles', '--manifest', 'study.json', '--providers', 'providers.json'], {
+    out: () => true, error: (value) => { errors.push(value); return true; },
+  });
+  assert.equal(status, 1);
+  assert.match(errors[0] ?? '', /mode/i);
+});
+
 test('CLI scripted trace is keyless and uses the shared graph runner', async () => {
   const output: string[] = [];
   const status = await runCli(['trace', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--arm', 'original', '--respondent', 'curious-outside-reader', '--choices', 'continue,continue'], {

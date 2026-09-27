@@ -16,6 +16,9 @@ export async function runCli(args: readonly string[], io = { out: (value: string
     let result: unknown;
     if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
     if (command === 'preflight') {
+      if (options.mode !== undefined && options.mode !== 'frozen-cohort' && options.mode !== 'maximum-profile') {
+        throw new Error('Preflight --mode must be frozen-cohort or maximum-profile.');
+      }
       const providers = JSON.parse(await readFile(required(options, 'providers'), 'utf8')) as PreflightProviderConfig[];
       const mode = options.mode === 'maximum-profile' ? 'maximum-profile' : 'frozen-cohort';
       result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), ...(options.cohort === undefined ? {} : { cohortPath: path.resolve(options.cohort) }), mode, providers });

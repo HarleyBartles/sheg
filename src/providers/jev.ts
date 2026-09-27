@@ -18,6 +18,8 @@ export class JevCallError extends Error {
     readonly attempts: number,
     readonly chargeStatus: 'not_billed' | 'unknown' | 'billed',
     readonly chargeUsd?: number,
+    readonly contextFit?: ProviderContextFit,
+    readonly decisionId?: string,
   ) {
     super(message);
     this.name = 'JevCallError';
@@ -87,7 +89,7 @@ export class JevProvider implements DecisionProvider {
       throw new JevCallError('Jev decision request is invalid.', 0, 'not_billed');
     }
     const fit = this.measure(parsedRequest.data);
-    if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed');
+    if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed', undefined, fit, parsedRequest.data.question.id);
     const apiKey = process.env[this.config.keyEnv];
     if (!apiKey) {
       throw new JevCallError(`Jev API key environment variable ${this.config.keyEnv} is not set.`, 0, 'not_billed');

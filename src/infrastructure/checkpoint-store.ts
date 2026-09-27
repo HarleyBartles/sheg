@@ -30,6 +30,13 @@ const budgetSnapshotSchema = z.object({
   overspendUsd: z.number().finite().nonnegative(), blocked: z.boolean(),
 }).strict();
 
+export const contextFailureSchema = z.object({
+  decisionId: z.string().min(1), nodeId: z.string().min(1), reason: z.string().min(1),
+  tokens: z.number().int().nonnegative(), effectiveLimit: z.number().int().nonnegative(),
+  measurementMethod: z.string().min(1),
+}).strict();
+export type ContextFailure = z.infer<typeof contextFailureSchema>;
+
 export const runCheckpointSchema = z.object({
   formatVersion: z.literal(2),
   runId: z.string().uuid(),
@@ -57,6 +64,7 @@ export const runCheckpointSchema = z.object({
     attemptHistory: z.array(z.object({ decisionId: z.string().min(1), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
     presentedTaskIds: z.array(z.string().min(1)),
     failureKind: z.enum(['provider', 'journey', 'unsupported-input']).optional(),
+    failureEvidence: contextFailureSchema.optional(),
   }).strict()),
   activeCellIds: z.array(z.string().min(1)),
   cancellationRequested: z.boolean(),

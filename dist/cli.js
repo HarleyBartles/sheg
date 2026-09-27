@@ -113,7 +113,7 @@ async function runJourney({ arm, profile, ask }) {
   };
   const answer = async (taskId, nodeId) => {
     const request = compileDecisionPacket(arm, profile, taskId, events);
-    const result = await ask(request);
+    const result = await ask(request, nodeId);
     if (typeof result?.choice !== "string" || !Object.hasOwn(request.question.options, result.choice)) {
       throw new JourneyExecutionError(`Task ${taskId} returned an option that was not offered.`);
     }
@@ -20519,6 +20519,14 @@ var budgetSnapshotSchema = external_exports.object({
   overspendUsd: external_exports.number().finite().nonnegative(),
   blocked: external_exports.boolean()
 }).strict();
+var contextFailureSchema = external_exports.object({
+  decisionId: external_exports.string().min(1),
+  nodeId: external_exports.string().min(1),
+  reason: external_exports.string().min(1),
+  tokens: external_exports.number().int().nonnegative(),
+  effectiveLimit: external_exports.number().int().nonnegative(),
+  measurementMethod: external_exports.string().min(1)
+}).strict();
 var runCheckpointSchema = external_exports.object({
   formatVersion: external_exports.literal(2),
   runId: external_exports.string().uuid(),
@@ -20545,7 +20553,8 @@ var runCheckpointSchema = external_exports.object({
     decisions: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
     attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
     presentedTaskIds: external_exports.array(external_exports.string().min(1)),
-    failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional()
+    failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional(),
+    failureEvidence: contextFailureSchema.optional()
   }).strict()),
   activeCellIds: external_exports.array(external_exports.string().min(1)),
   cancellationRequested: external_exports.boolean(),
@@ -20798,16 +20807,20 @@ function validateDecision(request, result, options = {}) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, chargeStatus, chargeUsd) {
+  constructor(message, attempts, chargeStatus, chargeUsd, contextFit, decisionId) {
     super(message);
     this.attempts = attempts;
     this.chargeStatus = chargeStatus;
     this.chargeUsd = chargeUsd;
+    this.contextFit = contextFit;
+    this.decisionId = decisionId;
     this.name = "JevCallError";
   }
   attempts;
   chargeStatus;
   chargeUsd;
+  contextFit;
+  decisionId;
 };
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -20872,7 +20885,7 @@ var JevProvider = class {
       throw new JevCallError("Jev decision request is invalid.", 0, "not_billed");
     }
     const fit = this.measure(parsedRequest.data);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed");
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed", void 0, fit, parsedRequest.data.question.id);
     const apiKey = process.env[this.config.keyEnv];
     if (!apiKey) {
       throw new JevCallError(`Jev API key environment variable ${this.config.keyEnv} is not set.`, 0, "not_billed");
@@ -21285,14 +21298,18 @@ async function measureLayaContext(request, config2) {
 
 // src/providers/laya.ts
 var LayaCallError = class extends Error {
-  constructor(message, attempts, chargeStatus) {
+  constructor(message, attempts, chargeStatus, contextFit, decisionId) {
     super(message);
     this.attempts = attempts;
     this.chargeStatus = chargeStatus;
+    this.contextFit = contextFit;
+    this.decisionId = decisionId;
     this.name = "LayaCallError";
   }
   attempts;
   chargeStatus;
+  contextFit;
+  decisionId;
 };
 var answerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -21344,7 +21361,7 @@ var LayaProvider = class {
     if (!parsedRequest.success) throw new LayaCallError("Laya decision request is invalid.", 0, "not_billed");
     const fit = await this.measure(parsedRequest.data);
     if (fit.status !== "fits") {
-      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed");
+      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed", fit, parsedRequest.data.question.id);
     }
     const { question } = parsedRequest.data;
     const endpoint = new URL("/v1/systemone", ensureTrailingSlash(this.config.baseUrl)).toString();
@@ -21438,9 +21455,10 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     const replayDecisions = previous?.decisions ?? [];
     const presentedTaskIds = [...previous?.presentedTaskIds ?? []];
     let replayCursor = 0;
+    let failedNodeId = null;
     await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
-      const result = await runJourney({ arm, profile, ask: async (request) => {
+      const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error("Task sequence changed while recovering the run.");
@@ -21460,6 +21478,7 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
           await ledger.settle(reservation, { attempts: 0, chargeStatus: "not_billed" });
           throw new RunCancelled();
         }
+        failedNodeId = nodeId;
         let decision;
         try {
           decision = await provider.decide(request, 1);
@@ -21479,6 +21498,7 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
       const current = await store.read(checkpoint.runId);
       const previousJourney = current.journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
       decisions = decisions.length > 0 ? decisions : previousJourney?.decisions ?? [];
+      const failureEvidence = cancelled ? null : admissionFailure(error62, failedNodeId);
       await updateCheckpoint(store, checkpoint.runId, (latest) => ({ ...latest, budget: ledger.snapshot(), journeys: replaceJourney(latest.journeys, {
         armId: arm.id,
         respondentId,
@@ -21486,7 +21506,8 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         decisions,
         attemptHistory,
         presentedTaskIds,
-        ...!cancelled ? { failureKind: isUnsupported(error62) ? "unsupported-input" : error62 instanceof JourneyExecutionError ? "journey" : "provider" } : {}
+        ...!cancelled ? { failureKind: isUnsupported(error62) ? "unsupported-input" : error62 instanceof JourneyExecutionError ? "journey" : "provider" } : {},
+        ...failureEvidence === null ? {} : { failureEvidence }
       }) }));
     } finally {
       await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, activeCellIds: current.activeCellIds.filter((cell) => cell !== id), budget: ledger.snapshot() }));
@@ -21536,6 +21557,12 @@ function errorEvidence(error62) {
 }
 function isUnsupported(error62) {
   return typeof error62 === "object" && error62 !== null && "message" in error62 && String(error62.message).includes("unsupported-input");
+}
+function admissionFailure(error62, nodeId) {
+  if (typeof error62 !== "object" || error62 === null || !("contextFit" in error62) || !("decisionId" in error62)) return null;
+  const { contextFit: fit, decisionId } = error62;
+  if (!fit || !decisionId || !nodeId || !Number.isSafeInteger(fit.tokens) || fit.tokens < 0 || !Number.isSafeInteger(fit.effectiveLimit) || fit.effectiveLimit < 0) return null;
+  return { decisionId, nodeId, reason: fit.reason ?? fit.status, tokens: fit.tokens, effectiveLimit: fit.effectiveLimit, measurementMethod: fit.method };
 }
 
 // src/application/run-manager.ts
@@ -21724,7 +21751,7 @@ var pollingReportSchema = external_exports.object({
     stimulusItems: external_exports.array(external_exports.object({ id: external_exports.string(), text: external_exports.string() }).strict()),
     tasks: external_exports.array(external_exports.object({ id: external_exports.string(), comparisonKey: external_exports.string().nullable(), instructions: external_exports.string(), options: external_exports.record(external_exports.string(), external_exports.string()) }).strict()),
     taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()) }).strict()) }).strict()),
-    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), status: external_exports.string(), outcome: external_exports.string().nullable(), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2) }).strict())
+    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), status: external_exports.string(), outcome: external_exports.string().nullable(), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failureEvidence: contextFailureSchema.optional() }).strict())
   }).strict()),
   providerEvidence: external_exports.object({ attempts: external_exports.number().int(), billedUsd: external_exports.number().nonnegative(), unknownCharges: external_exports.number().int(), failedCells: external_exports.number().int() }).strict()
 }).strict();
@@ -21767,7 +21794,15 @@ async function buildReport(checkpoint) {
           chargeUsd: result.chargeUsd ?? null
         };
       });
-      return { respondentId: respondent.id, archetypeId: respondent.archetypeId ?? null, status: stored?.status ?? "not-started", outcome: stored?.result?.outcome ?? null, events: stored?.result?.events ?? [], responses };
+      return {
+        respondentId: respondent.id,
+        archetypeId: respondent.archetypeId ?? null,
+        status: stored?.status ?? "not-started",
+        outcome: stored?.result?.outcome ?? null,
+        events: stored?.result?.events ?? [],
+        responses,
+        ...stored?.failureEvidence === void 0 ? {} : { failureEvidence: stored.failureEvidence }
+      };
     });
     const excludedByStatus = {};
     for (const journey of journeys) if (journey.status !== "completed") excludedByStatus[journey.status] = (excludedByStatus[journey.status] ?? 0) + 1;
@@ -22108,6 +22143,9 @@ async function preflightStudy(input2) {
     results.push({
       provider: providerConfig.kind === "jev" ? providerConfig.model : providerConfig.checkpoint,
       status: !complete || unavailable2.length ? "unverified" : overflows.length ? "does-not-fit" : "fit",
+      basis: config2.mode === "maximum-profile" ? "synthetic-profile" : "frozen-cohort",
+      configuration: providerConfig.kind === "jev" ? process.env[providerConfig.keyEnv] ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
+      availability: "unverified",
       complete,
       packetCount: traversal.packetCount,
       terminalJourneyCount: traversal.terminalJourneyCount,
@@ -22144,6 +22182,9 @@ async function runCli(args, io = { out: (value) => process.stdout.write(`${value
       return 0;
     }
     if (command === "preflight") {
+      if (options.mode !== void 0 && options.mode !== "frozen-cohort" && options.mode !== "maximum-profile") {
+        throw new Error("Preflight --mode must be frozen-cohort or maximum-profile.");
+      }
       const providers = JSON.parse(await readFile5(required2(options, "providers"), "utf8"));
       const mode = options.mode === "maximum-profile" ? "maximum-profile" : "frozen-cohort";
       result = await preflightStudy({ manifestPath: path7.resolve(required2(options, "manifest")), ...options.cohort === void 0 ? {} : { cohortPath: path7.resolve(options.cohort) }, mode, providers });

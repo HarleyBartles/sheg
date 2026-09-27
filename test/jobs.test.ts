@@ -8,7 +8,9 @@ import test, { type TestContext } from 'node:test';
 import { CheckpointStore, emptyBudgetSnapshot, type RunCheckpoint } from '../src/infrastructure/checkpoint-store.js';
 import { ProcessLock, ProcessLockError } from '../src/infrastructure/process-lock.js';
 import { RunManager, checkStudy } from '../src/application/run-manager.js';
+import { getReport } from '../src/application/reports.js';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
+import { LayaProvider } from '../src/providers/laya.js';
 
 async function tempDirectory(t: TestContext): Promise<string> {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'polling-jobs-'));
@@ -177,6 +179,35 @@ test('managed run checkpoints sequential provider decisions and reaches complete
   assert.equal(calls, 4);
   assert.equal(current.journeys[0]?.status, 'completed');
   assert.equal(current.budget.usedCalls, 4);
+});
+
+test('runtime context rejection records actionable admission evidence in checkpoint and report', async (t) => {
+  const directory = await tempDirectory(t);
+  const providerConfig = { kind: 'laya' as const, baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 1024, headLimit: 192,
+    tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 };
+  let calls = 0;
+  const manager = new RunManager({ providerFactory: () => new LayaProvider(providerConfig, {
+    measureFit: async () => ({ provider: 'laya', status: 'overflow', method: 'test-laya-tokenizer', modelIdentity: providerConfig.checkpoint,
+      tokenCount: 'measured', tokens: 1035, contextLimit: 1024, headroomTokens: 0, effectiveLimit: 1024,
+      details: { tokenizerSha256: providerConfig.tokenizerSha256 }, reason: 'state-would-be-truncated' }),
+    fetchRequest: async () => { calls += 1; throw new Error('inference should not be called'); },
+  }) });
+  const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
+    provider: providerConfig, outputDirectory: directory, maxCalls: 10, concurrency: 1 });
+  let current = started;
+  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = await manager.runStatus(directory, started.runId);
+  }
+  assert.equal(calls, 0);
+  assert.equal(current.status, 'partial');
+  assert.equal(current.journeys[0]?.status, 'failed');
+  assert.deepEqual(current.journeys[0]?.failureEvidence, {
+    decisionId: 'entry-response', nodeId: 'choose-entry', reason: 'state-would-be-truncated', tokens: 1035, effectiveLimit: 1024,
+    measurementMethod: 'test-laya-tokenizer',
+  });
+  const report = await getReport(directory, started.runId);
+  assert.deepEqual(report.arms[0]?.journeys[0]?.failureEvidence, current.journeys[0]?.failureEvidence);
 });
 
 test('matched run executes one cell for every frozen respondent in every arm', async (t) => {

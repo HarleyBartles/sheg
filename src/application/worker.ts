@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { BudgetLedger } from '../domain/budget-ledger.js';
-import { CheckpointStore, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
+import { CheckpointStore, type ContextFailure, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import type { DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import { JourneyExecutionError, runJourney } from '../domain/journey/run.js';
@@ -35,9 +35,10 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
     const replayDecisions = previous?.decisions ?? [];
     const presentedTaskIds = [...(previous?.presentedTaskIds ?? [])];
     let replayCursor = 0;
+    let failedNodeId: string | null = null;
     await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
-      const result = await runJourney({ arm, profile, ask: async (request) => {
+      const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error('Task sequence changed while recovering the run.');
@@ -57,6 +58,7 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
           await ledger.settle(reservation, { attempts: 0, chargeStatus: 'not_billed' });
           throw new RunCancelled();
         }
+        failedNodeId = nodeId;
         let decision: DecisionResult;
         try { decision = await provider.decide(request, 1); }
         catch (error) {
@@ -75,9 +77,11 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
       const current = await store.read(checkpoint.runId);
       const previousJourney = current.journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
       decisions = decisions.length > 0 ? decisions : previousJourney?.decisions ?? [];
+      const failureEvidence = cancelled ? null : admissionFailure(error, failedNodeId);
       await updateCheckpoint(store, checkpoint.runId, (latest) => ({ ...latest, budget: ledger.snapshot(), journeys: replaceJourney(latest.journeys, {
         armId: arm.id, respondentId, status: cancelled ? 'partial' : 'failed', decisions, attemptHistory, presentedTaskIds,
         ...(!cancelled ? { failureKind: isUnsupported(error) ? 'unsupported-input' as const : error instanceof JourneyExecutionError ? 'journey' as const : 'provider' as const } : {}),
+        ...(failureEvidence === null ? {} : { failureEvidence }),
       }) }));
     } finally {
       await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, activeCellIds: current.activeCellIds.filter((cell) => cell !== id), budget: ledger.snapshot() }));
@@ -120,3 +124,9 @@ function errorEvidence(error: unknown): { attempts: number; chargeStatus: 'not_b
   return { attempts: 0, chargeStatus: 'not_billed' };
 }
 function isUnsupported(error: unknown): boolean { return typeof error === 'object' && error !== null && 'message' in error && String(error.message).includes('unsupported-input'); }
+function admissionFailure(error: unknown, nodeId: string | null): ContextFailure | null {
+  if (typeof error !== 'object' || error === null || !('contextFit' in error) || !('decisionId' in error)) return null;
+  const { contextFit: fit, decisionId } = error as { contextFit?: { reason?: string; status: string; tokens: number; effectiveLimit: number; method: string }; decisionId?: string };
+  if (!fit || !decisionId || !nodeId || !Number.isSafeInteger(fit.tokens) || fit.tokens < 0 || !Number.isSafeInteger(fit.effectiveLimit) || fit.effectiveLimit < 0) return null;
+  return { decisionId, nodeId, reason: fit.reason ?? fit.status, tokens: fit.tokens, effectiveLimit: fit.effectiveLimit, measurementMethod: fit.method };
+}

@@ -49,8 +49,11 @@ token per three serialized UTF-8 bytes, rounded up, and reserves 20% of its
 published context window. Results identify the measurement method; a Jev fit is
 an estimate with headroom, not an exact tokenizer count. Provider selection
 remains explicit and stable throughout a run. Before a cohort is frozen,
-preflight uses the maximum valid profile envelope and labels its result
-provisional; with a frozen cohort it measures the actual respondents.
+preflight measures one synthetic profile at the aggregate prose allowance and
+labels that result as a provisional sample; with a frozen cohort it measures
+the actual respondents. A provisional `fit` describes only that sample, not
+every possible wording allowed by the profile schema. Laya measurement assumes
+the operator supplied the tokenizer and limits used by the local service.
 
 ## Consequences
 

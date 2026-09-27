@@ -7,7 +7,7 @@ export type ExposureEvent = Extract<PromptHistoryEvent, { type: 'exposure' }>;
 export type ChoiceEvent = Extract<PromptHistoryEvent, { type: 'choice' }>;
 export type JourneyEvent = PromptHistoryEvent;
 export type JourneyResult = { events: JourneyEvent[]; outcome: string | null; status: 'completed' | 'decision-limit'; decisionCount: number };
-export type JourneyOptions = { arm: StudyArm; profile: RespondentProfile; ask: (request: DecisionRequest) => Promise<{ choice: string }> };
+export type JourneyOptions = { arm: StudyArm; profile: RespondentProfile; ask: (request: DecisionRequest, nodeId: string) => Promise<{ choice: string }> };
 
 export class JourneyExecutionError extends Error {
   constructor(message: string) { super(message); this.name = 'JourneyExecutionError'; }
@@ -22,7 +22,7 @@ export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise
   };
   const answer = async (taskId: string, nodeId: string): Promise<string> => {
     const request = compileDecisionPacket(arm, profile, taskId, events);
-    const result = await ask(request);
+    const result = await ask(request, nodeId);
     if (typeof result?.choice !== 'string' || !Object.hasOwn(request.question.options, result.choice)) {
       throw new JourneyExecutionError(`Task ${taskId} returned an option that was not offered.`);
     }

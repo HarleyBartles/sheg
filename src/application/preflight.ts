@@ -28,6 +28,9 @@ export const preflightInputSchema = z.object({
 export type ProviderStudyFit = {
   provider: string;
   status: 'fit' | 'does-not-fit' | 'unverified';
+  basis: 'frozen-cohort' | 'synthetic-profile';
+  configuration: 'configured' | 'incomplete';
+  availability: 'unverified';
   complete: boolean;
   packetCount: number;
   terminalJourneyCount: number;
@@ -80,6 +83,11 @@ export async function preflightStudy(input: StudyPreflightInput): Promise<{ prov
     results.push({
       provider: providerConfig.kind === 'jev' ? providerConfig.model : providerConfig.checkpoint,
       status: !complete || unavailable.length ? 'unverified' : overflows.length ? 'does-not-fit' : 'fit',
+      basis: config.mode === 'maximum-profile' ? 'synthetic-profile' : 'frozen-cohort',
+      configuration: providerConfig.kind === 'jev'
+        ? process.env[providerConfig.keyEnv] ? 'configured' : 'incomplete'
+        : unavailable.length ? 'incomplete' : 'configured',
+      availability: 'unverified',
       complete, packetCount: traversal.packetCount, terminalJourneyCount: traversal.terminalJourneyCount,
       measurementMethod, effectiveLimit, maximumTokens, maximumPacket, overflows, unavailable,
       ...(traversal.incompleteReason === undefined ? {} : { incompleteReason: traversal.incompleteReason }),

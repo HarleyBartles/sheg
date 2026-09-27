@@ -21,7 +21,8 @@ export type FitMeasurer = (request: DecisionRequest, config: LayaConfig) => Prom
 export type FitResult = ProviderContextFit;
 
 export class LayaCallError extends Error {
-  constructor(message: string, readonly attempts: number, readonly chargeStatus: 'not_billed' | 'unknown') {
+  constructor(message: string, readonly attempts: number, readonly chargeStatus: 'not_billed' | 'unknown',
+    readonly contextFit?: ProviderContextFit, readonly decisionId?: string) {
     super(message);
     this.name = 'LayaCallError';
   }
@@ -94,7 +95,7 @@ export class LayaProvider implements DecisionProvider {
 
     const fit = await this.measure(parsedRequest.data);
     if (fit.status !== 'fits') {
-      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed');
+      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed', fit, parsedRequest.data.question.id);
     }
 
     const { question } = parsedRequest.data;

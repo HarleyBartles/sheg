@@ -23,6 +23,9 @@ test('preflight measures every frozen respondent packet for each configured prov
   assert.equal(result.providers.length, 2);
   assert.ok(result.providers.every((provider) => provider.packetCount > 0 && provider.complete));
   assert.equal(result.providers[0]?.status, 'does-not-fit');
+  assert.equal(result.providers[0]?.basis, 'frozen-cohort');
+  assert.equal(result.providers[0]?.configuration, 'configured');
+  assert.equal(result.providers[0]?.availability, 'unverified');
   assert.ok((result.providers[0]?.overflows.length ?? 0) > 0);
   assert.equal(result.providers[1]?.status, 'fit');
   assert.equal(result.providers[0]?.measurementMethod?.startsWith('laya-ts@'), true);
@@ -58,5 +61,18 @@ test('maximum-profile mode exercises the full aggregate prose allowance and labe
   assert.equal(result.provisional, true);
   assert.equal(result.mode, 'maximum-profile');
   assert.equal(result.providers[0]?.status, 'fit');
+  assert.equal(result.providers[0]?.basis, 'synthetic-profile');
   assert.equal(result.providers[0]?.packetCount, 3);
+});
+
+test('provider context fit stays distinct from missing credentials and unverified reachability', async () => {
+  const missingCredential = 'SHEG_PREFLIGHT_TEST_KEY_MISSING';
+  delete process.env[missingCredential];
+  const result = await preflightStudy({
+    manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: missingCredential, endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+  });
+  assert.equal(result.providers[0]?.status, 'fit');
+  assert.equal(result.providers[0]?.configuration, 'incomplete');
+  assert.equal(result.providers[0]?.availability, 'unverified');
 });
