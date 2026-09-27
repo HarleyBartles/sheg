@@ -22,6 +22,7 @@ contract again when upgrading the adapter.
   must not be replaced with zero.
 - The API response has no request-latency field. The adapter records elapsed
   wall time locally.
+- Starting or resuming inference rejects a missing key before creating or relaunching a run. Keyless `poll_check` remains available.
 
 ## Transport and retry policy
 
@@ -35,7 +36,7 @@ errors and HTTP 429, 500, 502, 503, 524, and 529 responses, bounded by the
 provider call's `maxAttempts`. Do not retry other HTTP statuses. A failed or
 timed-out attempt may have reached billing even if no response was received;
 report its charge as unknown and let the run controller require reconciliation
-before a later resume. Never include the API key or response body in an error.
+before a later resume. Reconcile only against the provider's verified total for all unresolved calls; `poll_reconcile` and the CLI `reconcile` command record that total without resetting call usage. Never include the API key or response body in an error.
 
 ## References
 

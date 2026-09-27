@@ -14,7 +14,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   t.after(async () => { await client.close(); });
   await client.connect(transport);
   const listed = await client.listTools();
-  for (const name of ['poll_check', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_resume', 'poll_report', 'poll_compare']) {
+  for (const name of ['poll_check', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_reconcile', 'poll_resume', 'poll_report', 'poll_compare']) {
     assert.ok(listed.tools.some((tool) => tool.name === name), `Missing ${name}`);
   }
   const checked = await client.callTool({ name: 'poll_check', arguments: { config: {

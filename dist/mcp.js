@@ -35856,6 +35856,7 @@ var RunManager = class {
   async startRun(config2) {
     const checked = await checkStudy(config2);
     const { config: c, study } = checked;
+    requireJevKey(c.provider);
     await mkdir3(c.outputDirectory, { recursive: true });
     const runId = randomUUID4();
     const store = new CheckpointStore(c.outputDirectory);
@@ -35920,10 +35921,19 @@ var RunManager = class {
   }
   async reconcileRun(outputDirectory, runId, unpricedUsd) {
     const store = new CheckpointStore(path4.resolve(outputDirectory));
-    const current = await store.read(runId);
-    const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-    await ledger.reconcile(unpricedUsd);
-    return store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+    await store.read(runId);
+    const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
+    try {
+      const current = await store.read(runId);
+      if (current.status !== "partial" && current.status !== "failed" && current.status !== "cancelled") {
+        throw new Error("Only a stopped partial, failed, or cancelled run can be reconciled. Check run status first.");
+      }
+      const ledger = BudgetLedger.restore(cleanBudget(current.budget));
+      await ledger.reconcile(unpricedUsd);
+      return await store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+    } finally {
+      await lock.release();
+    }
   }
   async resumeRun(outputDirectory, runId) {
     const store = new CheckpointStore(path4.resolve(outputDirectory));
@@ -35931,6 +35941,7 @@ var RunManager = class {
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
     if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
+    requireJevKey(checkpoint.provider);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
       if (checkpoint.budget.blocked) throw new Error("Unpriced calls must be reconciled before resume.");
@@ -35959,6 +35970,11 @@ var RunManager = class {
 function cleanBudget(snapshot) {
   const { maxUsd, ...rest } = snapshot;
   return { ...rest, ...maxUsd === void 0 ? {} : { maxUsd } };
+}
+function requireJevKey(provider) {
+  if (provider.kind === "jev" && !process.env[provider.keyEnv]?.trim()) {
+    throw new Error(`Jev API key environment variable ${provider.keyEnv} is not set. Set it in the process environment before starting or resuming a run.`);
+  }
 }
 
 // src/application/reports.ts
@@ -36190,6 +36206,7 @@ function createPollingServer(manager = new RunManager()) {
   server.registerTool("poll_start", { description: "Start a durable polling run. Returns immediately with its run ID.", inputSchema: { config: configSchema2 } }, async ({ config: config2 }) => jsonResult(await manager.startRun(config2)));
   server.registerTool("poll_status", { description: "Read run status and recover abandoned running state.", inputSchema: { outputDirectory: external_exports.string(), runId: external_exports.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await manager.runStatus(outputDirectory, runId)));
   server.registerTool("poll_cancel", { description: "Request cancellation and wait for in-flight decisions to settle.", inputSchema: { outputDirectory: external_exports.string(), runId: external_exports.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await manager.cancelRun(outputDirectory, runId)));
+  server.registerTool("poll_reconcile", { description: "Record the user-verified total provider charge for uncertain Jev calls in a stopped run, then clear its billing block.", inputSchema: { outputDirectory: external_exports.string(), runId: external_exports.string().uuid(), unpricedUsd: external_exports.number().finite().nonnegative() } }, async ({ outputDirectory, runId, unpricedUsd }) => jsonResult(await manager.reconcileRun(outputDirectory, runId, unpricedUsd)));
   server.registerTool("poll_resume", { description: "Resume a partial run after validating the frozen inputs and execution fingerprint.", inputSchema: { outputDirectory: external_exports.string(), runId: external_exports.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await manager.resumeRun(outputDirectory, runId)));
   server.registerTool("poll_report", { description: "Build a JSON-safe report from the durable checkpoint.", inputSchema: { outputDirectory: external_exports.string(), runId: external_exports.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await getReport(outputDirectory, runId)));
   server.registerTool("poll_compare", { description: "Compare two arms from one durable run by matched respondent and task comparison keys.", inputSchema: { outputDirectory: external_exports.string(), runId: external_exports.string().uuid(), leftArmId: external_exports.string(), rightArmId: external_exports.string() } }, async ({ outputDirectory, runId, leftArmId, rightArmId }) => jsonResult(compareReports(await getReport(outputDirectory, runId), leftArmId, rightArmId)));

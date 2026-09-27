@@ -21138,6 +21138,7 @@ var RunManager = class {
   async startRun(config2) {
     const checked = await checkStudy(config2);
     const { config: c, study } = checked;
+    requireJevKey(c.provider);
     await mkdir3(c.outputDirectory, { recursive: true });
     const runId = randomUUID4();
     const store = new CheckpointStore(c.outputDirectory);
@@ -21202,10 +21203,19 @@ var RunManager = class {
   }
   async reconcileRun(outputDirectory, runId, unpricedUsd) {
     const store = new CheckpointStore(path4.resolve(outputDirectory));
-    const current = await store.read(runId);
-    const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-    await ledger.reconcile(unpricedUsd);
-    return store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+    await store.read(runId);
+    const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
+    try {
+      const current = await store.read(runId);
+      if (current.status !== "partial" && current.status !== "failed" && current.status !== "cancelled") {
+        throw new Error("Only a stopped partial, failed, or cancelled run can be reconciled. Check run status first.");
+      }
+      const ledger = BudgetLedger.restore(cleanBudget(current.budget));
+      await ledger.reconcile(unpricedUsd);
+      return await store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+    } finally {
+      await lock.release();
+    }
   }
   async resumeRun(outputDirectory, runId) {
     const store = new CheckpointStore(path4.resolve(outputDirectory));
@@ -21213,6 +21223,7 @@ var RunManager = class {
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
     if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
+    requireJevKey(checkpoint.provider);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
       if (checkpoint.budget.blocked) throw new Error("Unpriced calls must be reconciled before resume.");
@@ -21241,6 +21252,11 @@ var RunManager = class {
 function cleanBudget(snapshot) {
   const { maxUsd, ...rest } = snapshot;
   return { ...rest, ...maxUsd === void 0 ? {} : { maxUsd } };
+}
+function requireJevKey(provider) {
+  if (provider.kind === "jev" && !process.env[provider.keyEnv]?.trim()) {
+    throw new Error(`Jev API key environment variable ${provider.keyEnv} is not set. Set it in the process environment before starting or resuming a run.`);
+  }
 }
 
 // src/application/reports.ts
@@ -21470,6 +21486,7 @@ async function runCli(args, io = { out: (value) => process.stdout.write(`${value
       result = await traceStudy(arm, profile, choices);
     } else if (command === "status") result = await manager.runStatus(required2(options, "output"), required2(options, "run-id"));
     else if (command === "cancel") result = await manager.cancelRun(required2(options, "output"), required2(options, "run-id"));
+    else if (command === "reconcile") result = await manager.reconcileRun(required2(options, "output"), required2(options, "run-id"), Number(required2(options, "unpriced-usd")));
     else if (command === "resume") result = await manager.resumeRun(required2(options, "output"), required2(options, "run-id"));
     else if (command === "report") result = await getReport(required2(options, "output"), required2(options, "run-id"));
     else if (command === "compare") {
@@ -21489,6 +21506,7 @@ Commands:
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>
   start --config <json>                         Start a durable run
   status|cancel|resume --output <dir> --run-id <id>
+  reconcile --output <dir> --run-id <id> --unpriced-usd <amount>
   report --output <dir> --run-id <id>
   compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>`;
 function parseArgs(args) {

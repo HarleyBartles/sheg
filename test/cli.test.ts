@@ -9,7 +9,7 @@ test('CLI help lists all supported workflow commands', async () => {
   const lines: string[] = [];
   const status = await runCli(['--help'], { out: (text) => { lines.push(text); return true; }, error: (text) => { lines.push(text); return true; } });
   assert.equal(status, 0);
-  for (const command of ['check', 'trace', 'start', 'status', 'cancel', 'resume', 'report', 'compare']) assert.match(lines[0] ?? '', new RegExp(command));
+  for (const command of ['check', 'trace', 'start', 'status', 'cancel', 'reconcile', 'resume', 'report', 'compare']) assert.match(lines[0] ?? '', new RegExp(command));
 });
 
 test('CLI check validates explicit provider config without key or network', async (t) => {

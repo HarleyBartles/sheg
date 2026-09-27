@@ -23,7 +23,7 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
    ```
 
 2. Restart the Codex desktop app, open the Plugins Directory, select the **Sheg** marketplace, and install the plugin.
-3. Confirm the `poll_check`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
+3. Confirm the `poll_check`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_reconcile`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).
 
@@ -36,7 +36,9 @@ See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for 
 
 In Codex, you can start with a request such as: “Compare these two versions with a distinct respondent cohort. Help me prepare the study and cohort, run `poll_check`, and show me the provider, cell count, and spend caps before any inference.” The skill guides the agent through preparation and keeps the paid run behind your explicit authorization.
 
-Jev is a hosted, paid provider. Keep its key in the environment, never in a manifest or chat, and set conservative call and spend caps before starting. `poll_check` and `poll_trace` do not make inference calls.
+Jev is a hosted, paid provider. Keep its key in the environment, never in a manifest or chat, and set conservative call and spend caps before starting. `poll_check` and `poll_trace` do not make inference calls or require a key. `poll_start` and `poll_resume` reject a missing key before launching.
+
+If a run stops with uncertain charges, check the provider's billing record for the total actual charge of all unresolved calls. Use `poll_reconcile` with that verified USD amount before `poll_resume`. Keep the run blocked if the charge cannot be established. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md).
 
 The local Laya adapter is not ready for inference yet. It requires a checkpoint-matched context-fit measurer, and none is currently bundled. It therefore refuses to send a request when that fit cannot be verified. See the [Laya capability notes](docs/providers/laya.md).
 
@@ -80,7 +82,7 @@ node dist/cli.js report --output ./.polling-runs --run-id <run-id>
 node dist/cli.js compare --output ./.polling-runs --run-id <run-id> --left-arm original --right-arm revised
 ```
 
-The CLI also supports `trace`, `status`, `cancel`, and `resume`. See `node dist/cli.js --help` for the full syntax.
+The CLI also supports `trace`, `status`, `cancel`, `reconcile`, and `resume`. For uncertain charges, use `node dist/cli.js reconcile --output ./.polling-runs --run-id <run-id> --unpriced-usd <verified-total>` after checking provider billing. See `node dist/cli.js --help` for the full syntax.
 
 The build recreates `dist/` from the current source, bundles the MCP server and CLI, and copies the domain-owned archetype groups into the plugin package.
 
@@ -105,3 +107,5 @@ When changing contracts, update the TypeScript source of truth and regenerate th
 - [Data contracts](docs/reference/data-contracts.md)
 - [Provider setup: Jev](docs/providers/jev.md) and [Laya](docs/providers/laya.md)
 - [Architecture decisions](docs/decisions/README.md)
+
+Sheg is licensed under the [MIT License](LICENSE).

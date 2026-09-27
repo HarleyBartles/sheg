@@ -53,6 +53,7 @@ export class RunManager {
   async startRun(config: RunConfig): Promise<RunCheckpoint> {
     const checked = await checkStudy(config);
     const { config: c, study } = checked;
+    requireJevKey(c.provider);
     await mkdir(c.outputDirectory, { recursive: true });
     const runId = randomUUID();
     const store = new CheckpointStore(c.outputDirectory);
@@ -101,10 +102,17 @@ export class RunManager {
 
   async reconcileRun(outputDirectory: string, runId: string, unpricedUsd: number): Promise<RunCheckpoint> {
     const store = new CheckpointStore(path.resolve(outputDirectory));
-    const current = await store.read(runId);
-    const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-    await ledger.reconcile(unpricedUsd);
-    return store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: new Date().toISOString() }));
+    await store.read(runId);
+    const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
+    try {
+      const current = await store.read(runId);
+      if (current.status !== 'partial' && current.status !== 'failed' && current.status !== 'cancelled') {
+        throw new Error('Only a stopped partial, failed, or cancelled run can be reconciled. Check run status first.');
+      }
+      const ledger = BudgetLedger.restore(cleanBudget(current.budget));
+      await ledger.reconcile(unpricedUsd);
+      return await store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: new Date().toISOString() }));
+    } finally { await lock.release(); }
   }
 
   async resumeRun(outputDirectory: string, runId: string): Promise<RunCheckpoint> {
@@ -113,6 +121,7 @@ export class RunManager {
     if (checkpoint.status === 'completed' || checkpoint.status === 'cancelled') throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...(checkpoint.maxUsd === undefined ? {} : { maxUsd: checkpoint.maxUsd }), ...(checkpoint.maxPerCallUsd === undefined ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }), concurrency: checkpoint.concurrency });
     if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error('Study or execution settings changed since this run was prepared.');
+    requireJevKey(checkpoint.provider);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
       if (checkpoint.budget.blocked) throw new Error('Unpriced calls must be reconciled before resume.');
@@ -138,4 +147,10 @@ export class RunManager {
 function cleanBudget(snapshot: RunCheckpoint['budget']) {
   const { maxUsd, ...rest } = snapshot;
   return { ...rest, ...(maxUsd === undefined ? {} : { maxUsd }) };
+}
+
+function requireJevKey(provider: ParsedConfig['provider']): void {
+  if (provider.kind === 'jev' && !process.env[provider.keyEnv]?.trim()) {
+    throw new Error(`Jev API key environment variable ${provider.keyEnv} is not set. Set it in the process environment before starting or resuming a run.`);
+  }
 }

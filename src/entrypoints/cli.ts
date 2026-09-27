@@ -29,6 +29,7 @@ export async function runCli(args: readonly string[], io = { out: (value: string
       result = await traceStudy(arm, profile, choices);
     } else if (command === 'status') result = await manager.runStatus(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'cancel') result = await manager.cancelRun(required(options, 'output'), required(options, 'run-id'));
+    else if (command === 'reconcile') result = await manager.reconcileRun(required(options, 'output'), required(options, 'run-id'), Number(required(options, 'unpriced-usd')));
     else if (command === 'resume') result = await manager.resumeRun(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'report') result = await getReport(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'compare') {
@@ -49,6 +50,7 @@ Commands:
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>
   start --config <json>                         Start a durable run
   status|cancel|resume --output <dir> --run-id <id>
+  reconcile --output <dir> --run-id <id> --unpriced-usd <amount>
   report --output <dir> --run-id <id>
   compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>`;
 

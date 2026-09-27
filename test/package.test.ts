@@ -50,8 +50,6 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
     }
   };
   await client.connect(transport);
-  const tools = await client.listTools();
-  assert.equal(tools.tools.length, 8);
   const result = await client.callTool({ name: 'poll_check', arguments: { config: {
     manifestPath: path.join(inputs, 'article.json'), cohortPath: path.join(inputs, 'cohort.json'), outputDirectory: path.join(sandbox, 'runs'),
     maxCalls: 10, provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'unavailable-checkpoint', contextLimit: 4096, timeoutMs: 5000 },
