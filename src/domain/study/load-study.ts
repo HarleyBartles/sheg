@@ -18,8 +18,8 @@ export type Study = {
 
 const maximumManifestBytes = 200_000;
 const archetypeCatalogueUrls = [
-  new URL('../../../skills/simulated-reader-polling/assets/reader-archetypes.json', import.meta.url),
-  new URL('./skills/simulated-reader-polling/assets/reader-archetypes.json', import.meta.url),
+  new URL('../readers/reader-archetypes.json', import.meta.url),
+  new URL('./data/reader-archetypes.json', import.meta.url),
 ];
 
 async function parseJsonFile(filePath: string, label: string): Promise<unknown> {

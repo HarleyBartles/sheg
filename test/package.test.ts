@@ -18,7 +18,10 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   });
   const plugin = path.join(sandbox, 'installed', 'system-one-polling');
   await mkdir(path.dirname(plugin), { recursive: true });
-  for (const item of ['plugin.json', 'mcp.json', 'dist', 'skills']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
+  for (const item of ['plugin.json', 'mcp.json', 'dist']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
+  await cp(path.resolve('skills/simulated-reader-polling/SKILL.md'), path.join(plugin, 'skills/simulated-reader-polling/SKILL.md'), { recursive: true });
+  await cp(path.resolve('skills/simulated-reader-polling/references'), path.join(plugin, 'skills/simulated-reader-polling/references'), { recursive: true });
+  assert.equal(await exists(path.join(plugin, 'dist/data/reader-archetypes.json')), true);
   assert.equal(await exists(path.join(plugin, 'node_modules')), false);
   const manifest = JSON.parse(await readFile(path.join(plugin, 'plugin.json'), 'utf8')) as { name: string };
   const mcp = JSON.parse(await readFile(path.join(plugin, 'mcp.json'), 'utf8')) as { mcpServers: Record<string, { type: string; command: string; args: string[]; cwd: string }> };

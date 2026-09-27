@@ -19847,8 +19847,8 @@ var manifestSchema = external_exports.object({
 // src/domain/study/load-study.ts
 var maximumManifestBytes = 2e5;
 var archetypeCatalogueUrls = [
-  new URL("../../../skills/simulated-reader-polling/assets/reader-archetypes.json", import.meta.url),
-  new URL("./skills/simulated-reader-polling/assets/reader-archetypes.json", import.meta.url)
+  new URL("../readers/reader-archetypes.json", import.meta.url),
+  new URL("./data/reader-archetypes.json", import.meta.url)
 ];
 async function parseJsonFile(filePath, label) {
   let bytes;
