@@ -9,11 +9,12 @@ alongside the code and planning artifacts.
 
 | ID | Decision | Status |
 | --- | --- | --- |
-| [0001](0001-keep-adrs-in-the-repository.md) | Keep ADRs in the repository root | Accepted |
+| [0001](0001-keep-adrs-in-the-repository.md) | Keep ADRs in the repository root | Superseded by 0006 |
 | [0002](0002-use-node-and-typescript.md) | Use Node.js and TypeScript | Accepted |
 | [0003](0003-use-domain-neutral-polling-primitives.md) | Model polls with domain-neutral primitives and an explicit graph | Accepted |
 | [0004](0004-organize-source-by-responsibility.md) | Organize source by responsibility and keep tests separate | Accepted |
 | [0005](0005-distribute-as-an-ambient-codex-plugin.md) | Distribute as an ambient Codex plugin | Accepted |
+| [0006](0006-store-adrs-in-docs-decisions.md) | Store ADRs in `docs/decisions` | Accepted |
 
 ## Writing and changing decisions
 
