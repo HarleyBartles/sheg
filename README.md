@@ -1,6 +1,6 @@
 # Sheg
 
-Sheg runs structured stimulus-task-response polls against simulated respondent cohorts using System One models. It is a Codex plugin and Node.js harness for bounded text studies. Jev is the available inference provider; local Laya inference remains gated.
+Sheg runs structured stimulus-task-response polls against simulated respondent cohorts using System One models. It is a Codex plugin and Node.js harness for bounded text studies. It supports Jev and a separately operated local Laya service, subject to provider context fit.
 
 ## What it does
 
@@ -23,15 +23,15 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
    ```
 
 2. Restart the Codex desktop app, open the Plugins Directory, select the **Sheg** marketplace, and install the plugin.
-3. Confirm the `poll_check`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_reconcile`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
+3. Confirm the `poll_check`, `poll_preflight`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_reconcile`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).
 
 ## Prepare and run a study
 
 1. Create a [study manifest](docs/reference/study-manifest.md) and a frozen respondent cohort. Use the [machine-readable contracts](docs/reference/data-contracts.md) and the [polling skill](skills/stimulus-response-polling/SKILL.md) for the exact shapes and authoring workflow.
-2. Configure one provider. Jev runs require an API key available to the Codex process and explicit `maxUsd` and `maxPerCallUsd` limits. See the [Jev setup and wire contract](docs/providers/jev.md).
-3. Call `poll_check` with the exact manifest, cohort, provider, and budgets. It validates and fingerprints inputs without making a provider inference call. Use `poll_trace` to check a scripted route without inference.
+2. Configure one provider. Jev runs require an API key available to the Codex process and explicit `maxUsd` and `maxPerCallUsd` limits. Local Laya runs require a running service and the matching checkpoint tokenizer JSON and SHA-256 digest. See the [Jev setup and wire contract](docs/providers/jev.md) and [Laya capability notes](docs/providers/laya.md).
+3. Call `poll_check` with the exact manifest, cohort, provider, and budgets. It validates and fingerprints inputs without making a provider inference call. Use `poll_preflight` to check every reachable request for context fit against configured providers, and `poll_trace` to check a scripted route without inference.
 4. Review the proposed respondent-arm cell count and spend limits, then start an authorized run with `poll_start`. Use `poll_status` and `poll_report` to follow and inspect it. Compare arms with `poll_compare` within that same run.
 
 In Codex, you can start with a request such as: “Compare these two versions with a distinct respondent cohort. Help me prepare the study and cohort, run `poll_check`, and show me the provider, cell count, and spend caps before any inference.” The skill guides the agent through preparation and keeps the paid run behind your explicit authorization.
@@ -40,7 +40,7 @@ Jev is a hosted, paid provider. Keep its key in the environment, never in a mani
 
 If a run stops with uncertain charges, check the provider's billing record for the total actual charge of all unresolved calls. Use `poll_reconcile` with that verified USD amount before `poll_resume`. Keep the run blocked if the charge cannot be established. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md).
 
-The local Laya adapter is not ready for inference yet. It requires a checkpoint-matched context-fit measurer, and none is currently bundled. It therefore refuses to send a request when that fit cannot be verified. See the [Laya capability notes](docs/providers/laya.md).
+The local Laya adapter bundles a pinned tokenizer and sequence builder for a pre-inference context-fit check. It sends a request only when the configured tokenizer matches its digest and the complete request fits; otherwise it rejects the request before inference. The service and checkpoint must be configured separately, and the integration still needs an operator smoke test against that service. See the [Laya capability notes](docs/providers/laya.md).
 
 ## Run the CLI from source
 
