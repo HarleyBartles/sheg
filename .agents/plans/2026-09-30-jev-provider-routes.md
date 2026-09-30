@@ -10,7 +10,7 @@
 
 **Spec:** [Jev provider routes and call limits](../specs/2026-09-30-jev-provider-routes.md), [SHEG-3](https://linear.app/harleys-workspace/issue/SHEG-3/support-native-typesafe-and-openrouter-jev-routes).
 
-**Status:** Approved for implementation by the user on 2026-09-30.
+**Status:** completed-awaiting-retirement. Draft PR #7 is open for review.
 
 **Execution Strategy:** `executing-plans`. Route schemas, provider results, attempt settlement, checkpoints, and reports share contracts and need sequential integration. Keeping their implementation context inline reduces repeated reconstruction of migration and recovery behavior.
 
@@ -187,10 +187,12 @@ npm run verify
 
 - [x] Check package.json, both root lockfile version values, and plugin.json remain `0.1.0`. Inspect the complete diff and generated-output explanation. Use a fresh whole-branch review when authorized and available; correct findings and verify the affected behavior.
 - [x] For the user's existing installation, run safe availability checks for both production targets. If verified native context metadata permits admission, complete a bounded Jev request using the vault while environment variables remain in place, without inspecting those variables or emitting credentials. Observe the same paid-run approval requirement used by Sheg; fixture tests require no paid request. Report any blocked live proof accurately.
-- [ ] Commit completed implementation through the normal pre-commit hook, push the feature branch, and open a reviewable feature PR with base `develop`. Include SHEG-3, final SHA, tests, vault/route/migration proof, and limitations. Do not merge or prepare a release within this execution slice.
-- [ ] Mark the plan `completed-awaiting-retirement` once the requested implementation and PR handoff are complete. Record subsequent human approval/merge and release preparation as follow-on actions, not unfinished execution tasks.
+- [x] Commit completed implementation through the normal pre-commit hook, push the feature branch, and open a reviewable feature PR with base `develop`. Include SHEG-3, final SHA, tests, vault/route/migration proof, and limitations. Do not merge or prepare a release within this execution slice.
+- [x] Mark the plan `completed-awaiting-retirement` once the requested implementation and PR handoff are complete. Record subsequent human approval/merge and release preparation as follow-on actions, not unfinished execution tasks.
 
 **Exit:** The feature PR targets develop, its verification evidence is current, versions are unchanged, and the human can review the complete implementation. If native fit evidence or paid-run approval is absent, report precisely which live proof remains unavailable.
+
+**Execution evidence:** Branch `codex/jev-auth-modes` is based on `origin/develop` at `3955863a0a69ab93d377bcbd408b3e6f57efc68d`. Draft PR [#7](https://github.com/HarleyBartles/sheg/pull/7) is open against `develop`. The commit hook passed `npm run verify` with 170 tests. Both production vault targets report available. Native TypeSafe inference remains unverified because its context limit is unknown.
 
 ## Acceptance Coverage
 
