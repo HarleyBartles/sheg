@@ -68,7 +68,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   const runGuidance = await readFile(path.join(plugin, 'skills/stimulus-response-polling/references/run-and-recovery.md'), 'utf8');
   assert.match(runGuidance, /explicit user authorization/);
   const resultsGuidance = await readFile(path.join(plugin, 'skills/stimulus-response-polling/references/interpret-results.md'), 'utf8');
-  assert.match(resultsGuidance, /simulated profile-conditioned typed responses/);
+  assert.match(resultsGuidance, /provider identity, incomplete cells, failures, and unknown charges/);
   const cohortGuidance = await readFile(path.join(plugin, 'skills/stimulus-response-polling/references/archetypes-and-cohorts.md'), 'utf8');
   assert.match(cohortGuidance, /Supply profiles directly/);
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);

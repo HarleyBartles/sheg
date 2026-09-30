@@ -29,7 +29,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   const inferenceAddress = inferenceServer.address();
   assert.ok(inferenceAddress && typeof inferenceAddress === 'object');
   const listed = await client.listTools();
-  for (const name of ['poll_capabilities', 'poll_preview', 'poll_check', 'poll_preflight', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_reconcile', 'poll_resume', 'poll_report', 'poll_compare', 'poll_compare_runs', 'poll_measure_packets']) {
+  for (const name of ['poll_preview', 'poll_check', 'poll_preflight', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_reconcile', 'poll_resume', 'poll_report', 'poll_compare', 'poll_compare_runs', 'poll_measure_packets']) {
     assert.ok(listed.tools.some((tool) => tool.name === name), `Missing ${name}`);
   }
   const measureTool = listed.tools.find((tool) => tool.name === 'poll_measure_packets');
@@ -37,13 +37,6 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   assert.match(measureTool?.description ?? '', /paired/i);
   assert.match(measureTool?.description ?? '', /cartesian/i);
   assert.match(measureTool?.description ?? '', /same length/i);
-  const capabilities = await client.callTool({ name: 'poll_capabilities', arguments: {} });
-  assert.equal(capabilities.isError ?? false, false);
-  const catalog = capabilities.structuredContent as { tasks: Array<{ type: string }>; journeys: { responseHistory: { default: string } }; stimulus: { ownership: string }; comparison: { crossRun: string } };
-  assert.deepEqual(catalog.tasks.map((task) => task.type), ['choice', 'score', 'noul']);
-  assert.equal(catalog.journeys.responseHistory.default, 'include');
-  assert.match(catalog.stimulus.ownership, /agent and human/i);
-  assert.match(catalog.comparison.crossRun, /exact ordered frozen cohort/i);
   const preview = await client.callTool({ name: 'poll_preview', arguments: { manifestPath: path.resolve('test/fixtures/article.json') } });
   assert.equal(preview.isError ?? false, false);
   const previewContent = preview.structuredContent as { arms: Array<{ armId: string; presentation: string; nodes: Array<{ kind: string; id: string; routeContexts?: Array<{ exposedStimulusIds: string[]; priorChoices: Array<{ taskId: string; optionId: string; meaning: string }>; priorResponses: unknown[] }> }> }> };

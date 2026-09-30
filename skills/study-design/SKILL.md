@@ -125,7 +125,6 @@ profile limits in the cohort guide.
 ## Tool sequence at a glance
 
 - Static capabilities: read this skill and its references; no tool call.
-- Semantic tool capability catalogue: `poll_capabilities`; no provider call.
 - Draft task fit: `poll_measure_packets`; no inference call.
 - Show all branches and route context before cohort construction: `poll_preview`;
   no cohort or inference call.

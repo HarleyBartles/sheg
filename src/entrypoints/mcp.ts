@@ -22,8 +22,7 @@ const configSchema = z.object({
 }).strict();
 
 export function createPollingServer(manager = new RunManager()): McpServer {
-  const server = new McpServer({ name: 'sheg', version: '0.1.0' }, { instructions: 'Polling decisions are simulations. Check and trace do not contact a provider. Hosted runs require explicit call and spend caps. Reports describe simulated responses, not readership or publication outcomes.' });
-  server.registerTool('poll_capabilities', { description: 'Describe Sheg task types, journey and history controls, cohort inputs, provider constraints, and comparison behavior in semantic terms before study authoring.', inputSchema: {} }, async () => jsonResult(capabilityCatalog));
+  const server = new McpServer({ name: 'sheg', version: '0.1.0' }, { instructions: 'Check and trace do not contact a provider. Hosted runs require explicit call and spend caps.' });
   server.registerTool('poll_preview', { description: 'Preview every branch from the manifest, including authored stimulus and question wording, choices and destinations, shared continuations, each route’s prior choices, and the stimulus IDs in scope at each question. Requires no cohort or inference-provider call. Rejects previews above 10,000 route contexts instead of returning a partial result.', inputSchema: { manifestPath: z.string().min(1) } }, async ({ manifestPath }) => jsonResult(await previewStudy(manifestPath)));
   server.registerTool('poll_check', { description: 'Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls. Return deterministic minimum/maximum reachable decision-call counts, whether maxCalls covers the maximum, and for Jev a configured spend ceiling, not a predicted charge.', inputSchema: { config: configSchema } }, async ({ config }) => {
     const checked = await checkStudy(config as RunConfig);
@@ -54,31 +53,5 @@ export function createPollingServer(manager = new RunManager()): McpServer {
 }
 
 function jsonResult(value: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(value) }], structuredContent: value as Record<string, unknown> }; }
-
-const capabilityCatalog = {
-  tasks: [
-    { type: 'choice', meaning: 'Select one stable option ID.', evidence: ['selected option', 'option probabilities', 'optional confidence'], routing: 'Option ID transitions.' },
-    { type: 'score', meaning: 'Rate against an ordered rubric of at least two levels.', evidence: ['expected score from level 0 through the final level', 'per-level probabilities', 'rubric legend'], routing: 'Explicit non-overlapping intervals covering the full rubric score range.' },
-    { type: 'noul', meaning: 'Judge whether a proposition is true.', evidence: ['P(true) from 0 through 1'], routing: 'Explicit non-overlapping intervals covering [0, 1].' },
-  ],
-  journeys: {
-    shapes: ['single task', 'ordered sequence', 'finite acyclic graph with conditional routes'],
-    responseHistory: { default: 'include', choices: ['include', 'omit'], scope: 'Per task. Omission removes prior responses but retains stimulus exposure context.' },
-    eligibility: 'Graph routes independently determine which respondents reach later tasks. Each respondent sees only their own history.',
-  },
-  cohort: { input: 'Ordered frozen respondent profiles, optionally created from archetypes and declared variations.', profileFields: ['intent', 'context', 'desired_outcome', 'engagement_cues', 'friction_cues'] },
-  stimulus: { ownership: 'The agent and human choose editorial cuts and preserve authored text.', shegSupport: 'Provider and token-size guidance plus exact packet preflight; no inferred editorial boundaries or silent rewriting.' },
-  providers: {
-    jev: { typedTasks: ['choice', 'score', 'noul'], preflight: 'Token estimate is supported only for the configured typesafe/jev-1.13 model.' },
-    laya: { typedTasks: ['choice', 'score', 'noul'], preflight: 'Uses the configured local checkpoint tokenizer and context limits. The deployed service revision must match the documented System One wire contract.' },
-    enforcement: 'Provider and task compatibility is measured or rejected before inference when possible; unknown fit is never reported as fit.',
-  },
-  comparison: {
-    withinRun: 'Compare selected arms by respondent, comparisonKey, and occurrence.',
-    crossRun: 'Compare selected arms from separate runs only when the exact ordered frozen cohort matches. Typed results are comparable only when task type and authored meanings align. The result includes source, stimulus, task, provider, run-status, completion, and declared profile-group differences.',
-    profileGroups: 'Declared archetype and variation groups include their denominators and response coverage.',
-    limitation: 'Comparisons describe simulated model responses; they do not establish human readership, statistical significance, or causal lift.',
-  },
-};
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) serveStdio(() => createPollingServer(), { onerror: (error) => process.stderr.write(`${error.message}\n`) });

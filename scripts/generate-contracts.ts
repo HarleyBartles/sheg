@@ -23,7 +23,7 @@ const contracts: Array<{ filename: string; title: string; schema: z.ZodType; val
     'Choice option IDs are stable response values; answer keys are never sent to providers. Score uses an ordered rubric. Noul reports P(true).',
     'Graph transitions cover every Choice option or typed response domain exactly once; all nodes are reachable.',
     'Per-task responseHistory controls prior answer context independently from graph routing and respondent eligibility.',
-    'Typed comparisons require matching task meanings; simulated responses are not evidence of human outcomes.',
+    'Typed comparisons require matching task meanings.',
   ] },
 ];
 await rm(contractDirectory, { recursive: true, force: true });

@@ -29,7 +29,6 @@ preview, execute, or report; there is no capability-list tool.
 
 | Tool | Accepted input | Result | Provider behavior |
 | --- | --- | --- | --- |
-| `poll_capabilities` | No input. | Semantic catalogue of typed tasks, journey/history controls, cohort inputs, provider constraints, and comparison behavior. | No provider call. |
 | `poll_preview` | `manifestPath` | Each arm's presentation and stable ordered nodes, including stimulus/task wording, Choice options or typed threshold routes, destinations, and shared continuations. Every question includes one `routeContexts` entry per route reaching it, with Choice options or typed response intervals, prior response meanings/exposure IDs, and stimulus IDs currently in scope. Shared questions remain one node with multiple route contexts. A stimulus ID resolves to the authored text on its stimulus node. Rejects more than 10,000 route contexts with no partial preview. | No cohort, provider, or inference call. |
 | `poll_check` | `config`: manifest, cohort, output directory, call limits, and provider configuration. | Validation/fingerprints, respondent and arm counts, minimum/maximum reachable decision calls, call-cap sufficiency, and configured Jev spend ceiling. | No provider call. |
 | `poll_preflight` | `manifestPath`, optional `cohortPath`, provider list, optional mode and packet cap. | Per-provider fit, worst packet, overflow/unavailable details, measurement method, and whether traversal completed. | Measures every reachable packet; no inference call. |
@@ -91,7 +90,7 @@ For a follow-up that changes a variable, create a new run. The same frozen
 cohort can be reused and compared with `poll_compare_runs`; a paired comparison
 does not require a two-arm execution. Keep task comparison keys stable only
 when the question's meaning is still aligned. Comparisons describe simulated
-responses and do not establish causal lift.
+responses.
 
 Optimization of a study's shared trajectory/context policy is a future seam.
 It is not an authoring prerequisite or a current tool.
