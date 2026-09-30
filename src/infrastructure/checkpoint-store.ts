@@ -12,11 +12,8 @@ import { executionFingerprint, legacyExecutionFingerprint, legacyChoiceStimulusF
 import { loadStudy } from './study-loader.js';
 import { legacyPromptContractHash, promptContractHash } from '../domain/decision/prompt.js';
 
-const legacyJevProviderConfigSchema = z.object({ kind: z.literal('jev'), model: z.string().min(1), keyEnv: z.string().min(1), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict()
-  .transform((legacy) => jevConfigSchema.parse({ kind: 'jev', model: legacy.model, endpoint: legacy.endpoint, timeoutMs: legacy.timeoutMs }));
 const providerConfigSchema = z.union([
   jevConfigInputSchema.transform((config) => jevConfigSchema.parse(config)),
-  legacyJevProviderConfigSchema,
   z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
 ]);
 

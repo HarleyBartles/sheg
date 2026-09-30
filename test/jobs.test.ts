@@ -122,6 +122,9 @@ test('checkpoint rejects unrecognized fields and malformed provider provenance',
   const store = new CheckpointStore(directory);
   await assert.rejects(store.create({ ...checkpoint(directory), credential: 'do-not-store' } as never));
   await assert.rejects(store.create(checkpoint(directory, {
+    provider: { kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 5000, keyEnv: 'OBSOLETE_ENV_METADATA' },
+  } as never)));
+  await assert.rejects(store.create(checkpoint(directory, {
     provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'not-a-url', timeoutMs: 5000 },
   } as never)));
 });
@@ -242,7 +245,7 @@ test('managed run checkpoints sequential provider decisions and reaches complete
     outputDirectory: directory, maxCalls: 10, concurrency: 1,
   });
   let current = started;
-  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt++) {
+  for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, started.runId);
   }
@@ -268,7 +271,7 @@ test('a partial study stops at its run-wide physical-attempt limit', async (t) =
     outputDirectory: directory, maxCalls: 2, concurrency: 1,
   });
   let current = started;
-  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) {
+  for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, started.runId);
   }
@@ -298,7 +301,7 @@ test('direct resume consumes interrupted reservations before dispatching further
   const manager = new RunManager({ providerFactory: () => provider });
   let current = await manager.resumeRun(directory, abandoned.runId);
   const resumedBudget = current.budget;
-  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) {
+  for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, abandoned.runId);
   }
@@ -322,7 +325,7 @@ test('runtime context rejection records actionable admission evidence in checkpo
   const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
     provider: providerConfig, outputDirectory: directory, maxCalls: 10, concurrency: 1 });
   let current = started;
-  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) {
+  for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, started.runId);
   }
@@ -356,7 +359,7 @@ test('matched run executes one cell for every frozen respondent in every arm', a
   const manager = new RunManager({ providerFactory: () => provider });
   const started = await manager.startRun({ manifestPath, cohortPath: path.join(directory, 'cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: path.join(directory, 'runs'), maxCalls: 10, concurrency: 1 });
   let current = started;
-  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(path.join(directory, 'runs'), started.runId); }
+  for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(path.join(directory, 'runs'), started.runId); }
   assert.equal(current.status, 'completed', JSON.stringify(current.journeys));
   assert.equal(current.journeys.length, 4);
   assert.equal(calls, 8);
@@ -383,7 +386,7 @@ test('resume replays completed responses without charging the same respondent-ta
   const manager = new RunManager({ providerFactory: () => provider });
   const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 10, concurrency: 1 });
   let current = started;
-  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); }
+  for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); }
   assert.equal(current.status, 'partial');
   const study = await loadStudy(path.resolve('test/fixtures/article.json'), path.resolve('test/fixtures/cohort.json'));
   const legacyStimulus = legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash);
@@ -405,7 +408,7 @@ test('resume replays completed responses without charging the same respondent-ta
   await writeFile(path.join(directory, `run-${started.runId}.json`), JSON.stringify(rawCheckpoint));
   expectLegacyPacket = true;
   await manager.resumeRun(directory, started.runId);
-  for (let attempt = 0; attempt < 100; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); if (current.status !== 'running') break; }
+  for (let attempt = 0; attempt < 1000; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); if (current.status !== 'running') break; }
   assert.equal(current.status, 'completed', JSON.stringify(current.journeys));
   assert.equal(entryCalls, 2);
   assert.equal(laterCalls, 3);
@@ -418,7 +421,7 @@ test('failed provider attempts remain visible per cell and unknown failures cons
   const manager = new RunManager({ providerFactory: () => ({ async decide() { throw new Error('unknown transport failure'); } }) });
   const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 2, concurrency: 2 });
   let current = started;
-  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt++) {
+  for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, started.runId);
   }

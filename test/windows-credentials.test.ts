@@ -49,10 +49,10 @@ test('Windows vault reads, replaces, and removes a unique isolated fixture crede
   ], { input: `${value}\n`, encoding: 'utf8', windowsHide: true, shell: false });
   const fingerprint = (value: string) => createHash('sha256').update(value).digest('hex');
   try {
-    const first = fixture('fixture-key-one-never-print-\u6f22');
+    const first = fixture('fixture-key-one-never-print-\u9f8d');
     assert.equal(first.status, 0, first.stderr);
     assert.equal(await store.availability('typesafe'), 'available');
-    assert.equal(fingerprint(await store.readForAuthentication('typesafe')), fingerprint('fixture-key-one-never-print-\u6f22'));
+    assert.equal(fingerprint(await store.readForAuthentication('typesafe')), fingerprint('fixture-key-one-never-print-\u9f8d'));
 
     const replacement = fixture('fixture-key-two-never-print');
     assert.equal(replacement.status, 0, replacement.stderr);

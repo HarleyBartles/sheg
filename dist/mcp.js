@@ -35428,10 +35428,8 @@ function requirePositiveInteger(value, label) {
 }
 
 // src/infrastructure/checkpoint-store.ts
-var legacyJevProviderConfigSchema = external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict().transform((legacy) => jevConfigSchema.parse({ kind: "jev", model: legacy.model, endpoint: legacy.endpoint, timeoutMs: legacy.timeoutMs }));
 var providerConfigSchema = external_exports.union([
   jevConfigInputSchema.transform((config2) => jevConfigSchema.parse(config2)),
-  legacyJevProviderConfigSchema,
   external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
 ]);
 var journeyResultSchema = external_exports.object({
