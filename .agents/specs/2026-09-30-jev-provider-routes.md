@@ -1,6 +1,6 @@
 # Jev provider routes and call limits
 
-**Status:** draft for human review
+**Status:** approved for implementation by the user on 2026-09-30
 
 ## Intent
 
@@ -250,9 +250,8 @@ update `docs/decisions/README.md` in the same change.
 
 ## Branch, version, and publication workflow
 
-This document remains a draft for human review. SHEG-3 stays in the spec phase
-until the human approves this repo-resident spec; do not begin implementation
-before that approval.
+The human approved this repo-resident spec on 2026-09-30. Implementation must
+stay within its scope, guardrails, and branch/publication workflow.
 
 After approval, feature work starts from the latest `origin/develop` and its
 feature PR targets `develop`. The feature PR may be squash merged. Keep the

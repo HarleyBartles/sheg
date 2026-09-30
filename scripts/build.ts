@@ -24,6 +24,13 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
     outdir: resolvedOutputDirectory,
   });
 
+  const credentialDirectory = path.join(resolvedOutputDirectory, 'credentials');
+  await mkdir(credentialDirectory, { recursive: true });
+  await cp(
+    path.join(repositoryRoot, 'src/infrastructure/credentials/windows-credential.ps1'),
+    path.join(credentialDirectory, 'windows-credential.ps1'),
+  );
+
   const dataDirectory = path.join(resolvedOutputDirectory, 'data/respondent-archetypes');
   await mkdir(dataDirectory, { recursive: true });
   for (const group of respondentArchetypeGroups) {

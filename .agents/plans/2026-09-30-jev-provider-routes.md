@@ -10,7 +10,7 @@
 
 **Spec:** [Jev provider routes and call limits](../specs/2026-09-30-jev-provider-routes.md), [SHEG-3](https://linear.app/harleys-workspace/issue/SHEG-3/support-native-typesafe-and-openrouter-jev-routes).
 
-**Status:** Draft implementation plan for human review. Writing this plan does not authorize implementation or mark the spec approved.
+**Status:** Approved for implementation by the user on 2026-09-30.
 
 **Execution Strategy:** `executing-plans`. Route schemas, provider results, attempt settlement, checkpoints, and reports share contracts and need sequential integration. Keeping their implementation context inline reduces repeated reconstruction of migration and recovery behavior.
 
@@ -78,14 +78,14 @@ type AttemptReservation = { id: string; maxAttempts: number };
 
 **Produces:** `jevConfigSchema`, `JevRoute`, `JevCredentialStore`, default Windows implementation, and a packaged helper supporting setup, status, remove, and internal read operations.
 
-- [ ] After human approval and before implementation, refresh `origin/develop` while preserving the draft files, report branch/base/status, and commit the approved spec and plan. Retire the completed SHEG-4 plan in the first implementation commit through `/completing-planning-artifacts`, preserving its durable workflow records.
-- [ ] Add behavior cases for route defaults, strict rejection of key fields, and explicit endpoint/model preservation. Use current OpenRouter defaults from the live adapter/config examples; TypeSafe defaults to `jev-latest` and `https://api.typesafe.ai/v1/systemone`.
-- [ ] Add Windows tests using unique fixture target names, injected only through the test boundary. Save, read, replace, remove, verify missing status, and clean up in `finally`. Never write to the user's production targets in tests. Cover native write rejection and unavailable helper with injected failures.
-- [ ] Implement the helper with native API return checking, Unicode credential targets, current-user persistence, and native buffer release. Setup uses `Read-Host -AsSecureString`; clear allocated unmanaged secret buffers in `finally`.
-- [ ] Implement Node lookup via `spawn` with a fixed helper path, fixed operation, and allowlisted route. No shell interpolation. Capture secret read output only on the internal pipe, never in errors or logs; status returns only safe availability. Bound execution time and output; treat malformed output and native errors as safe failures.
-- [ ] Expose interactive setup/remove as a local helper invocation with no secret argument. Keep its prompts out of the internal read operation. Setup failure stops setup; unsupported platforms report unavailable secure storage.
-- [ ] Copy the helper into `dist/credentials/` through `buildPlugin`, and resolve it correctly from both source tests and bundled entrypoints. Extend the existing build behavior test to exercise the copied helper's safe status operation rather than just checking a filename.
-- [ ] Run focused tests and typecheck; commit this task only when the existing suite remains valid.
+- [x] After human approval and before implementation, refresh `origin/develop` while preserving the draft files, report branch/base/status, and commit the approved spec and plan. Retire the completed SHEG-4 plan in the first implementation commit through `/completing-planning-artifacts`, preserving its durable workflow records.
+- [x] Add behavior cases for route defaults, strict rejection of key fields, and explicit endpoint/model preservation. Use current OpenRouter defaults from the live adapter/config examples; TypeSafe defaults to `jev-latest` and `https://api.typesafe.ai/v1/systemone`.
+- [x] Add Windows tests using unique fixture target names, injected only through the test boundary. Save, read, replace, remove, verify missing status, and clean up in `finally`. Never write to the user's production targets in tests. Cover native write rejection and unavailable helper with injected failures.
+- [x] Implement the helper with native API return checking, Unicode credential targets, current-user persistence, and native buffer release. Setup uses `Read-Host -AsSecureString`; clear allocated unmanaged secret buffers in `finally`.
+- [x] Implement Node lookup via `spawn` with a fixed helper path, fixed operation, and allowlisted route. No shell interpolation. Capture secret read output only on the internal pipe, never in errors or logs; status returns only safe availability. Bound execution time and output; treat malformed output and native errors as safe failures.
+- [x] Expose interactive setup/remove as a local helper invocation with no secret argument. Keep its prompts out of the internal read operation. Setup failure stops setup; unsupported platforms report unavailable secure storage.
+- [x] Copy the helper into `dist/credentials/` through `buildPlugin`, and resolve it correctly from both source tests and bundled entrypoints. Extend the existing build behavior test to exercise the copied helper's safe status operation rather than just checking a filename.
+- [x] Run focused tests and typecheck; commit this task only when the existing suite remains valid.
 
 ```powershell
 node --import tsx --test test/jev-config.test.ts test/windows-credentials.test.ts test/build.test.ts
