@@ -24,6 +24,10 @@ export const studyArmSchema = z.object({
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: 'custom', path: ['presentation'], message: 'Item, task, and graph node IDs must be unique within an arm.' });
   }
+  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
+  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
+    context.addIssue({ code: 'custom', path: ['tasks'], message: 'Each comparisonKey must identify at most one task within an arm.' });
+  }
 
   if (presentation.kind === 'sequence') return;
 

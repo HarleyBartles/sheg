@@ -11,6 +11,11 @@ import { RunManager, checkStudy } from '../src/application/run-manager.js';
 import { getReport } from '../src/application/reports.js';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import { LayaProvider } from '../src/providers/laya.js';
+import { compileDecisionPacket } from '../src/domain/decision/prompt.js';
+import { legacyPromptContractHash } from '../src/domain/decision/prompt.js';
+import { legacyChoiceRequestFingerprint } from '../src/application/worker.js';
+import { executionFingerprint, legacyChoiceStimulusFingerprint } from '../src/infrastructure/identity.js';
+import { loadStudy } from '../src/infrastructure/study-loader.js';
 
 async function tempDirectory(t: TestContext): Promise<string> {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'polling-jobs-'));
@@ -252,7 +257,7 @@ test('matched run executes one cell for every frozen respondent in every arm', a
   const started = await manager.startRun({ manifestPath, cohortPath: path.join(directory, 'cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: path.join(directory, 'runs'), maxCalls: 10, concurrency: 1 });
   let current = started;
   for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(path.join(directory, 'runs'), started.runId); }
-  assert.equal(current.status, 'completed');
+  assert.equal(current.status, 'completed', JSON.stringify(current.journeys));
   assert.equal(current.journeys.length, 4);
   assert.equal(calls, 8);
   assert.equal(new Set(current.journeys.map((journey) => `${journey.armId}/${journey.respondentId}`)).size, 4);
@@ -261,9 +266,14 @@ test('matched run executes one cell for every frozen respondent in every arm', a
 test('resume replays completed responses without charging the same respondent-task cell twice', async (t) => {
   const directory = await tempDirectory(t);
   let failedOnce = false;
+  let expectLegacyPacket = false;
+  let legacyPacketHadTypedResponses = false;
   let entryCalls = 0;
   let laterCalls = 0;
   const provider: DecisionProvider = { async decide(request) {
+    if (expectLegacyPacket && request.question.id === 'investigation-response') {
+      legacyPacketHadTypedResponses ||= 'responses' in (request.state.trajectory as object);
+    }
     if (request.question.type !== 'choice') throw new Error('Expected Choice question.');
     if (request.question.id === 'entry-response') entryCalls += 1; else laterCalls += 1;
     if (request.question.id === 'investigation-response' && !failedOnce) { failedOnce = true; throw Object.assign(new Error('temporary failure'), { attempts: 0, chargeStatus: 'not_billed' }); }
@@ -275,9 +285,24 @@ test('resume replays completed responses without charging the same respondent-ta
   let current = started;
   for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); }
   assert.equal(current.status, 'partial');
+  const study = await loadStudy(path.resolve('test/fixtures/article.json'), path.resolve('test/fixtures/cohort.json'));
+  const legacyStimulus = legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash);
+  const legacyRequest = compileDecisionPacket(study.manifest.arms[0]!, study.respondents[0]!, study.manifest.arms[0]!.tasks[0]!.id,
+    [{ type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' }]);
+  const store = new CheckpointStore(directory);
+  const v2Checkpoint = await store.read(started.runId);
+  v2Checkpoint.formatVersion = 2;
+  v2Checkpoint.stimulusFingerprint = legacyStimulus;
+  v2Checkpoint.executionFingerprint = executionFingerprint(legacyStimulus, { kind: 'laya', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerSha256: 'a'.repeat(64) });
+  const firstDecision = v2Checkpoint.journeys.find((journey) => journey.decisions.length)?.decisions[0];
+  assert.ok(firstDecision);
+  firstDecision.requestFingerprint = legacyChoiceRequestFingerprint(legacyRequest);
+  await store.save(v2Checkpoint);
+  expectLegacyPacket = true;
   await manager.resumeRun(directory, started.runId);
   for (let attempt = 0; attempt < 100; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); if (current.status !== 'running') break; }
-  assert.equal(current.status, 'completed');
+  assert.equal(current.status, 'completed', JSON.stringify(current.journeys));
   assert.equal(entryCalls, 2);
   assert.equal(laterCalls, 3);
+  assert.equal(legacyPacketHadTypedResponses, false);
 });

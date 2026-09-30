@@ -112,6 +112,19 @@ test('encodes Score and Noul criteria and preserves their typed evidence', async
   });
 });
 
+test('reports over-limit Score rubrics during measurement and rejects before inference', async () => {
+  let measured = 0; let requested = 0;
+  const provider = new LayaProvider(config, {
+    measureFit: async () => { measured += 1; return fit(20); },
+    fetchRequest: async () => { requested += 1; return Response.json({}); },
+  });
+  const overLimit = { state: request.state, question: { type: 'score' as const, id: 'too-many', instructions: 'Rate this', rubric: Array.from({ length: 33 }, (_, index) => `Level ${index}`) } } as DecisionRequest;
+  assert.equal((await provider.measure(overLimit)).status, 'overflow');
+  await assert.rejects(provider.decide(overLimit, 1), /score-rubric-exceeds-32-levels/);
+  assert.equal(measured, 0);
+  assert.equal(requested, 0);
+});
+
 test('provider rejects missing or mismatched routed checkpoint and malformed probabilities', async () => {
   const measure: FitMeasurer = async () => fit(20);
   for (const payload of [

@@ -19,6 +19,7 @@ export type LayaConfig = {
 
 export type FitMeasurer = (request: DecisionRequest, config: LayaConfig) => Promise<ProviderContextFit>;
 export type FitResult = ProviderContextFit;
+const MAX_LAYA_SCORE_LEVELS = 32;
 
 export class LayaCallError extends Error {
   constructor(message: string, readonly attempts: number, readonly chargeStatus: 'not_billed' | 'unknown',
@@ -63,6 +64,9 @@ export async function checkLayaFit(
   config: LayaConfig,
   measureFit?: FitMeasurer,
 ): Promise<FitResult> {
+  if (request.question.type === 'score' && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
+    return { provider: 'laya', status: 'overflow', method: 'laya-score-rubric-limit/v1', modelIdentity: config.checkpoint, tokenCount: 'measured', tokens: request.question.rubric.length, contextLimit: config.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
+  }
   let measurement: ProviderContextFit;
   try {
     measurement = await (measureFit ?? measureLayaContext)(request, config);
@@ -100,7 +104,6 @@ export class LayaProvider implements DecisionProvider {
     }
     const parsedRequest = decisionRequestSchema.safeParse(request);
     if (!parsedRequest.success) throw new LayaCallError('Laya decision request is invalid.', 0, 'not_billed');
-
     const fit = await this.measure(parsedRequest.data);
     if (fit.status !== 'fits') {
       throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed', fit, parsedRequest.data.question.id);

@@ -10,6 +10,8 @@ Configure a running `/v1/systemone` endpoint with the intended checkpoint, `cont
 
 The Laya service exposes `POST /v1/systemone`. The request carries an explicit `model`, `state`, and `questions` map. Choice uses `type: "choice"` and a `criteria` map; Score uses `type: "score"` with ordered rubric criteria; Noul uses `type: "noul"` with optional true/false criteria. A successful response has a top-level `model`, `answers`, `usage`, and `routing`. Choice answers carry `choice` and `probabilities`; Score answers carry `score`, `legend`, and `probabilities`; Noul answers carry `noul` (P(true)). `routing.model` identifies the selected checkpoint. The top-level model can be the generic `laya-rl-agent`, so the adapter checks the routed checkpoint rather than treating that generic name as the checkpoint identity.
 
+The `/v1/systemone` service currently limits Score questions to 32 rubric levels. The adapter reports larger rubrics as overflow in measurement and rejects them before inference. This service limit is provider-specific; Sheg's task contract does not impose it on other providers. Verified against the upstream [service limit](https://github.com/NandhaKishorM/laya/blob/main/laya/serve.py) on 2026-09-30; check the installed service revision before use.
+
 These fields were checked against the upstream [Laya service](https://github.com/NandhaKishorM/laya/blob/main/laya/serve.py), [router](https://github.com/NandhaKishorM/laya/blob/main/laya/router.py), and [agent](https://github.com/NandhaKishorM/laya/blob/main/laya/agent.py) on 2026-09-27. The repository is actively changing. A deployment must confirm its installed revision implements the same wire contract before use.
 
 ## Context admission

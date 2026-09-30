@@ -4,8 +4,8 @@ This roadmap implements `.agents/specs/2026-09-30-smallest-executable-study-iter
 
 | # | Title | Status | Plan File | Commit | PR | Rating | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | Typed response primitives and deterministic routing | completed-awaiting-retirement | `.agents/plans/2026-09-30-typed-responses-and-routing.md` | | | | Foundational execution contract: Choice, Score, and Noul from manifest through provider, journey, checkpoint, report, and route validation. |
-| 2 | Compatible cross-run comparison | completed-awaiting-retirement | `.agents/plans/2026-09-30-cross-run-comparison.md` | | | | Compare independent runs over the same frozen cohort and only align explicitly equivalent typed outcomes, with declared profile subgroup denominators and design/provider/completion differences. |
+| 1 | Typed response primitives and deterministic routing | completed-awaiting-retirement | `.agents/plans/2026-09-30-typed-responses-and-routing.md` | | | | Foundational execution contract: Choice, Score, and Noul from manifest through provider, journey, checkpoint, report, and route validation. Follow-up review repairs completed. |
+| 2 | Compatible cross-run comparison | completed-awaiting-retirement | `.agents/plans/2026-09-30-cross-run-comparison.md` | | | | Compare independent runs over the same frozen cohort and only align explicitly equivalent typed outcomes, with declared profile subgroup denominators and design/provider/completion differences. Follow-up review repairs completed. |
 | 3 | Agent-guided iterative study workflow | completed-awaiting-retirement | `.agents/plans/2026-09-30-agent-guided-iterative-study.md` | | | | Make question-first, cohort recommendation, smallest journey, provider fit, interpretation, and follow-up the default workflow. Teach when to continue respondents within one graph journey with their own history and when to rerun the same frozen cohort with fresh histories. |
 
 ## Sequencing and boundaries

@@ -221,6 +221,13 @@ test('preserves each supplied trajectory history and measures provider-specific 
   assert.equal(tied.providers[0]?.largestCase?.caseId, [...tied.cases.map(({ caseId }) => caseId)].sort()[0]);
 });
 
+test('accepts typed response history for packet measurement and counts it as a decision', async () => {
+  const trajectory = { ...emptyTrajectory, eventCount: 1, decisionCount: 1, eventRange: { firstSequence: 0, lastSequence: 0 }, responses: [{ type: 'score' as const, taskId: 'prior-score', score: 1.5, meaning: 'balanced', probabilities: { '0': 0.5, '1': 0.5 }, legend: { '0': 'low', '1': 'high' }, exposedItemIds: ['opening'] }] };
+  const factory = providerFactory((_request, config) => fit(config.kind, config.kind === 'jev' ? config.model : config.checkpoint, 12));
+  const result = await measurePacketBatch(input({ trajectories: [{ id: 'typed-history', value: trajectory }] }), { createProvider: factory.createProvider });
+  assert.equal(result.cases.length, 1);
+});
+
 test('rejects case and serialized packet bounds before invoking provider measurement', async () => {
   const counters = { measure: 0, decide: 0 };
   const factory = providerFactory((_request, config) => fit(config.kind, config.kind === 'jev' ? config.model : config.checkpoint, 1), counters);

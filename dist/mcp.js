@@ -34518,7 +34518,7 @@ function compactTrajectory(arm, history) {
     version: 1,
     eventCount: history.length,
     exposureCount: exposureIds.length,
-    decisionCount: choices.length,
+    decisionCount: responses.length,
     eventRange: history.length === 0 ? null : { firstSequence: history[0].sequence, lastSequence: history.at(-1).sequence },
     choices,
     responses
@@ -34785,6 +34785,10 @@ var studyArmSchema = external_exports.object({
   const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
+  }
+  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
+  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
   }
   if (presentation.kind === "sequence") return;
   const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
@@ -35598,6 +35602,14 @@ function stimulusFingerprint(study, cohort, promptContractHash2) {
   if (!promptContractHash2) throw new TypeError("Prompt contract hash is required.");
   return hashCanonical({ version: 1, study, cohort, promptContractHash: promptContractHash2 });
 }
+function legacyChoiceStimulusFingerprint(study, cohort, promptHash) {
+  const legacyStudy = { ...study, arms: study.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task) => {
+    const legacyTask = { ...task };
+    delete legacyTask.type;
+    return legacyTask;
+  }) })) };
+  return hashCanonical({ version: 1, study: legacyStudy, cohort, promptContractHash: promptHash });
+}
 function executionFingerprint(stimulus, provider) {
   if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
   let decisionSettings;
@@ -35615,8 +35627,8 @@ function executionFingerprint(stimulus, provider) {
   }
   return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
 }
-function respondentCohortFingerprint(respondents) {
-  return hashCanonical({ version: 1, respondents });
+function respondentCohortFingerprint(cohort) {
+  return hashCanonical({ version: 2, archetypes: cohort.archetypes, respondents: cohort.respondents });
 }
 function hashCanonical(value) {
   return createHash3("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
@@ -36220,6 +36232,7 @@ async function measureLayaContext(request, config2) {
 }
 
 // src/providers/laya.ts
+var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
   constructor(message, attempts, chargeStatus, contextFit, decisionId) {
     super(message);
@@ -36257,6 +36270,9 @@ var responseSchema = external_exports.object({
   routing: external_exports.object({ model: external_exports.string().min(1) }).passthrough()
 }).passthrough();
 async function checkLayaFit(request, config2, measureFit) {
+  if (request.question.type === "score" && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
+    return { provider: "laya", status: "overflow", method: "laya-score-rubric-limit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: request.question.rubric.length, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
+  }
   let measurement;
   try {
     measurement = await (measureFit ?? measureLayaContext)(request, config2);
@@ -36366,7 +36382,7 @@ var RunCancelled = class extends Error {
 };
 async function runWorker(store, checkpoint, provider, restoredBudget) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint) throw new Error("Study or provider settings changed since this run was prepared.");
   const { maxUsd, ...budgetRest } = checkpoint.budget;
@@ -36387,10 +36403,11 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
+        const providerRequest = checkpoint.formatVersion === 2 ? legacyChoiceRequest(request) : request;
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error("Task sequence changed while recovering the run.");
-          if (replay.requestFingerprint !== requestFingerprint(request)) throw new Error("Rendered task request changed while recovering the run.");
+          if (replay.requestFingerprint !== requestFingerprint(request) && !(checkpoint.formatVersion === 2 && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error("Rendered task request changed while recovering the run.");
           replayCursor += 1;
           decisions.push(replay);
           return replay.result;
@@ -36409,14 +36426,14 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         failedNodeId = nodeId;
         let decision;
         try {
-          decision = await provider.decide(request, 1);
+          decision = await provider.decide(providerRequest, 1);
         } catch (error62) {
           await ledger.settle(reservation, errorEvidence(error62));
           await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
           throw error62;
         }
         await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd } });
-        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: requestFingerprint(request), result: decision }];
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: checkpoint.formatVersion === 2 ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
         return decision;
       } });
@@ -36463,6 +36480,36 @@ function cellId(armId, respondentId) {
 }
 function requestFingerprint(request) {
   return createHash5("sha256").update(JSON.stringify(request)).digest("hex");
+}
+function legacyChoiceRequestFingerprint(request) {
+  if (typeof request !== "object" || request === null || !("question" in request) || !("state" in request)) return "";
+  const value = request;
+  if (value.question.type !== "choice") return "";
+  const question = { ...value.question };
+  delete question.type;
+  const state = legacyChoiceState(value.state);
+  return requestFingerprint({ state, question, ..."optionIds" in request ? { optionIds: request.optionIds } : {} });
+}
+function legacyChoiceRequest(request) {
+  if (request.question.type !== "choice") throw new Error("Version-2 checkpoints can resume Choice tasks only.");
+  return { ...request, state: legacyChoiceState(request.state) };
+}
+function legacyChoiceState(source) {
+  const state = structuredClone(source);
+  const trajectory = state.trajectory;
+  if (trajectory) {
+    delete trajectory.responses;
+    trajectory.decisionCount = Array.isArray(trajectory.choices) ? trajectory.choices.length : 0;
+    delete trajectory.payloadUtf8Bytes;
+    let bytes = 0;
+    for (; ; ) {
+      const size = new TextEncoder().encode(JSON.stringify({ ...trajectory, payloadUtf8Bytes: bytes })).length;
+      if (size === bytes) break;
+      bytes = size;
+    }
+    trajectory.payloadUtf8Bytes = bytes;
+  }
+  return state;
 }
 function replaceJourney(journeys, replacement) {
   return [...journeys.filter((journey) => !(journey.armId === replacement.armId && journey.respondentId === replacement.respondentId)), replacement];
@@ -36682,7 +36729,8 @@ var RunManager = class {
     let checkpoint = await store.read(runId);
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
-    if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
+    const compatibleExecutionFingerprint = checkpoint.formatVersion === 2 ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === "laya" ? { kind: "laya", checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...checked.config.provider.precision === void 0 ? {} : { precision: checked.config.provider.precision } } : checked.config.provider) : checked.executionFingerprint;
+    if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
     requireJevKey(checkpoint.provider);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
@@ -36737,18 +36785,19 @@ var pollingReportSchema = external_exports.object({
     label: external_exports.string(),
     denominator: external_exports.object({ intended: external_exports.number().int(), started: external_exports.number().int(), completed: external_exports.number().int(), excluded: external_exports.number().int(), excludedByStatus: external_exports.record(external_exports.string(), external_exports.number().int()) }).strict(),
     fingerprint: external_exports.string(),
+    presentation: external_exports.unknown(),
     sources: external_exports.array(external_exports.object({ path: external_exports.string(), sha256: external_exports.string() }).strict()),
     stimulusItems: external_exports.array(external_exports.object({ id: external_exports.string(), text: external_exports.string() }).strict()),
     tasks: external_exports.array(external_exports.object({ id: external_exports.string(), type: external_exports.enum(["choice", "score", "noul"]).optional(), comparisonKey: external_exports.string().nullable(), instructions: external_exports.string(), options: external_exports.record(external_exports.string(), external_exports.string()).optional(), rubric: external_exports.array(external_exports.string()).optional(), criteria: external_exports.object({ true: external_exports.string().optional(), false: external_exports.string().optional() }).nullable().optional(), responseHistory: external_exports.enum(["include", "omit"]).optional() }).strict()),
     taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), type: external_exports.enum(["choice", "score", "noul"]).optional(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()), meanScore: external_exports.number().finite().optional(), rubricProbabilities: external_exports.record(external_exports.string(), external_exports.number().min(0).max(1)).optional(), meanProbabilityTrue: external_exports.number().min(0).max(1).optional() }).strict()) }).strict()),
-    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), variation: external_exports.record(external_exports.string(), external_exports.string()).optional(), status: external_exports.string(), outcome: external_exports.string().nullable(), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failureEvidence: contextFailureSchema.optional() }).strict())
+    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), variation: external_exports.record(external_exports.string(), external_exports.string()).optional(), status: external_exports.string(), outcome: external_exports.string().nullable(), presentedTaskIds: external_exports.array(external_exports.string()), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failureEvidence: contextFailureSchema.optional() }).strict())
   }).strict()),
   providerEvidence: external_exports.object({ attempts: external_exports.number().int(), billedUsd: external_exports.number().nonnegative(), unknownCharges: external_exports.number().int(), failedCells: external_exports.number().int() }).strict()
 }).strict();
 async function buildReport(checkpoint) {
   checkpoint = runCheckpointSchema.parse(checkpoint);
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.cohort, checkpoint.formatVersion === 2 ? legacyPromptContractHash : promptContractHash());
+  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index]) || study.sources.length !== checkpoint.sourceHashes.length) {
     throw new Error("Study inputs or provider settings changed since this run was prepared; the report cannot be reproduced.");
@@ -36794,6 +36843,7 @@ async function buildReport(checkpoint) {
         ...respondent.variation === void 0 ? {} : { variation: respondent.variation },
         status: stored?.status ?? "not-started",
         outcome: stored?.result?.outcome ?? null,
+        presentedTaskIds: stored?.presentedTaskIds ?? [],
         events: stored?.result?.events ?? [],
         responses,
         ...stored?.failureEvidence === void 0 ? {} : { failureEvidence: stored.failureEvidence }
@@ -36843,9 +36893,9 @@ async function buildReport(checkpoint) {
     }
     const completed = journeys.filter((journey) => journey.status === "completed").length;
     const started = checkpoint.journeys.filter((journey) => journey.armId === arm.id).length;
-    const snapshot = { sources: arm.sources, items: arm.items, tasks: arm.tasks };
+    const snapshot = { sources: arm.sources, items: arm.items, tasks: arm.tasks, presentation: arm.presentation };
     const fingerprint = createHash6("sha256").update(JSON.stringify(snapshot)).digest("hex");
-    return { id: arm.id, label: arm.label, fingerprint, sources: arm.sources, stimulusItems: arm.items, tasks: arm.tasks.map((task) => ({
+    return { id: arm.id, label: arm.label, fingerprint, presentation: arm.presentation, sources: arm.sources, stimulusItems: arm.items, tasks: arm.tasks.map((task) => ({
       id: task.id,
       type: "options" in task ? "choice" : "rubric" in task ? "score" : "noul",
       comparisonKey: task.comparisonKey ?? null,
@@ -36863,7 +36913,7 @@ async function buildReport(checkpoint) {
     status: checkpoint.status,
     stimulusFingerprint: checkpoint.stimulusFingerprint,
     executionFingerprint: checkpoint.executionFingerprint,
-    cohortFingerprint: respondentCohortFingerprint(cohort.respondents),
+    cohortFingerprint: respondentCohortFingerprint(cohort),
     provider: { kind: rawProvider.kind, model: rawProvider.kind === "jev" ? rawProvider.model : null, checkpoint: rawProvider.kind === "laya" ? rawProvider.checkpoint : null },
     cohortSize: profiles.size,
     arms,
@@ -37072,15 +37122,26 @@ function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
       profileGroups
     };
   });
-  const matched = respondentIds.map((respondentId) => ({ respondentId, taskComparisons: [...keys].sort().flatMap((key) => {
-    const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
-    const occurrence = Number(occurrenceText);
-    const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
-    const a = leftCells.get(cell);
-    const b = rightCells.get(cell);
-    if (!a || !b) return [];
-    return [{ comparisonKey, occurrence, leftAnswer: a.answer, rightAnswer: b.answer, comparable: equivalentTasks(left, right, comparisonKey) && a.answer.type === b.answer.type }];
-  }) }));
+  const matched = respondentIds.map((respondentId) => ({
+    respondentId,
+    leftJourneyPath: { presentedTaskIds: left.journeys.find((journey) => journey.respondentId === respondentId)?.presentedTaskIds ?? [], events: left.journeys.find((journey) => journey.respondentId === respondentId)?.events ?? [] },
+    rightJourneyPath: { presentedTaskIds: right.journeys.find((journey) => journey.respondentId === respondentId)?.presentedTaskIds ?? [], events: right.journeys.find((journey) => journey.respondentId === respondentId)?.events ?? [] },
+    taskComparisons: [...keys].sort().map((key) => {
+      const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
+      const occurrence = Number(occurrenceText);
+      const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
+      const a = leftCells.get(cell);
+      const b = rightCells.get(cell);
+      const leftJourney = left.journeys.find((journey) => journey.respondentId === respondentId);
+      const rightJourney = right.journeys.find((journey) => journey.respondentId === respondentId);
+      const taskIds = (arm) => arm.tasks.filter((task) => task.comparisonKey === comparisonKey).map((task) => task.id);
+      const reached = (arm, journey) => !!journey && taskIds(arm).some((taskId) => journey.presentedTaskIds.filter((id) => id === taskId).length >= occurrence);
+      const outcome = (response, wasReached) => response ? "completed" : wasReached ? "incomplete" : "not-reached";
+      const leftReached = reached(left, leftJourney);
+      const rightReached = reached(right, rightJourney);
+      return { comparisonKey, occurrence, leftAnswer: a?.answer ?? null, rightAnswer: b?.answer ?? null, leftOutcome: outcome(a, leftReached), rightOutcome: outcome(b, rightReached), comparable: !!a && !!b && equivalentTasks(left, right, comparisonKey) && a.answer.type === b.answer.type };
+    })
+  }));
   const leftSources = new Map(left.sources.map((source) => [source.path, source.sha256]));
   const rightSources = new Map(right.sources.map((source) => [source.path, source.sha256]));
   const sourceChanges = [.../* @__PURE__ */ new Set([...leftSources.keys(), ...rightSources.keys()])].flatMap((sourcePath) => leftSources.get(sourcePath) === rightSources.get(sourcePath) ? [] : [{ path: sourcePath, leftSha256: leftSources.get(sourcePath) ?? null, rightSha256: rightSources.get(sourcePath) ?? null }]);
@@ -37097,6 +37158,7 @@ function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
     return fields.length ? [{ comparisonKey: key, fields }] : [];
   });
   const providerChanges = JSON.stringify(leftReport.provider) === JSON.stringify(rightReport.provider) ? null : { left: leftReport.provider, right: rightReport.provider };
+  const presentationChanges = JSON.stringify(left.presentation) === JSON.stringify(right.presentation) ? null : { left: left.presentation, right: right.presentation };
   return {
     leftRunId: leftReport.runId,
     rightRunId: rightReport.runId,
@@ -37112,6 +37174,7 @@ function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
       sources: sourceChanges,
       stimulusItems: stimulusChanges,
       tasks: taskChanges,
+      presentation: presentationChanges,
       provider: providerChanges,
       runStatus: leftReport.status === rightReport.status ? null : { left: leftReport.status, right: rightReport.status },
       completion: { left: left.denominator, right: right.denominator }
@@ -37583,9 +37646,10 @@ var trajectorySummarySchema = external_exports.object({
   decisionCount: external_exports.number().int().nonnegative(),
   eventRange: external_exports.object({ firstSequence: external_exports.number().int().nonnegative(), lastSequence: external_exports.number().int().nonnegative() }).strict().nullable(),
   choices: external_exports.array(trajectoryChoiceSchema),
+  responses: external_exports.array(external_exports.object({ type: external_exports.enum(["choice", "score", "noul"]), taskId: external_exports.string().min(1) }).passthrough()).optional(),
   payloadUtf8Bytes: external_exports.number().int().nonnegative()
 }).strict().superRefine((trajectory, context) => {
-  if (trajectory.eventCount !== trajectory.exposureCount + trajectory.decisionCount || trajectory.choices.length !== trajectory.decisionCount || trajectory.eventCount === 0 !== (trajectory.eventRange === null)) {
+  if (trajectory.eventCount !== trajectory.exposureCount + trajectory.decisionCount || (trajectory.responses?.length ?? trajectory.choices.length) !== trajectory.decisionCount || trajectory.eventCount === 0 !== (trajectory.eventRange === null)) {
     context.addIssue({ code: "custom", message: "Trajectory counts, choices, and event range must describe the same history." });
   }
 });

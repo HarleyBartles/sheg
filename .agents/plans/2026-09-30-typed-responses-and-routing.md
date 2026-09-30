@@ -210,6 +210,9 @@ For graph routing, retain option-ID edges for Choice. A Score/Noul edge uses a `
 - [x] Test MCP preview, preflight, packet measurement, typed trace, run, report, and within-run compare contracts; test CLI typed trace, run/check, report, and within-run compare while retaining the existing `--choices` behavior.
 - [x] Run focused tests: `node --import tsx --test test/application-preflight.test.ts test/packet-sizing.test.ts test/mcp.test.ts test/cli.test.ts test/package.test.ts`.
 - [x] Run `npm run verify` after source and generated outputs are finalized. The planning/retirement commit is already the first commit in the PR; confirm those deletions remain in branch history. Do not run the canonical gate immediately before or after a successful hooked commit.
+- [x] Preserve version-2 prompt/stimulus/request fingerprints and legacy packets for report, resume, and replay after Choice normalization; detect any changed history semantics.
+- [x] Count typed Score/Noul responses in all journey decision totals and accept typed trajectory summaries in packet measurement while retaining legacy Choice input.
+- [x] Reject Laya Score rubrics above the documented service limit during measurement and before inference, with a provider-specific diagnostic.
 
 ## Exit criteria
 

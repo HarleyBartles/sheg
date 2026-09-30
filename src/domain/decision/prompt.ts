@@ -99,7 +99,7 @@ function compactTrajectory(arm: StudyArm, history: readonly PromptHistoryEvent[]
     version: 1 as const,
     eventCount: history.length,
     exposureCount: exposureIds.length,
-    decisionCount: choices.length,
+    decisionCount: responses.length,
     eventRange: history.length === 0
       ? null
       : { firstSequence: history[0]!.sequence, lastSequence: history.at(-1)!.sequence },

@@ -26,6 +26,11 @@
 - [x] Add tests for identical cohort acceptance, changed profile/order rejection, changed task meaning remaining unpooled, typed paired Score/Noul summaries, and declared profile-group denominators; verify old within-run compare remains unchanged.
 - [x] Include source/stimulus/task changes, provider identity, run status, and arm completion denominators in cross-run output; test that these differences remain visible.
 - [x] Update user guidance and ADR-0012 consequences, then run focused tests and `npm run verify`.
+- [x] Include presentation and ordered journey design in each report arm's identity; compare presentation differences between runs.
+- [x] Preserve per-respondent presented task/event paths in matched comparisons, including one-sided reached, incomplete, and not-reached outcomes.
+- [x] Reject duplicate `comparisonKey` values for distinct tasks within an arm so task alignment cannot silently select the first meaning.
+- [x] Fingerprint the entire frozen cohort, including archetype snapshots and ordered respondent profiles.
+- [x] Add focused regression coverage for the review findings, then run `npm run verify`.
 
 ## Exit criteria
 

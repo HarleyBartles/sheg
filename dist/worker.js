@@ -19795,6 +19795,10 @@ var studyArmSchema = external_exports.object({
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
   }
+  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
+  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
+  }
   if (presentation.kind === "sequence") return;
   const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
   if (!nodesById.has(presentation.entryNodeId)) {
@@ -20248,6 +20252,7 @@ var promptContract = {
   otherArmsExcluded: true,
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
+var legacyPromptContractHash = "c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044";
 function compactTrajectory(arm, history) {
   const exposureIds = [];
   const choices = [];
@@ -20278,7 +20283,7 @@ function compactTrajectory(arm, history) {
     version: 1,
     eventCount: history.length,
     exposureCount: exposureIds.length,
-    decisionCount: choices.length,
+    decisionCount: responses.length,
     eventRange: history.length === 0 ? null : { firstSequence: history[0].sequence, lastSequence: history.at(-1).sequence },
     choices,
     responses
@@ -20790,6 +20795,14 @@ import { createHash as createHash3 } from "node:crypto";
 function stimulusFingerprint(study, cohort, promptContractHash2) {
   if (!promptContractHash2) throw new TypeError("Prompt contract hash is required.");
   return hashCanonical({ version: 1, study, cohort, promptContractHash: promptContractHash2 });
+}
+function legacyChoiceStimulusFingerprint(study, cohort, promptHash) {
+  const legacyStudy = { ...study, arms: study.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task) => {
+    const legacyTask = { ...task };
+    delete legacyTask.type;
+    return legacyTask;
+  }) })) };
+  return hashCanonical({ version: 1, study: legacyStudy, cohort, promptContractHash: promptHash });
 }
 function executionFingerprint(stimulus, provider) {
   if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
@@ -21410,6 +21423,7 @@ async function measureLayaContext(request, config2) {
 }
 
 // src/providers/laya.ts
+var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
   constructor(message, attempts, chargeStatus, contextFit, decisionId) {
     super(message);
@@ -21447,6 +21461,9 @@ var responseSchema = external_exports.object({
   routing: external_exports.object({ model: external_exports.string().min(1) }).passthrough()
 }).passthrough();
 async function checkLayaFit(request, config2, measureFit) {
+  if (request.question.type === "score" && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
+    return { provider: "laya", status: "overflow", method: "laya-score-rubric-limit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: request.question.rubric.length, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
+  }
   let measurement;
   try {
     measurement = await (measureFit ?? measureLayaContext)(request, config2);
@@ -21623,7 +21640,7 @@ var RunCancelled = class extends Error {
 };
 async function runWorker(store, checkpoint, provider, restoredBudget) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint) throw new Error("Study or provider settings changed since this run was prepared.");
   const { maxUsd, ...budgetRest } = checkpoint.budget;
@@ -21644,10 +21661,11 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
+        const providerRequest = checkpoint.formatVersion === 2 ? legacyChoiceRequest(request) : request;
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error("Task sequence changed while recovering the run.");
-          if (replay.requestFingerprint !== requestFingerprint(request)) throw new Error("Rendered task request changed while recovering the run.");
+          if (replay.requestFingerprint !== requestFingerprint(request) && !(checkpoint.formatVersion === 2 && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error("Rendered task request changed while recovering the run.");
           replayCursor += 1;
           decisions.push(replay);
           return replay.result;
@@ -21666,14 +21684,14 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         failedNodeId = nodeId;
         let decision;
         try {
-          decision = await provider.decide(request, 1);
+          decision = await provider.decide(providerRequest, 1);
         } catch (error62) {
           await ledger.settle(reservation, errorEvidence(error62));
           await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
           throw error62;
         }
         await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd } });
-        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: requestFingerprint(request), result: decision }];
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: checkpoint.formatVersion === 2 ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
         return decision;
       } });
@@ -21720,6 +21738,36 @@ function cellId(armId, respondentId) {
 }
 function requestFingerprint(request) {
   return createHash5("sha256").update(JSON.stringify(request)).digest("hex");
+}
+function legacyChoiceRequestFingerprint(request) {
+  if (typeof request !== "object" || request === null || !("question" in request) || !("state" in request)) return "";
+  const value = request;
+  if (value.question.type !== "choice") return "";
+  const question = { ...value.question };
+  delete question.type;
+  const state = legacyChoiceState(value.state);
+  return requestFingerprint({ state, question, ..."optionIds" in request ? { optionIds: request.optionIds } : {} });
+}
+function legacyChoiceRequest(request) {
+  if (request.question.type !== "choice") throw new Error("Version-2 checkpoints can resume Choice tasks only.");
+  return { ...request, state: legacyChoiceState(request.state) };
+}
+function legacyChoiceState(source) {
+  const state = structuredClone(source);
+  const trajectory = state.trajectory;
+  if (trajectory) {
+    delete trajectory.responses;
+    trajectory.decisionCount = Array.isArray(trajectory.choices) ? trajectory.choices.length : 0;
+    delete trajectory.payloadUtf8Bytes;
+    let bytes = 0;
+    for (; ; ) {
+      const size = new TextEncoder().encode(JSON.stringify({ ...trajectory, payloadUtf8Bytes: bytes })).length;
+      if (size === bytes) break;
+      bytes = size;
+    }
+    trajectory.payloadUtf8Bytes = bytes;
+  }
+  return state;
 }
 function replaceJourney(journeys, replacement) {
   return [...journeys.filter((journey) => !(journey.armId === replacement.armId && journey.respondentId === replacement.respondentId)), replacement];
@@ -21939,7 +21987,8 @@ var RunManager = class {
     let checkpoint = await store.read(runId2);
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
-    if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
+    const compatibleExecutionFingerprint = checkpoint.formatVersion === 2 ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === "laya" ? { kind: "laya", checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...checked.config.provider.precision === void 0 ? {} : { precision: checked.config.provider.precision } } : checked.config.provider) : checked.executionFingerprint;
+    if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
     requireJevKey(checkpoint.provider);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
     try {

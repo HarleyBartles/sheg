@@ -25,10 +25,11 @@ const trajectorySummarySchema = z.object({
   decisionCount: z.number().int().nonnegative(),
   eventRange: z.object({ firstSequence: z.number().int().nonnegative(), lastSequence: z.number().int().nonnegative() }).strict().nullable(),
   choices: z.array(trajectoryChoiceSchema),
+  responses: z.array(z.object({ type: z.enum(['choice', 'score', 'noul']), taskId: z.string().min(1) }).passthrough()).optional(),
   payloadUtf8Bytes: z.number().int().nonnegative(),
 }).strict().superRefine((trajectory, context) => {
   if (trajectory.eventCount !== trajectory.exposureCount + trajectory.decisionCount ||
-      trajectory.choices.length !== trajectory.decisionCount ||
+      (trajectory.responses?.length ?? trajectory.choices.length) !== trajectory.decisionCount ||
       (trajectory.eventCount === 0) !== (trajectory.eventRange === null)) {
     context.addIssue({ code: 'custom', message: 'Trajectory counts, choices, and event range must describe the same history.' });
   }

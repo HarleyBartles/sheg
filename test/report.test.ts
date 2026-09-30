@@ -8,8 +8,8 @@ import type { RunCheckpoint } from '../src/infrastructure/checkpoint-store.js';
 import { buildReport, compareReports, compareRunReports, getReport } from '../src/application/reports.js';
 import { CheckpointStore, emptyBudgetSnapshot } from '../src/infrastructure/checkpoint-store.js';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { promptContractHash } from '../src/domain/decision/prompt.js';
-import { executionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
+import { legacyPromptContractHash, promptContractHash } from '../src/domain/decision/prompt.js';
+import { executionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
 
 const decision = (choice: string) => ({ type: 'choice' as const, choice, probabilities: { continue: choice === 'continue' ? 1 : 0, leave: choice === 'leave' ? 1 : 0, unanswerable: choice === 'unanswerable' ? 1 : 0 }, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 12, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 });
 async function setup(t: TestContext) {
@@ -60,6 +60,16 @@ test('report keeps a per-arm matched denominator and answer-key scoring distinct
   assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.notReached, 1);
   assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.unscored, 1);
   assert.equal(report.providerEvidence.billedUsd, 0.002);
+});
+
+test('reports legacy version-2 Choice checkpoints with their original prompt and stimulus identity', async (t) => {
+  const { checkpoint } = await setup(t);
+  checkpoint.formatVersion = 2;
+  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
+  checkpoint.stimulusFingerprint = legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash);
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  const report = await buildReport(checkpoint);
+  assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.completed, 1);
 });
 
 test('reports Score and Noul evidence with typed cohort summaries', async (t) => {
@@ -155,6 +165,7 @@ test('compares independent runs only for an identical cohort and equivalent type
   assert.equal(comparison.comparisonTasks[0]?.nonComparableResponses, 1);
   assert.deepEqual(comparison.comparisonTasks[0]?.choiceTransitions, {});
   assert.equal(comparison.differences.stimulusItems.length, 1);
+  assert.deepEqual(comparison.differences.presentation, null);
   assert.deepEqual(comparison.differences.tasks[0]?.fields, ['options']);
   assert.equal(comparison.comparisonTasks[0]?.profileGroups.find((group) => group.group === 'all')?.denominator, 2);
   assert.ok(comparison.comparisonTasks[0]?.profileGroups.some((group) => group.group.startsWith('archetype:')));
@@ -165,6 +176,17 @@ test('compares independent runs only for an identical cohort and equivalent type
   assert.ok(withRunDifferences.differences.completion.left.intended > 0);
   assert.throws(() => compareRunReports(report, 'original', report, 'revised'), /distinct run IDs/i);
   assert.throws(() => compareRunReports(report, 'original', { ...secondRun, cohortFingerprint: 'f'.repeat(64) }, 'revised'), /same frozen respondent cohort/i);
+  const changedJourney = structuredClone(secondRun);
+  changedJourney.arms[1]!.presentation = { kind: 'sequence', itemOrder: ['symptom'] };
+  changedJourney.arms[1]!.journeys[0]!.presentedTaskIds = [];
+  changedJourney.arms[1]!.journeys[0]!.responses = [];
+  const journeyComparison = compareRunReports(report, 'original', changedJourney, 'revised');
+  assert.notEqual(journeyComparison.differences.presentation, null);
+  const curiousReader = journeyComparison.matched.find((item) => item.respondentId === 'curious-outside-reader');
+  const oneSided = curiousReader?.taskComparisons.find((item) => item.comparisonKey === 'entry-choice');
+  assert.equal(oneSided?.leftOutcome, 'completed');
+  assert.equal(oneSided?.rightOutcome, 'not-reached');
+  assert.ok(curiousReader?.leftJourneyPath.events.length);
 });
 test('cross-run comparison preserves comparable Score and Noul deltas', async (t) => {
   const report = await buildReport((await setup(t)).checkpoint);

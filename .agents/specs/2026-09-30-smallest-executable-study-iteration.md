@@ -1,6 +1,6 @@
 # Smallest Executable Study Iteration
 
-- Status: Approved; implementation complete
+- Status: Approved; implementation complete, including review repairs
 - Date: 2026-09-30
 - Linear issue: SHEG-2
 - Related decision: ADR-0008
