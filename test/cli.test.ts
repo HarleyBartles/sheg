@@ -28,7 +28,7 @@ test('CLI check validates explicit provider config without key or network', asyn
   assert.equal(errors.length, 0);
 });
 
-test('CLI preflight reports fit for every packet without provider calls', async (t) => {
+test('CLI preflight reports incomplete fit evidence for variable response histories without provider calls', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'polling-preflight-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const providersPath = path.join(directory, 'providers.json');
@@ -38,8 +38,9 @@ test('CLI preflight reports fit for every packet without provider calls', async 
     out: (text) => { output.push(text); return true; }, error: (text) => { errors.push(text); return true; },
   });
   assert.equal(status, 0, errors.join('\n'));
-  const result = JSON.parse(output[0] ?? '{}') as { providers: Array<{ status: string; packetCount: number }> };
-  assert.equal(result.providers[0]?.status, 'fit');
+  const result = JSON.parse(output[0] ?? '{}') as { providers: Array<{ status: string; packetCount: number; incompleteReason?: string }> };
+  assert.equal(result.providers[0]?.status, 'unverified');
+  assert.match(result.providers[0]?.incompleteReason ?? '', /response history/i);
   assert.ok((result.providers[0]?.packetCount ?? 0) > 0);
 });
 

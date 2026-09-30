@@ -92,7 +92,8 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
     providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
   } });
   assert.equal(preflight.isError ?? false, false);
-  assert.equal((preflight.structuredContent as { providers: Array<{ status: string }> }).providers[0]?.status, 'fit');
+  assert.equal((preflight.structuredContent as { providers: Array<{ status: string; incompleteReason?: string }> }).providers[0]?.status, 'unverified');
+  assert.match((preflight.structuredContent as { providers: Array<{ incompleteReason?: string }> }).providers[0]?.incompleteReason ?? '', /response history/i);
   const layaProvider = {
     kind: 'laya', baseUrl: `http://127.0.0.1:${inferenceAddress.port}`, checkpoint: 'measurement-only', contextLimit: 1024, headLimit: 192,
     tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'),

@@ -183,6 +183,42 @@ test('reconstructs only graph exposures supported by the next durably presented 
   assert.deepEqual(partial?.events.map((event) => (event as { type?: string }).type), ['exposure', 'pending-response', 'exposure', 'response']);
   assert.deepEqual(partial?.events.filter((event) => (event as { type?: string }).type === 'exposure').map((event) => (event as { itemId: string }).itemId), ['symptom', 'investigation']);
 });
+
+test('routes repeated task nodes using the decision stored for that occurrence', async (t) => {
+  const { checkpoint } = await setup(t);
+  const manifest = JSON.parse(await readFile(checkpoint.manifestPath, 'utf8')) as { arms: Array<{ presentation: unknown }> };
+  manifest.arms[0]!.presentation = {
+    kind: 'graph', entryNodeId: 'show-start', maxDecisions: 3,
+    nodes: [
+      { id: 'show-start', kind: 'expose', itemId: 'symptom' }, { id: 'ask-one', kind: 'ask', taskId: 'entry-response' },
+      { id: 'show-first-a', kind: 'expose', itemId: 'investigation' }, { id: 'show-first-b', kind: 'expose', itemId: 'repair' }, { id: 'show-first-c', kind: 'expose', itemId: 'test-notes' },
+      { id: 'ask-two', kind: 'ask', taskId: 'entry-response' },
+      { id: 'show-second-a', kind: 'expose', itemId: 'repair' }, { id: 'show-second-b', kind: 'expose', itemId: 'test-notes' }, { id: 'show-second-c', kind: 'expose', itemId: 'symptom' },
+      { id: 'ask-three', kind: 'ask', taskId: 'investigation-response' }, { id: 'done', kind: 'terminal', outcome: 'done' },
+    ],
+    transitions: [
+      { fromNodeId: 'show-start', toNodeId: 'ask-one' },
+      { fromNodeId: 'ask-one', optionId: 'continue', toNodeId: 'show-first-a' }, { fromNodeId: 'ask-one', optionId: 'leave', toNodeId: 'show-first-b' }, { fromNodeId: 'ask-one', optionId: 'unanswerable', toNodeId: 'show-first-c' },
+      { fromNodeId: 'show-first-a', toNodeId: 'ask-two' }, { fromNodeId: 'show-first-b', toNodeId: 'ask-two' }, { fromNodeId: 'show-first-c', toNodeId: 'ask-two' },
+      { fromNodeId: 'ask-two', optionId: 'continue', toNodeId: 'show-second-a' }, { fromNodeId: 'ask-two', optionId: 'leave', toNodeId: 'show-second-b' }, { fromNodeId: 'ask-two', optionId: 'unanswerable', toNodeId: 'show-second-c' },
+      { fromNodeId: 'show-second-a', toNodeId: 'ask-three' }, { fromNodeId: 'show-second-b', toNodeId: 'ask-three' }, { fromNodeId: 'show-second-c', toNodeId: 'ask-three' },
+      { fromNodeId: 'ask-three', optionId: 'continue', toNodeId: 'done' }, { fromNodeId: 'ask-three', optionId: 'leave', toNodeId: 'done' }, { fromNodeId: 'ask-three', optionId: 'open-notes', toNodeId: 'done' },
+    ],
+  };
+  await writeFile(checkpoint.manifestPath, JSON.stringify(manifest));
+  await refreshStudyIdentity(checkpoint);
+  const partialCell = checkpoint.journeys.find((cell) => cell.armId === 'original' && cell.respondentId === 'craft-reader')!;
+  partialCell.decisions = [
+    { decisionId: 'entry-response', requestFingerprint: '1'.repeat(64), result: decision('continue') },
+    { decisionId: 'entry-response', requestFingerprint: '2'.repeat(64), result: decision('leave') },
+  ];
+  partialCell.presentedTaskIds = ['entry-response', 'entry-response', 'investigation-response'];
+  const report = await buildReport(checkpoint);
+  const events = report.arms[0]?.journeys.find((journey) => journey.respondentId === 'craft-reader')?.events as Array<{ type: string; itemId?: string; result?: { choice?: string } }>;
+  assert.deepEqual(events.filter((event) => event.type === 'exposure').map((event) => event.itemId), ['symptom', 'investigation', 'test-notes']);
+  assert.deepEqual(events.filter((event) => event.type === 'response').map((event) => event.result?.choice), ['continue', 'leave']);
+  assert.equal(events.at(-1)?.type, 'pending-response');
+});
 test('does not pool repeated Choice outcomes when option meanings changed', async (t) => {
   const { checkpoint } = await setup(t);
   for (const armId of ['original', 'revised']) {

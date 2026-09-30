@@ -77,8 +77,8 @@ export function walkStudyPackets(
       markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
-    if (request.state.trajectory.responses.some((response) => response.type === 'score' || response.type === 'noul')) {
-      unverifiedReason ??= 'Typed response history can vary in serialized size; future packet fit is not conservatively bounded.';
+    if (request.state.trajectory.responses.length > 0) {
+      unverifiedReason ??= 'Prior response history can include provider probabilities or confidence with variable serialized size; future packet fit is not conservatively bounded.';
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
     const packetId = `packet-${createHash('sha256').update(identity).digest('hex')}`;

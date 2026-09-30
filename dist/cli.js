@@ -22084,13 +22084,13 @@ function reconstructPartialEvents(arm, stored) {
     const decisionIndex = stored.decisions.findIndex((decision, index) => !used.has(index) && decision.decisionId === taskId);
     if (decisionIndex < 0) {
       events.push({ type: "pending-response", sequence: sequence++, nodeId, taskId });
-      return false;
+      return null;
     }
     used.add(decisionIndex);
     const result = stored.decisions[decisionIndex].result;
     const value = result.type === "choice" ? { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : result.type === "score" ? { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : { type: "noul", noul: result.noul };
     events.push({ type: "response", sequence: sequence++, nodeId, taskId, result: value });
-    return true;
+    return stored.decisions[decisionIndex];
   };
   const expose = (itemId, nodeId) => {
     events.push({ type: "exposure", sequence: sequence++, nodeId, itemId });
@@ -22117,8 +22117,8 @@ function reconstructPartialEvents(arm, stored) {
     }
     if (presented[presentedIndex] !== node2.taskId) break;
     presentedIndex += 1;
-    const hasResponse = responseFor(node2.taskId, node2.id);
-    if (!hasResponse) {
+    const decision = responseFor(node2.taskId, node2.id);
+    if (!decision) {
       const nextTaskId = presented[presentedIndex];
       if (!nextTaskId) break;
       const findPaths = (start, visited = /* @__PURE__ */ new Set()) => {
@@ -22142,8 +22142,6 @@ function reconstructPartialEvents(arm, stored) {
       current = candidateEdges[0].toNodeId;
       continue;
     }
-    const decision = stored.decisions.find((item, index) => used.has(index) && item.decisionId === node2.taskId);
-    if (!decision) break;
     const edge = graph.transitions.find((candidate) => {
       if (candidate.fromNodeId !== node2.id) return false;
       if (decision.result.type === "choice") return candidate.optionId === decision.result.choice;
@@ -22596,8 +22594,8 @@ function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
       markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error62 instanceof Error ? error62.message : String(error62)}`);
       return;
     }
-    if (request.state.trajectory.responses.some((response) => response.type === "score" || response.type === "noul")) {
-      unverifiedReason ??= "Typed response history can vary in serialized size; future packet fit is not conservatively bounded.";
+    if (request.state.trajectory.responses.length > 0) {
+      unverifiedReason ??= "Prior response history can include provider probabilities or confidence with variable serialized size; future packet fit is not conservatively bounded.";
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
     const packetId = `packet-${createHash7("sha256").update(identity).digest("hex")}`;

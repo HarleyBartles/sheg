@@ -29,11 +29,11 @@ function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys
   const events: unknown[] = [];
   const used = new Set<number>();
   let sequence = 0;
-  const responseFor = (taskId: string, nodeId: string): boolean => {
+  const responseFor = (taskId: string, nodeId: string): RunCheckpoint['journeys'][number]['decisions'][number] | null => {
     const decisionIndex = stored.decisions.findIndex((decision, index) => !used.has(index) && decision.decisionId === taskId);
     if (decisionIndex < 0) {
       events.push({ type: 'pending-response', sequence: sequence++, nodeId, taskId });
-      return false;
+      return null;
     }
     used.add(decisionIndex);
     const result = stored.decisions[decisionIndex]!.result;
@@ -43,7 +43,7 @@ function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys
         ? { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
         : { type: 'noul', noul: result.noul };
     events.push({ type: 'response', sequence: sequence++, nodeId, taskId, result: value });
-    return true;
+    return stored.decisions[decisionIndex]!;
   };
   const expose = (itemId: string, nodeId: string): void => { events.push({ type: 'exposure', sequence: sequence++, nodeId, itemId }); };
 
@@ -70,8 +70,8 @@ function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys
     }
     if (presented[presentedIndex] !== node.taskId) break;
     presentedIndex += 1;
-    const hasResponse = responseFor(node.taskId, node.id);
-    if (!hasResponse) {
+    const decision = responseFor(node.taskId, node.id);
+    if (!decision) {
       const nextTaskId = presented[presentedIndex];
       if (!nextTaskId) break;
       const findPaths = (start: string, visited = new Set<string>()): string[][] => {
@@ -95,8 +95,6 @@ function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys
       current = candidateEdges[0]!.toNodeId;
       continue;
     }
-    const decision = stored.decisions.find((item, index) => used.has(index) && item.decisionId === node.taskId);
-    if (!decision) break;
     const edge = graph.transitions.find((candidate) => {
       if (candidate.fromNodeId !== node.id) return false;
       if (decision.result.type === 'choice') return candidate.optionId === decision.result.choice;

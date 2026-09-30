@@ -29,7 +29,8 @@ test('preflight measures every frozen respondent packet for each configured prov
   assert.equal(result.providers[0]?.configuration, 'configured');
   assert.equal(result.providers[0]?.availability, 'unverified');
   assert.ok((result.providers[0]?.overflows.length ?? 0) > 0);
-  assert.equal(result.providers[1]?.status, 'fit');
+  assert.equal(result.providers[1]?.status, 'unverified');
+  assert.match(result.providers[1]?.incompleteReason ?? '', /response history/i);
   assert.equal(result.providers[0]?.measurementMethod?.startsWith('laya-ts@'), true);
   assert.equal(result.providers[1]?.measurementMethod, 'utf8-bytes-div-3+20%-reserve/v1');
 });
@@ -62,7 +63,8 @@ test('maximum-profile mode exercises the full aggregate prose allowance and labe
   });
   assert.equal(result.provisional, true);
   assert.equal(result.mode, 'maximum-profile');
-  assert.equal(result.providers[0]?.status, 'fit');
+  assert.equal(result.providers[0]?.status, 'unverified');
+  assert.match(result.providers[0]?.incompleteReason ?? '', /response history/i);
   assert.equal(result.providers[0]?.basis, 'synthetic-profile');
   assert.equal(result.providers[0]?.packetCount, 3);
 });
@@ -74,7 +76,8 @@ test('provider context fit stays distinct from missing credentials and unverifie
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
     providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: missingCredential, endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
   });
-  assert.equal(result.providers[0]?.status, 'fit');
+  assert.equal(result.providers[0]?.status, 'unverified');
+  assert.match(result.providers[0]?.incompleteReason ?? '', /response history/i);
   assert.equal(result.providers[0]?.configuration, 'incomplete');
   assert.equal(result.providers[0]?.availability, 'unverified');
 
@@ -123,7 +126,7 @@ test('preflight does not claim fit when a later packet includes typed response h
     });
     assert.equal(result.providers[0]?.complete, true);
     assert.equal(result.providers[0]?.status, 'unverified');
-    assert.match(result.providers[0]?.incompleteReason ?? '', /typed response history/i);
+    assert.match(result.providers[0]?.incompleteReason ?? '', /response history/i);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

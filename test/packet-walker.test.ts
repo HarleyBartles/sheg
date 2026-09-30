@@ -82,6 +82,9 @@ test('enumerates every sequence response history and keeps all stimuli in each p
   assert.equal(result.status, 'complete');
   assert.equal(result.terminalJourneyCount, 4);
   assert.equal(result.packetCount, 3);
+  assert.match(result.unverifiedReason ?? '', /response history/i);
+  assert.equal(packets[1]?.request.state.trajectory.responses[0]?.type, 'choice');
+  assert.equal(packets[1]?.request.state.trajectory.responses[0]?.probabilities, undefined);
   assert.deepEqual(packets.map((packet) => packet.pathId), ['root', 'sequence-ask-entry-response=continue', 'sequence-ask-entry-response=leave']);
   assert.ok(packets.every((packet) => packet.request.state.encounteredItems.map((item) => item.id).join(',') === arm.items.map((item) => item.id).join(',')));
 });
@@ -120,7 +123,7 @@ test('enumerates Score threshold routes and carries typed response history to th
   assert.equal(result.terminalJourneyCount, 3);
   assert.equal(followUp?.request.state.trajectory.responses[0]?.type, 'score');
   assert.equal(followUp?.request.state.trajectory.responses[0]?.score, 1.5);
-  assert.match(result.unverifiedReason ?? '', /typed response history/i);
+  assert.match(result.unverifiedReason ?? '', /response history/i);
 });
 
 test('returns incomplete rather than dropping work at the packet ceiling or on a cycle', () => {
