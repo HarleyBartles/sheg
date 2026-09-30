@@ -111,6 +111,7 @@ export class JevProvider implements DecisionProvider {
       try {
         response = await this.fetchRequest(this.config.endpoint, {
           method: 'POST',
+          redirect: 'error',
           headers: {
             Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
@@ -152,7 +153,7 @@ export class JevProvider implements DecisionProvider {
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
       const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata = jevMetadata(this.config.route, this.config.model);
+      const metadata = jevMetadata(this.config.route, parsedResponse.data.model);
       const estimatedAmount = inputTokens !== undefined && outputTokens !== undefined && metadata?.inputUsdPerMillion !== undefined && metadata.outputUsdPerMillion !== undefined
         ? (inputTokens * metadata.inputUsdPerMillion + outputTokens * metadata.outputUsdPerMillion) / 1_000_000
         : undefined;

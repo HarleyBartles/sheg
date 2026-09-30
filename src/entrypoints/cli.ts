@@ -26,7 +26,7 @@ export async function runCli(args: readonly string[], io = { out: (value: string
     }
     else if (command === 'check' || command === 'start') {
       const config = JSON.parse(await readFile(required(options, 'config'), 'utf8')) as RunConfig;
-      result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint })) : await runManager.startRun(config);
+      result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint, runBounds }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint, runBounds })) : await runManager.startRun(config);
     } else if (command === 'trace') {
       const manifestPath = path.resolve(required(options, 'manifest'));
       const cohortPath = path.resolve(required(options, 'cohort'));

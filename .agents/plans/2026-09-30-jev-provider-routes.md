@@ -209,4 +209,22 @@ npm run verify
 | 9: Entry points, docs, and ADR alignment | 3, 4 |
 | 10: Verify before feature publication | 5 |
 
-No implementation has been performed by writing this plan. Record execution evidence only when the relevant commands, native APIs, or GitHub state prove it.
+## PR review corrections
+
+The first fresh review identified unrestricted credential destinations, direct
+resume orphaning reserved calls, omitted report route/call allowance, and CLI
+call-bound omission. Corrections preserve provider HTTPS origins and disable
+redirects, consume interrupted reservations under run ownership, expose report
+route/endpoint/allowance, and show logical bounds in CLI check.
+
+The strengthened Windows integration test uses the shipped helper for native
+Setup/Read/Remove, includes rejected writes and replacement, and connects the
+fake vault record through preflight and the adapter. An isolated child process
+with only fake environment keys proves missing-vault rejection for both routes,
+including startup, without reading the user's real environment credentials.
+Concurrent-failure coverage also exposed checkpoint write contention; writes now
+wait for the short-lived checkpoint lock. Failed attempts remain visible per
+cell, and unknown failures conservatively consume the reserved allowance.
+
+Full verification after these corrections passed with 174 tests. Repeat the
+fresh review before claiming the review cycle is complete.

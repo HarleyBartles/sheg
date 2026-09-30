@@ -65,6 +65,11 @@ test('report keeps a per-arm matched denominator and answer-key scoring distinct
   assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.notReached, 1);
   assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.unscored, 1);
   assert.equal(report.providerEvidence.attempts, 2);
+  assert.equal(report.providerEvidence.maxCalls, 10);
+  assert.equal(report.providerEvidence.remainingCalls, 8);
+  assert.equal(report.providerEvidence.reservedCalls, 0);
+  assert.equal(report.provider.route, 'typesafe');
+  assert.equal(report.provider.endpoint, checkpoint.provider.kind === 'jev' ? checkpoint.provider.endpoint : null);
   assert.equal(Object.hasOwn(report.providerEvidence, 'billedUsd'), false);
 });
 

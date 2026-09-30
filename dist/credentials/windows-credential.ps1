@@ -4,7 +4,7 @@ param(
   [string] $Operation,
 
   [Parameter(Mandatory = $true)]
-  [ValidateSet('Sheg/Jev/TypeSafe', 'Sheg/Jev/OpenRouter')]
+  [ValidatePattern('^Sheg/(Jev/(TypeSafe|OpenRouter)|Test/[0-9a-f-]{36})$')]
   [string] $TargetName
 )
 
@@ -71,7 +71,7 @@ switch ($Operation) {
       $characters = [char[]]::new($length)
       try {
         for ($index = 0; $index -lt $length; $index++) {
-          $characters[$index] = [char][Runtime.InteropServices.Marshal]::ReadInt16($credential.CredentialBlob, $index * 2)
+          $characters[$index] = [char]([Runtime.InteropServices.Marshal]::ReadInt16($credential.CredentialBlob, $index * 2) -band 0xffff)
         }
         [Console]::Out.Write([string]::new($characters))
       }
@@ -86,7 +86,7 @@ switch ($Operation) {
   }
   'Setup' {
     $securePassword = Read-Host "Enter the API key for $TargetName" -AsSecureString
-    if ($securePassword.Length -eq 0) { exit 1 }
+    if ($securePassword.Length -eq 0) { $securePassword.Dispose(); exit 1 }
     $credentialBlob = [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($securePassword)
     try {
       $credential = [ShegCredential]::new()

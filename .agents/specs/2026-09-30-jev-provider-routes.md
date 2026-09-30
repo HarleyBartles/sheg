@@ -56,7 +56,10 @@ checkpoints; remove the obsolete `keyEnv` field during checkpoint migration.
 Do not preserve environment-variable key lookup or `keyEnv` overrides. New
 native configurations default to `jev-latest` and
 `https://api.typesafe.ai/v1/systemone`. Existing OpenRouter defaults remain
-unchanged. Both routes use Sheg's fetch transport;
+unchanged. Endpoint overrides must use the selected route's HTTPS origin without URL
+credentials. Saved paths on that origin remain supported; redirects are
+rejected to preserve credential custody and physical-attempt counting.
+Both routes use Sheg's fetch transport;
 do not add the TypeSafe SDK. Sheg owns retries so each HTTP attempt is counted
 once against the run's call limit. The current worker grants one attempt per
 decision; any route retry policy that permits more attempts must reserve and

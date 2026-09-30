@@ -277,6 +277,37 @@ test('a partial study stops at its run-wide physical-attempt limit', async (t) =
   assert.deepEqual(current.budget, { maxCalls: 2, usedCalls: 2, reservedCalls: 0, remainingCalls: 0 });
 });
 
+test('direct resume consumes interrupted reservations before dispatching further calls', async (t) => {
+  const directory = await tempDirectory(t);
+  const checked = await checkStudy({
+    manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
+    provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 },
+    outputDirectory: directory, maxCalls: 4, concurrency: 1,
+  });
+  const abandoned = await new CheckpointStore(directory).create(checkpoint(directory, {
+    ...checked.config, status: 'running', stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint,
+    sourceHashes: checked.study.sources.map((source) => source.sha256), respondentIds: checked.study.respondents.map((respondent) => respondent.id),
+    budget: { maxCalls: 4, usedCalls: 1, reservedCalls: 1, remainingCalls: 2 },
+  }));
+  let calls = 0;
+  const provider: DecisionProvider = { async decide(request) {
+    assert.equal(request.question.type, 'choice');
+    calls += 1;
+    return { type: 'choice', choice: 'continue', probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === 'continue' ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {} };
+  } };
+  const manager = new RunManager({ providerFactory: () => provider });
+  let current = await manager.resumeRun(directory, abandoned.runId);
+  const resumedBudget = current.budget;
+  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    current = await manager.runStatus(directory, abandoned.runId);
+  }
+  assert.equal(resumedBudget.usedCalls, 2);
+  assert.equal(resumedBudget.reservedCalls, 0);
+  assert.equal(calls, 2);
+  assert.deepEqual(current.budget, { maxCalls: 4, usedCalls: 4, reservedCalls: 0, remainingCalls: 0 });
+});
+
 test('runtime context rejection records actionable admission evidence in checkpoint and report', async (t) => {
   const directory = await tempDirectory(t);
   const providerConfig = { kind: 'laya' as const, baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 1024, headLimit: 192,
@@ -379,4 +410,22 @@ test('resume replays completed responses without charging the same respondent-ta
   assert.equal(entryCalls, 2);
   assert.equal(laterCalls, 3);
   assert.equal(legacyPacketHadTypedResponses, false);
+});
+
+
+test('failed provider attempts remain visible per cell and unknown failures consume reserved allowance', async (t) => {
+  const directory = await tempDirectory(t);
+  const manager = new RunManager({ providerFactory: () => ({ async decide() { throw new Error('unknown transport failure'); } }) });
+  const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 2, concurrency: 2 });
+  let current = started;
+  for (let attempt = 0; attempt < 100 && current.status === 'running'; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    current = await manager.runStatus(directory, started.runId);
+  }
+  assert.equal(current.status, 'partial');
+  assert.deepEqual(current.budget, { maxCalls: 2, usedCalls: 2, reservedCalls: 0, remainingCalls: 0 });
+  assert.equal(current.journeys.length, 2);
+  assert.ok(current.journeys.every(journey => journey.failedAttempts === 1));
+  const report = await getReport(directory, started.runId);
+  assert.ok(report.arms[0]?.journeys.every(journey => journey.failedAttempts === 1));
 });

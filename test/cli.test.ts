@@ -25,6 +25,9 @@ test('CLI check validates explicit provider config without key or network', asyn
   const status = await runCli(['check', '--config', configPath], { out: (text) => { output.push(text); return true; }, error: (text) => { errors.push(text); return true; } });
   assert.equal(status, 0, errors.join('\n'));
   assert.equal(JSON.parse(output[0] ?? '{}').valid, true);
+  assert.equal(JSON.parse(output[0] ?? '{}').runBounds.maximumCallsConfigured, 10);
+  assert.equal(JSON.parse(output[0] ?? '{}').runBounds.maximumCallsSufficient, true);
+  assert.ok(JSON.parse(output[0] ?? '{}').runBounds.maximumDecisionCalls > 0);
   assert.equal(errors.length, 0);
 });
 
@@ -32,7 +35,7 @@ test('CLI preflight reports incomplete fit evidence for variable response histor
   const directory = await mkdtemp(path.join(os.tmpdir(), 'polling-preflight-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const providersPath = path.join(directory, 'providers.json');
-  await writeFile(providersPath, JSON.stringify([{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }]));
+  await writeFile(providersPath, JSON.stringify([{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }]));
   const output: string[] = []; const errors: string[] = [];
   const status = await runCli(['preflight', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--providers', providersPath], {
     out: (text) => { output.push(text); return true; }, error: (text) => { errors.push(text); return true; },

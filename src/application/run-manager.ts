@@ -117,7 +117,11 @@ export class RunManager {
     await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
-      checkpoint = await store.update(runId, (current) => ({ ...current, status: 'running', cancellationRequested: false, updatedAt: new Date().toISOString() }));
+      checkpoint = await store.update(runId, (current) => {
+        const ledger = AttemptLedger.restore(current.budget);
+        ledger.consumeInterruptedReservations();
+        return { ...current, status: 'running', cancellationRequested: false, activeCellIds: [], budget: ledger.snapshot(), updatedAt: new Date().toISOString() };
+      });
       this.launch(store, checkpoint, lock);
       return checkpoint;
     } catch (error) { await lock.release(); throw error; }

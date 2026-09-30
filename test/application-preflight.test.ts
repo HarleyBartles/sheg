@@ -19,7 +19,7 @@ test('preflight measures every frozen respondent packet for each configured prov
     cohortPath: path.join(fixtures, 'cohort.json'),
     providers: [
       { kind: 'laya', baseUrl: 'http://127.0.0.1:8787', checkpoint: 'fixture', contextLimit: 1024, headLimit: 192, tokenizerJsonPath, tokenizerSha256, timeoutMs: 1000 },
-      { kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 },
+      { kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 },
     ],
   }, { credentialStore: missingStore });
   assert.equal(result.provisional, false);
@@ -40,7 +40,7 @@ test('an unavailable provider measurement or incomplete traversal cannot report 
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
     maxPackets: 0,
-    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
   }, { credentialStore: missingStore });
   assert.equal(result.providers[0]?.status, 'unverified');
   assert.equal(result.providers[0]?.complete, false);
@@ -50,7 +50,7 @@ test('an unavailable provider measurement or incomplete traversal cannot report 
 test('an unknown Jev context window is unverified even after complete path traversal', async () => {
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
-    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
   }, { credentialStore: missingStore });
   assert.equal(result.providers[0]?.complete, true);
   assert.equal(result.providers[0]?.status, 'unverified');
@@ -71,7 +71,7 @@ test('native TypeSafe preflight reports its credential and keeps unknown context
 test('maximum-profile mode exercises the full aggregate prose allowance and labels results provisional', async () => {
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), mode: 'maximum-profile',
-    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
   }, { credentialStore: missingStore });
   assert.equal(result.provisional, true);
   assert.equal(result.mode, 'maximum-profile');
@@ -86,7 +86,7 @@ test('provider context fit stays distinct from missing credentials and unverifie
   delete process.env[missingCredential];
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
-    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
   }, { credentialStore: missingStore });
   assert.equal(result.providers[0]?.status, 'unverified');
   assert.match(result.providers[0]?.incompleteReason ?? '', /response history/i);
@@ -97,7 +97,7 @@ test('provider context fit stays distinct from missing credentials and unverifie
   try {
     const blankKey = await preflightStudy({
       manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
-      providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+      providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
     }, { credentialStore: missingStore });
     assert.equal(blankKey.providers[0]?.configuration, 'incomplete');
   } finally {

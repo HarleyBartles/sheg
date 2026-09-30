@@ -26,6 +26,8 @@ alongside the code.
 | [0015](0015-store-jev-credentials-in-windows-vault.md) | Store Jev credentials in Windows Credential Manager | Accepted |
 | [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
 
+| [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
+
 ## Writing and changing decisions
 
 Create one numbered record for each consequential decision. Include its status,

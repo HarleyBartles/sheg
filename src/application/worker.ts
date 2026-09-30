@@ -30,12 +30,13 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
     if (!profile) throw new Error(`Frozen respondent ${respondentId} is no longer present.`);
     let decisions: RunCheckpoint['journeys'][number]['decisions'] = [];
     const previous = (await store.read(checkpoint.runId)).journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
+    let failedAttempts = previous?.failedAttempts ?? 0;
     const attemptHistory = [...(previous?.attemptHistory ?? [])];
     const replayDecisions = previous?.decisions ?? [];
     const presentedTaskIds = [...(previous?.presentedTaskIds ?? [])];
     let replayCursor = 0;
     let failedNodeId: string | null = null;
-    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
+    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions: replayDecisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
         const legacyChoiceReplay = checkpoint.migratedFromFormatVersion === 2;
@@ -51,7 +52,7 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
         const presentedCount = presentedTaskIds.filter((id) => id === request.question.id).length;
         const completedCount = decisions.filter((decision) => decision.decisionId === request.question.id).length;
         if (presentedCount <= completedCount) presentedTaskIds.push(request.question.id);
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         if (await cancellationRequested(store, checkpoint.runId)) throw new RunCancelled();
         const reservation = await ledger.reserve(1);
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), activeCellIds: addUnique(current.activeCellIds, id) }));
@@ -63,16 +64,18 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
         let decision: DecisionResult;
         try { decision = await provider.decide(providerRequest, 1); }
         catch (error) {
-          await ledger.settle(reservation, errorEvidence(error));
-          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
+          const evidence = errorEvidence(error);
+          await ledger.settle(reservation, evidence);
+          failedAttempts += evidence.attempts;
+          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
           throw error;
         }
         await ledger.settle(reservation, { attempts: decision.attempts });
         decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: legacyChoiceReplay ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         return decision;
       } });
-      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'completed', result, decisions, attemptHistory, presentedTaskIds }) }));
+      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'completed', result, decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     } catch (error) {
       const cancelled = error instanceof RunCancelled || await cancellationRequested(store, checkpoint.runId);
       const current = await store.read(checkpoint.runId);
@@ -80,7 +83,7 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
       decisions = decisions.length > 0 ? decisions : previousJourney?.decisions ?? [];
       const failureEvidence = cancelled ? null : admissionFailure(error, failedNodeId);
       await updateCheckpoint(store, checkpoint.runId, (latest) => ({ ...latest, budget: ledger.snapshot(), journeys: replaceJourney(latest.journeys, {
-        armId: arm.id, respondentId, status: cancelled ? 'partial' : 'failed', decisions, attemptHistory, presentedTaskIds,
+        armId: arm.id, respondentId, status: cancelled ? 'partial' : 'failed', decisions, attemptHistory, failedAttempts, presentedTaskIds,
         ...(!cancelled ? { failureKind: isUnsupported(error) ? 'unsupported-input' as const : error instanceof JourneyExecutionError ? 'journey' as const : 'provider' as const } : {}),
         ...(failureEvidence === null ? {} : { failureEvidence }),
       }) }));
@@ -147,7 +150,7 @@ function errorEvidence(error: unknown): { attempts: number } {
   if (typeof error === 'object' && error !== null && 'attempts' in error && typeof error.attempts === 'number' && Number.isSafeInteger(error.attempts) && error.attempts >= 0) {
     return { attempts: error.attempts };
   }
-  return { attempts: 0 };
+  return { attempts: 1 };
 }
 function isUnsupported(error: unknown): boolean { return typeof error === 'object' && error !== null && 'message' in error && String(error.message).includes('unsupported-input'); }
 function admissionFailure(error: unknown, nodeId: string | null): ContextFailure | null {

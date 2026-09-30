@@ -20427,6 +20427,7 @@ function sameReservation(left, right) {
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir, rename as rename2, rm as rm2 } from "node:fs/promises";
 import path3 from "node:path";
+import { setTimeout as delay2 } from "node:timers/promises";
 
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
@@ -20523,7 +20524,19 @@ var jevConfigInputSchema = external_exports.object({
   model: external_exports.string().min(1).optional(),
   endpoint: external_exports.string().url().optional(),
   timeoutMs: external_exports.number().int().positive().optional()
-}).strict();
+}).strict().superRefine((input2, context) => {
+  if (input2.endpoint === void 0) return;
+  let endpoint;
+  try {
+    endpoint = new URL(input2.endpoint);
+  } catch {
+    return;
+  }
+  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
+  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
+    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
+  }
+});
 var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
   const route = input2.route ?? "openrouter";
   const defaults = routeDefaults[route];
@@ -20666,6 +20679,7 @@ var runCheckpointSchema = external_exports.object({
     attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
     presentedTaskIds: external_exports.array(external_exports.string().min(1)),
     failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional(),
+    failedAttempts: external_exports.number().int().nonnegative().optional(),
     failureEvidence: contextFailureSchema.optional()
   }).strict()),
   activeCellIds: external_exports.array(external_exports.string().min(1)),
@@ -20791,7 +20805,7 @@ var CheckpointStore = class {
     if (current.success) return current.data;
     const runLock = await ProcessLock.acquire(this.directory, `run-${runId2}`);
     try {
-      const checkpointLock = await ProcessLock.acquire(this.directory, `${runId2}-checkpoint`);
+      const checkpointLock = await acquireCheckpointLock(this.directory, runId2);
       try {
         return await this.readCurrentOrMigrate(runId2);
       } finally {
@@ -20809,7 +20823,7 @@ var CheckpointStore = class {
   }
   async update(runId2, mutate) {
     await this.read(runId2);
-    const lock = await ProcessLock.acquire(this.directory, `${runId2}-checkpoint`);
+    const lock = await acquireCheckpointLock(this.directory, runId2);
     try {
       const current = await this.readCurrentOrMigrate(runId2);
       const updated = runCheckpointSchema.parse(mutate(current));
@@ -20905,6 +20919,17 @@ var CheckpointStore = class {
 };
 function emptyAttemptSnapshot(maxCalls) {
   return { maxCalls, usedCalls: 0, reservedCalls: 0, remainingCalls: maxCalls };
+}
+async function acquireCheckpointLock(directory, runId2) {
+  const deadline = Date.now() + 1e4;
+  for (; ; ) {
+    try {
+      return await ProcessLock.acquire(directory, `${runId2}-checkpoint`);
+    } catch (error62) {
+      if (!(error62 instanceof ProcessLockError) || Date.now() >= deadline) throw error62;
+      await delay2(10);
+    }
+  }
 }
 
 // src/providers/jev.ts
@@ -21212,6 +21237,7 @@ var JevProvider = class {
       try {
         response = await this.fetchRequest(this.config.endpoint, {
           method: "POST",
+          redirect: "error",
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json"
@@ -21250,7 +21276,7 @@ var JevProvider = class {
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
       const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata2 = jevMetadata(this.config.route, this.config.model);
+      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
       const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const result = {
         ...answer.data,
@@ -21839,12 +21865,13 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     if (!profile) throw new Error(`Frozen respondent ${respondentId} is no longer present.`);
     let decisions = [];
     const previous = (await store.read(checkpoint.runId)).journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
+    let failedAttempts = previous?.failedAttempts ?? 0;
     const attemptHistory = [...previous?.attemptHistory ?? []];
     const replayDecisions = previous?.decisions ?? [];
     const presentedTaskIds = [...previous?.presentedTaskIds ?? []];
     let replayCursor = 0;
     let failedNodeId = null;
-    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
+    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
         const legacyChoiceReplay = checkpoint.migratedFromFormatVersion === 2;
@@ -21860,7 +21887,7 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         const presentedCount = presentedTaskIds.filter((id2) => id2 === request.question.id).length;
         const completedCount = decisions.filter((decision2) => decision2.decisionId === request.question.id).length;
         if (presentedCount <= completedCount) presentedTaskIds.push(request.question.id);
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         if (await cancellationRequested(store, checkpoint.runId)) throw new RunCancelled();
         const reservation = await ledger.reserve(1);
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), activeCellIds: addUnique(current.activeCellIds, id) }));
@@ -21873,16 +21900,18 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         try {
           decision = await provider.decide(providerRequest, 1);
         } catch (error62) {
-          await ledger.settle(reservation, errorEvidence(error62));
-          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+          const evidence = errorEvidence(error62);
+          await ledger.settle(reservation, evidence);
+          failedAttempts += evidence.attempts;
+          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
           throw error62;
         }
         await ledger.settle(reservation, { attempts: decision.attempts });
         decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: legacyChoiceReplay ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         return decision;
       } });
-      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "completed", result, decisions, attemptHistory, presentedTaskIds }) }));
+      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "completed", result, decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     } catch (error62) {
       const cancelled = error62 instanceof RunCancelled || await cancellationRequested(store, checkpoint.runId);
       const current = await store.read(checkpoint.runId);
@@ -21895,6 +21924,7 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         status: cancelled ? "partial" : "failed",
         decisions,
         attemptHistory,
+        failedAttempts,
         presentedTaskIds,
         ...!cancelled ? { failureKind: isUnsupported(error62) ? "unsupported-input" : error62 instanceof JourneyExecutionError ? "journey" : "provider" } : {},
         ...failureEvidence === null ? {} : { failureEvidence }
@@ -21972,7 +22002,7 @@ function errorEvidence(error62) {
   if (typeof error62 === "object" && error62 !== null && "attempts" in error62 && typeof error62.attempts === "number" && Number.isSafeInteger(error62.attempts) && error62.attempts >= 0) {
     return { attempts: error62.attempts };
   }
-  return { attempts: 0 };
+  return { attempts: 1 };
 }
 function isUnsupported(error62) {
   return typeof error62 === "object" && error62 !== null && "message" in error62 && String(error62.message).includes("unsupported-input");
@@ -22149,7 +22179,11 @@ var RunManager = class {
     await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
     try {
-      checkpoint = await store.update(runId2, (current) => ({ ...current, status: "running", cancellationRequested: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+      checkpoint = await store.update(runId2, (current) => {
+        const ledger = AttemptLedger.restore(current.budget);
+        ledger.consumeInterruptedReservations();
+        return { ...current, status: "running", cancellationRequested: false, activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      });
       this.launch(store, checkpoint, lock);
       return checkpoint;
     } catch (error62) {

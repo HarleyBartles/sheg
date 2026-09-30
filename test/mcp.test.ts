@@ -76,7 +76,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   assert.equal(Object.hasOwn(layaBounds, 'spendCeilingUsd'), false);
   const preflight = await client.callTool({ name: 'poll_preflight', arguments: {
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
-    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
   } });
   assert.equal(preflight.isError ?? false, false);
   assert.equal((preflight.structuredContent as { providers: Array<{ status: string; incompleteReason?: string }> }).providers[0]?.status, 'unverified');

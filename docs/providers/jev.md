@@ -32,6 +32,11 @@ support are future work.
 
 The adapter uses Node `fetch` for both routes. It sends the configured model,
 state, and typed question to the selected endpoint with bearer authentication.
+Endpoint overrides must stay on the selected provider's HTTPS origin:
+`https://openrouter.ai` or `https://api.typesafe.ai`. Saved paths on that origin
+remain supported. URL credentials, other origins, and redirects are rejected
+before any key can be forwarded to a different destination.
+
 Choice, Score, and Noul answers are validated at the adapter boundary and
 normalized into the same domain result. Missing cost evidence does not make a
 valid answer invalid.
@@ -45,7 +50,7 @@ OpenRouter's Decisions endpoint is an alpha API. Its response may include
 `usage.cost`; when present, Sheg records that as provider-reported evidence.
 TypeSafe's published rate is $0.042 per million input tokens, with output
 tokens listed as free. Sheg may estimate per-decision cost from complete
-response token counts using that rate and label it as a published-rate
+response token counts using a rate recorded for the served model and label it as a published-rate
 estimate. Account-specific billing remains visible in the selected provider's
 dashboard. Sheg does not present a cumulative bill or spend ceiling.
 
@@ -64,7 +69,10 @@ independent of the study's per-respondent `maxDecisions` journey limit. A
 failed or interrupted request consumes its attempt allowance because the
 provider may have received it. Unknown billing does not block resume and does
 not require reconciliation. Per-decision cost evidence is optional and is not
-summed into a run total.
+summed into a run total. Status and reports expose the maximum, used,
+reserved, and remaining call allowance. Reports identify the route and endpoint,
+and preserve failed physical-attempt counts per respondent cell. Unknown
+provider errors conservatively consume the reserved attempt.
 
 Route, model, and effective endpoint are part of execution identity. Changing
 any of these prevents resuming a run with different provider behavior.

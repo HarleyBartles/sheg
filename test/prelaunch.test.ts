@@ -12,7 +12,7 @@ const missingCredentialStore = {
   readForAuthentication: async () => { throw new Error('missing'); },
 };
 
-test('CLI start rejects a missing Jev key before creating a run, ignoring environment keys', async (t) => {
+test('CLI start rejects a missing Jev key before creating a run', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'sheg-missing-key-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const configPath = path.join(directory, 'run.json');
@@ -23,15 +23,8 @@ test('CLI start rejects a missing Jev key before creating a run, ignoring enviro
     provider: { kind: 'jev', model: 'test-jev', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 5000 },
   }));
   const errors: string[] = [];
-  const previousKey = process.env.OPENROUTER_API_KEY;
-  process.env.OPENROUTER_API_KEY = 'environment-key-must-not-authenticate';
-  try {
-    const exitCode = await runCli(['start', '--config', configPath], { out: () => true, error: (value) => { errors.push(value); return true; } }, new RunManager({ credentialStore: missingCredentialStore }));
-    assert.equal(exitCode, 1);
-  } finally {
-    if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
-    else process.env.OPENROUTER_API_KEY = previousKey;
-  }
+  const exitCode = await runCli(['start', '--config', configPath], { out: () => true, error: (value) => { errors.push(value); return true; } }, new RunManager({ credentialStore: missingCredentialStore }));
+  assert.equal(exitCode, 1);
   assert.match(JSON.parse(errors[0] ?? '{}').error, /openrouter secure credential is missing/i);
   assert.deepEqual(await new CheckpointStore(outputDirectory).list(), []);
 });

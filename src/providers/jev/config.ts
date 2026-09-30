@@ -20,7 +20,15 @@ export const jevConfigInputSchema = z.object({
   model: z.string().min(1).optional(),
   endpoint: z.string().url().optional(),
   timeoutMs: z.number().int().positive().optional(),
-}).strict();
+}).strict().superRefine((input, context) => {
+  if (input.endpoint === undefined) return;
+  let endpoint: URL;
+  try { endpoint = new URL(input.endpoint); } catch { return; }
+  const expectedOrigin = new URL(routeDefaults[input.route ?? 'openrouter'].endpoint).origin;
+  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
+    context.addIssue({ code: 'custom', path: ['endpoint'], message: 'Jev endpoint must use the selected provider HTTPS origin without URL credentials.' });
+  }
+});
 
 export const jevConfigSchema = jevConfigInputSchema.transform((input) => {
   const route = input.route ?? 'openrouter';

@@ -21,3 +21,9 @@ use format 4 and retain the maximum physical-call allowance, used calls, and
 remaining calls. Decision results may contain per-decision `cost` evidence
 with a `provider-reported` or `published-rate-estimate` basis. Cost is optional
 and is not aggregated into a run bill.
+
+Reports retain the selected Jev route and endpoint beside the model, and expose
+`providerEvidence.maxCalls`, `attempts`, `reservedCalls`, and `remainingCalls`.
+Each journey also exposes `failedAttempts`; failures do not require billing
+reconciliation. Published-rate estimates require metadata for the served model,
+not just the requested alias.

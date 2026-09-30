@@ -92,6 +92,7 @@ test('sends one typed choice and preserves the served model, distribution, usage
     const result = await provider.decide(request, 1);
 
     assert.equal(captured?.url, config.endpoint);
+    assert.equal(captured?.init.redirect, 'error');
     assert.equal((captured?.init.headers as Record<string, string>).Authorization, 'Bearer secret-test-key');
     const body = JSON.parse(String(captured?.init.body)) as Record<string, unknown>;
     assert.deepEqual(body, {
@@ -273,7 +274,7 @@ test('rejects a missing key before attempting a request', async () => {
   }
 });
 
-test('native route uses its own vault entry and endpoint even when both provider environment keys are set', async () => {
+test('native route uses its own vault entry and endpoint for each typed request', async () => {
   const nativeConfig = defaultJevConfig('typesafe');
   let capturedUrl = '';
   let authorization = '';
@@ -289,11 +290,7 @@ test('native route uses its own vault entry and endpoint even when both provider
     },
     measureContext: () => ({ provider: 'jev', status: 'fits', method: 'fixture', modelIdentity: nativeConfig.model, tokenCount: 'estimated', tokens: 1, contextLimit: 1_000, headroomTokens: 0, effectiveLimit: 1_000, details: {} }),
   });
-  const previousNative = process.env.TYPESAFE_API_KEY;
-  const previousRouter = process.env.OPENROUTER_API_KEY;
-  process.env.TYPESAFE_API_KEY = 'must-not-be-read';
-  process.env.OPENROUTER_API_KEY = 'must-not-be-read-either';
-  try {
+  {
     await provider.decide(request, 1);
     assert.equal(capturedUrl, 'https://api.typesafe.ai/v1/systemone');
     assert.equal(authorization, 'Bearer fixture-native-key');
@@ -320,10 +317,28 @@ test('native route uses its own vault entry and endpoint even when both provider
       const typedResult = await typedProvider.decide(typedRequest, 1);
       assert.equal(typedResult.type, typedRequest.question.type);
     }
-  } finally {
-    if (previousNative === undefined) delete process.env.TYPESAFE_API_KEY;
-    else process.env.TYPESAFE_API_KEY = previousNative;
-    if (previousRouter === undefined) delete process.env.OPENROUTER_API_KEY;
-    else process.env.OPENROUTER_API_KEY = previousRouter;
   }
+});
+
+
+test('optional cost evidence uses only known served-model rates and complete token counts', async () => {
+  const native = defaultJevConfig('typesafe');
+  for (const [servedModel, usage, expected] of [
+    ['jev-latest', { input_tokens: 120, output_tokens: 12 }, { amountUsd: 0.00000504, basis: 'published-rate-estimate' }],
+    ['unknown-served-model', { input_tokens: 120, output_tokens: 12 }, undefined],
+    ['jev-latest', { input_tokens: 120 }, undefined],
+    ['jev-latest', {}, undefined],
+    ['unknown-served-model', { cost: 0 }, { amountUsd: 0, basis: 'provider-reported' }],
+  ] as const) {
+    const provider = new JevProvider(native, fakeFetch(async () => response({ model: servedModel, usage })), {
+      credentialStore: testCredentialStore,
+      measureContext: () => ({ provider: 'jev', status: 'fits', method: 'fixture', modelIdentity: native.model, tokenCount: 'estimated', tokens: 1, contextLimit: 100, headroomTokens: 0, effectiveLimit: 100, details: {} }),
+    });
+    const result = await provider.decide(request, 1);
+    assert.deepEqual(result.cost, expected);
+    assert.equal(result.type, 'choice');
+    assert.equal(result.model, servedModel);
+  }
+  const openrouter = makeJevProvider(fakeFetch(async () => response({ model: config.model, usage: { input_tokens: 120, output_tokens: 12 } })));
+  assert.deepEqual((await openrouter.decide(request, 1)).cost, { amountUsd: 0.00000504, basis: 'published-rate-estimate' });
 });

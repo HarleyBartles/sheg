@@ -5,7 +5,8 @@ import { z } from 'zod';
 import type { JourneyResult } from '../domain/journey/run.js';
 import { decisionResultSchema, decisionValueSchema, type DecisionResult } from '../domain/decision/decision.js';
 import type { AttemptSnapshot } from '../domain/attempt-ledger.js';
-import { ProcessLock } from './process-lock.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { ProcessLockError, ProcessLock } from './process-lock.js';
 import { jevConfigInputSchema, jevConfigSchema } from '../providers/jev/config.js';
 import { executionFingerprint, legacyExecutionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from './identity.js';
 import { loadStudy } from './study-loader.js';
@@ -74,6 +75,7 @@ export const runCheckpointSchema = z.object({
     attemptHistory: z.array(z.object({ decisionId: z.string().min(1), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
     presentedTaskIds: z.array(z.string().min(1)),
     failureKind: z.enum(['provider', 'journey', 'unsupported-input']).optional(),
+    failedAttempts: z.number().int().nonnegative().optional(),
     failureEvidence: contextFailureSchema.optional(),
   }).strict()),
   activeCellIds: z.array(z.string().min(1)),
@@ -213,7 +215,7 @@ export class CheckpointStore {
     if (current.success) return current.data;
     const runLock = await ProcessLock.acquire(this.directory, `run-${runId}`);
     try {
-      const checkpointLock = await ProcessLock.acquire(this.directory, `${runId}-checkpoint`);
+      const checkpointLock = await acquireCheckpointLock(this.directory, runId);
       try { return await this.readCurrentOrMigrate(runId); }
       finally { await checkpointLock.release(); }
     } finally { await runLock.release(); }
@@ -228,7 +230,7 @@ export class CheckpointStore {
 
   async update(runId: string, mutate: (checkpoint: RunCheckpoint) => RunCheckpoint): Promise<RunCheckpoint> {
     await this.read(runId);
-    const lock = await ProcessLock.acquire(this.directory, `${runId}-checkpoint`);
+    const lock = await acquireCheckpointLock(this.directory, runId);
     try {
       const current = await this.readCurrentOrMigrate(runId);
       const updated = runCheckpointSchema.parse(mutate(current));
@@ -323,4 +325,16 @@ export class CheckpointStore {
 
 export function emptyAttemptSnapshot(maxCalls: number): AttemptSnapshot {
   return { maxCalls, usedCalls: 0, reservedCalls: 0, remainingCalls: maxCalls };
+}
+
+
+async function acquireCheckpointLock(directory: string, runId: string): Promise<ProcessLock> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try { return await ProcessLock.acquire(directory, `${runId}-checkpoint`); }
+    catch (error) {
+      if (!(error instanceof ProcessLockError) || Date.now() >= deadline) throw error;
+      await delay(10);
+    }
+  }
 }
