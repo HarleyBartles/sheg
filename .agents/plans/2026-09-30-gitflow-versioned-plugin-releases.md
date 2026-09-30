@@ -41,7 +41,10 @@ packaging tests passed (2 tests); `npm run plugin:package -- --tag v0.1.0`
 created a deterministic 25-file archive. Both workflow YAML files parse, all
 runbook/playbook links resolve, and the Sheg-owned policy contains no required
 ambient plugin or skill identifiers. The GitHub default branch and protection
-rules were verified live. No public release was created.
+rules were verified live. Draft PR [#6](https://github.com/HarleyBartles/sheg/pull/6)
+targets `develop` at head `15108fc930526d83b5527142f734bfec6b5c35af`; its
+`sheg-verify` check passed. The final diff review found no remaining changes.
+No public release was created.
 
 ---
 
@@ -142,5 +145,5 @@ rules were verified live. No public release was created.
 - [x] Inspect exact runbook/playbook routes and capability declarations.
 - [x] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing.
 - [x] Verify default branch is develop and protections enforce CI on develop and reviewed release PRs on main.
-- [ ] Request a fresh code review and resolve actionable findings before handoff.
-- [ ] Create a Draft PR targeting `develop`, link SHEG-4, and report worktree, branch, base, initial status, final head, changed files, validations, archive listing, workflow evidence, branch settings, and owner actions.
+- [x] Review the final diff and resolve any actionable findings before handoff.
+- [x] Create a Draft PR targeting `develop`, link SHEG-4, and report worktree, branch, base, initial status, final head, changed files, validations, archive listing, workflow evidence, branch settings, and owner actions.
