@@ -51,7 +51,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   const checked = await client.callTool({ name: 'poll_check', arguments: { config: {
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), outputDirectory: directory,
     maxCalls: 5, maxUsd: 1, maxPerCallUsd: 0.1,
-    provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'POLL_TEST_MISSING_KEY', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
+    provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
   } } });
   assert.equal(checked.isError ?? false, false);
   assert.equal((checked.structuredContent as { valid?: boolean }).valid, true);
@@ -77,7 +77,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   assert.equal(Object.hasOwn(layaBounds, 'spendCeilingUsd'), false);
   const preflight = await client.callTool({ name: 'poll_preflight', arguments: {
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
-    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
   } });
   assert.equal(preflight.isError ?? false, false);
   assert.equal((preflight.structuredContent as { providers: Array<{ status: string; incompleteReason?: string }> }).providers[0]?.status, 'unverified');

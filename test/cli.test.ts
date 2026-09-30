@@ -19,7 +19,7 @@ test('CLI check validates explicit provider config without key or network', asyn
   await writeFile(configPath, JSON.stringify({
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), outputDirectory: directory,
     maxCalls: 10, maxUsd: 1, maxPerCallUsd: 0.1,
-    provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'POLL_TEST_MISSING_KEY', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
+    provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
   }));
   const output: string[] = []; const errors: string[] = [];
   const status = await runCli(['check', '--config', configPath], { out: (text) => { output.push(text); return true; }, error: (text) => { errors.push(text); return true; } });
@@ -32,7 +32,7 @@ test('CLI preflight reports incomplete fit evidence for variable response histor
   const directory = await mkdtemp(path.join(os.tmpdir(), 'polling-preflight-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const providersPath = path.join(directory, 'providers.json');
-  await writeFile(providersPath, JSON.stringify([{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }]));
+  await writeFile(providersPath, JSON.stringify([{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }]));
   const output: string[] = []; const errors: string[] = [];
   const status = await runCli(['preflight', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--providers', providersPath], {
     out: (text) => { output.push(text); return true; }, error: (text) => { errors.push(text); return true; },

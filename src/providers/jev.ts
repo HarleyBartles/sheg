@@ -3,14 +3,11 @@ import { z } from 'zod';
 import { decisionRequestSchema, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, validateDecision } from '../domain/decision/validate.js';
+import { jevConfigSchema, type JevConfigInput, type JevConfig } from './jev/config.js';
+import { jevMetadata } from './jev/model-metadata.js';
+import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 
-export type JevConfig = {
-  kind: 'jev';
-  model: string;
-  keyEnv: string;
-  endpoint: string;
-  timeoutMs: number;
-};
+export { jevConfigInputSchema, jevConfigSchema, type JevConfigInput, type JevConfig, type JevRoute } from './jev/config.js';
 
 export class JevCallError extends Error {
   constructor(
@@ -47,10 +44,7 @@ const wireResponseSchema = z.object({
 }).passthrough();
 
 const retryableStatuses = new Set([429, 500, 502, 503, 524, 529]);
-const JEV_MODEL = 'typesafe/jev-1.13';
-const JEV_CONTEXT_LIMIT = 32_768;
-const JEV_HEADROOM = Math.ceil(JEV_CONTEXT_LIMIT * 0.2);
-const JEV_EFFECTIVE_LIMIT = JEV_CONTEXT_LIMIT - JEV_HEADROOM;
+const TYPESAFE_CONTEXT_UNVERIFIED = 'typesafe-model-context-unverified';
 const JEV_MEASUREMENT_METHOD = 'utf8-bytes-div-3+20%-reserve/v1';
 
 function requestBody(request: DecisionRequest, model: string): Record<string, unknown> {
@@ -59,29 +53,39 @@ function requestBody(request: DecisionRequest, model: string): Record<string, un
   return { model, state: request.state, questions: { [question.id]: { type: question.type, instructions: question.instructions, ...(criteria === undefined ? {} : { criteria }) } } };
 }
 
-export function measureJevContext(request: DecisionRequest, model: string): ProviderContextFit {
+export function measureJevContext(request: DecisionRequest, model: string, route: JevConfig['route'] = 'openrouter'): ProviderContextFit {
   const serialized = JSON.stringify(requestBody(request, model));
   const bytes = Buffer.byteLength(serialized, 'utf8');
   const tokens = Math.ceil(bytes / 3);
-  const knownModel = model === JEV_MODEL;
+  const contextLimit = jevMetadata(route, model)?.contextLimit ?? null;
+  const headroomTokens = contextLimit === null ? null : Math.ceil(contextLimit * 0.2);
+  const effectiveLimit = contextLimit === null ? null : contextLimit - Math.ceil(contextLimit * 0.2);
+  const status = effectiveLimit === null ? 'unavailable' : tokens > effectiveLimit ? 'overflow' : 'fits';
   return {
-    provider: 'jev', status: !knownModel ? 'unavailable' : tokens > JEV_EFFECTIVE_LIMIT ? 'overflow' : 'fits',
+    provider: 'jev', status,
     method: JEV_MEASUREMENT_METHOD, modelIdentity: model, tokenCount: 'estimated', tokens,
-    contextLimit: JEV_CONTEXT_LIMIT, headroomTokens: JEV_HEADROOM, effectiveLimit: JEV_EFFECTIVE_LIMIT,
-    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20 },
-    ...(!knownModel ? { reason: 'model-context-unknown' } : tokens > JEV_EFFECTIVE_LIMIT ? { reason: 'estimated-context-over-limit' } : {}),
+    contextLimit, headroomTokens, effectiveLimit,
+    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20, ...(contextLimit === null ? {} : { contextEvidenceDate: jevMetadata(route, model)?.contextEvidence?.checkedOn ?? 'unrecorded' }) },
+    ...(status === 'unavailable' ? { reason: route === 'typesafe' ? TYPESAFE_CONTEXT_UNVERIFIED : 'model-context-unknown' } : status === 'overflow' ? { reason: 'estimated-context-over-limit' } : {}),
   };
 }
 
 export class JevProvider implements DecisionProvider {
+  private readonly config: JevConfig;
+  private readonly credentialStore: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'>;
+  private readonly measureContext: (request: DecisionRequest, config: JevConfig) => ProviderContextFit;
+
   constructor(
-    private readonly config: JevConfig,
+    config: JevConfigInput,
     private readonly fetchRequest: typeof fetch = fetch,
+    options: {
+      credentialStore?: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'>;
+      measureContext?: (request: DecisionRequest, config: JevConfig) => ProviderContextFit;
+    } = {},
   ) {
-    if (config.kind !== 'jev' || !config.model || !config.keyEnv || !config.endpoint ||
-        !Number.isInteger(config.timeoutMs) || config.timeoutMs < 1) {
-      throw new TypeError('Jev configuration requires a model, key environment name, endpoint, and positive timeout.');
-    }
+    this.config = jevConfigSchema.parse(config);
+    this.credentialStore = options.credentialStore ?? new WindowsCredentialStore();
+    this.measureContext = options.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
   }
 
   async decide(request: DecisionRequest, maxAttempts: number): Promise<DecisionResult> {
@@ -94,10 +98,9 @@ export class JevProvider implements DecisionProvider {
     }
     const fit = this.measure(parsedRequest.data);
     if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed', undefined, fit, parsedRequest.data.question.id);
-    const apiKey = process.env[this.config.keyEnv];
-    if (!apiKey) {
-      throw new JevCallError(`Jev API key environment variable ${this.config.keyEnv} is not set.`, 0, 'not_billed');
-    }
+    let apiKey: string;
+    try { apiKey = await this.credentialStore.readForAuthentication(this.config.route); }
+    catch { throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, 'not_billed'); }
 
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -181,7 +184,7 @@ export class JevProvider implements DecisionProvider {
   }
 
   measure(request: DecisionRequest): ProviderContextFit {
-    return measureJevContext(request, this.config.model);
+    return this.measureContext(request, this.config);
   }
 }
 

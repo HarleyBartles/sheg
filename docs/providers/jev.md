@@ -1,64 +1,78 @@
-# Jev wire contract
+# Jev provider routes
 
-## Configuration
+Sheg supports two explicit Jev routes. A missing route in an existing config
+continues to mean OpenRouter. New configs should select a route deliberately;
+the presence of a saved key never selects or switches routes.
 
-Set the environment variable named by `keyEnv` in the environment launching Codex. Never put the secret in a manifest, plugin file, or chat. Every hosted run requires `maxUsd` and `maxPerCallUsd`. Routine checks use fake transports and make no paid provider calls.
+| Route | Default model | Default endpoint | Windows Credential Manager target |
+| --- | --- | --- | --- |
+| `openrouter` | `typesafe/jev-1.13` | `https://openrouter.ai/api/alpha/decisions` | `Sheg/Jev/OpenRouter` |
+| `typesafe` | `jev-latest` | `https://api.typesafe.ai/v1/systemone` | `Sheg/Jev/TypeSafe` |
 
-## Evidence checked
+Every Jev key is read from the selected target in the current user's Windows
+Credential Manager. Sheg does not read environment variables or accept a key
+source in configuration. To connect a key, use the bundled local helper:
 
-Checked 2026-09-27 against OpenRouter's current Decisions API reference and
-TypeScript examples. The Decisions endpoint is an alpha API, so verify this
-contract again when upgrading the adapter.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\dist\credentials\windows-credential.ps1 -Operation Setup -TargetName Sheg/Jev/TypeSafe
+```
 
-## Context preflight
+Use `Sheg/Jev/OpenRouter` to connect OpenRouter. The helper prompts without
+echoing the key and writes directly to Credential Manager. Run `Status` to
+check an entry, `Setup` again to replace it, or `Remove` to delete it. The
+setup prompt is local and interactive; never paste a key into chat or an MCP
+tool argument. Windows Credential Manager is the only secure-store backend in
+this implementation. macOS Keychain and Linux Secret Service support are
+future work.
 
-For the pinned `typesafe/jev-1.13` model, preflight estimates tokens as the
-UTF-8 byte length of the exact serialized request divided by three, rounded up.
-It reserves 20% of the configured 32,768-token context (6,554 tokens), so the
-estimate must be at most 26,214. This is an estimate, not provider-reported
-usage. Other Jev model identifiers are unavailable to preflight until their
-context limit is explicitly supported. Runtime applies this check before any
-network request.
+## Provider evidence
 
-- Endpoint: `POST https://openrouter.ai/api/alpha/decisions`
-- Authentication: `Authorization: Bearer <OpenRouter API key>`
-- Request: `{ model, state, questions }`
-- Choice question: `{ type: "choice", instructions, criteria }`, where
-  `criteria` maps every offered stable option ID to its description.
-- Score question: `{ type: "score", instructions, criteria }`, where
-  `criteria` is the ordered rubric. The answer retains `score`, a numeric-keyed
-  `legend`, and numeric-keyed `probabilities`.
-- Noul question: `{ type: "noul", instructions, criteria }`, where `criteria`
-  may describe `true` and `false`. The answer retains `noul`, the probability
-  that the proposition is true.
-- Response: `answers[questionId]` contains `type: "choice"`, `choice`,
-  `probabilities`, and `confidence`. The envelope reports the actual `model`,
-  provider, and `usage` with `input_tokens`, `output_tokens`, and `cost`.
-- `usage.cost` is the provider-reported monetary amount. Missing cost evidence
-  must not be replaced with zero.
-- The API response has no request-latency field. The adapter records elapsed
-  wall time locally.
-- Choice, Score, and Noul are encoded as distinct question types. The adapter
-  validates each answer against the authored task before recording it; typed
-  values are never coerced into Choice.
-- Starting or resuming inference rejects a missing key before creating or relaunching a run. Keyless `poll_check` remains available.
+The adapter uses Node `fetch` for both routes. It sends the configured model,
+state, and typed question to the selected endpoint with bearer authentication.
+Choice, Score, and Noul answers are validated at the adapter boundary and
+normalized into the same domain result. Missing cost evidence does not make a
+valid answer invalid.
 
-## Transport and retry policy
+The TypeSafe System One request is `POST /v1/systemone` with bearer
+authentication. Its response reports `model`, `answers`, and token usage. The
+JavaScript SDK has its own retries, so Sheg does not add the SDK and keeps
+physical request counting in the fetch adapter.
 
-The OpenRouter TypeScript SDK has a typed Decisions operation and exposes
-request retry configuration on its request methods. This adapter uses Node's
-`fetch` directly so its small retry loop owns and counts every physical request
-against the run's hard call allowance; no SDK retry layer is involved.
+OpenRouter's Decisions endpoint is an alpha API. Its response may include
+`usage.cost`; when present, Sheg records that as provider-reported evidence.
+TypeSafe's published rate is $0.042 per million input tokens, with output
+tokens listed as free. Sheg may estimate per-decision cost from complete
+response token counts using that rate and label it as a published-rate
+estimate. Account-specific billing remains visible in the selected provider's
+dashboard. Sheg does not present a cumulative bill or spend ceiling.
 
-Count every request that reaches the transport as one attempt. Retry network
-errors and HTTP 429, 500, 502, 503, 524, and 529 responses, bounded by the
-provider call's `maxAttempts`. Do not retry other HTTP statuses. A failed or
-timed-out attempt may have reached billing even if no response was received;
-report its charge as unknown and let the run controller require reconciliation
-before a later resume. Reconcile only against the provider's verified total for all unresolved calls; `poll_reconcile` and the CLI `reconcile` command record that total without resetting call usage. Never include the API key or response body in an error.
+Context fit is model-specific. OpenRouter's pinned `typesafe/jev-1.13` path
+retains the existing 32,768-token context assumption and estimates request
+tokens as serialized UTF-8 bytes divided by three, rounded up, with a 20%
+reserve. TypeSafe's native docs and model metadata do not publish a context
+limit, so native preflight reports fit as unverified and a paid request is
+blocked until that evidence exists. The OpenRouter limit is not transferred to
+the native route by analogy.
+
+## Attempts and recovery
+
+`maxCalls` bounds physical provider attempts, including retries. It is
+independent of the study's per-respondent `maxDecisions` journey limit. A
+failed or interrupted request consumes its attempt allowance because the
+provider may have received it. Unknown billing does not block resume and does
+not require reconciliation. Per-decision cost evidence is optional and is not
+summed into a run total.
+
+Route, model, and effective endpoint are part of execution identity. Changing
+any of these prevents resuming a run with different provider behavior.
+Credential rotation does not change execution identity.
 
 ## References
 
+- [TypeSafe API introduction](https://docs.typesafe.ai/introduction)
+- [TypeSafe JavaScript SDK guide](https://docs.typesafe.ai/sdk/javascript)
+- [TypeSafe JavaScript SDK v0.6.0 client](https://github.com/typesafe-ai/typesafe-sdk-js/blob/v0.6.0/src/client.ts)
+- [TypeSafe OpenAPI](https://api.typesafe.ai/openapi.json)
+- [TypeSafe pricing announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
 - [OpenRouter Decisions API reference](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request)
-- [OpenRouter's TypeScript Jev example](https://openrouter.ai/blog/tutorials/how-to-use-jev/)
-- [OpenRouter TypeScript SDK overview](https://openrouter.ai/docs/client-sdks/typescript/overview)
+- [Microsoft CredWrite](https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credwritea)

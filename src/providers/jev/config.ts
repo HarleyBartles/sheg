@@ -14,13 +14,15 @@ const routeDefaults = {
   },
 } satisfies Record<JevRoute, { model: string; endpoint: string }>;
 
-export const jevConfigSchema = z.object({
+export const jevConfigInputSchema = z.object({
   kind: z.literal('jev'),
   route: jevRouteSchema.optional(),
   model: z.string().min(1).optional(),
   endpoint: z.string().url().optional(),
   timeoutMs: z.number().int().positive().optional(),
-}).strict().transform((input) => {
+}).strict();
+
+export const jevConfigSchema = jevConfigInputSchema.transform((input) => {
   const route = input.route ?? 'openrouter';
   const defaults = routeDefaults[route];
   return {

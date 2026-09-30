@@ -11,7 +11,10 @@ import { RunManager, checkStudy } from '../src/application/run-manager.js';
 import { CheckpointStore, emptyBudgetSnapshot } from '../src/infrastructure/checkpoint-store.js';
 import { ProcessLock, ProcessLockError } from '../src/infrastructure/process-lock.js';
 
-const missingKey = 'SHEG_PRELAUNCH_MISSING_KEY';
+const missingCredentialStore = {
+  availability: async () => 'missing' as const,
+  readForAuthentication: async () => { throw new Error('missing'); },
+};
 
 test('CLI start rejects a missing Jev key before creating a run', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'sheg-missing-key-'));
@@ -21,16 +24,20 @@ test('CLI start rejects a missing Jev key before creating a run', async (t) => {
   await writeFile(configPath, JSON.stringify({
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
     outputDirectory, maxCalls: 4, maxUsd: 0.1, maxPerCallUsd: 0.01,
-    provider: { kind: 'jev', model: 'test-jev', keyEnv: missingKey, endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 5000 },
+    provider: { kind: 'jev', model: 'test-jev', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 5000 },
   }));
   const errors: string[] = []; const output: string[] = [];
-  const exitCode = await runCli(['start', '--config', configPath], { out: (value) => { output.push(value); return true; }, error: (value) => { errors.push(value); return true; } });
+  const previousKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'environment-key-must-not-authenticate';
+  const exitCode = await runCli(['start', '--config', configPath], { out: (value) => { output.push(value); return true; }, error: (value) => { errors.push(value); return true; } }, new RunManager({ credentialStore: missingCredentialStore }));
+  if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = previousKey;
   if (exitCode === 0) {
     const runId = JSON.parse(output[0] ?? '{}').runId as string;
     await runCli(['cancel', '--output', outputDirectory, '--run-id', runId], { out: () => true, error: () => true });
   }
   assert.equal(exitCode, 1);
-  assert.match(JSON.parse(errors[0] ?? '{}').error, /SHEG_PRELAUNCH_MISSING_KEY.*not set/);
+  assert.match(JSON.parse(errors[0] ?? '{}').error, /openrouter secure credential is missing/i);
   assert.deepEqual(await new CheckpointStore(outputDirectory).list(), []);
 });
 
@@ -92,7 +99,7 @@ test('resume rejects a missing Jev key before relaunching a partial run', async 
   t.after(() => rm(directory, { recursive: true, force: true }));
   const { store, runId } = await createBlockedRun(directory);
   await store.update(runId, (current) => ({ ...current, budget: { ...current.budget, reservedUsd: 0, unpricedReservations: 0, blocked: false } }));
-  const manager = new RunManager();
+  const manager = new RunManager({ credentialStore: missingCredentialStore });
   let failure: unknown;
   try { await manager.resumeRun(directory, runId); } catch (error) { failure = error; }
   if (!failure) {
@@ -107,7 +114,7 @@ test('resume rejects a missing Jev key before relaunching a partial run', async 
       }
     }
   }
-  assert.match(failure instanceof Error ? failure.message : '', /SHEG_PRELAUNCH_MISSING_KEY.*not set/);
+  assert.match(failure instanceof Error ? failure.message : '', /openrouter secure credential is missing/i);
   assert.equal((await store.read(runId)).status, 'partial');
 });
 
@@ -115,7 +122,7 @@ async function createBlockedRun(directory: string): Promise<{ store: CheckpointS
   const checked = await checkStudy({
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
     outputDirectory: directory, maxCalls: 4, maxUsd: 0.1, maxPerCallUsd: 0.01,
-    provider: { kind: 'jev', model: 'test-jev', keyEnv: missingKey, endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 5000 },
+    provider: { kind: 'jev', model: 'test-jev', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 5000 },
   });
   const store = new CheckpointStore(directory);
   const budget = { ...emptyBudgetSnapshot(4, 0.1), usedCalls: 1, remainingCalls: 3, reservedUsd: 0.01, unpricedReservations: 1, blocked: true };

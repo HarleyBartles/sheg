@@ -7,16 +7,12 @@ import type { DecisionRequest } from '../src/domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import type { RespondentPerspective } from '../src/domain/respondents/profile.js';
 import { measurePacketBatch, type PacketSizingInput } from '../src/application/packet-sizing.js';
+import { defaultJevConfig } from '../src/providers/jev/config.js';
 
 const tokenizerJsonPath = fileURLToPath(new URL('./fixtures/laya-tokenizer.json', import.meta.url));
 const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerJsonPath)).digest('hex');
-const jev = {
-  kind: 'jev' as const,
-  model: 'typesafe/jev-1.13',
-  keyEnv: 'SHEG_PACKET_SIZING_TEST_KEY_UNSET',
-  endpoint: 'https://example.invalid/api/decisions',
-  timeoutMs: 1_000,
-};
+const missingCredentialStore = { availability: async () => 'missing' as const, readForAuthentication: async () => { throw new Error('missing'); } };
+const jev = defaultJevConfig();
 const laya = {
   kind: 'laya' as const,
   baseUrl: 'http://127.0.0.1:8787',
@@ -240,14 +236,13 @@ test('rejects case and serialized packet bounds before invoking provider measure
 });
 
 test('keeps provider fit separate from configuration and never turns unavailable measurements into fit claims', async () => {
-  delete process.env[jev.keyEnv];
   const factory = providerFactory((request, config) => {
     const identity = config.kind === 'jev' ? config.model : config.checkpoint;
     return config.kind === 'jev'
       ? { ...fit(config.kind, identity, 42), status: 'unavailable', reason: 'model-context-unknown' }
       : fit(config.kind, identity, 42);
   });
-  const result = await measurePacketBatch(input(), { createProvider: factory.createProvider });
+  const result = await measurePacketBatch(input(), { createProvider: factory.createProvider, credentialStore: missingCredentialStore });
   const summary = result.providers[0]!;
   const measurement = result.cases[0]!.measurements[0]!;
 
@@ -273,7 +268,6 @@ test('reports positive arithmetic headroom without overriding a provider truncat
 });
 
 test('uses Jev measurement offline without requiring credentials or invoking fetch', async () => {
-  delete process.env[jev.keyEnv];
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
   globalThis.fetch = async () => {
@@ -282,7 +276,7 @@ test('uses Jev measurement offline without requiring credentials or invoking fet
   };
   let result: Awaited<ReturnType<typeof measurePacketBatch>> | undefined;
   try {
-    result = await measurePacketBatch(input());
+    result = await measurePacketBatch(input(), { credentialStore: missingCredentialStore });
   } finally {
     globalThis.fetch = originalFetch;
   }

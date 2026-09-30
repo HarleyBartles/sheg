@@ -29,7 +29,7 @@ function checkpoint(directory: string, overrides: Partial<RunCheckpoint> = {}): 
     status: 'prepared', createdAt: now, updatedAt: now,
     manifestPath: path.join(directory, 'study.json'), cohortPath: path.join(directory, 'cohort.json'),
     outputDirectory: directory,
-    provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'JEV_API_KEY', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
+    provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
     maxCalls: 10, maxUsd: 1, maxPerCallUsd: 0.05, concurrency: 2,
     stimulusFingerprint: 'a'.repeat(64), executionFingerprint: 'b'.repeat(64),
     sourceHashes: ['c'.repeat(64)], respondentIds: ['reader-a', 'reader-b'], journeys: [], activeCellIds: [],
@@ -48,7 +48,7 @@ test('checkpoint store writes an atomic versioned record without source text or 
   assert.deepEqual(await store.list(), [loaded]);
   const raw = await readFile(path.join(directory, `run-${created.runId}.json`), 'utf8');
   assert.doesNotMatch(raw, /JEV_API_KEY=.secret|source prose that should not persist/);
-  assert.match(raw, /"keyEnv": "JEV_API_KEY"/);
+  assert.match(raw, /"route": "typesafe"/);
   await assert.rejects(store.create(checkpoint(directory, { runId: created.runId })), /already exists/);
 });
 
@@ -78,7 +78,7 @@ test('checkpoint rejects unrecognized fields and malformed provider provenance',
   const store = new CheckpointStore(directory);
   await assert.rejects(store.create({ ...checkpoint(directory), credential: 'do-not-store' } as never));
   await assert.rejects(store.create(checkpoint(directory, {
-    provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'JEV_API_KEY', endpoint: 'not-a-url', timeoutMs: 5000 },
+    provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'not-a-url', timeoutMs: 5000 },
   } as never)));
 });
 

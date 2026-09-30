@@ -9,15 +9,16 @@ import { BudgetLedger } from '../domain/budget-ledger.js';
 import { CheckpointStore, emptyBudgetSnapshot, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import { executionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 import { ProcessLock, ProcessLockError } from '../infrastructure/process-lock.js';
-import { JevProvider, type JevConfig } from '../providers/jev.js';
+import { JevProvider, jevConfigInputSchema, jevConfigSchema, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type FitMeasurer, type LayaConfig } from '../providers/laya.js';
+import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import { runWorker } from './worker.js';
 import { estimateRunDecisionCalls, type RunDecisionCallBounds } from '../domain/journey/route-bounds.js';
 
 const configSchema = z.object({
   manifestPath: z.string().min(1), cohortPath: z.string().min(1),
-  provider: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('jev'), model: z.string().min(1), keyEnv: z.string().min(1), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict(),
+  provider: z.union([
+    jevConfigInputSchema.transform((input) => jevConfigSchema.parse(input)),
     z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
   ]),
   outputDirectory: z.string().min(1), maxCalls: z.number().int().positive(), maxUsd: z.number().finite().positive().optional(),
@@ -34,7 +35,11 @@ const configSchema = z.object({
 export type RunConfig = z.input<typeof configSchema>;
 type ParsedConfig = z.output<typeof configSchema>;
 export type CheckedStudy = { config: ParsedConfig; study: Awaited<ReturnType<typeof loadStudy>>; stimulusFingerprint: string; executionFingerprint: string; runBounds: RunDecisionCallBounds & { maximumCallsConfigured: number; maximumCallsSufficient: boolean; spendCeilingUsd?: number } };
-export type JobOptions = { measureLayaFit?: FitMeasurer; providerFactory?: (config: ParsedConfig['provider']) => DecisionProvider };
+export type JobOptions = {
+  measureLayaFit?: FitMeasurer;
+  providerFactory?: (config: ParsedConfig['provider']) => DecisionProvider;
+  credentialStore?: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'>;
+};
 
 export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
   const parsed = configSchema.parse(config);
@@ -59,12 +64,15 @@ export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
 
 export class RunManager {
   private readonly active = new Map<string, Promise<void>>();
-  constructor(private readonly options: JobOptions = {}) {}
+  private readonly credentialStore: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'>;
+  constructor(private readonly options: JobOptions = {}) {
+    this.credentialStore = options.credentialStore ?? new WindowsCredentialStore();
+  }
 
   async startRun(config: RunConfig): Promise<RunCheckpoint> {
     const checked = await checkStudy(config);
     const { config: c, study } = checked;
-    requireJevKey(c.provider);
+    await requireJevCredential(c.provider, this.credentialStore);
     await mkdir(c.outputDirectory, { recursive: true });
     const runId = randomUUID();
     const store = new CheckpointStore(c.outputDirectory);
@@ -137,7 +145,7 @@ export class RunManager {
         : checked.config.provider)
       : checked.executionFingerprint;
     if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error('Study or execution settings changed since this run was prepared.');
-    requireJevKey(checkpoint.provider);
+    await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
       if (checkpoint.budget.blocked) throw new Error('Unpriced calls must be reconciled before resume.');
@@ -151,7 +159,7 @@ export class RunManager {
 
   private launch(store: CheckpointStore, checkpoint: RunCheckpoint, lock: Awaited<ReturnType<typeof ProcessLock.acquire>>): void {
     const provider = this.options.providerFactory?.(checkpoint.provider) ?? (checkpoint.provider.kind === 'jev'
-      ? new JevProvider(checkpoint.provider as JevConfig)
+      ? new JevProvider(checkpoint.provider as JevConfig, fetch, { credentialStore: this.credentialStore })
       : new LayaProvider(checkpoint.provider as LayaConfig, { ...(this.options.measureLayaFit === undefined ? {} : { measureFit: this.options.measureLayaFit }) }));
     const task = runWorker(store, checkpoint, provider).then(() => undefined).catch(async () => {
       await store.update(checkpoint.runId, (current) => ({ ...current, status: 'failed', activeCellIds: [], updatedAt: new Date().toISOString() }));
@@ -165,8 +173,8 @@ function cleanBudget(snapshot: RunCheckpoint['budget']) {
   return { ...rest, ...(maxUsd === undefined ? {} : { maxUsd }) };
 }
 
-function requireJevKey(provider: ParsedConfig['provider']): void {
-  if (provider.kind === 'jev' && !process.env[provider.keyEnv]?.trim()) {
-    throw new Error(`Jev API key environment variable ${provider.keyEnv} is not set. Set it in the process environment before starting or resuming a run.`);
-  }
+async function requireJevCredential(provider: ParsedConfig['provider'], credentialStore: Pick<WindowsCredentialStore, 'availability'>): Promise<void> {
+  if (provider.kind !== 'jev') return;
+  const availability = await credentialStore.availability(provider.route);
+  if (availability !== 'available') throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
 }

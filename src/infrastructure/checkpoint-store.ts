@@ -6,9 +6,13 @@ import type { JourneyResult } from '../domain/journey/run.js';
 import { decisionResultSchema, decisionValueSchema, type DecisionResult } from '../domain/decision/decision.js';
 import type { BudgetSnapshot } from '../domain/budget-ledger.js';
 import { ProcessLock } from './process-lock.js';
+import { jevConfigInputSchema, jevConfigSchema } from '../providers/jev/config.js';
 
-const providerConfigSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('jev'), model: z.string().min(1), keyEnv: z.string().min(1), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict(),
+const legacyJevProviderConfigSchema = z.object({ kind: z.literal('jev'), model: z.string().min(1), keyEnv: z.string().min(1), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict()
+  .transform((legacy) => jevConfigSchema.parse({ kind: 'jev', model: legacy.model, endpoint: legacy.endpoint, timeoutMs: legacy.timeoutMs }));
+const providerConfigSchema = z.union([
+  jevConfigInputSchema.transform((config) => jevConfigSchema.parse(config)),
+  legacyJevProviderConfigSchema,
   z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
 ]);
 

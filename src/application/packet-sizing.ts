@@ -6,8 +6,9 @@ import type { DecisionRequest } from '../domain/decision/decision.js';
 import { compileDecisionRequest, questionForTask, type DecisionPacketParts, type TrajectorySummary } from '../domain/decision/prompt.js';
 import { stimulusItemSchema } from '../domain/study/stimulus.js';
 import { taskSchema, type StudyTask } from '../domain/study/task.js';
-import { JevProvider, type JevConfig } from '../providers/jev.js';
+import { JevProvider, jevConfigSchema, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type LayaConfig } from '../providers/laya.js';
+import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 
 export const MAX_PACKET_SIZING_CASES = 1_000;
 export const MAX_PACKET_SIZING_BYTES = 16 * 1024 * 1024;
@@ -49,14 +50,8 @@ const variantSchema = <T extends z.ZodType>(valueSchema: T) => z.object({
   value: valueSchema,
 }).strict();
 
-const providerConfigSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('jev'),
-    model: z.string().min(1),
-    keyEnv: z.string().min(1),
-    endpoint: z.string().url(),
-    timeoutMs: z.number().int().positive(),
-  }).strict(),
+const providerConfigSchema = z.union([
+  jevConfigSchema,
   z.object({
     kind: z.literal('laya'),
     baseUrl: z.string().url(),
@@ -132,6 +127,7 @@ export type PacketSizingResult = {
 
 export type PacketSizingDependencies = {
   createProvider?: (config: ProviderConfig) => DecisionProvider;
+  credentialStore?: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'>;
 };
 
 const dimensions = ['respondents', 'stimuli', 'tasks', 'trajectories'] as const;
@@ -158,8 +154,10 @@ export async function measurePacketBatch(rawInput: PacketSizingInput, dependenci
     }
   }
 
-  const providers = input.providers.map((config) => {
-    const provider = dependencies.createProvider?.(config) ?? createProvider(config);
+  const credentialStore = dependencies.credentialStore ?? new WindowsCredentialStore();
+  const providers = input.providers.map((providerInput) => {
+    const config = providerInput.kind === 'jev' ? jevConfigSchema.parse(providerInput) : providerInput;
+    const provider = dependencies.createProvider?.(config) ?? createProvider(config, credentialStore);
     return { config, providerId: providerId(config), provider, modelIdentity: modelIdentity(config) };
   });
   const cases: PacketSizingResult['cases'] = [];
@@ -181,7 +179,7 @@ export async function measurePacketBatch(rawInput: PacketSizingInput, dependenci
     complete: true,
     combination: input.combination,
     caseCount,
-    providers: providers.map(({ config, providerId: id, modelIdentity }) => {
+    providers: await Promise.all(providers.map(async ({ config, providerId: id, modelIdentity }) => {
       const measurements = providerMeasurements.get(id) ?? [];
       const measured = measurements.filter(({ measurement }) => measurement.status !== 'unavailable' && measurement.tokens !== null)
         .sort((left, right) => (right.measurement.tokens! - left.measurement.tokens!) || left.caseId.localeCompare(right.caseId));
@@ -192,11 +190,11 @@ export async function measurePacketBatch(rawInput: PacketSizingInput, dependenci
         providerId: id,
         provider: config.kind,
         modelIdentity,
-        configuration: config.kind === 'jev' && !process.env[config.keyEnv]?.trim() ? 'incomplete' as const : 'configured' as const,
+        configuration: config.kind === 'jev' && await credentialStore.availability(config.route) !== 'available' ? 'incomplete' as const : 'configured' as const,
         status,
         largestCase: first ? { caseId: first.caseId, tokens: first.measurement.tokens! } : null,
       };
-    }),
+    })),
     cases,
   };
 }
@@ -226,6 +224,9 @@ async function measureOne(provider: DecisionProvider, config: ProviderConfig, id
       details: fit.details,
       ...(fit.reason === undefined ? {} : { reason: fit.reason }),
     };
+  }
+  if (fit.contextLimit === null || fit.effectiveLimit === null || fit.headroomTokens === null) {
+    return unavailableMeasurement(config, id, identity, 'context-limit-unverified');
   }
   return {
     providerId: id,
@@ -260,8 +261,8 @@ function unavailableMeasurement(config: ProviderConfig, id: string, identity: st
   };
 }
 
-function createProvider(config: ProviderConfig): DecisionProvider {
-  return config.kind === 'jev' ? new JevProvider(config as JevConfig) : new LayaProvider(config as LayaConfig);
+function createProvider(config: ProviderConfig, credentialStore: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'>): DecisionProvider {
+  return config.kind === 'jev' ? new JevProvider(config as JevConfig, fetch, { credentialStore }) : new LayaProvider(config as LayaConfig);
 }
 
 function expandedCaseCount(combination: 'paired' | 'cartesian', variants: Record<typeof dimensions[number], Variant<unknown>[]>): number {
@@ -327,5 +328,5 @@ function providerId(config: ProviderConfig): string {
 }
 
 function modelIdentity(config: ProviderConfig): string {
-  return config.kind === 'jev' ? config.model : config.checkpoint;
+  return config.kind === 'jev' ? `${config.route}:${config.model}` : config.checkpoint;
 }

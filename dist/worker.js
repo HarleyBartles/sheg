@@ -7,7 +7,7 @@ var __export = (target, all) => {
 // src/application/run-manager.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { mkdir as mkdir3 } from "node:fs/promises";
-import path5 from "node:path";
+import path6 from "node:path";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -825,10 +825,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1168,11 +1168,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -1622,16 +1622,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1670,17 +1670,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1719,8 +1719,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18822,13 +18822,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path7 = ref.slice(1).split("/").filter(Boolean);
+  if (path7.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
+  if (path7[0] === defsKey) {
+    const key = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -20576,9 +20576,42 @@ function processExists(pid) {
   }
 }
 
+// src/providers/jev/config.ts
+var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
+var routeDefaults = {
+  openrouter: {
+    model: "typesafe/jev-1.13",
+    endpoint: "https://openrouter.ai/api/alpha/decisions"
+  },
+  typesafe: {
+    model: "jev-latest",
+    endpoint: "https://api.typesafe.ai/v1/systemone"
+  }
+};
+var jevConfigInputSchema = external_exports.object({
+  kind: external_exports.literal("jev"),
+  route: jevRouteSchema.optional(),
+  model: external_exports.string().min(1).optional(),
+  endpoint: external_exports.string().url().optional(),
+  timeoutMs: external_exports.number().int().positive().optional()
+}).strict();
+var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
+  const route = input2.route ?? "openrouter";
+  const defaults = routeDefaults[route];
+  return {
+    kind: "jev",
+    route,
+    model: input2.model ?? defaults.model,
+    endpoint: input2.endpoint ?? defaults.endpoint,
+    timeoutMs: input2.timeoutMs ?? 3e4
+  };
+});
+
 // src/infrastructure/checkpoint-store.ts
-var providerConfigSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict(),
+var legacyJevProviderConfigSchema = external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict().transform((legacy) => jevConfigSchema.parse({ kind: "jev", model: legacy.model, endpoint: legacy.endpoint, timeoutMs: legacy.timeoutMs }));
+var providerConfigSchema = external_exports.union([
+  jevConfigInputSchema.transform((config2) => jevConfigSchema.parse(config2)),
+  legacyJevProviderConfigSchema,
   external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
 ]);
 var journeyResultSchema = external_exports.object({
@@ -20808,7 +20841,12 @@ function executionFingerprint(stimulus, provider) {
   if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
   let decisionSettings;
   if (provider.kind === "jev") {
-    decisionSettings = { kind: provider.kind, model: requireText(provider.model, "Jev model") };
+    decisionSettings = {
+      kind: provider.kind,
+      route: provider.route ?? "openrouter",
+      model: requireText(provider.model, "Jev model"),
+      ...provider.endpoint === void 0 ? {} : { endpoint: provider.endpoint }
+    };
   } else {
     decisionSettings = {
       kind: provider.kind,
@@ -20923,6 +20961,145 @@ function validateDistribution(distribution, expectedIds, label) {
   }
 }
 
+// src/providers/jev/model-metadata.ts
+var jevModelMetadata = {
+  openrouter: {
+    "typesafe/jev-1.13": {
+      contextLimit: 32768,
+      contextEvidence: {
+        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
+        checkedOn: "2026-09-30"
+      },
+      inputUsdPerMillion: 0.042,
+      outputUsdPerMillion: 0,
+      priceEvidence: {
+        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
+        checkedOn: "2026-09-30"
+      }
+    }
+  },
+  typesafe: {
+    "jev-latest": {
+      contextLimit: null,
+      inputUsdPerMillion: 0.042,
+      outputUsdPerMillion: 0,
+      priceEvidence: {
+        sourceUrl: "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
+        checkedOn: "2026-09-30"
+      }
+    }
+  }
+};
+function jevMetadata(route, model) {
+  return jevModelMetadata[route][model];
+}
+
+// src/infrastructure/credentials/windows.ts
+import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path4 from "node:path";
+import { fileURLToPath } from "node:url";
+var defaultTargets = {
+  typesafe: "Sheg/Jev/TypeSafe",
+  openrouter: "Sheg/Jev/OpenRouter"
+};
+var WindowsCredentialStore = class {
+  targets;
+  helperPath;
+  run;
+  constructor(options2 = {}) {
+    this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    this.helperPath = options2.helperPath ?? locateHelper();
+    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
+  }
+  async availability(route) {
+    try {
+      const result = await this.run(this.arguments("Status", route));
+      if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
+      if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
+      return "unavailable";
+    } catch {
+      return "unavailable";
+    }
+  }
+  async readForAuthentication(route) {
+    let result;
+    try {
+      result = await this.run(this.arguments("Read", route));
+    } catch {
+      throw new Error(`The ${route} secure credential could not be read.`);
+    }
+    const key = result.stdout.replace(/\r?\n$/, "");
+    if (result.code !== 0 || !key) throw new Error(`The ${route} secure credential could not be read.`);
+    return key;
+  }
+  async setup(route) {
+    const result = await this.run(this.arguments("Setup", route), true);
+    if (result.code !== 0) throw new Error(`The ${route} secure credential could not be saved.`);
+  }
+  async remove(route) {
+    const result = await this.run(this.arguments("Remove", route));
+    if (result.code !== 0 && result.code !== 3) throw new Error(`The ${route} secure credential could not be removed.`);
+  }
+  arguments(operation, route) {
+    return ["-Operation", operation, "-TargetName", this.targets[route]];
+  }
+};
+function locateHelper() {
+  const moduleDirectory = path4.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path4.join(moduleDirectory, "windows-credential.ps1"),
+    path4.join(moduleDirectory, "credentials", "windows-credential.ps1")
+  ];
+  const helper = candidates.find(existsSync);
+  if (!helper) throw new Error("The Windows credential helper is unavailable.");
+  return helper;
+}
+async function runPowerShell(helperPath, args, interactive = false) {
+  if (process.platform !== "win32") throw new Error("Windows secure credentials are unavailable on this platform.");
+  const childArgs = [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File"
+  ];
+  if (interactive) childArgs.splice(2, 1);
+  childArgs.push(helperPath, ...args);
+  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name) => process.env[name] === void 0 ? [] : [[name, process.env[name]]]));
+  return new Promise((resolve, reject) => {
+    const child = nodeSpawn("powershell.exe", childArgs, {
+      windowsHide: !interactive,
+      shell: false,
+      stdio: interactive ? ["inherit", "inherit", "ignore"] : ["ignore", "pipe", "ignore"],
+      env
+    });
+    let stdout = "";
+    let settled = false;
+    const finish = (error62, code = 1) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error62) reject(error62);
+      else resolve({ code, stdout, stderr: "" });
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(new Error("Credential helper timed out."));
+    }, interactive ? 3e5 : 1e4);
+    if (!interactive) child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > 16384) {
+        child.kill();
+        finish(new Error("Credential helper output exceeded its limit."));
+      }
+    });
+    child.once("error", () => finish(new Error("Credential helper could not start.")));
+    child.once("close", (code) => finish(void 0, code ?? 1));
+  });
+}
+
 // src/providers/jev.ts
 var JevCallError = class extends Error {
   constructor(message, attempts, chargeStatus, chargeUsd, contextFit, decisionId) {
@@ -20959,45 +21136,46 @@ var wireResponseSchema = external_exports.object({
   }).passthrough()
 }).passthrough();
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
-var JEV_MODEL = "typesafe/jev-1.13";
-var JEV_CONTEXT_LIMIT = 32768;
-var JEV_HEADROOM = Math.ceil(JEV_CONTEXT_LIMIT * 0.2);
-var JEV_EFFECTIVE_LIMIT = JEV_CONTEXT_LIMIT - JEV_HEADROOM;
+var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
 function requestBody(request, model) {
   const { question } = request;
   const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
   return { model, state: request.state, questions: { [question.id]: { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } } } };
 }
-function measureJevContext(request, model) {
+function measureJevContext(request, model, route = "openrouter") {
   const serialized = JSON.stringify(requestBody(request, model));
   const bytes = Buffer.byteLength(serialized, "utf8");
   const tokens = Math.ceil(bytes / 3);
-  const knownModel = model === JEV_MODEL;
+  const contextLimit = jevMetadata(route, model)?.contextLimit ?? null;
+  const headroomTokens = contextLimit === null ? null : Math.ceil(contextLimit * 0.2);
+  const effectiveLimit = contextLimit === null ? null : contextLimit - Math.ceil(contextLimit * 0.2);
+  const status2 = effectiveLimit === null ? "unavailable" : tokens > effectiveLimit ? "overflow" : "fits";
   return {
     provider: "jev",
-    status: !knownModel ? "unavailable" : tokens > JEV_EFFECTIVE_LIMIT ? "overflow" : "fits",
+    status: status2,
     method: JEV_MEASUREMENT_METHOD,
     modelIdentity: model,
     tokenCount: "estimated",
     tokens,
-    contextLimit: JEV_CONTEXT_LIMIT,
-    headroomTokens: JEV_HEADROOM,
-    effectiveLimit: JEV_EFFECTIVE_LIMIT,
-    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20 },
-    ...!knownModel ? { reason: "model-context-unknown" } : tokens > JEV_EFFECTIVE_LIMIT ? { reason: "estimated-context-over-limit" } : {}
+    contextLimit,
+    headroomTokens,
+    effectiveLimit,
+    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20, ...contextLimit === null ? {} : { contextEvidenceDate: jevMetadata(route, model)?.contextEvidence?.checkedOn ?? "unrecorded" } },
+    ...status2 === "unavailable" ? { reason: route === "typesafe" ? TYPESAFE_CONTEXT_UNVERIFIED : "model-context-unknown" } : status2 === "overflow" ? { reason: "estimated-context-over-limit" } : {}
   };
 }
 var JevProvider = class {
-  constructor(config2, fetchRequest = fetch) {
-    this.config = config2;
+  constructor(config2, fetchRequest = fetch, options2 = {}) {
     this.fetchRequest = fetchRequest;
-    if (config2.kind !== "jev" || !config2.model || !config2.keyEnv || !config2.endpoint || !Number.isInteger(config2.timeoutMs) || config2.timeoutMs < 1) {
-      throw new TypeError("Jev configuration requires a model, key environment name, endpoint, and positive timeout.");
-    }
+    this.config = jevConfigSchema.parse(config2);
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
+    this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
   }
-  config;
   fetchRequest;
+  config;
+  credentialStore;
+  measureContext;
   async decide(request, maxAttempts) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       throw new JevCallError("Jev call limit must be a positive integer.", 0, "not_billed");
@@ -21008,9 +21186,11 @@ var JevProvider = class {
     }
     const fit = this.measure(parsedRequest.data);
     if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed", void 0, fit, parsedRequest.data.question.id);
-    const apiKey = process.env[this.config.keyEnv];
-    if (!apiKey) {
-      throw new JevCallError(`Jev API key environment variable ${this.config.keyEnv} is not set.`, 0, "not_billed");
+    let apiKey;
+    try {
+      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+    } catch {
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, "not_billed");
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -21086,7 +21266,7 @@ var JevProvider = class {
     throw new JevCallError("Jev call limit reached without a response.", attempts, "unknown");
   }
   measure(request) {
-    return measureJevContext(request, this.config.model);
+    return this.measureContext(request, this.config);
   }
 };
 function retryDelayMs(attempt) {
@@ -21096,7 +21276,7 @@ function retryDelayMs(attempt) {
 // src/providers/laya/context-fit.ts
 import { createHash as createHash4 } from "node:crypto";
 import { readFile as readFile4, stat } from "node:fs/promises";
-import path4 from "node:path";
+import path5 from "node:path";
 
 // src/providers/laya/vendor/sequence.ts
 function pyJson(v) {
@@ -21325,7 +21505,7 @@ var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
 var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
 var tokenizerCache = /* @__PURE__ */ new Map();
 async function tokenizerPromise(config2) {
-  const absolutePath = path4.resolve(config2.tokenizerJsonPath);
+  const absolutePath = path5.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
   const metadata2 = await stat(absolutePath, { bigint: true });
   const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
@@ -21854,8 +22034,8 @@ function graphDecisionRange(arm) {
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
   cohortPath: external_exports.string().min(1),
-  provider: external_exports.discriminatedUnion("kind", [
-    external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict(),
+  provider: external_exports.union([
+    jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
     external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
   ]),
   outputDirectory: external_exports.string().min(1),
@@ -21875,10 +22055,10 @@ async function checkStudy(config2) {
   const parsed = configSchema.parse(config2);
   const normalized = {
     ...parsed,
-    manifestPath: path5.resolve(parsed.manifestPath),
-    cohortPath: path5.resolve(parsed.cohortPath),
-    outputDirectory: path5.resolve(parsed.outputDirectory),
-    provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path5.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
+    manifestPath: path6.resolve(parsed.manifestPath),
+    cohortPath: path6.resolve(parsed.cohortPath),
+    outputDirectory: path6.resolve(parsed.outputDirectory),
+    provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path6.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
   };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
   const routeBounds = estimateRunDecisionCalls(study.manifest.arms, study.respondents);
@@ -21897,13 +22077,15 @@ async function checkStudy(config2) {
 var RunManager = class {
   constructor(options2 = {}) {
     this.options = options2;
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
   }
   options;
   active = /* @__PURE__ */ new Map();
+  credentialStore;
   async startRun(config2) {
     const checked = await checkStudy(config2);
     const { config: c, study } = checked;
-    requireJevKey(c.provider);
+    await requireJevCredential(c.provider, this.credentialStore);
     await mkdir3(c.outputDirectory, { recursive: true });
     const runId2 = randomUUID4();
     const store = new CheckpointStore(c.outputDirectory);
@@ -21941,7 +22123,7 @@ var RunManager = class {
     }
   }
   async runStatus(outputDirectory2, runId2) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory2));
+    const store = new CheckpointStore(path6.resolve(outputDirectory2));
     const checkpoint = await store.read(runId2);
     if (checkpoint.status === "running" && !this.active.has(runId2)) {
       try {
@@ -21961,13 +22143,13 @@ var RunManager = class {
     return checkpoint;
   }
   async cancelRun(outputDirectory2, runId2) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory2));
+    const store = new CheckpointStore(path6.resolve(outputDirectory2));
     await store.update(runId2, (current) => ({ ...current, cancellationRequested: true, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
     await this.active.get(runId2);
     return store.read(runId2);
   }
   async reconcileRun(outputDirectory2, runId2, unpricedUsd) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory2));
+    const store = new CheckpointStore(path6.resolve(outputDirectory2));
     await store.read(runId2);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
     try {
@@ -21983,13 +22165,13 @@ var RunManager = class {
     }
   }
   async resumeRun(outputDirectory2, runId2) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory2));
+    const store = new CheckpointStore(path6.resolve(outputDirectory2));
     let checkpoint = await store.read(runId2);
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
     const compatibleExecutionFingerprint = checkpoint.formatVersion === 2 ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === "laya" ? { kind: "laya", checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...checked.config.provider.precision === void 0 ? {} : { precision: checked.config.provider.precision } } : checked.config.provider) : checked.executionFingerprint;
     if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
-    requireJevKey(checkpoint.provider);
+    await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
     try {
       if (checkpoint.budget.blocked) throw new Error("Unpriced calls must be reconciled before resume.");
@@ -22002,10 +22184,10 @@ var RunManager = class {
     }
   }
   async readCheckpoint(outputDirectory2, runId2) {
-    return new CheckpointStore(path5.resolve(outputDirectory2)).read(runId2);
+    return new CheckpointStore(path6.resolve(outputDirectory2)).read(runId2);
   }
   launch(store, checkpoint, lock) {
-    const provider = this.options.providerFactory?.(checkpoint.provider) ?? (checkpoint.provider.kind === "jev" ? new JevProvider(checkpoint.provider) : new LayaProvider(checkpoint.provider, { ...this.options.measureLayaFit === void 0 ? {} : { measureFit: this.options.measureLayaFit } }));
+    const provider = this.options.providerFactory?.(checkpoint.provider) ?? (checkpoint.provider.kind === "jev" ? new JevProvider(checkpoint.provider, fetch, { credentialStore: this.credentialStore }) : new LayaProvider(checkpoint.provider, { ...this.options.measureLayaFit === void 0 ? {} : { measureFit: this.options.measureLayaFit } }));
     const task = runWorker(store, checkpoint, provider).then(() => void 0).catch(async () => {
       await store.update(checkpoint.runId, (current) => ({ ...current, status: "failed", activeCellIds: [], updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
     }).finally(async () => {
@@ -22019,10 +22201,10 @@ function cleanBudget(snapshot) {
   const { maxUsd, ...rest } = snapshot;
   return { ...rest, ...maxUsd === void 0 ? {} : { maxUsd } };
 }
-function requireJevKey(provider) {
-  if (provider.kind === "jev" && !process.env[provider.keyEnv]?.trim()) {
-    throw new Error(`Jev API key environment variable ${provider.keyEnv} is not set. Set it in the process environment before starting or resuming a run.`);
-  }
+async function requireJevCredential(provider, credentialStore) {
+  if (provider.kind !== "jev") return;
+  const availability = await credentialStore.availability(provider.route);
+  if (availability !== "available") throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
 }
 
 // src/entrypoints/worker.ts

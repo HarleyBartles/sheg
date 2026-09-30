@@ -28,7 +28,7 @@ async function setup(t: TestContext) {
   const checkpoint: RunCheckpoint = {
     formatVersion: 3, runId: '53a0c895-695b-4bb5-a5e5-b9304fc8b2aa', status: 'completed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     manifestPath: path.join(directory, 'study.json'), cohortPath: path.join(directory, 'cohort.json'), outputDirectory: directory,
-    provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'JEV_API_KEY', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
+    provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
     maxCalls: 10, maxUsd: 1, maxPerCallUsd: 0.1, concurrency: 2, stimulusFingerprint: '', executionFingerprint: '', sourceHashes: [],
     respondentIds: ['curious-outside-reader', 'craft-reader'], journeys: [
       { armId: 'original', respondentId: 'curious-outside-reader', status: 'completed', result: { events: [{ type: 'exposure', sequence: 0, nodeId: 'sequence-expose-symptom', itemId: 'symptom' }, { type: 'choice', sequence: 1, nodeId: 'sequence-ask-entry-response', taskId: 'entry-response', choice: 'unanswerable' }], outcome: 'completed', status: 'completed', decisionCount: 1 }, decisions: [{ decisionId: 'entry-response', requestFingerprint: 'd'.repeat(64), result: decision('unanswerable') }], attemptHistory: [], presentedTaskIds: ['entry-response'] },
@@ -38,14 +38,14 @@ async function setup(t: TestContext) {
   };
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions' });
   checkpoint.sourceHashes = study.sources.map((source) => source.sha256);
   return { directory, checkpoint };
 }
 async function refreshStudyIdentity(checkpoint: RunCheckpoint): Promise<void> {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions' });
 }
 
 test('report keeps a per-arm matched denominator and answer-key scoring distinct', async (t) => {
@@ -72,7 +72,7 @@ test('reports legacy version-2 Choice checkpoints with their original prompt and
   checkpoint.formatVersion = 2;
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   checkpoint.stimulusFingerprint = legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash);
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions' });
   const report = await buildReport(checkpoint);
   assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.completed, 1);
 });
@@ -110,7 +110,7 @@ test('reports Score and Noul evidence with typed cohort summaries', async (t) =>
   });
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions' });
   checkpoint.sourceHashes = study.sources.map((source) => source.sha256);
 
   const report = await buildReport(checkpoint);
