@@ -9,7 +9,7 @@ test('CLI help lists all supported workflow commands', async () => {
   const lines: string[] = [];
   const status = await runCli(['--help'], { out: (text) => { lines.push(text); return true; }, error: (text) => { lines.push(text); return true; } });
   assert.equal(status, 0);
-  for (const command of ['check', 'preflight', 'trace', 'start', 'status', 'cancel', 'reconcile', 'resume', 'report', 'compare', 'compare-runs']) assert.match(lines[0] ?? '', new RegExp(command));
+  for (const command of ['check', 'preflight', 'trace', 'start', 'status', 'cancel', 'resume', 'report', 'compare', 'compare-runs']) assert.match(lines[0] ?? '', new RegExp(command));
 });
 
 test('CLI check validates explicit provider config without key or network', async (t) => {
@@ -18,7 +18,7 @@ test('CLI check validates explicit provider config without key or network', asyn
   const configPath = path.join(directory, 'run.json');
   await writeFile(configPath, JSON.stringify({
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), outputDirectory: directory,
-    maxCalls: 10, maxUsd: 1, maxPerCallUsd: 0.1,
+    maxCalls: 10,
     provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
   }));
   const output: string[] = []; const errors: string[] = [];

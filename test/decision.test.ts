@@ -24,8 +24,7 @@ function result(overrides: Partial<Extract<DecisionResult, { type: 'choice' }>> 
     model: 'typesafe/jev-1.13',
     latencyMs: 120,
     usage: { inputTokens: 18, outputTokens: 2 },
-    chargeStatus: 'billed',
-    chargeUsd: 0.0001,
+    cost: { amountUsd: 0.0001, basis: 'provider-reported' },
     ...overrides,
   };
 }
@@ -95,32 +94,19 @@ test('enforces attempt limits and configured provider identity', () => {
   }
 });
 
-test('requires billed cost and refuses invented local zero-cost billing', () => {
-  const missingBilledCost = result();
-  delete missingBilledCost.chargeUsd;
-  assert.throws(() => validateDecision(request, missingBilledCost), /billed.*cost/i);
-  const localWithInventedCost = result({
-    provider: 'laya',
-    model: 'local-checkpoint',
-    chargeStatus: 'not_billed',
-    chargeUsd: 0,
-  });
-  assert.throws(() => validateDecision(request, localWithInventedCost), /charge/i);
+test('accepts decisions without cost evidence and validates evidence provenance when present', () => {
+  const resultWithoutCost = { ...result() } as Record<string, unknown>;
+  delete resultWithoutCost.cost;
+  const accepted = validateDecision(request, resultWithoutCost);
+  assert.equal(accepted.cost, undefined);
 
-  const unbilledLocal = result({
-    provider: 'laya',
-    model: 'local-checkpoint',
-    checkpoint: 'local-checkpoint',
-    chargeStatus: 'not_billed',
-  });
-  delete unbilledLocal.chargeUsd;
-  const local = validateDecision(request, unbilledLocal, {
-    maxAttempts: 1,
-    provider: 'laya',
-    checkpoint: 'local-checkpoint',
-  });
-  assert.equal(local.chargeStatus, 'not_billed');
-  assert.equal(local.chargeUsd, undefined);
+  assert.equal(validateDecision(request, { ...resultWithoutCost, cost: { amountUsd: 0.0001, basis: 'provider-reported' } }).cost?.basis, 'provider-reported');
+  assert.equal(validateDecision(request, { ...resultWithoutCost, cost: { amountUsd: 0.0001, basis: 'published-rate-estimate' } }).cost?.basis, 'published-rate-estimate');
+  for (const cost of [
+    { amountUsd: -0.01, basis: 'provider-reported' },
+    { amountUsd: Number.NaN, basis: 'published-rate-estimate' },
+    { amountUsd: 0.01, basis: 'invented' },
+  ]) assert.throws(() => validateDecision(request, { ...resultWithoutCost, cost }), DecisionError);
 });
 
 test('validates typed Score and Noul responses without converting them to Choice', () => {
@@ -132,7 +118,7 @@ test('validates typed Score and Noul responses without converting them to Choice
     type: 'score', score: 1.25, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' },
     probabilities: { '0': 0.25, '1': 0.25, '2': 0.5 }, confidence: 0.8,
     attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 120,
-    usage: { inputTokens: 18, outputTokens: 2 }, chargeStatus: 'billed', chargeUsd: 0.0001,
+    usage: { inputTokens: 18, outputTokens: 2 }, cost: { amountUsd: 0.0001, basis: 'provider-reported' },
   };
   const score = validateDecision(scoreRequest, scoreResult);
   assert.equal(score.type, 'score');
@@ -146,7 +132,7 @@ test('validates typed Score and Noul responses without converting them to Choice
   } as unknown as DecisionRequest;
   const noul = validateDecision(noulRequest, {
     type: 'noul', noul: 0.74, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 120,
-    usage: { inputTokens: 18, outputTokens: 2 }, chargeStatus: 'billed', chargeUsd: 0.0001,
+    usage: { inputTokens: 18, outputTokens: 2 }, cost: { amountUsd: 0.0001, basis: 'provider-reported' },
   });
   assert.equal(noul.type, 'noul');
   assert.equal(noul.noul, 0.74);
@@ -161,7 +147,7 @@ test('rejects out-of-domain typed values, incomplete evidence, and responses wit
     type: 'score', score: 1, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' },
     probabilities: { '0': 0.2, '1': 0.3, '2': 0.5 },
     attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 120,
-    usage: { inputTokens: 18, outputTokens: 2 }, chargeStatus: 'billed', chargeUsd: 0.0001,
+    usage: { inputTokens: 18, outputTokens: 2 }, cost: { amountUsd: 0.0001, basis: 'provider-reported' },
   };
   for (const invalid of [
     { ...score, type: 'noul', noul: 0.4 },
@@ -181,7 +167,7 @@ test('rejects out-of-domain typed values, incomplete evidence, and responses wit
   for (const noul of [-0.01, 1.01, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.throws(() => validateDecision(noulRequest, {
       type: 'noul', noul, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1,
-      usage: {}, chargeStatus: 'billed', chargeUsd: 0.0001,
+      usage: {}, cost: { amountUsd: 0.0001, basis: 'provider-reported' },
     }), DecisionError);
   }
 });

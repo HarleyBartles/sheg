@@ -20166,6 +20166,10 @@ var identifier5 = external_exports.string().min(1);
 var prose5 = external_exports.string().min(1);
 var probability = external_exports.number().finite().min(0).max(1);
 var probabilities = external_exports.record(external_exports.string(), probability);
+var costEvidenceSchema = external_exports.object({
+  amountUsd: external_exports.number().finite().nonnegative(),
+  basis: external_exports.enum(["provider-reported", "published-rate-estimate"])
+}).strict();
 var metadata = external_exports.object({
   attempts: external_exports.number().int().positive(),
   provider: external_exports.enum(["jev", "laya"]),
@@ -20176,8 +20180,7 @@ var metadata = external_exports.object({
     inputTokens: external_exports.number().int().nonnegative().optional(),
     outputTokens: external_exports.number().int().nonnegative().optional()
   }).strict(),
-  chargeStatus: external_exports.enum(["billed", "not_billed", "unknown"]),
-  chargeUsd: external_exports.number().finite().nonnegative().optional()
+  cost: costEvidenceSchema.optional()
 }).strict();
 var choiceQuestionSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -20348,140 +20351,66 @@ function promptContractHash() {
   return createHash2("sha256").update(JSON.stringify(promptContract)).digest("hex");
 }
 
-// src/domain/budget-ledger.ts
+// src/domain/attempt-ledger.ts
 import { randomUUID } from "node:crypto";
-var BudgetError = class extends Error {
+var AttemptLedgerError = class extends Error {
   constructor(message) {
     super(message);
-    this.name = "BudgetError";
+    this.name = "AttemptLedgerError";
   }
 };
-var BudgetLedger = class _BudgetLedger {
-  constructor(limits) {
-    this.limits = limits;
-    if (!Number.isInteger(limits.maxCalls) || limits.maxCalls < 1) {
-      throw new BudgetError("Call limit must be a positive integer.");
-    }
-    if (limits.maxUsd !== void 0 && (!Number.isFinite(limits.maxUsd) || limits.maxUsd < 0)) {
-      throw new BudgetError("Spend limit must be finite and nonnegative.");
-    }
+var AttemptLedger = class _AttemptLedger {
+  constructor(maxCalls) {
+    this.maxCalls = maxCalls;
+    if (!Number.isSafeInteger(maxCalls) || maxCalls < 1) throw new AttemptLedgerError("Call limit must be a positive safe integer.");
   }
-  limits;
+  maxCalls;
   reservations = /* @__PURE__ */ new Map();
   usedCalls = 0;
   reservedCalls = 0;
-  billedUsd = 0;
-  reservedUsd = 0;
-  unpricedReservations = 0;
-  blocked = false;
   queue = Promise.resolve();
   static restore(snapshot) {
-    const ledger = new _BudgetLedger({ maxCalls: snapshot.maxCalls, ...snapshot.maxUsd === void 0 ? {} : { maxUsd: snapshot.maxUsd } });
+    if (!Number.isSafeInteger(snapshot.maxCalls) || snapshot.maxCalls < 1 || !Number.isSafeInteger(snapshot.usedCalls) || snapshot.usedCalls < 0 || !Number.isSafeInteger(snapshot.reservedCalls) || snapshot.reservedCalls < 0 || !Number.isSafeInteger(snapshot.remainingCalls) || snapshot.remainingCalls < 0 || snapshot.usedCalls + snapshot.reservedCalls > snapshot.maxCalls || snapshot.remainingCalls !== snapshot.maxCalls - snapshot.usedCalls - snapshot.reservedCalls) {
+      throw new AttemptLedgerError("Attempt snapshot is inconsistent or exceeds maxCalls.");
+    }
+    const ledger = new _AttemptLedger(snapshot.maxCalls);
     ledger.usedCalls = snapshot.usedCalls;
     ledger.reservedCalls = snapshot.reservedCalls;
-    ledger.billedUsd = snapshot.billedUsd;
-    ledger.reservedUsd = snapshot.reservedUsd;
-    ledger.unpricedReservations = snapshot.unpricedReservations;
-    ledger.blocked = snapshot.blocked;
     return ledger;
   }
-  markInterruptedReservationsUnpriced() {
-    if (this.reservedCalls === 0) return;
-    this.usedCalls += this.reservedCalls;
-    this.reservedCalls = 0;
-    this.unpricedReservations += 1;
-    this.blocked = true;
-  }
-  reserve(maxAttempts, maxPerCallUsd) {
+  reserve(maxAttempts) {
     return this.serialized(() => {
-      if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new BudgetError("Reservation attempts must be a positive integer.");
-      if (maxPerCallUsd !== void 0 && (!Number.isFinite(maxPerCallUsd) || maxPerCallUsd < 0)) {
-        throw new BudgetError("Per-call allowance must be finite and nonnegative.");
-      }
-      if (this.blocked) throw new BudgetError("New calls are blocked until unpriced charges are reconciled.");
-      if (this.usedCalls + this.reservedCalls + maxAttempts > this.limits.maxCalls) {
-        throw new BudgetError("Reservation exceeds the call cap.");
-      }
-      if (this.limits.maxUsd !== void 0 && maxPerCallUsd === void 0) {
-        throw new BudgetError("A hosted spend cap requires a per-call allowance.");
-      }
-      if (this.limits.maxUsd !== void 0 && maxPerCallUsd === 0) {
-        throw new BudgetError("Per-call allowance must be positive when a hosted spend cap is enabled.");
-      }
-      const perCallUsd = maxPerCallUsd ?? 0;
-      const reservation = {
-        id: randomUUID(),
-        maxAttempts,
-        ...maxPerCallUsd === void 0 ? {} : { maxPerCallUsd }
-      };
-      const reservedUsd = perCallUsd * maxAttempts;
-      if (!Number.isFinite(reservedUsd) || this.limits.maxUsd !== void 0 && this.billedUsd + this.reservedUsd + reservedUsd > this.limits.maxUsd) {
-        throw new BudgetError("Reservation exceeds the spend cap.");
-      }
-      this.reservations.set(reservation.id, { reservation, reservedUsd, perCallUsd, state: "pending" });
+      if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new AttemptLedgerError("Reservation attempts must be a positive safe integer.");
+      if (this.usedCalls + this.reservedCalls + maxAttempts > this.maxCalls) throw new AttemptLedgerError("Reservation exceeds maxCalls.");
+      const reservation = { id: randomUUID(), maxAttempts };
+      this.reservations.set(reservation.id, reservation);
       this.reservedCalls += maxAttempts;
-      this.reservedUsd += reservedUsd;
       return reservation;
     });
   }
   settle(reservation, evidence) {
     return this.serialized(() => {
       const stored = this.reservations.get(reservation.id);
-      if (!stored || stored.state !== "pending" || !sameReservation(stored.reservation, reservation)) {
-        throw new BudgetError("Reservation is unknown, modified, or already settled.");
+      if (!stored || !sameReservation(stored, reservation)) throw new AttemptLedgerError("Reservation is unknown, modified, or already settled.");
+      if (!Number.isSafeInteger(evidence.attempts) || evidence.attempts < 0 || evidence.attempts > stored.maxAttempts) {
+        throw new AttemptLedgerError("Settlement attempts exceed the reservation.");
       }
-      if (!Number.isInteger(evidence.attempts) || evidence.attempts < 0 || evidence.attempts > reservation.maxAttempts) {
-        throw new BudgetError("Settlement attempts exceed the reservation.");
-      }
-      if (evidence.chargeStatus !== "not_billed" && evidence.attempts < 1) {
-        throw new BudgetError("Billed or unpriced settlement requires at least one attempted call.");
-      }
-      if (evidence.chargeStatus === "billed") {
-        if (evidence.chargeUsd === void 0 || !Number.isFinite(evidence.chargeUsd) || evidence.chargeUsd < 0) {
-          throw new BudgetError("Billed settlement requires a finite nonnegative charge.");
-        }
-      } else if (evidence.chargeUsd !== void 0) {
-        throw new BudgetError("Charge evidence requires billed status.");
-      }
-      this.reservedCalls -= reservation.maxAttempts;
+      this.reservations.delete(stored.id);
+      this.reservedCalls -= stored.maxAttempts;
       this.usedCalls += evidence.attempts;
-      this.reservedUsd -= stored.reservedUsd;
-      if (evidence.chargeStatus === "billed") {
-        this.billedUsd += evidence.chargeUsd;
-      } else if (evidence.chargeStatus === "unknown") {
-        const uncertainUsd = stored.perCallUsd * evidence.attempts;
-        this.reservations.delete(reservation.id);
-        this.reservedUsd += uncertainUsd;
-        this.unpricedReservations += 1;
-        this.blocked = true;
-        return;
-      }
-      this.reservations.delete(reservation.id);
     });
   }
-  reconcile(unpricedUsd) {
-    return this.serialized(() => {
-      if (!Number.isFinite(unpricedUsd) || unpricedUsd < 0) throw new BudgetError("Reconciled charges must be finite and nonnegative.");
-      if (this.unpricedReservations === 0) throw new BudgetError("There are no unpriced reservations to reconcile.");
-      if (this.reservedCalls > 0) throw new BudgetError("Cannot reconcile while calls are in flight.");
-      this.reservedUsd = 0;
-      this.billedUsd += unpricedUsd;
-      this.unpricedReservations = 0;
-      this.blocked = false;
-    });
+  consumeInterruptedReservations() {
+    this.usedCalls += this.reservedCalls;
+    this.reservedCalls = 0;
+    this.reservations.clear();
   }
   snapshot() {
     return {
-      maxCalls: this.limits.maxCalls,
-      ...this.limits.maxUsd === void 0 ? {} : { maxUsd: this.limits.maxUsd },
+      maxCalls: this.maxCalls,
       usedCalls: this.usedCalls,
       reservedCalls: this.reservedCalls,
-      remainingCalls: this.limits.maxCalls - this.usedCalls - this.reservedCalls,
-      billedUsd: this.billedUsd,
-      reservedUsd: this.reservedUsd,
-      unpricedReservations: this.unpricedReservations,
-      overspendUsd: this.limits.maxUsd === void 0 ? 0 : Math.max(0, this.billedUsd - this.limits.maxUsd),
-      blocked: this.blocked
+      remainingCalls: this.maxCalls - this.usedCalls - this.reservedCalls
     };
   }
   serialized(operation) {
@@ -20491,7 +20420,7 @@ var BudgetLedger = class _BudgetLedger {
   }
 };
 function sameReservation(left, right) {
-  return left.id === right.id && left.maxAttempts === right.maxAttempts && left.maxPerCallUsd === right.maxPerCallUsd;
+  return left.id === right.id && left.maxAttempts === right.maxAttempts;
 }
 
 // src/infrastructure/checkpoint-store.ts
@@ -20607,222 +20536,6 @@ var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
   };
 });
 
-// src/infrastructure/checkpoint-store.ts
-var legacyJevProviderConfigSchema = external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict().transform((legacy) => jevConfigSchema.parse({ kind: "jev", model: legacy.model, endpoint: legacy.endpoint, timeoutMs: legacy.timeoutMs }));
-var providerConfigSchema = external_exports.union([
-  jevConfigInputSchema.transform((config2) => jevConfigSchema.parse(config2)),
-  legacyJevProviderConfigSchema,
-  external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
-]);
-var journeyResultSchema = external_exports.object({
-  events: external_exports.array(external_exports.discriminatedUnion("type", [
-    external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), itemId: external_exports.string() }).strict(),
-    external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), choice: external_exports.string() }).strict(),
-    external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), result: decisionValueSchema }).strict()
-  ])),
-  outcome: external_exports.string().nullable(),
-  status: external_exports.enum(["completed", "decision-limit"]),
-  decisionCount: external_exports.number().int().nonnegative()
-}).strict();
-var budgetSnapshotSchema = external_exports.object({
-  maxCalls: external_exports.number().int().positive(),
-  maxUsd: external_exports.number().finite().nonnegative().optional(),
-  usedCalls: external_exports.number().int().nonnegative(),
-  reservedCalls: external_exports.number().int().nonnegative(),
-  remainingCalls: external_exports.number().int().nonnegative(),
-  billedUsd: external_exports.number().finite().nonnegative(),
-  reservedUsd: external_exports.number().finite().nonnegative(),
-  unpricedReservations: external_exports.number().int().nonnegative(),
-  overspendUsd: external_exports.number().finite().nonnegative(),
-  blocked: external_exports.boolean()
-}).strict();
-var contextFailureSchema = external_exports.object({
-  decisionId: external_exports.string().min(1),
-  nodeId: external_exports.string().min(1),
-  reason: external_exports.string().min(1),
-  tokens: external_exports.number().int().nonnegative(),
-  effectiveLimit: external_exports.number().int().nonnegative(),
-  measurementMethod: external_exports.string().min(1)
-}).strict();
-var runCheckpointSchema = external_exports.object({
-  formatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]),
-  runId: external_exports.string().uuid(),
-  status: external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled"]),
-  createdAt: external_exports.string().datetime(),
-  updatedAt: external_exports.string().datetime(),
-  manifestPath: external_exports.string().min(1),
-  cohortPath: external_exports.string().min(1),
-  outputDirectory: external_exports.string().min(1),
-  provider: providerConfigSchema,
-  maxCalls: external_exports.number().int().positive(),
-  maxUsd: external_exports.number().finite().nonnegative().optional(),
-  maxPerCallUsd: external_exports.number().finite().positive().optional(),
-  concurrency: external_exports.number().int().positive(),
-  stimulusFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  executionFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  sourceHashes: external_exports.array(external_exports.string().regex(/^[a-f\d]{64}$/i)),
-  respondentIds: external_exports.array(external_exports.string().min(1)),
-  journeys: external_exports.array(external_exports.object({
-    armId: external_exports.string().min(1),
-    respondentId: external_exports.string().min(1),
-    status: external_exports.enum(["completed", "failed", "partial"]),
-    result: journeyResultSchema.optional(),
-    decisions: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
-    attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
-    presentedTaskIds: external_exports.array(external_exports.string().min(1)),
-    failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional(),
-    failureEvidence: contextFailureSchema.optional()
-  }).strict()),
-  activeCellIds: external_exports.array(external_exports.string().min(1)),
-  cancellationRequested: external_exports.boolean(),
-  budget: budgetSnapshotSchema
-}).strict().superRefine((checkpoint, context) => {
-  if (checkpoint.sourceHashes.some((hash2) => hash2.length !== 64)) {
-    context.addIssue({ code: "custom", path: ["sourceHashes"], message: "Source hashes must be SHA-256 values." });
-  }
-  const cellIds = checkpoint.journeys.map((journey) => `${journey.armId}\0${journey.respondentId}`);
-  if (new Set(checkpoint.respondentIds).size !== checkpoint.respondentIds.length || new Set(cellIds).size !== cellIds.length) {
-    context.addIssue({ code: "custom", path: ["respondentIds"], message: "Checkpoint respondent IDs and arm/respondent cells must be unique." });
-  }
-});
-var CheckpointStore = class {
-  constructor(directory) {
-    this.directory = directory;
-  }
-  directory;
-  async create(input2) {
-    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 3, runId: input2.runId ?? randomUUID3() });
-    await mkdir2(this.directory, { recursive: true });
-    const filePath = this.filePath(checkpoint.runId);
-    try {
-      await readFile3(filePath);
-      throw new Error(`Run checkpoint already exists: ${checkpoint.runId}.`);
-    } catch (error62) {
-      if (error62 instanceof Error && error62.message.startsWith("Run checkpoint already exists:")) throw error62;
-      if (error62.code !== "ENOENT") throw error62;
-    }
-    await this.writeAtomic(checkpoint);
-    return checkpoint;
-  }
-  async read(runId2) {
-    let raw;
-    try {
-      raw = await readFile3(this.filePath(runId2), "utf8");
-    } catch (error62) {
-      try {
-        raw = await readFile3(`${this.filePath(runId2)}.bak`, "utf8");
-      } catch {
-        throw new Error(`Run checkpoint ${runId2} is unavailable.`, { cause: error62 });
-      }
-    }
-    let value;
-    try {
-      value = JSON.parse(raw);
-    } catch (error62) {
-      throw new Error(`Run checkpoint ${runId2} is not valid JSON.`, { cause: error62 });
-    }
-    const checkpoint = runCheckpointSchema.safeParse(value);
-    if (!checkpoint.success) throw new Error(`Run checkpoint ${runId2} failed validation.`, { cause: checkpoint.error });
-    if (checkpoint.data.formatVersion === 2) {
-      return {
-        ...checkpoint.data,
-        journeys: checkpoint.data.journeys.map((journey) => ({
-          ...journey,
-          ...journey.result === void 0 ? {} : {
-            result: {
-              ...journey.result,
-              events: journey.result.events.map((event) => event.type === "choice" ? { type: "response", sequence: event.sequence, nodeId: event.nodeId, taskId: event.taskId, result: { type: "choice", choice: event.choice } } : event)
-            }
-          }
-        }))
-      };
-    }
-    return checkpoint.data;
-  }
-  async save(checkpoint) {
-    const parsed = runCheckpointSchema.parse(checkpoint);
-    const existing = await this.read(parsed.runId);
-    if (existing.runId !== parsed.runId) throw new Error("Checkpoint identity changed while saving.");
-    await this.writeAtomic(parsed);
-  }
-  async update(runId2, mutate) {
-    const lock = await ProcessLock.acquire(this.directory, `${runId2}-checkpoint`);
-    try {
-      const current = await this.read(runId2);
-      const updated = runCheckpointSchema.parse(mutate(current));
-      if (updated.runId !== current.runId) throw new Error("Checkpoint identity cannot be changed.");
-      await this.writeAtomic(updated);
-      return updated;
-    } finally {
-      await lock.release();
-    }
-  }
-  async list() {
-    let names;
-    try {
-      names = await readdir(this.directory);
-    } catch (error62) {
-      if (error62.code === "ENOENT") return [];
-      throw error62;
-    }
-    const files = names.filter((name) => /^run-[0-9a-f-]+\.json$/i.test(name)).sort();
-    const checkpoints = [];
-    for (const filename of files) checkpoints.push(await this.read(filename.slice(4, -5)));
-    return checkpoints;
-  }
-  filePath(runId2) {
-    if (!external_exports.string().uuid().safeParse(runId2).success) throw new TypeError("Run ID must be a UUID.");
-    return path3.join(this.directory, `run-${runId2}.json`);
-  }
-  async writeAtomic(checkpoint) {
-    await mkdir2(this.directory, { recursive: true });
-    const target = this.filePath(checkpoint.runId);
-    const temporary = `${target}.${process.pid}.${randomUUID3()}.tmp`;
-    const handle = await open3(temporary, "wx", 384);
-    try {
-      await handle.writeFile(`${JSON.stringify(checkpoint, null, 2)}
-`, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    try {
-      try {
-        await rename2(temporary, target);
-      } catch (error62) {
-        if (!["EPERM", "EEXIST"].includes(error62.code ?? "")) throw error62;
-        const backup = `${target}.bak`;
-        await rm2(backup, { force: true });
-        await rename2(target, backup);
-        try {
-          await rename2(temporary, target);
-          await rm2(backup, { force: true });
-        } catch (replacementError) {
-          await rename2(backup, target).catch(() => void 0);
-          throw replacementError;
-        }
-      }
-    } catch (error62) {
-      await rm2(temporary, { force: true });
-      throw error62;
-    }
-  }
-};
-function emptyBudgetSnapshot(maxCalls, maxUsd) {
-  return {
-    maxCalls,
-    ...maxUsd === void 0 ? {} : { maxUsd },
-    usedCalls: 0,
-    reservedCalls: 0,
-    remainingCalls: maxCalls,
-    billedUsd: 0,
-    reservedUsd: 0,
-    unpricedReservations: 0,
-    overspendUsd: 0,
-    blocked: false
-  };
-}
-
 // src/infrastructure/identity.ts
 import { createHash as createHash3 } from "node:crypto";
 function stimulusFingerprint(study, cohort, promptContractHash2) {
@@ -20859,6 +20572,11 @@ function executionFingerprint(stimulus, provider) {
   }
   return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
 }
+function legacyExecutionFingerprint(stimulus, provider) {
+  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
+  const decisionSettings = provider.kind === "jev" ? { kind: provider.kind, model: requireText(provider.model, "Jev model"), ...provider.endpoint === void 0 ? {} : { endpoint: provider.endpoint } } : { kind: provider.kind, checkpoint: requireText(provider.checkpoint, "Laya checkpoint"), contextLimit: requirePositiveInteger(provider.contextLimit, "Laya context limit"), headLimit: requirePositiveInteger(provider.headLimit, "Laya head limit"), tokenizerSha256: requireText(provider.tokenizerSha256, "Laya tokenizer SHA-256"), ...provider.precision === void 0 ? {} : { precision: provider.precision } };
+  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
+}
 function hashCanonical(value) {
   return createHash3("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
 }
@@ -20885,6 +20603,308 @@ function requireText(value, label) {
 function requirePositiveInteger(value, label) {
   if (!Number.isInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer.`);
   return value;
+}
+
+// src/infrastructure/checkpoint-store.ts
+var legacyJevProviderConfigSchema = external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict().transform((legacy) => jevConfigSchema.parse({ kind: "jev", model: legacy.model, endpoint: legacy.endpoint, timeoutMs: legacy.timeoutMs }));
+var providerConfigSchema = external_exports.union([
+  jevConfigInputSchema.transform((config2) => jevConfigSchema.parse(config2)),
+  legacyJevProviderConfigSchema,
+  external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
+]);
+var journeyResultSchema = external_exports.object({
+  events: external_exports.array(external_exports.discriminatedUnion("type", [
+    external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), itemId: external_exports.string() }).strict(),
+    external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), choice: external_exports.string() }).strict(),
+    external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), result: decisionValueSchema }).strict()
+  ])),
+  outcome: external_exports.string().nullable(),
+  status: external_exports.enum(["completed", "decision-limit"]),
+  decisionCount: external_exports.number().int().nonnegative()
+}).strict();
+var attemptSnapshotSchema = external_exports.object({
+  maxCalls: external_exports.number().int().positive(),
+  usedCalls: external_exports.number().int().nonnegative(),
+  reservedCalls: external_exports.number().int().nonnegative(),
+  remainingCalls: external_exports.number().int().nonnegative()
+}).strict().superRefine((snapshot, context) => {
+  if (snapshot.usedCalls + snapshot.reservedCalls > snapshot.maxCalls || snapshot.remainingCalls !== snapshot.maxCalls - snapshot.usedCalls - snapshot.reservedCalls) {
+    context.addIssue({ code: "custom", message: "Attempt allowance counters must exactly account for maxCalls." });
+  }
+});
+var contextFailureSchema = external_exports.object({
+  decisionId: external_exports.string().min(1),
+  nodeId: external_exports.string().min(1),
+  reason: external_exports.string().min(1),
+  tokens: external_exports.number().int().nonnegative(),
+  effectiveLimit: external_exports.number().int().nonnegative(),
+  measurementMethod: external_exports.string().min(1)
+}).strict();
+var runCheckpointSchema = external_exports.object({
+  formatVersion: external_exports.literal(4),
+  migratedFromFormatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]).optional(),
+  runId: external_exports.string().uuid(),
+  status: external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled"]),
+  createdAt: external_exports.string().datetime(),
+  updatedAt: external_exports.string().datetime(),
+  manifestPath: external_exports.string().min(1),
+  cohortPath: external_exports.string().min(1),
+  outputDirectory: external_exports.string().min(1),
+  provider: providerConfigSchema,
+  maxCalls: external_exports.number().int().positive(),
+  concurrency: external_exports.number().int().positive(),
+  stimulusFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  executionFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  sourceHashes: external_exports.array(external_exports.string().regex(/^[a-f\d]{64}$/i)),
+  respondentIds: external_exports.array(external_exports.string().min(1)),
+  journeys: external_exports.array(external_exports.object({
+    armId: external_exports.string().min(1),
+    respondentId: external_exports.string().min(1),
+    status: external_exports.enum(["completed", "failed", "partial"]),
+    result: journeyResultSchema.optional(),
+    decisions: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
+    attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
+    presentedTaskIds: external_exports.array(external_exports.string().min(1)),
+    failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional(),
+    failureEvidence: contextFailureSchema.optional()
+  }).strict()),
+  activeCellIds: external_exports.array(external_exports.string().min(1)),
+  cancellationRequested: external_exports.boolean(),
+  budget: attemptSnapshotSchema
+}).strict().superRefine((checkpoint, context) => {
+  if (checkpoint.sourceHashes.some((hash2) => hash2.length !== 64)) {
+    context.addIssue({ code: "custom", path: ["sourceHashes"], message: "Source hashes must be SHA-256 values." });
+  }
+  const cellIds = checkpoint.journeys.map((journey) => `${journey.armId}\0${journey.respondentId}`);
+  if (new Set(checkpoint.respondentIds).size !== checkpoint.respondentIds.length || new Set(cellIds).size !== cellIds.length) {
+    context.addIssue({ code: "custom", path: ["respondentIds"], message: "Checkpoint respondent IDs and arm/respondent cells must be unique." });
+  }
+});
+var legacyBudgetSchema = external_exports.object({
+  maxCalls: external_exports.number().int().positive(),
+  maxUsd: external_exports.number().finite().nonnegative().optional(),
+  usedCalls: external_exports.number().int().nonnegative(),
+  reservedCalls: external_exports.number().int().nonnegative(),
+  remainingCalls: external_exports.number().int().nonnegative(),
+  billedUsd: external_exports.number().finite().nonnegative(),
+  reservedUsd: external_exports.number().finite().nonnegative(),
+  unpricedReservations: external_exports.number().int().nonnegative(),
+  overspendUsd: external_exports.number().finite().nonnegative(),
+  blocked: external_exports.boolean()
+}).strict();
+function normalizeLegacyShape(value) {
+  if (!isRecord(value) || value.formatVersion !== 2 && value.formatVersion !== 3) return null;
+  const legacyVersion = value.formatVersion;
+  const budget = legacyBudgetSchema.parse(value.budget);
+  if (budget.maxCalls !== value.maxCalls || budget.usedCalls + budget.reservedCalls + budget.remainingCalls !== budget.maxCalls || budget.usedCalls + budget.reservedCalls > budget.maxCalls) throw new Error("Legacy call counters do not account for maxCalls.");
+  if (value.maxUsd !== void 0 && (!Number.isFinite(value.maxUsd) || Number(value.maxUsd) < 0)) throw new Error("Legacy run spend limit is invalid.");
+  if (value.maxPerCallUsd !== void 0 && (!Number.isFinite(value.maxPerCallUsd) || Number(value.maxPerCallUsd) <= 0)) throw new Error("Legacy per-call spend limit is invalid.");
+  const migrated = structuredClone(value);
+  migrated.formatVersion = 4;
+  migrated.migratedFromFormatVersion = legacyVersion;
+  delete migrated.maxUsd;
+  delete migrated.maxPerCallUsd;
+  migrated.provider = normalizeLegacyProvider(migrated.provider);
+  migrated.budget = {
+    maxCalls: budget.maxCalls,
+    usedCalls: budget.usedCalls + budget.reservedCalls,
+    reservedCalls: 0,
+    remainingCalls: budget.maxCalls - budget.usedCalls - budget.reservedCalls
+  };
+  if (!Array.isArray(migrated.journeys)) throw new Error("Legacy checkpoint journeys are invalid.");
+  migrated.journeys = migrated.journeys.map((rawJourney) => {
+    if (!isRecord(rawJourney)) return rawJourney;
+    const journey = { ...rawJourney };
+    for (const key of ["decisions", "attemptHistory"]) {
+      if (!Array.isArray(journey[key])) continue;
+      journey[key] = journey[key].map((rawDecision) => {
+        if (!isRecord(rawDecision) || !isRecord(rawDecision.result)) return rawDecision;
+        return { ...rawDecision, result: normalizeLegacyDecision(rawDecision.result) };
+      });
+    }
+    if (legacyVersion === 2 && isRecord(journey.result) && Array.isArray(journey.result.events)) {
+      journey.result = { ...journey.result, events: journey.result.events.map((event) => isRecord(event) && event.type === "choice" ? { type: "response", sequence: event.sequence, nodeId: event.nodeId, taskId: event.taskId, result: { type: "choice", choice: event.choice } } : event) };
+    }
+    return journey;
+  });
+  return migrated;
+}
+function normalizeLegacyProvider(value) {
+  if (!isRecord(value) || value.kind !== "jev") return value;
+  if (value.keyEnv !== void 0 && typeof value.keyEnv !== "string") throw new Error("Legacy Jev credential metadata is invalid.");
+  const config2 = { ...value };
+  delete config2.keyEnv;
+  return jevConfigSchema.parse({ ...config2, route: config2.route ?? "openrouter" });
+}
+function normalizeLegacyDecision(value) {
+  const { chargeStatus, chargeUsd, ...result } = value;
+  if (chargeStatus !== void 0 && !["billed", "not_billed", "unknown"].includes(String(chargeStatus))) throw new Error("Legacy charge status is invalid.");
+  if (chargeUsd !== void 0 && (typeof chargeUsd !== "number" || !Number.isFinite(chargeUsd) || chargeUsd < 0)) throw new Error("Legacy charge amount is invalid.");
+  if (chargeStatus === "billed" && chargeUsd !== void 0) result.cost = { amountUsd: chargeUsd, basis: "provider-reported" };
+  return result;
+}
+async function migrateLegacyCheckpoint(checkpoint) {
+  const legacyVersion = checkpoint.migratedFromFormatVersion;
+  if (!legacyVersion) return checkpoint;
+  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
+  if (study.sources.length !== checkpoint.sourceHashes.length || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) {
+    throw new Error("Study source hashes changed since the legacy run was prepared.");
+  }
+  const oldStimulus = legacyVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const providerIdentity = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
+  if (oldStimulus !== checkpoint.stimulusFingerprint || legacyExecutionFingerprint(oldStimulus, providerIdentity) !== checkpoint.executionFingerprint) {
+    throw new Error("Legacy study or provider identity changed since the run was prepared.");
+  }
+  const nextStimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  return runCheckpointSchema.parse({
+    ...checkpoint,
+    stimulusFingerprint: nextStimulus,
+    executionFingerprint: executionFingerprint(nextStimulus, providerIdentity),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var CheckpointStore = class {
+  constructor(directory) {
+    this.directory = directory;
+  }
+  directory;
+  async create(input2) {
+    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 4, runId: input2.runId ?? randomUUID3() });
+    await mkdir2(this.directory, { recursive: true });
+    const filePath = this.filePath(checkpoint.runId);
+    try {
+      await readFile3(filePath);
+      throw new Error(`Run checkpoint already exists: ${checkpoint.runId}.`);
+    } catch (error62) {
+      if (error62 instanceof Error && error62.message.startsWith("Run checkpoint already exists:")) throw error62;
+      if (error62.code !== "ENOENT") throw error62;
+    }
+    await this.writeAtomic(checkpoint);
+    return checkpoint;
+  }
+  async read(runId2) {
+    const initial = await this.readValue(runId2);
+    const current = runCheckpointSchema.safeParse(initial);
+    if (current.success) return current.data;
+    const runLock = await ProcessLock.acquire(this.directory, `run-${runId2}`);
+    try {
+      const checkpointLock = await ProcessLock.acquire(this.directory, `${runId2}-checkpoint`);
+      try {
+        return await this.readCurrentOrMigrate(runId2);
+      } finally {
+        await checkpointLock.release();
+      }
+    } finally {
+      await runLock.release();
+    }
+  }
+  async save(checkpoint) {
+    const parsed = runCheckpointSchema.parse(checkpoint);
+    const existing = await this.read(parsed.runId);
+    if (existing.runId !== parsed.runId) throw new Error("Checkpoint identity changed while saving.");
+    await this.writeAtomic(parsed);
+  }
+  async update(runId2, mutate) {
+    await this.read(runId2);
+    const lock = await ProcessLock.acquire(this.directory, `${runId2}-checkpoint`);
+    try {
+      const current = await this.readCurrentOrMigrate(runId2);
+      const updated = runCheckpointSchema.parse(mutate(current));
+      if (updated.runId !== current.runId) throw new Error("Checkpoint identity cannot be changed.");
+      await this.writeAtomic(updated);
+      return updated;
+    } finally {
+      await lock.release();
+    }
+  }
+  async list() {
+    let names;
+    try {
+      names = await readdir(this.directory);
+    } catch (error62) {
+      if (error62.code === "ENOENT") return [];
+      throw error62;
+    }
+    const files = names.filter((name) => /^run-[0-9a-f-]+\.json$/i.test(name)).sort();
+    const checkpoints = [];
+    for (const filename of files) checkpoints.push(await this.read(filename.slice(4, -5)));
+    return checkpoints;
+  }
+  filePath(runId2) {
+    if (!external_exports.string().uuid().safeParse(runId2).success) throw new TypeError("Run ID must be a UUID.");
+    return path3.join(this.directory, `run-${runId2}.json`);
+  }
+  async readCurrentOrMigrate(runId2) {
+    const value = await this.readValue(runId2);
+    const current = runCheckpointSchema.safeParse(value);
+    if (current.success) return current.data;
+    const legacyShape = normalizeLegacyShape(value);
+    if (!legacyShape) throw new Error(`Run checkpoint ${runId2} failed validation.`, { cause: current.error });
+    let migrated;
+    try {
+      migrated = await migrateLegacyCheckpoint(runCheckpointSchema.parse(legacyShape));
+    } catch (error62) {
+      throw new Error(`Legacy run checkpoint ${runId2} failed migration validation.`, { cause: error62 });
+    }
+    await this.writeAtomic(migrated);
+    return migrated;
+  }
+  async readValue(runId2) {
+    let raw;
+    try {
+      raw = await readFile3(this.filePath(runId2), "utf8");
+    } catch (error62) {
+      try {
+        raw = await readFile3(`${this.filePath(runId2)}.bak`, "utf8");
+      } catch {
+        throw new Error(`Run checkpoint ${runId2} is unavailable.`, { cause: error62 });
+      }
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (error62) {
+      throw new Error(`Run checkpoint ${runId2} is not valid JSON.`, { cause: error62 });
+    }
+  }
+  async writeAtomic(checkpoint) {
+    await mkdir2(this.directory, { recursive: true });
+    const target = this.filePath(checkpoint.runId);
+    const temporary = `${target}.${process.pid}.${randomUUID3()}.tmp`;
+    const handle = await open3(temporary, "wx", 384);
+    try {
+      await handle.writeFile(`${JSON.stringify(checkpoint, null, 2)}
+`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      try {
+        await rename2(temporary, target);
+      } catch (error62) {
+        if (!["EPERM", "EEXIST"].includes(error62.code ?? "")) throw error62;
+        const backup = `${target}.bak`;
+        await rm2(backup, { force: true });
+        await rename2(target, backup);
+        try {
+          await rename2(temporary, target);
+          await rm2(backup, { force: true });
+        } catch (replacementError) {
+          await rename2(backup, target).catch(() => void 0);
+          throw replacementError;
+        }
+      }
+    } catch (error62) {
+      await rm2(temporary, { force: true });
+      throw error62;
+    }
+  }
+};
+function emptyAttemptSnapshot(maxCalls) {
+  return { maxCalls, usedCalls: 0, reservedCalls: 0, remainingCalls: maxCalls };
 }
 
 // src/providers/jev.ts
@@ -20941,12 +20961,6 @@ function validateDecision(request, result, options2 = {}) {
     if (options2[key] !== void 0 && decision[key] !== options2[key]) {
       throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
     }
-  }
-  if (decision.chargeStatus === "billed" && decision.chargeUsd === void 0) {
-    throw new DecisionError("Billed decision is missing cost evidence.");
-  }
-  if (decision.chargeStatus !== "billed" && decision.chargeUsd !== void 0) {
-    throw new DecisionError("Charge amount is present without billed status evidence.");
   }
   return decision;
 }
@@ -21102,18 +21116,14 @@ async function runPowerShell(helperPath, args, interactive = false) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, chargeStatus, chargeUsd, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId) {
     super(message);
     this.attempts = attempts;
-    this.chargeStatus = chargeStatus;
-    this.chargeUsd = chargeUsd;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.name = "JevCallError";
   }
   attempts;
-  chargeStatus;
-  chargeUsd;
   contextFit;
   decisionId;
 };
@@ -21178,19 +21188,19 @@ var JevProvider = class {
   measureContext;
   async decide(request, maxAttempts) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new JevCallError("Jev call limit must be a positive integer.", 0, "not_billed");
+      throw new JevCallError("Jev call limit must be a positive integer.", 0);
     }
     const parsedRequest = decisionRequestSchema.safeParse(request);
     if (!parsedRequest.success) {
-      throw new JevCallError("Jev decision request is invalid.", 0, "not_billed");
+      throw new JevCallError("Jev decision request is invalid.", 0);
     }
     const fit = this.measure(parsedRequest.data);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed", void 0, fit, parsedRequest.data.question.id);
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     let apiKey;
     try {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
     } catch {
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, "not_billed");
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0);
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -21214,33 +21224,34 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary; billing is unknown.", attempts, "unknown");
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
       }
       if (!response.ok) {
         if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}; billing is unknown.`, attempts, "unknown");
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts);
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response; billing is unknown.", attempts, "unknown");
+        throw new JevCallError("Jev returned an unreadable response.", attempts);
       }
       const parsedResponse = wireResponseSchema.safeParse(payload);
       if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields; billing is unknown.", attempts, "unknown");
+        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}; billing is unknown.`, attempts, "unknown");
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts);
       }
       const cost = parsedResponse.data.usage.cost;
-      if (cost === void 0) {
-        throw new JevCallError("Jev response did not report usage cost; billing is unknown.", attempts, "unknown");
-      }
+      const inputTokens = parsedResponse.data.usage.input_tokens;
+      const outputTokens = parsedResponse.data.usage.output_tokens;
+      const metadata2 = jevMetadata(this.config.route, this.config.model);
+      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const result = {
         ...answer.data,
         attempts,
@@ -21248,22 +21259,21 @@ var JevProvider = class {
         model: parsedResponse.data.model,
         latencyMs: performance.now() - startedAt,
         usage: {
-          ...parsedResponse.data.usage.input_tokens === void 0 ? {} : { inputTokens: parsedResponse.data.usage.input_tokens },
-          ...parsedResponse.data.usage.output_tokens === void 0 ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }
+          ...inputTokens === void 0 ? {} : { inputTokens },
+          ...outputTokens === void 0 ? {} : { outputTokens }
         },
-        chargeStatus: "billed",
-        chargeUsd: cost
+        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
       };
       try {
         return validateDecision(request, result, { maxAttempts, provider: "jev" });
       } catch (error62) {
         if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation; the reported charge is retained.", attempts, "billed", cost);
+          throw new JevCallError("Jev response failed decision validation.", attempts);
         }
         throw error62;
       }
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts, "unknown");
+    throw new JevCallError("Jev call limit reached without a response.", attempts);
   }
   measure(request) {
     return this.measureContext(request, this.config);
@@ -21605,16 +21615,14 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, chargeStatus, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId) {
     super(message);
     this.attempts = attempts;
-    this.chargeStatus = chargeStatus;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.name = "LayaCallError";
   }
   attempts;
-  chargeStatus;
   contextFit;
   decisionId;
 };
@@ -21672,13 +21680,13 @@ var LayaProvider = class {
   }
   async decide(request, maxAttempts) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new LayaCallError("Laya call limit must be a positive integer.", 0, "not_billed");
+      throw new LayaCallError("Laya call limit must be a positive integer.", 0);
     }
     const parsedRequest = decisionRequestSchema.safeParse(request);
-    if (!parsedRequest.success) throw new LayaCallError("Laya decision request is invalid.", 0, "not_billed");
+    if (!parsedRequest.success) throw new LayaCallError("Laya decision request is invalid.", 0);
     const fit = await this.measure(parsedRequest.data);
     if (fit.status !== "fits") {
-      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed", fit, parsedRequest.data.question.id);
+      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     }
     const { question } = parsedRequest.data;
     const endpoint = new URL("/v1/systemone", ensureTrailingSlash(this.config.baseUrl)).toString();
@@ -21698,24 +21706,24 @@ var LayaProvider = class {
         signal: AbortSignal.timeout(this.config.timeoutMs)
       });
     } catch {
-      throw new LayaCallError("Laya local service request failed.", 1, "unknown");
+      throw new LayaCallError("Laya local service request failed.", 1);
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, "not_billed");
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1);
     let payload;
     try {
       payload = await response.json();
     } catch {
-      throw new LayaCallError("Laya local service returned unreadable JSON.", 1, "not_billed");
+      throw new LayaCallError("Laya local service returned unreadable JSON.", 1);
     }
     const parsedResponse = responseSchema.safeParse(payload);
     if (!parsedResponse.success) {
-      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1, "not_billed");
+      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1);
     }
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
-      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, "not_billed");
+      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
     }
     const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, "not_billed");
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
     const result = {
       ...answer.data,
       attempts: 1,
@@ -21726,14 +21734,13 @@ var LayaProvider = class {
       usage: {
         ...parsedResponse.data.usage.input_tokens === void 0 ? {} : { inputTokens: parsedResponse.data.usage.input_tokens },
         ...parsedResponse.data.usage.output_tokens === void 0 ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }
-      },
-      chargeStatus: "not_billed"
+      }
     };
     try {
       return validateDecision(request, result, { maxAttempts, provider: "laya", checkpoint: this.config.checkpoint });
     } catch (error62) {
       if (error62 instanceof DecisionError) {
-        throw new LayaCallError("Laya response failed decision validation.", 1, "not_billed");
+        throw new LayaCallError("Laya response failed decision validation.", 1);
       }
       throw error62;
     }
@@ -21820,11 +21827,10 @@ var RunCancelled = class extends Error {
 };
 async function runWorker(store, checkpoint, provider, restoredBudget) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint) throw new Error("Study or provider settings changed since this run was prepared.");
-  const { maxUsd, ...budgetRest } = checkpoint.budget;
-  const ledger = restoredBudget ?? BudgetLedger.restore({ ...budgetRest, ...maxUsd === void 0 ? {} : { maxUsd } });
+  const ledger = restoredBudget ?? AttemptLedger.restore(checkpoint.budget);
   const respondents = new Map(study.respondents.map((respondent) => [respondent.id, respondent]));
   const cells = study.manifest.arms.flatMap((arm) => study.respondents.map((respondent) => ({ arm, respondent, id: cellId(arm.id, respondent.id) })));
   const cursor = { next: 0 };
@@ -21841,11 +21847,12 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
-        const providerRequest = checkpoint.formatVersion === 2 ? legacyChoiceRequest(request) : request;
+        const legacyChoiceReplay = checkpoint.migratedFromFormatVersion === 2;
+        const providerRequest = legacyChoiceReplay ? legacyChoiceRequest(request) : request;
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error("Task sequence changed while recovering the run.");
-          if (replay.requestFingerprint !== requestFingerprint(request) && !(checkpoint.formatVersion === 2 && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error("Rendered task request changed while recovering the run.");
+          if (replay.requestFingerprint !== requestFingerprint(request) && !(legacyChoiceReplay && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error("Rendered task request changed while recovering the run.");
           replayCursor += 1;
           decisions.push(replay);
           return replay.result;
@@ -21855,10 +21862,10 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         if (presentedCount <= completedCount) presentedTaskIds.push(request.question.id);
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
         if (await cancellationRequested(store, checkpoint.runId)) throw new RunCancelled();
-        const reservation = await ledger.reserve(1, checkpoint.provider.kind === "jev" ? checkpoint.maxPerCallUsd : void 0);
+        const reservation = await ledger.reserve(1);
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), activeCellIds: addUnique(current.activeCellIds, id) }));
         if (await cancellationRequested(store, checkpoint.runId)) {
-          await ledger.settle(reservation, { attempts: 0, chargeStatus: "not_billed" });
+          await ledger.settle(reservation, { attempts: 0 });
           throw new RunCancelled();
         }
         failedNodeId = nodeId;
@@ -21870,8 +21877,8 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
           await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
           throw error62;
         }
-        await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd } });
-        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: checkpoint.formatVersion === 2 ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
+        await ledger.settle(reservation, { attempts: decision.attempts });
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: legacyChoiceReplay ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
         return decision;
       } });
@@ -21962,11 +21969,10 @@ function addUnique(values, value) {
   return values.includes(value) ? values : [...values, value];
 }
 function errorEvidence(error62) {
-  if (typeof error62 === "object" && error62 !== null && "attempts" in error62 && typeof error62.attempts === "number" && "chargeStatus" in error62 && ["not_billed", "unknown", "billed"].includes(String(error62.chargeStatus))) {
-    const evidence = error62;
-    return { attempts: evidence.attempts, chargeStatus: evidence.chargeStatus, ...evidence.chargeUsd === void 0 ? {} : { chargeUsd: evidence.chargeUsd } };
+  if (typeof error62 === "object" && error62 !== null && "attempts" in error62 && typeof error62.attempts === "number" && Number.isSafeInteger(error62.attempts) && error62.attempts >= 0) {
+    return { attempts: error62.attempts };
   }
-  return { attempts: 0, chargeStatus: "not_billed" };
+  return { attempts: 0 };
 }
 function isUnsupported(error62) {
   return typeof error62 === "object" && error62 !== null && "message" in error62 && String(error62.message).includes("unsupported-input");
@@ -22040,17 +22046,8 @@ var configSchema = external_exports.object({
   ]),
   outputDirectory: external_exports.string().min(1),
   maxCalls: external_exports.number().int().positive(),
-  maxUsd: external_exports.number().finite().positive().optional(),
-  maxPerCallUsd: external_exports.number().finite().positive().optional(),
   concurrency: external_exports.number().int().min(1).max(64).default(1)
-}).strict().superRefine((value, context) => {
-  if (value.provider.kind === "jev" && (value.maxUsd === void 0 || value.maxPerCallUsd === void 0)) {
-    context.addIssue({ code: "custom", path: ["maxUsd"], message: "Jev runs require maxUsd and maxPerCallUsd." });
-  }
-  if (value.provider.kind === "laya" && (value.maxUsd !== void 0 || value.maxPerCallUsd !== void 0)) {
-    context.addIssue({ code: "custom", path: ["maxUsd"], message: "Local Laya runs do not accept hosted spend caps." });
-  }
-});
+}).strict();
 async function checkStudy(config2) {
   const parsed = configSchema.parse(config2);
   const normalized = {
@@ -22065,10 +22062,7 @@ async function checkStudy(config2) {
   const runBounds = {
     ...routeBounds,
     maximumCallsConfigured: normalized.maxCalls,
-    maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls,
-    ...normalized.provider.kind === "jev" ? {
-      spendCeilingUsd: Math.min(normalized.maxUsd, normalized.maxPerCallUsd * Math.min(routeBounds.maximumDecisionCalls, normalized.maxCalls))
-    } : {}
+    maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls
   };
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === "laya" ? { kind: "laya", checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...normalized.provider.precision === void 0 ? {} : { precision: normalized.provider.precision } } : normalized.provider;
@@ -22102,8 +22096,6 @@ var RunManager = class {
         outputDirectory: c.outputDirectory,
         provider: c.provider,
         maxCalls: c.maxCalls,
-        ...c.maxUsd === void 0 ? {} : { maxUsd: c.maxUsd },
-        ...c.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: c.maxPerCallUsd },
         concurrency: c.concurrency,
         stimulusFingerprint: checked.stimulusFingerprint,
         executionFingerprint: checked.executionFingerprint,
@@ -22112,7 +22104,7 @@ var RunManager = class {
         journeys: [],
         activeCellIds: [],
         cancellationRequested: false,
-        budget: emptyBudgetSnapshot(c.maxCalls, c.maxUsd)
+        budget: emptyAttemptSnapshot(c.maxCalls)
       });
       checkpoint = await store.update(runId2, (current) => ({ ...current, status: "running", updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
       this.launch(store, checkpoint, lock);
@@ -22130,8 +22122,8 @@ var RunManager = class {
         const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
         try {
           const current = await store.read(runId2);
-          const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-          ledger.markInterruptedReservationsUnpriced();
+          const ledger = AttemptLedger.restore(current.budget);
+          ledger.consumeInterruptedReservations();
           return await store.update(runId2, (latest) => ({ ...latest, status: "partial", activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
         } finally {
           await lock.release();
@@ -22148,33 +22140,15 @@ var RunManager = class {
     await this.active.get(runId2);
     return store.read(runId2);
   }
-  async reconcileRun(outputDirectory2, runId2, unpricedUsd) {
-    const store = new CheckpointStore(path6.resolve(outputDirectory2));
-    await store.read(runId2);
-    const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
-    try {
-      const current = await store.read(runId2);
-      if (current.status !== "partial" && current.status !== "failed" && current.status !== "cancelled") {
-        throw new Error("Only a stopped partial, failed, or cancelled run can be reconciled. Check run status first.");
-      }
-      const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-      await ledger.reconcile(unpricedUsd);
-      return await store.update(runId2, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
-    } finally {
-      await lock.release();
-    }
-  }
   async resumeRun(outputDirectory2, runId2) {
     const store = new CheckpointStore(path6.resolve(outputDirectory2));
     let checkpoint = await store.read(runId2);
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
-    const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
-    const compatibleExecutionFingerprint = checkpoint.formatVersion === 2 ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === "laya" ? { kind: "laya", checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...checked.config.provider.precision === void 0 ? {} : { precision: checked.config.provider.precision } } : checked.config.provider) : checked.executionFingerprint;
-    if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
+    const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, concurrency: checkpoint.concurrency });
+    if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
     await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
     try {
-      if (checkpoint.budget.blocked) throw new Error("Unpriced calls must be reconciled before resume.");
       checkpoint = await store.update(runId2, (current) => ({ ...current, status: "running", cancellationRequested: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
       this.launch(store, checkpoint, lock);
       return checkpoint;
@@ -22197,10 +22171,6 @@ var RunManager = class {
     this.active.set(checkpoint.runId, task);
   }
 };
-function cleanBudget(snapshot) {
-  const { maxUsd, ...rest } = snapshot;
-  return { ...rest, ...maxUsd === void 0 ? {} : { maxUsd } };
-}
 async function requireJevCredential(provider, credentialStore) {
   if (provider.kind !== "jev") return;
   const availability = await credentialStore.availability(provider.route);

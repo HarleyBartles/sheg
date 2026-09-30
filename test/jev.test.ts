@@ -114,8 +114,7 @@ test('sends one typed choice and preserves the served model, distribution, usage
     assert.equal(result.model, 'typesafe/jev-1.13-20260917');
     assert.equal(result.attempts, 1);
     assert.deepEqual(result.usage, { inputTokens: 120, outputTokens: 12 });
-    assert.equal(result.chargeStatus, 'billed');
-    assert.equal(result.chargeUsd, 0.00000504);
+    assert.deepEqual(result.cost, { amountUsd: 0.00000504, basis: 'provider-reported' });
     assert.ok(result.latencyMs >= 0);
   } finally {
     restoreKey();
@@ -200,7 +199,7 @@ test('does not retry authentication failures or leak the key in errors', async (
     await assert.rejects(provider.decide(request, 4), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 1);
-      assert.equal(error.chargeStatus, 'unknown');
+      assert.equal(error.attempts, 1);
       assert.equal(error.message.includes('secret-test-key'), false);
       return true;
     });
@@ -210,7 +209,7 @@ test('does not retry authentication failures or leak the key in errors', async (
   }
 });
 
-test('stops after the hard attempt limit and marks an uncertain charge unknown', async () => {
+test('stops after the hard physical-attempt limit and reports observed attempts', async () => {
   const restoreKey = installTestKey();
   try {
     let calls = 0;
@@ -222,7 +221,6 @@ test('stops after the hard attempt limit and marks an uncertain charge unknown',
     await assert.rejects(provider.decide(request, 2), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 2);
-      assert.equal(error.chargeStatus, 'unknown');
       return true;
     });
     assert.equal(calls, 2);
@@ -231,7 +229,7 @@ test('stops after the hard attempt limit and marks an uncertain charge unknown',
   }
 });
 
-test('retains known cost evidence when a billed response fails decision validation', async () => {
+test('does not describe costs in errors when a response fails decision validation', async () => {
   const restoreKey = installTestKey();
   try {
     const invalid = response({
@@ -248,8 +246,8 @@ test('retains known cost evidence when a billed response fails decision validati
     await assert.rejects(provider.decide(request, 1), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 1);
-      assert.equal(error.chargeStatus, 'billed');
-      assert.equal(error.chargeUsd, 0.00000504);
+      assert.equal(error.message.toLowerCase().includes('charge'), false);
+      assert.equal(error.message.toLowerCase().includes('billing'), false);
       return true;
     });
   } finally {
@@ -267,7 +265,6 @@ test('rejects a missing key before attempting a request', async () => {
     await assert.rejects(provider.decide(request, 1), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 0);
-      assert.equal(error.chargeStatus, 'not_billed');
       return true;
     });
   } finally {

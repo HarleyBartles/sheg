@@ -78,7 +78,7 @@ test('provider accepts the routed checkpoint while preserving Laya confidence se
   assert.equal(result.model, 'laya-rl-agent');
   assert.equal(result.checkpoint, config.checkpoint);
   assert.equal(result.confidence, 0.6);
-  assert.equal(result.chargeStatus, 'not_billed');
+  assert.equal(result.cost, undefined);
 });
 
 test('encodes Score and Noul criteria and preserves their typed evidence', async () => {

@@ -4,10 +4,10 @@ import path from 'node:path';
 import { z } from 'zod';
 import { loadStudy } from '../infrastructure/study-loader.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
-import { legacyPromptContractHash, promptContractHash } from '../domain/decision/prompt.js';
-import { BudgetLedger } from '../domain/budget-ledger.js';
-import { CheckpointStore, emptyBudgetSnapshot, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
-import { executionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
+import { promptContractHash } from '../domain/decision/prompt.js';
+import { AttemptLedger } from '../domain/attempt-ledger.js';
+import { CheckpointStore, emptyAttemptSnapshot, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
+import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 import { ProcessLock, ProcessLockError } from '../infrastructure/process-lock.js';
 import { JevProvider, jevConfigInputSchema, jevConfigSchema, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type FitMeasurer, type LayaConfig } from '../providers/laya.js';
@@ -21,20 +21,13 @@ const configSchema = z.object({
     jevConfigInputSchema.transform((input) => jevConfigSchema.parse(input)),
     z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
   ]),
-  outputDirectory: z.string().min(1), maxCalls: z.number().int().positive(), maxUsd: z.number().finite().positive().optional(),
-  maxPerCallUsd: z.number().finite().positive().optional(), concurrency: z.number().int().min(1).max(64).default(1),
-}).strict().superRefine((value, context) => {
-  if (value.provider.kind === 'jev' && (value.maxUsd === undefined || value.maxPerCallUsd === undefined)) {
-    context.addIssue({ code: 'custom', path: ['maxUsd'], message: 'Jev runs require maxUsd and maxPerCallUsd.' });
-  }
-  if (value.provider.kind === 'laya' && (value.maxUsd !== undefined || value.maxPerCallUsd !== undefined)) {
-    context.addIssue({ code: 'custom', path: ['maxUsd'], message: 'Local Laya runs do not accept hosted spend caps.' });
-  }
-});
+  outputDirectory: z.string().min(1), maxCalls: z.number().int().positive(),
+  concurrency: z.number().int().min(1).max(64).default(1),
+}).strict();
 
 export type RunConfig = z.input<typeof configSchema>;
 type ParsedConfig = z.output<typeof configSchema>;
-export type CheckedStudy = { config: ParsedConfig; study: Awaited<ReturnType<typeof loadStudy>>; stimulusFingerprint: string; executionFingerprint: string; runBounds: RunDecisionCallBounds & { maximumCallsConfigured: number; maximumCallsSufficient: boolean; spendCeilingUsd?: number } };
+export type CheckedStudy = { config: ParsedConfig; study: Awaited<ReturnType<typeof loadStudy>>; stimulusFingerprint: string; executionFingerprint: string; runBounds: RunDecisionCallBounds & { maximumCallsConfigured: number; maximumCallsSufficient: boolean } };
 export type JobOptions = {
   measureLayaFit?: FitMeasurer;
   providerFactory?: (config: ParsedConfig['provider']) => DecisionProvider;
@@ -51,9 +44,6 @@ export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
     ...routeBounds,
     maximumCallsConfigured: normalized.maxCalls,
     maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls,
-    ...(normalized.provider.kind === 'jev' ? {
-      spendCeilingUsd: Math.min(normalized.maxUsd!, normalized.maxPerCallUsd! * Math.min(routeBounds.maximumDecisionCalls, normalized.maxCalls)),
-    } : {}),
   };
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === 'laya'
@@ -83,11 +73,10 @@ export class RunManager {
         runId,
         status: 'prepared', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         manifestPath: c.manifestPath, cohortPath: c.cohortPath, outputDirectory: c.outputDirectory,
-        provider: c.provider, maxCalls: c.maxCalls, ...(c.maxUsd === undefined ? {} : { maxUsd: c.maxUsd }),
-        ...(c.maxPerCallUsd === undefined ? {} : { maxPerCallUsd: c.maxPerCallUsd }), concurrency: c.concurrency,
+        provider: c.provider, maxCalls: c.maxCalls, concurrency: c.concurrency,
         stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint,
         sourceHashes: study.sources.map((source) => source.sha256), respondentIds: study.respondents.map((profile) => profile.id),
-        journeys: [], activeCellIds: [], cancellationRequested: false, budget: emptyBudgetSnapshot(c.maxCalls, c.maxUsd),
+        journeys: [], activeCellIds: [], cancellationRequested: false, budget: emptyAttemptSnapshot(c.maxCalls),
       });
       checkpoint = await store.update(runId, (current) => ({ ...current, status: 'running', updatedAt: new Date().toISOString() }));
       this.launch(store, checkpoint, lock);
@@ -103,8 +92,8 @@ export class RunManager {
         const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
         try {
           const current = await store.read(runId);
-          const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-          ledger.markInterruptedReservationsUnpriced();
+          const ledger = AttemptLedger.restore(current.budget);
+          ledger.consumeInterruptedReservations();
           return await store.update(runId, (latest) => ({ ...latest, status: 'partial', activeCellIds: [], budget: ledger.snapshot(), updatedAt: new Date().toISOString() }));
         } finally { await lock.release(); }
       } catch (error) { if (!(error instanceof ProcessLockError)) throw error; }
@@ -119,36 +108,15 @@ export class RunManager {
     return store.read(runId);
   }
 
-  async reconcileRun(outputDirectory: string, runId: string, unpricedUsd: number): Promise<RunCheckpoint> {
-    const store = new CheckpointStore(path.resolve(outputDirectory));
-    await store.read(runId);
-    const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
-    try {
-      const current = await store.read(runId);
-      if (current.status !== 'partial' && current.status !== 'failed' && current.status !== 'cancelled') {
-        throw new Error('Only a stopped partial, failed, or cancelled run can be reconciled. Check run status first.');
-      }
-      const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-      await ledger.reconcile(unpricedUsd);
-      return await store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: new Date().toISOString() }));
-    } finally { await lock.release(); }
-  }
-
   async resumeRun(outputDirectory: string, runId: string): Promise<RunCheckpoint> {
     const store = new CheckpointStore(path.resolve(outputDirectory));
     let checkpoint = await store.read(runId);
     if (checkpoint.status === 'completed' || checkpoint.status === 'cancelled') throw new Error(`Cannot resume a ${checkpoint.status} run.`);
-    const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...(checkpoint.maxUsd === undefined ? {} : { maxUsd: checkpoint.maxUsd }), ...(checkpoint.maxPerCallUsd === undefined ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }), concurrency: checkpoint.concurrency });
-    const compatibleExecutionFingerprint = checkpoint.formatVersion === 2
-      ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === 'laya'
-        ? { kind: 'laya', checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...(checked.config.provider.precision === undefined ? {} : { precision: checked.config.provider.precision }) }
-        : checked.config.provider)
-      : checked.executionFingerprint;
-    if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error('Study or execution settings changed since this run was prepared.');
+    const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, concurrency: checkpoint.concurrency });
+    if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error('Study or execution settings changed since this run was prepared.');
     await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
-      if (checkpoint.budget.blocked) throw new Error('Unpriced calls must be reconciled before resume.');
       checkpoint = await store.update(runId, (current) => ({ ...current, status: 'running', cancellationRequested: false, updatedAt: new Date().toISOString() }));
       this.launch(store, checkpoint, lock);
       return checkpoint;
@@ -166,11 +134,6 @@ export class RunManager {
     }).finally(async () => { this.active.delete(checkpoint.runId); await lock.release(); });
     this.active.set(checkpoint.runId, task);
   }
-}
-
-function cleanBudget(snapshot: RunCheckpoint['budget']) {
-  const { maxUsd, ...rest } = snapshot;
-  return { ...rest, ...(maxUsd === undefined ? {} : { maxUsd }) };
 }
 
 async function requireJevCredential(provider: ParsedConfig['provider'], credentialStore: Pick<WindowsCredentialStore, 'availability'>): Promise<void> {

@@ -13,8 +13,6 @@ export class JevCallError extends Error {
   constructor(
     message: string,
     readonly attempts: number,
-    readonly chargeStatus: 'not_billed' | 'unknown' | 'billed',
-    readonly chargeUsd?: number,
     readonly contextFit?: ProviderContextFit,
     readonly decisionId?: string,
   ) {
@@ -90,17 +88,17 @@ export class JevProvider implements DecisionProvider {
 
   async decide(request: DecisionRequest, maxAttempts: number): Promise<DecisionResult> {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new JevCallError('Jev call limit must be a positive integer.', 0, 'not_billed');
+      throw new JevCallError('Jev call limit must be a positive integer.', 0);
     }
     const parsedRequest = decisionRequestSchema.safeParse(request);
     if (!parsedRequest.success) {
-      throw new JevCallError('Jev decision request is invalid.', 0, 'not_billed');
+      throw new JevCallError('Jev decision request is invalid.', 0);
     }
     const fit = this.measure(parsedRequest.data);
-    if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed', undefined, fit, parsedRequest.data.question.id);
+    if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     let apiKey: string;
     try { apiKey = await this.credentialStore.readForAuthentication(this.config.route); }
-    catch { throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, 'not_billed'); }
+    catch { throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0); }
 
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -125,7 +123,7 @@ export class JevProvider implements DecisionProvider {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError('Jev request failed at the transport boundary; billing is unknown.', attempts, 'unknown');
+        throw new JevCallError('Jev request failed at the transport boundary.', attempts);
       }
 
       if (!response.ok) {
@@ -133,28 +131,31 @@ export class JevProvider implements DecisionProvider {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}; billing is unknown.`, attempts, 'unknown');
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts);
       }
 
       let payload: unknown;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError('Jev returned an unreadable response; billing is unknown.', attempts, 'unknown');
+        throw new JevCallError('Jev returned an unreadable response.', attempts);
       }
 
       const parsedResponse = wireResponseSchema.safeParse(payload);
       if (!parsedResponse.success) {
-        throw new JevCallError('Jev response is missing required identity or usage fields; billing is unknown.', attempts, 'unknown');
+        throw new JevCallError('Jev response is missing required identity or usage fields.', attempts);
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}; billing is unknown.`, attempts, 'unknown');
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts);
       }
       const cost = parsedResponse.data.usage.cost;
-      if (cost === undefined) {
-        throw new JevCallError('Jev response did not report usage cost; billing is unknown.', attempts, 'unknown');
-      }
+      const inputTokens = parsedResponse.data.usage.input_tokens;
+      const outputTokens = parsedResponse.data.usage.output_tokens;
+      const metadata = jevMetadata(this.config.route, this.config.model);
+      const estimatedAmount = inputTokens !== undefined && outputTokens !== undefined && metadata?.inputUsdPerMillion !== undefined && metadata.outputUsdPerMillion !== undefined
+        ? (inputTokens * metadata.inputUsdPerMillion + outputTokens * metadata.outputUsdPerMillion) / 1_000_000
+        : undefined;
 
       const result: DecisionResult = {
         ...answer.data,
@@ -163,24 +164,23 @@ export class JevProvider implements DecisionProvider {
         model: parsedResponse.data.model,
         latencyMs: performance.now() - startedAt,
         usage: {
-          ...(parsedResponse.data.usage.input_tokens === undefined ? {} : { inputTokens: parsedResponse.data.usage.input_tokens }),
-          ...(parsedResponse.data.usage.output_tokens === undefined ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }),
+          ...(inputTokens === undefined ? {} : { inputTokens }),
+          ...(outputTokens === undefined ? {} : { outputTokens }),
         },
-        chargeStatus: 'billed',
-        chargeUsd: cost,
+        ...(cost !== undefined ? { cost: { amountUsd: cost, basis: 'provider-reported' as const } } : estimatedAmount === undefined ? {} : { cost: { amountUsd: estimatedAmount, basis: 'published-rate-estimate' as const } }),
       };
 
       try {
         return validateDecision(request, result, { maxAttempts, provider: 'jev' });
       } catch (error) {
         if (error instanceof DecisionError) {
-          throw new JevCallError('Jev response failed decision validation; the reported charge is retained.', attempts, 'billed', cost);
+          throw new JevCallError('Jev response failed decision validation.', attempts);
         }
         throw error;
       }
     }
 
-    throw new JevCallError('Jev call limit reached without a response.', attempts, 'unknown');
+    throw new JevCallError('Jev call limit reached without a response.', attempts);
   }
 
   measure(request: DecisionRequest): ProviderContextFit {
