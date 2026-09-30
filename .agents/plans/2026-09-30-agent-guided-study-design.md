@@ -229,10 +229,10 @@ Return `{ complete: true, caseCount, providers, cases }`. Each case contains its
 - [x] Confirm Laya uses its pinned tokenizer measurement, Jev reports its estimated measurement method and reserve, and provider fit status remains distinct from configuration/availability.
 - [x] Confirm the ADR index includes the new record.
 - [x] Update `test/package.test.ts` to copy the new skill into its isolated plugin fixture and verify that links from both packaged skills resolve within the plugin root.
-- [ ] Stage the intended source, tests, docs, skill, and generated build outputs only if the repository tracks them.
-- [ ] Create the final implementation commit through the normal tracked pre-commit hook. The hook runs `npm run verify` against the staged snapshot; do not run that full command immediately before or after the hooked commit, and do not bypass the hook.
-- [ ] Push the implementation branch and open a Draft PR containing the approved plan/spec and complete implementation. Verify the remote branch head and PR draft state. Report that GitHub Actions verification is skipped while the PR is Draft (`.github/workflows/ci.yml` gates `sheg-verify` on non-draft); local staged-snapshot verification is provided by the required pre-commit hook. Keep the PR in Draft for human review.
-- [ ] Record final changed files, focused evidence, successful staged-snapshot `npm run verify`, PR link/state, and any provider limits in the implementation handoff.
+- [x] Stage the intended source, tests, docs, skill, and generated build outputs only if the repository tracks them.
+- [x] Create implementation commits through the normal tracked pre-commit hook. The hook ran `npm run verify` against each staged snapshot; no hook bypass was used.
+- [x] Push the implementation branch and open Draft PR [#4](https://github.com/HarleyBartles/sheg/pull/4) containing the approved plan/spec and complete implementation. Verify the remote branch head and PR draft state. GitHub Actions verification is skipped while the PR is Draft (`.github/workflows/ci.yml` gates `sheg-verify` on non-draft); local staged-snapshot verification passed through the required pre-commit hook. Keep the PR in Draft for human review.
+- [x] Record final changed-file groups, focused evidence, successful staged-snapshot `npm run verify`, PR link/state, and provider limits in the implementation handoff.
 
 ## Out of Scope
 
