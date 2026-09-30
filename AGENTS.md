@@ -1,5 +1,10 @@
 # Repository agent orientation
 
+For contribution stage routing, follow the [Sheg runbook and playbook
+policy](.agents/doctrine/repo-runbook-policy.md), then use the matching
+lifecycle runbook and any routed playbooks. Feature work starts from `develop`
+and feature PRs target `develop`.
+
 ## Repository surfaces
 
 - `src/domain/` owns study, respondent, decision, and journey contracts and behavior.
