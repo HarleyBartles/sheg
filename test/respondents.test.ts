@@ -4,7 +4,7 @@ import test from 'node:test';
 import { respondentArchetypeLibrarySchema as archetypeLibrarySchema } from '../src/domain/respondents/archetype.js';
 import { respondentArchetypeGroups } from '../src/domain/respondents/archetype-catalogue.js';
 import { loadCohort } from '../src/domain/respondents/cohort.js';
-import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
+import { respondentPerspectiveSchema, respondentProfileSchema } from '../src/domain/respondents/profile.js';
 
 const groupUrls = respondentArchetypeGroups.map((group) => new URL(`../src/domain/respondents/archetype-groups/${group.filename}`, import.meta.url));
 const schemaAssets = new URL('../skills/stimulus-response-polling/assets/', import.meta.url);
@@ -145,6 +145,10 @@ test('enforces an aggregate 1,500-character ceiling across profile prose fields'
 
   const overLimit = { ...exactLimit, friction_cues: 'x'.repeat(301) };
   assert.equal(respondentProfileSchema.safeParse(overLimit).success, false);
+  const perspective = Object.fromEntries(fieldNames.map((field) => [field, 'x'.repeat(300)]));
+  assert.equal(respondentPerspectiveSchema.safeParse(perspective).success, true);
+  assert.equal(respondentPerspectiveSchema.safeParse({ ...perspective, friction_cues: 'x'.repeat(301) }).success, false);
+  assert.equal(respondentPerspectiveSchema.safeParse({ ...perspective, intent: 'x'.repeat(501) }).success, false);
 });
 
 test('archetype-derived profiles must select every declared variation axis value', async () => {

@@ -8,6 +8,8 @@ import { loadStudy } from '../infrastructure/study-loader.js';
 import { RunManager, checkStudy, type RunConfig } from '../application/run-manager.js';
 import { compareReports, getReport } from '../application/reports.js';
 import { preflightStudy, preflightInputSchema, type StudyPreflightInput } from '../application/preflight.js';
+import { previewStudy } from '../application/study-preview.js';
+import { measurePacketBatch, packetSizingInputSchema, type PacketSizingInput } from '../application/packet-sizing.js';
 
 const configSchema = z.object({
   manifestPath: z.string(), cohortPath: z.string(), outputDirectory: z.string(), maxCalls: z.number().int().positive(),
@@ -20,11 +22,16 @@ const configSchema = z.object({
 
 export function createPollingServer(manager = new RunManager()): McpServer {
   const server = new McpServer({ name: 'sheg', version: '0.1.0' }, { instructions: 'Polling decisions are simulations. Check and trace do not contact a provider. Hosted runs require explicit call and spend caps. Reports describe simulated responses, not readership or publication outcomes.' });
-  server.registerTool('poll_check', { description: 'Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls.', inputSchema: { config: configSchema } }, async ({ config }) => {
+  server.registerTool('poll_preview', { description: 'Preview every branch from the manifest, including authored stimulus and question wording, choices and destinations, shared continuations, each route’s prior choices, and the stimulus IDs in scope at each question. Requires no cohort or inference-provider call. Rejects previews above 10,000 route contexts instead of returning a partial result.', inputSchema: { manifestPath: z.string().min(1) } }, async ({ manifestPath }) => jsonResult(await previewStudy(manifestPath)));
+  server.registerTool('poll_check', { description: 'Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls. Return deterministic minimum/maximum reachable decision-call counts, whether maxCalls covers the maximum, and for Jev a configured spend ceiling, not a predicted charge.', inputSchema: { config: configSchema } }, async ({ config }) => {
     const checked = await checkStudy(config as RunConfig);
-    return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint });
+    return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint, runBounds: checked.runBounds });
   });
   server.registerTool('poll_preflight', { description: 'Measure every reachable decision packet for a frozen cohort or maximum valid profile envelope against configured providers without inference calls or run creation.', inputSchema: preflightInputSchema.shape }, async (input) => jsonResult(await preflightStudy(input as StudyPreflightInput)));
+  server.registerTool('poll_measure_packets', {
+    description: 'Measure complete respondent decision packets for draft variants without inference calls. In paired mode, same-index values from multi-valued dimensions form each case; singleton dimensions broadcast, and multi-valued dimensions must have the same length or validation fails (for example, 3 profiles with 2 task drafts). Cartesian mode measures every combination (3 profiles by 2 tasks produces 6 cases). Returns each case and provider-specific largest case, measured or estimated tokens, headroom, fit status, and provider reason.',
+    inputSchema: packetSizingInputSchema.shape,
+  }, async (input) => jsonResult(await measurePacketBatch(input as PacketSizingInput)));
   server.registerTool('poll_trace', { description: 'Trace scripted option IDs through one frozen respondent and study arm without provider calls.', inputSchema: { manifestPath: z.string(), cohortPath: z.string(), armId: z.string(), respondentId: z.string(), choices: z.array(z.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
     const profile = study.respondents.find((respondent) => respondent.id === respondentId);

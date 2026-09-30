@@ -8,7 +8,7 @@ A study combines a bounded text stimulus, one or more questions with explicit re
 
 The harness runs each respondent once per arm, checkpoints progress, and reports response counts, task reach and completion, optional answer-key scoring, and matched comparisons. Use a sequence for straightforward item-then-question studies, or a bounded graph when conditional exposure or branching is part of the study.
 
-The skill helps an agent prepare the study, author or expand respondent profiles, validate inputs, trace routes, run polls, and interpret results. The plugin ships reusable [respondent archetypes](dist/data/respondent-archetypes/), not ready-made profiles. You can use the shipped archetypes, add custom ones, mix them, or provide a frozen profile cohort directly.
+The [study-design skill](skills/study-design/SKILL.md) helps an agent work with a person from their material and question through respondent perspectives, study design, and a reviewable journey. The [polling skill](skills/stimulus-response-polling/SKILL.md) covers the contracts and harness operations. The plugin ships reusable [respondent archetypes](dist/data/respondent-archetypes/), not ready-made profiles. You can use the shipped archetypes, add custom ones, mix them, or provide a frozen profile cohort directly.
 
 These are simulated responses. Repeating the same respondent, stimulus, and task does not create a more meaningful sample. Reports do not establish human readership, real-world accuracy, statistical significance, or causal lift.
 
@@ -23,18 +23,18 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
    ```
 
 2. Restart the Codex desktop app, open the Plugins Directory, select the **Sheg** marketplace, and install the plugin.
-3. Confirm the `poll_check`, `poll_preflight`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_reconcile`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
+3. Confirm the `poll_preview`, `poll_check`, `poll_preflight`, `poll_measure_packets`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_reconcile`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).
 
 ## Prepare and run a study
 
-1. Create a [study manifest](docs/reference/study-manifest.md) and a frozen respondent cohort. Use the [machine-readable contracts](docs/reference/data-contracts.md) and the [polling skill](skills/stimulus-response-polling/SKILL.md) for the exact shapes and authoring workflow.
+1. Start with the text and what you want to learn. The [study-design skill](skills/study-design/SKILL.md) helps an agent work with you on the question, useful respondent perspectives, and a study you can review before it is translated into Sheg's contracts.
 2. Configure one provider. Jev runs require an API key available to the Codex process and explicit `maxUsd` and `maxPerCallUsd` limits. Local Laya runs require a running service and the matching checkpoint tokenizer JSON and SHA-256 digest. See the [Jev setup and wire contract](docs/providers/jev.md) and [Laya capability notes](docs/providers/laya.md).
-3. Call `poll_check` with the exact manifest, cohort, provider, and budgets. It validates and fingerprints inputs without making a provider inference call. Use `poll_preflight` to check every reachable request for context fit against configured providers, and `poll_trace` to check a scripted route without inference.
+3. Use `poll_preview` after manifest validation and before cohort construction to inspect every branch as one generic respondent journey, including route-specific prior choices and current stimulus scope at each question. Shared questions appear once with a context for each route. Preview needs no cohort or inference call and rejects more than 10,000 route contexts rather than returning partial output. Use `poll_measure_packets` to check draft respondent/task/stimulus/history combinations as you build the study. Call `poll_check` with the exact manifest, cohort, provider, and budgets; it validates and fingerprints inputs without a provider inference call. Use `poll_preflight` on the complete frozen cohort to measure every reachable request, and `poll_trace` to check a scripted route without inference.
 4. Review the proposed respondent-arm cell count and spend limits, then start an authorized run with `poll_start`. Use `poll_status` and `poll_report` to follow and inspect it. Compare arms with `poll_compare` within that same run.
 
-In Codex, you can start with a request such as: “Compare these two versions with a distinct respondent cohort. Help me prepare the study and cohort, run `poll_check`, and show me the provider, cell count, and spend caps before any inference.” The skill guides the agent through preparation and keeps the paid run behind your explicit authorization.
+In Codex, you can start with a request such as: “I have this article and want to know where readers lose interest. Help me decide what to ask and whose perspectives to include, then show me the proposed study journey.” The agent uses Sheg's design guidance to shape the human-language design, translates it into the harness, and checks fit before asking for approval to run.
 
 Jev is a hosted, paid provider. Keep its key in the environment, never in a manifest or chat, and set conservative call and spend caps before starting. `poll_check` and `poll_trace` do not make inference calls or require a key. `poll_start` and `poll_resume` reject a missing key before launching.
 
@@ -102,6 +102,7 @@ When changing contracts, update the TypeScript source of truth and regenerate th
 
 ## Project links
 
+- [Study-design skill](skills/study-design/SKILL.md)
 - [Codex polling skill](skills/stimulus-response-polling/SKILL.md)
 - [Study manifest guide](docs/reference/study-manifest.md)
 - [Data contracts](docs/reference/data-contracts.md)

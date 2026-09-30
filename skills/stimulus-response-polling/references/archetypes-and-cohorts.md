@@ -26,7 +26,7 @@ Use the contract schema to check the artifact shape and the bundled library as e
 4. Put exact snapshots of all used archetypes in the cohort. For each archetype-derived respondent, select a declared value for every axis and make the concrete perspective consistent with those choices.
 5. Inspect the cohort as a whole for meaningful differences, preserved invariants, and fit with the study question. Freeze it before polling.
 
-The cohort snapshot makes expansion auditable and independent of later library edits. The runner sends only the concrete respondent perspective fields to the model. It does not send archetype definitions, variation metadata, study purpose, or stimulus content that the respondent's path has not exposed.
+The cohort snapshot makes expansion auditable and independent of later library edits. The runner sends only the concrete respondent perspective fields to the model. It does not send archetype definitions, variation metadata, study purpose, or stimulus content that the respondent's path has not exposed. Each of the five prose fields is capped at 500 characters and the five together at 1,500 characters. Treat those caps as safeguards: write only perspective details that could affect a response, rather than filling the available space.
 
 ## Supply profiles directly
 

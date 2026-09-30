@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { compileDecisionPacket, promptContractHash } from '../src/domain/decision/prompt.js';
+import { compileDecisionPacket, compileDecisionRequest, promptContractHash } from '../src/domain/decision/prompt.js';
 import { fileURLToPath } from 'node:url';
 import type { PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 
@@ -65,4 +65,46 @@ test('decision packet compilation is deterministic and rejects unknown history r
     { type: 'exposure', sequence: 0, nodeId: 'show-missing', itemId: 'missing' },
   ]), /unknown encountered item/i);
 });
-test('prompt contract fingerprint is a stable SHA-256 value', () => assert.match(promptContractHash(), /^[a-f0-9]{64}$/));
+
+test('explicit packet parts compile to the same validated request as the study arm path', async () => {
+  const study = await loadStudy(manifestPath, cohortPath);
+  const arm = study.manifest.arms[0]!;
+  const profile = study.respondents[0]!;
+  const task = arm.tasks[1]!;
+  const history: PromptHistoryEvent[] = [
+    { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
+    { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, choice: 'continue' },
+    { type: 'exposure', sequence: 2, nodeId: 'show-investigation', itemId: 'investigation' },
+  ];
+  const fromArm = compileDecisionPacket(arm, profile, task.id, history);
+  const fromParts = compileDecisionRequest({
+    respondentProfile: {
+      intent: profile.intent,
+      context: profile.context,
+      desired_outcome: profile.desired_outcome,
+      engagement_cues: profile.engagement_cues,
+      friction_cues: profile.friction_cues,
+    },
+    encounteredItems: [
+      { id: 'investigation', text: arm.items.find((item) => item.id === 'investigation')!.text },
+    ],
+    trajectory: fromArm.state.trajectory,
+    question: { id: task.id, instructions: task.instructions, options: { ...task.options } },
+  });
+
+  assert.deepEqual(fromParts, fromArm);
+  assert.deepEqual(fromParts.state.encounteredItems.map((item) => item.id), ['investigation']);
+  assert.deepEqual(fromParts.state.respondent.profile, {
+    intent: profile.intent,
+    context: profile.context,
+    desired_outcome: profile.desired_outcome,
+    engagement_cues: profile.engagement_cues,
+    friction_cues: profile.friction_cues,
+  });
+  assert.equal(fromParts.state.trajectory.choices[0]?.choiceMeaning, arm.tasks[0]!.options.continue);
+  assert.deepEqual(fromParts.optionIds, Object.keys(task.options));
+});
+
+test('prompt contract fingerprint remains unchanged when packet assembly is shared', () => {
+  assert.equal(promptContractHash(), 'c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044');
+});

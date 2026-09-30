@@ -12,6 +12,7 @@ import { ProcessLock, ProcessLockError } from '../infrastructure/process-lock.js
 import { JevProvider, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type FitMeasurer, type LayaConfig } from '../providers/laya.js';
 import { runWorker } from './worker.js';
+import { estimateRunDecisionCalls, type RunDecisionCallBounds } from '../domain/journey/route-bounds.js';
 
 const configSchema = z.object({
   manifestPath: z.string().min(1), cohortPath: z.string().min(1),
@@ -32,7 +33,7 @@ const configSchema = z.object({
 
 export type RunConfig = z.input<typeof configSchema>;
 type ParsedConfig = z.output<typeof configSchema>;
-export type CheckedStudy = { config: ParsedConfig; study: Awaited<ReturnType<typeof loadStudy>>; stimulusFingerprint: string; executionFingerprint: string };
+export type CheckedStudy = { config: ParsedConfig; study: Awaited<ReturnType<typeof loadStudy>>; stimulusFingerprint: string; executionFingerprint: string; runBounds: RunDecisionCallBounds & { maximumCallsConfigured: number; maximumCallsSufficient: boolean; spendCeilingUsd?: number } };
 export type JobOptions = { measureLayaFit?: FitMeasurer; providerFactory?: (config: ParsedConfig['provider']) => DecisionProvider };
 
 export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
@@ -40,11 +41,20 @@ export async function checkStudy(config: RunConfig): Promise<CheckedStudy> {
   const normalized: ParsedConfig = { ...parsed, manifestPath: path.resolve(parsed.manifestPath), cohortPath: path.resolve(parsed.cohortPath), outputDirectory: path.resolve(parsed.outputDirectory),
     provider: parsed.provider.kind === 'laya' ? { ...parsed.provider, tokenizerJsonPath: path.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
+  const routeBounds = estimateRunDecisionCalls(study.manifest.arms, study.respondents);
+  const runBounds = {
+    ...routeBounds,
+    maximumCallsConfigured: normalized.maxCalls,
+    maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls,
+    ...(normalized.provider.kind === 'jev' ? {
+      spendCeilingUsd: Math.min(normalized.maxUsd!, normalized.maxPerCallUsd! * Math.min(routeBounds.maximumDecisionCalls, normalized.maxCalls)),
+    } : {}),
+  };
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === 'laya'
     ? { kind: 'laya' as const, checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...(normalized.provider.precision === undefined ? {} : { precision: normalized.provider.precision }) }
     : normalized.provider;
-  return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider) };
+  return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider), runBounds };
 }
 
 export class RunManager {

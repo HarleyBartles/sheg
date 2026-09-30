@@ -34397,6 +34397,39 @@ import { pathToFileURL } from "node:url";
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
+
+// src/domain/decision/decision.ts
+var decisionRequestSchema = external_exports.object({
+  state: external_exports.record(external_exports.string(), external_exports.unknown()),
+  question: external_exports.object({
+    id: external_exports.string().min(1),
+    instructions: external_exports.string().min(1),
+    options: external_exports.record(external_exports.string().min(1), external_exports.string().min(1))
+  }).strict(),
+  optionIds: external_exports.array(external_exports.string().min(1)).min(1)
+}).strict().superRefine((request, context) => {
+  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== Object.keys(request.question.options).length || request.optionIds.some((optionId) => !(optionId in request.question.options))) {
+    context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
+  }
+});
+var decisionResultSchema = external_exports.object({
+  choice: external_exports.string().min(1),
+  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
+  confidence: external_exports.number().finite().min(0).max(1).optional(),
+  attempts: external_exports.number().int().positive(),
+  provider: external_exports.enum(["jev", "laya"]),
+  model: external_exports.string().min(1),
+  checkpoint: external_exports.string().min(1).optional(),
+  latencyMs: external_exports.number().finite().nonnegative(),
+  usage: external_exports.object({
+    inputTokens: external_exports.number().int().nonnegative().optional(),
+    outputTokens: external_exports.number().int().nonnegative().optional()
+  }).strict(),
+  chargeStatus: external_exports.enum(["billed", "not_billed", "unknown"]),
+  chargeUsd: external_exports.number().finite().nonnegative().optional()
+}).strict();
+
+// src/domain/decision/prompt.ts
 var promptContract = {
   version: 5,
   stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
@@ -34463,21 +34496,33 @@ function compileDecisionPacket(arm, profile, taskId, history = []) {
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
     return { id: item.id, text: item.text };
   });
-  const state = {
-    respondent: { profile: {
+  return compileDecisionRequest({
+    respondentProfile: {
       intent: profile.intent,
       context: profile.context,
       desired_outcome: profile.desired_outcome,
       engagement_cues: profile.engagement_cues,
       friction_cues: profile.friction_cues
-    } },
+    },
     encounteredItems,
-    trajectory: compactTrajectory(arm, history)
+    trajectory: compactTrajectory(arm, history),
+    question: { id: task.id, instructions: task.instructions, options: { ...task.options } }
+  });
+}
+function compileDecisionRequest(parts) {
+  const state = {
+    respondent: { profile: { ...parts.respondentProfile } },
+    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    trajectory: parts.trajectory
   };
-  return {
+  const request = decisionRequestSchema.parse({
     state,
-    question: { id: task.id, instructions: task.instructions, options: { ...task.options } },
-    optionIds: Object.keys(task.options)
+    question: { ...parts.question, options: { ...parts.question.options } },
+    optionIds: Object.keys(parts.question.options)
+  });
+  return {
+    ...request,
+    state
   };
 }
 function promptContractHash() {
@@ -34805,16 +34850,14 @@ var respondentArchetypeLibrarySchema = external_exports.array(respondentArchetyp
 // src/domain/respondents/profile.ts
 var idSchema2 = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 var proseSchema2 = external_exports.string().trim().min(1).max(500);
-var respondentProfileSchema = external_exports.object({
-  id: idSchema2,
-  archetypeId: idSchema2.optional(),
-  variation: external_exports.record(idSchema2, idSchema2).optional(),
+var perspectiveFields = {
   intent: proseSchema2,
   context: proseSchema2,
   desired_outcome: proseSchema2,
   engagement_cues: proseSchema2,
   friction_cues: proseSchema2
-}).strict().superRefine((profile, context) => {
+};
+function enforceAggregateProfileProse(profile, context) {
   const proseLength = profile.intent.length + profile.context.length + profile.desired_outcome.length + profile.engagement_cues.length + profile.friction_cues.length;
   if (proseLength > 1500) {
     context.addIssue({
@@ -34822,7 +34865,14 @@ var respondentProfileSchema = external_exports.object({
       message: "Combined profile prose must not exceed 1,500 characters across the five prose fields."
     });
   }
-});
+}
+var respondentPerspectiveSchema = external_exports.object(perspectiveFields).strict().superRefine(enforceAggregateProfileProse);
+var respondentProfileSchema = external_exports.object({
+  id: idSchema2,
+  archetypeId: idSchema2.optional(),
+  variation: external_exports.record(idSchema2, idSchema2).optional(),
+  ...perspectiveFields
+}).strict().superRefine(enforceAggregateProfileProse);
 
 // src/domain/respondents/cohort.ts
 var respondentCohortSchema = external_exports.object({
@@ -35102,37 +35152,6 @@ function sameReservation(left, right) {
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir, rename as rename2, rm as rm2 } from "node:fs/promises";
 import path3 from "node:path";
-
-// src/domain/decision/decision.ts
-var decisionRequestSchema = external_exports.object({
-  state: external_exports.record(external_exports.string(), external_exports.unknown()),
-  question: external_exports.object({
-    id: external_exports.string().min(1),
-    instructions: external_exports.string().min(1),
-    options: external_exports.record(external_exports.string().min(1), external_exports.string().min(1))
-  }).strict(),
-  optionIds: external_exports.array(external_exports.string().min(1)).min(1)
-}).strict().superRefine((request, context) => {
-  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== Object.keys(request.question.options).length || request.optionIds.some((optionId) => !(optionId in request.question.options))) {
-    context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
-  }
-});
-var decisionResultSchema = external_exports.object({
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional(),
-  attempts: external_exports.number().int().positive(),
-  provider: external_exports.enum(["jev", "laya"]),
-  model: external_exports.string().min(1),
-  checkpoint: external_exports.string().min(1).optional(),
-  latencyMs: external_exports.number().finite().nonnegative(),
-  usage: external_exports.object({
-    inputTokens: external_exports.number().int().nonnegative().optional(),
-    outputTokens: external_exports.number().int().nonnegative().optional()
-  }).strict(),
-  chargeStatus: external_exports.enum(["billed", "not_billed", "unknown"]),
-  chargeUsd: external_exports.number().finite().nonnegative().optional()
-}).strict();
 
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
@@ -36285,6 +36304,58 @@ function admissionFailure(error62, nodeId) {
   return { decisionId, nodeId, reason: fit.reason ?? fit.status, tokens: fit.tokens, effectiveLimit: fit.effectiveLimit, measurementMethod: fit.method };
 }
 
+// src/domain/journey/route-bounds.ts
+function estimateRunDecisionCalls(arms, respondents) {
+  if (arms.length === 0) throw new Error("Run call bounds require at least one study arm.");
+  if (respondents.length === 0) throw new Error("Run call bounds require at least one frozen respondent.");
+  let minimumDecisionCalls = 0;
+  let maximumDecisionCalls = 0;
+  for (const rawArm of arms) {
+    const arm = studyArmSchema.parse(rawArm);
+    const range = arm.presentation.kind === "sequence" ? { minimum: arm.tasks.length, maximum: arm.tasks.length } : graphDecisionRange(arm);
+    minimumDecisionCalls += range.minimum * respondents.length;
+    maximumDecisionCalls += range.maximum * respondents.length;
+    if (!Number.isSafeInteger(minimumDecisionCalls) || !Number.isSafeInteger(maximumDecisionCalls)) {
+      throw new RangeError("Run decision-call bounds exceed the safe integer range.");
+    }
+  }
+  return { minimumDecisionCalls, maximumDecisionCalls };
+}
+function graphDecisionRange(arm) {
+  if (arm.presentation.kind !== "graph") throw new Error("Graph decision bounds require a graph presentation.");
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const edge of graph.transitions) {
+    const edges = outgoing.get(edge.fromNodeId) ?? [];
+    edges.push(edge);
+    outgoing.set(edge.fromNodeId, edges);
+  }
+  const memo3 = /* @__PURE__ */ new Map();
+  const active = /* @__PURE__ */ new Set();
+  const visit2 = (nodeId) => {
+    const cached3 = memo3.get(nodeId);
+    if (cached3) return cached3;
+    if (active.has(nodeId)) throw new Error(`Run call bounds encountered a graph cycle at ${nodeId}.`);
+    const node2 = nodes.get(nodeId);
+    if (!node2) throw new Error(`Run call bounds encountered an unknown node ${nodeId}.`);
+    if (node2.kind === "terminal") return { minimum: 0, maximum: 0 };
+    active.add(nodeId);
+    const edges = outgoing.get(nodeId) ?? [];
+    if (edges.length === 0) throw new Error(`Run call bounds found no outgoing transition at ${nodeId}.`);
+    const branches = edges.map((edge) => visit2(edge.toNodeId));
+    const decisionCost = node2.kind === "ask" ? 1 : 0;
+    const range = {
+      minimum: decisionCost + Math.min(...branches.map((branch) => branch.minimum)),
+      maximum: decisionCost + Math.max(...branches.map((branch) => branch.maximum))
+    };
+    active.delete(nodeId);
+    memo3.set(nodeId, range);
+    return range;
+  };
+  return visit2(graph.entryNodeId);
+}
+
 // src/application/run-manager.ts
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
@@ -36316,9 +36387,18 @@ async function checkStudy(config2) {
     provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path5.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
   };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
+  const routeBounds = estimateRunDecisionCalls(study.manifest.arms, study.respondents);
+  const runBounds = {
+    ...routeBounds,
+    maximumCallsConfigured: normalized.maxCalls,
+    maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls,
+    ...normalized.provider.kind === "jev" ? {
+      spendCeilingUsd: Math.min(normalized.maxUsd, normalized.maxPerCallUsd * Math.min(routeBounds.maximumDecisionCalls, normalized.maxCalls))
+    } : {}
+  };
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === "laya" ? { kind: "laya", checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...normalized.provider.precision === void 0 ? {} : { precision: normalized.provider.precision } } : normalized.provider;
-  return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider) };
+  return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider), runBounds };
 }
 var RunManager = class {
   constructor(options = {}) {
@@ -36905,6 +36985,401 @@ function packetRef(packet) {
   return { packetId: packet.packetId, respondentId: packet.respondentId, armId: packet.armId, pathId: packet.pathId, decisionIndex: packet.decisionIndex, nodeId: packet.nodeId };
 }
 
+// src/domain/journey/preview.ts
+var MAX_JOURNEY_PREVIEW_CONTEXTS = 1e4;
+function previewStudyJourney(arms) {
+  const budget = { contexts: 0 };
+  return { arms: arms.map((rawArm) => previewArm(studyArmSchema.parse(rawArm), budget)) };
+}
+function previewArm(arm, budget) {
+  if (arm.presentation.kind === "sequence") {
+    const stimulusNodes = arm.items.map((item, index) => ({
+      id: `sequence-expose-${item.id}`,
+      kind: "stimulus",
+      stimulusId: item.id,
+      text: item.text,
+      nextNodeId: index + 1 < arm.items.length ? `sequence-expose-${arm.items[index + 1].id}` : `sequence-ask-${arm.tasks[0].id}`
+    }));
+    const questionNodes = arm.tasks.map((task, index) => {
+      const routeContexts = sequenceRouteContexts(arm, index, budget);
+      return {
+        id: `sequence-ask-${task.id}`,
+        kind: "question",
+        taskId: task.id,
+        instructions: task.instructions,
+        options: Object.entries(task.options).map(([optionId, description]) => ({
+          optionId,
+          description,
+          nextNodeId: index + 1 < arm.tasks.length ? `sequence-ask-${arm.tasks[index + 1].id}` : `sequence-terminal-${arm.id}`
+        })),
+        routeContexts
+      };
+    });
+    return {
+      armId: arm.id,
+      label: arm.label,
+      presentation: "sequence",
+      entryNodeId: stimulusNodes[0].id,
+      nodes: [...stimulusNodes, ...questionNodes, { id: `sequence-terminal-${arm.id}`, kind: "terminal", outcome: "completed" }]
+    };
+  }
+  const tasksById = new Map(arm.tasks.map((task) => [task.id, task]));
+  const itemsById = new Map(arm.items.map((item) => [item.id, item]));
+  const routeContextsByNode = graphRouteContexts(arm, budget);
+  const nodes = arm.presentation.nodes.map((node2) => {
+    if (node2.kind === "terminal") return { id: node2.id, kind: "terminal", outcome: node2.outcome };
+    if (node2.kind === "expose") {
+      const item = itemsById.get(node2.itemId);
+      const edge = arm.presentation.kind === "graph" ? arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node2.id) : void 0;
+      return { id: node2.id, kind: "stimulus", stimulusId: item.id, text: item.text, nextNodeId: edge.toNodeId };
+    }
+    const task = tasksById.get(node2.taskId);
+    const options = Object.entries(task.options).map(([optionId, description]) => {
+      const edge = arm.presentation.kind === "graph" ? arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node2.id && candidate.optionId === optionId) : void 0;
+      return { optionId, description, nextNodeId: edge.toNodeId };
+    });
+    return { id: node2.id, kind: "question", taskId: task.id, instructions: task.instructions, options, routeContexts: routeContextsByNode.get(node2.id) ?? [] };
+  });
+  return {
+    armId: arm.id,
+    label: arm.label,
+    presentation: "graph",
+    entryNodeId: arm.presentation.entryNodeId,
+    nodes
+  };
+}
+function sequenceRouteContexts(arm, taskIndex, budget) {
+  const priorTasks = arm.tasks.slice(0, taskIndex);
+  let contextCount = 1;
+  for (const task of priorTasks) {
+    const optionCount = Object.keys(task.options).length;
+    if (contextCount > MAX_JOURNEY_PREVIEW_CONTEXTS / optionCount) throw contextLimitError();
+    contextCount *= optionCount;
+  }
+  reserveContexts(budget, contextCount);
+  const exposedStimulusIds = arm.items.map(({ id }) => id);
+  let contexts = [{ path: arm.items.map((item) => ({ nodeId: `sequence-expose-${item.id}` })), exposedStimulusIds, priorChoices: [] }];
+  for (const task of priorTasks) {
+    contexts = contexts.flatMap((context) => Object.entries(task.options).map(([optionId, meaning]) => ({
+      path: [...context.path, { nodeId: `sequence-ask-${task.id}`, optionId }],
+      exposedStimulusIds,
+      priorChoices: [...context.priorChoices, {
+        nodeId: `sequence-ask-${task.id}`,
+        taskId: task.id,
+        optionId,
+        meaning,
+        exposedItemIds: [...exposedStimulusIds]
+      }]
+    })));
+  }
+  return contexts.map((context) => ({
+    ...context,
+    path: [...context.path, { nodeId: `sequence-ask-${arm.tasks[taskIndex].id}` }]
+  }));
+}
+function graphRouteContexts(arm, budget) {
+  if (arm.presentation.kind !== "graph") throw new Error("Graph route contexts require a graph presentation.");
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const tasks = new Map(arm.tasks.map((task) => [task.id, task]));
+  const items = new Map(arm.items.map((item) => [item.id, item]));
+  const contexts = /* @__PURE__ */ new Map();
+  const visit2 = (nodeId, path8, exposedSinceDecision, allExposures, priorChoices) => {
+    const node2 = nodes.get(nodeId);
+    if (node2.kind === "terminal") return;
+    if (node2.kind === "expose") {
+      const item = items.get(node2.itemId);
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+      visit2(edge.toNodeId, [...path8, { nodeId }], [...exposedSinceDecision, item.id], [...allExposures, item.id], priorChoices);
+      return;
+    }
+    const task = tasks.get(node2.taskId);
+    reserveContexts(budget, 1);
+    const nodeContexts = contexts.get(node2.id) ?? [];
+    nodeContexts.push({ path: [...path8, { nodeId }], exposedStimulusIds: [...exposedSinceDecision], priorChoices });
+    contexts.set(node2.id, nodeContexts);
+    for (const [optionId, meaning] of Object.entries(task.options)) {
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id && candidate.optionId === optionId);
+      visit2(edge.toNodeId, [...path8, { nodeId, optionId }], [], allExposures, [...priorChoices, {
+        nodeId,
+        taskId: task.id,
+        optionId,
+        meaning,
+        exposedItemIds: [...allExposures]
+      }]);
+    }
+  };
+  visit2(graph.entryNodeId, [], [], [], []);
+  return contexts;
+}
+function reserveContexts(budget, count) {
+  if (budget.contexts + count > MAX_JOURNEY_PREVIEW_CONTEXTS) throw contextLimitError();
+  budget.contexts += count;
+}
+function contextLimitError() {
+  return new RangeError(`Journey preview exceeds the ${MAX_JOURNEY_PREVIEW_CONTEXTS}-context limit; no partial preview was returned.`);
+}
+
+// src/application/study-preview.ts
+async function previewStudy(manifestPath) {
+  const study = await loadStudy(manifestPath, void 0, { allowMissingCohort: true });
+  return previewStudyJourney(study.manifest.arms);
+}
+
+// src/application/packet-sizing.ts
+import { createHash as createHash8 } from "node:crypto";
+var MAX_PACKET_SIZING_CASES = 1e3;
+var MAX_PACKET_SIZING_BYTES = 16 * 1024 * 1024;
+var trajectoryChoiceSchema = external_exports.object({
+  taskId: external_exports.string().min(1),
+  choiceId: external_exports.string().min(1),
+  choiceMeaning: external_exports.string().min(1),
+  exposedItemIds: external_exports.array(external_exports.string().min(1))
+}).strict();
+var trajectorySummarySchema = external_exports.object({
+  version: external_exports.literal(1),
+  eventCount: external_exports.number().int().nonnegative(),
+  exposureCount: external_exports.number().int().nonnegative(),
+  decisionCount: external_exports.number().int().nonnegative(),
+  eventRange: external_exports.object({ firstSequence: external_exports.number().int().nonnegative(), lastSequence: external_exports.number().int().nonnegative() }).strict().nullable(),
+  choices: external_exports.array(trajectoryChoiceSchema),
+  payloadUtf8Bytes: external_exports.number().int().nonnegative()
+}).strict().superRefine((trajectory, context) => {
+  if (trajectory.eventCount !== trajectory.exposureCount + trajectory.decisionCount || trajectory.choices.length !== trajectory.decisionCount || trajectory.eventCount === 0 !== (trajectory.eventRange === null)) {
+    context.addIssue({ code: "custom", message: "Trajectory counts, choices, and event range must describe the same history." });
+  }
+});
+var choiceTaskSchema = external_exports.unknown().transform((value, context) => {
+  const task = taskSchema.safeParse(value);
+  if (!task.success) {
+    for (const issue2 of task.error.issues) context.addIssue({ code: "custom", path: issue2.path, message: issue2.message });
+    return external_exports.NEVER;
+  }
+  return task.data;
+});
+var variantSchema = (valueSchema) => external_exports.object({
+  id: external_exports.string().min(1).max(128),
+  value: valueSchema
+}).strict();
+var providerConfigSchema2 = external_exports.discriminatedUnion("kind", [
+  external_exports.object({
+    kind: external_exports.literal("jev"),
+    model: external_exports.string().min(1),
+    keyEnv: external_exports.string().min(1),
+    endpoint: external_exports.string().url(),
+    timeoutMs: external_exports.number().int().positive()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("laya"),
+    baseUrl: external_exports.string().url(),
+    checkpoint: external_exports.string().min(1),
+    contextLimit: external_exports.number().int().positive(),
+    headLimit: external_exports.number().int().positive(),
+    tokenizerJsonPath: external_exports.string().min(1),
+    tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+    precision: external_exports.string().min(1).optional(),
+    timeoutMs: external_exports.number().int().positive()
+  }).strict()
+]);
+var variantDimensionSchema = (name, schema) => external_exports.array(variantSchema(schema)).min(1).superRefine((variants, context) => {
+  const ids = variants.map(({ id }) => id);
+  if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: `${name} variant IDs must be unique.` });
+});
+var packetSizingInputSchema = external_exports.object({
+  providers: external_exports.array(providerConfigSchema2).min(1),
+  combination: external_exports.enum(["paired", "cartesian"]),
+  respondents: variantDimensionSchema("Respondent", respondentPerspectiveSchema),
+  stimuli: variantDimensionSchema("Stimulus", external_exports.array(stimulusItemSchema)),
+  tasks: variantDimensionSchema("Task", choiceTaskSchema),
+  trajectories: variantDimensionSchema("Trajectory", trajectorySummarySchema)
+}).strict().superRefine((input2, context) => {
+  const providerIds = input2.providers.map(providerId);
+  if (new Set(providerIds).size !== providerIds.length) {
+    context.addIssue({ code: "custom", path: ["providers"], message: "Provider configurations must have unique measurement identities." });
+  }
+});
+var dimensions = ["respondents", "stimuli", "tasks", "trajectories"];
+async function measurePacketBatch(rawInput, dependencies = {}) {
+  const input2 = packetSizingInputSchema.parse(rawInput);
+  const variants = {
+    respondents: input2.respondents,
+    stimuli: input2.stimuli,
+    tasks: input2.tasks,
+    trajectories: input2.trajectories
+  };
+  const caseCount = expandedCaseCount(input2.combination, variants);
+  if (caseCount > MAX_PACKET_SIZING_CASES) {
+    throw new Error(`Packet sizing expands beyond the ${MAX_PACKET_SIZING_CASES}-case limit.`);
+  }
+  const expanded = expandCases(input2.combination, variants);
+  let serializedBytes = 0;
+  for (const packet of expanded) {
+    serializedBytes += Buffer.byteLength(JSON.stringify(packet), "utf8");
+    if (serializedBytes > MAX_PACKET_SIZING_BYTES) {
+      throw new Error(`Serialized packet input exceeds the ${MAX_PACKET_SIZING_BYTES}-byte (16 MiB) limit.`);
+    }
+  }
+  const providers = input2.providers.map((config2) => {
+    const provider = dependencies.createProvider?.(config2) ?? createProvider(config2);
+    return { config: config2, providerId: providerId(config2), provider, modelIdentity: modelIdentity(config2) };
+  });
+  const cases = [];
+  const providerMeasurements = /* @__PURE__ */ new Map();
+  for (const packet of expanded) {
+    const measurements = [];
+    for (const entry of providers) {
+      const measurement = await measureOne(entry.provider, entry.config, entry.providerId, entry.modelIdentity, packet.request);
+      measurements.push(measurement);
+      const existing = providerMeasurements.get(entry.providerId) ?? [];
+      existing.push({ caseId: packet.caseId, measurement });
+      providerMeasurements.set(entry.providerId, existing);
+    }
+    cases.push({ caseId: packet.caseId, variantIds: packet.variantIds, measurements });
+  }
+  return {
+    complete: true,
+    combination: input2.combination,
+    caseCount,
+    providers: providers.map(({ config: config2, providerId: id, modelIdentity: modelIdentity2 }) => {
+      const measurements = providerMeasurements.get(id) ?? [];
+      const measured = measurements.filter(({ measurement }) => measurement.status !== "unavailable" && measurement.tokens !== null).sort((left, right) => right.measurement.tokens - left.measurement.tokens || left.caseId.localeCompare(right.caseId));
+      const statuses = measurements.map(({ measurement }) => measurement.status);
+      const status = statuses.includes("unavailable") ? "unavailable" : statuses.includes("overflow") ? "overflow" : "fits";
+      const first = measured[0];
+      return {
+        providerId: id,
+        provider: config2.kind,
+        modelIdentity: modelIdentity2,
+        configuration: config2.kind === "jev" && !process.env[config2.keyEnv]?.trim() ? "incomplete" : "configured",
+        status,
+        largestCase: first ? { caseId: first.caseId, tokens: first.measurement.tokens } : null
+      };
+    }),
+    cases
+  };
+}
+async function measureOne(provider, config2, id, identity, request) {
+  if (!provider.measure) {
+    return unavailableMeasurement(config2, id, identity, "provider-measurement-unavailable");
+  }
+  let fit;
+  try {
+    fit = await provider.measure(request);
+  } catch (error62) {
+    return unavailableMeasurement(config2, id, identity, error62 instanceof Error ? error62.message : "measurement-failed");
+  }
+  if (fit.status === "unavailable") {
+    return {
+      providerId: id,
+      provider: fit.provider,
+      modelIdentity: fit.modelIdentity,
+      status: "unavailable",
+      method: fit.method,
+      tokenCount: fit.tokenCount,
+      tokens: null,
+      contextLimit: fit.contextLimit,
+      effectiveLimit: fit.effectiveLimit,
+      headroomTokens: null,
+      details: fit.details,
+      ...fit.reason === void 0 ? {} : { reason: fit.reason }
+    };
+  }
+  return {
+    providerId: id,
+    provider: fit.provider,
+    modelIdentity: fit.modelIdentity,
+    status: fit.status,
+    method: fit.method,
+    tokenCount: fit.tokenCount,
+    tokens: fit.tokens,
+    contextLimit: fit.contextLimit,
+    effectiveLimit: fit.effectiveLimit,
+    headroomTokens: fit.effectiveLimit - fit.tokens,
+    details: fit.details,
+    ...fit.reason === void 0 ? {} : { reason: fit.reason }
+  };
+}
+function unavailableMeasurement(config2, id, identity, reason) {
+  return {
+    providerId: id,
+    provider: config2.kind,
+    modelIdentity: identity,
+    status: "unavailable",
+    method: "measurement-unavailable",
+    tokenCount: config2.kind === "jev" ? "estimated" : "measured",
+    tokens: null,
+    contextLimit: config2.kind === "jev" ? null : config2.contextLimit,
+    effectiveLimit: null,
+    headroomTokens: null,
+    details: {},
+    reason
+  };
+}
+function createProvider(config2) {
+  return config2.kind === "jev" ? new JevProvider(config2) : new LayaProvider(config2);
+}
+function expandedCaseCount(combination, variants) {
+  if (combination === "paired") {
+    const multiLengths = dimensions.map((dimension) => variants[dimension].length).filter((length) => length > 1);
+    if (multiLengths.some((length) => length !== multiLengths[0])) {
+      throw new Error("Paired variant dimensions with multiple values must have the same length. Use cartesian to measure every combination.");
+    }
+    return multiLengths[0] ?? 1;
+  }
+  let count = 1;
+  for (const dimension of dimensions) {
+    const length = variants[dimension].length;
+    if (count > MAX_PACKET_SIZING_CASES / length) return MAX_PACKET_SIZING_CASES + 1;
+    count *= length;
+  }
+  return count;
+}
+function expandCases(combination, variants) {
+  const count = expandedCaseCount(combination, variants);
+  const selections = [];
+  if (combination === "paired") {
+    for (let index = 0; index < count; index += 1) {
+      const select = (dimension) => {
+        const values = variants[dimension];
+        return values[values.length === 1 ? 0 : index];
+      };
+      selections.push({ respondent: select("respondents"), stimulus: select("stimuli"), task: select("tasks"), trajectory: select("trajectories") });
+    }
+  } else {
+    for (const respondent of variants.respondents) {
+      for (const stimulus of variants.stimuli) {
+        for (const selectedTask of variants.tasks) {
+          for (const trajectory of variants.trajectories) {
+            selections.push({ respondent, stimulus, task: selectedTask, trajectory });
+          }
+        }
+      }
+    }
+  }
+  return selections.map((selection) => {
+    const variantIds = {
+      respondent: selection.respondent.id,
+      stimulus: selection.stimulus.id,
+      task: selection.task.id,
+      trajectory: selection.trajectory.id
+    };
+    const caseId = `case-${createHash8("sha256").update(JSON.stringify([variantIds.respondent, variantIds.stimulus, variantIds.task, variantIds.trajectory])).digest("hex").slice(0, 20)}`;
+    const parts = {
+      respondentProfile: selection.respondent.value,
+      encounteredItems: selection.stimulus.value,
+      trajectory: selection.trajectory.value,
+      question: { id: selection.task.value.id, instructions: selection.task.value.instructions, options: { ...selection.task.value.options } }
+    };
+    return { caseId, variantIds, request: compileDecisionRequest(parts) };
+  });
+}
+function providerId(config2) {
+  return `provider-${createHash8("sha256").update(JSON.stringify(config2)).digest("hex").slice(0, 20)}`;
+}
+function modelIdentity(config2) {
+  return config2.kind === "jev" ? config2.model : config2.checkpoint;
+}
+
 // src/entrypoints/mcp.ts
 var configSchema2 = external_exports.object({
   manifestPath: external_exports.string(),
@@ -36921,11 +37396,16 @@ var configSchema2 = external_exports.object({
 }).strict();
 function createPollingServer(manager = new RunManager()) {
   const server = new McpServer({ name: "sheg", version: "0.1.0" }, { instructions: "Polling decisions are simulations. Check and trace do not contact a provider. Hosted runs require explicit call and spend caps. Reports describe simulated responses, not readership or publication outcomes." });
-  server.registerTool("poll_check", { description: "Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls.", inputSchema: { config: configSchema2 } }, async ({ config: config2 }) => {
+  server.registerTool("poll_preview", { description: "Preview every branch from the manifest, including authored stimulus and question wording, choices and destinations, shared continuations, each route\u2019s prior choices, and the stimulus IDs in scope at each question. Requires no cohort or inference-provider call. Rejects previews above 10,000 route contexts instead of returning a partial result.", inputSchema: { manifestPath: external_exports.string().min(1) } }, async ({ manifestPath }) => jsonResult(await previewStudy(manifestPath)));
+  server.registerTool("poll_check", { description: "Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls. Return deterministic minimum/maximum reachable decision-call counts, whether maxCalls covers the maximum, and for Jev a configured spend ceiling, not a predicted charge.", inputSchema: { config: configSchema2 } }, async ({ config: config2 }) => {
     const checked = await checkStudy(config2);
-    return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint });
+    return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint, runBounds: checked.runBounds });
   });
   server.registerTool("poll_preflight", { description: "Measure every reachable decision packet for a frozen cohort or maximum valid profile envelope against configured providers without inference calls or run creation.", inputSchema: preflightInputSchema.shape }, async (input2) => jsonResult(await preflightStudy(input2)));
+  server.registerTool("poll_measure_packets", {
+    description: "Measure complete respondent decision packets for draft variants without inference calls. In paired mode, same-index values from multi-valued dimensions form each case; singleton dimensions broadcast, and multi-valued dimensions must have the same length or validation fails (for example, 3 profiles with 2 task drafts). Cartesian mode measures every combination (3 profiles by 2 tasks produces 6 cases). Returns each case and provider-specific largest case, measured or estimated tokens, headroom, fit status, and provider reason.",
+    inputSchema: packetSizingInputSchema.shape
+  }, async (input2) => jsonResult(await measurePacketBatch(input2)));
   server.registerTool("poll_trace", { description: "Trace scripted option IDs through one frozen respondent and study arm without provider calls.", inputSchema: { manifestPath: external_exports.string(), cohortPath: external_exports.string(), armId: external_exports.string(), respondentId: external_exports.string(), choices: external_exports.array(external_exports.string()) } }, async ({ manifestPath, cohortPath, armId, respondentId, choices }) => {
     const study = await loadStudy(manifestPath, cohortPath);
     const profile = study.respondents.find((respondent) => respondent.id === respondentId);
