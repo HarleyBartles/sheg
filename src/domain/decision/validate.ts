@@ -1,4 +1,4 @@
-import { decisionResultSchema, type DecisionRequest, type DecisionResult } from './decision.js';
+import { decisionRequestSchema, decisionResultSchema, type DecisionRequest, type DecisionResult } from './decision.js';
 import type { ProviderKind } from './provider.js';
 
 type ValidationOptions = {
@@ -22,28 +22,40 @@ export function validateDecision(
   result: unknown,
   options: ValidationOptions = {},
 ): DecisionResult {
+  const parsedRequest = decisionRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue) => issue.message).join(' ')}`, { cause: parsedRequest.error });
+  }
   const parsed = decisionResultSchema.safeParse(result);
   if (!parsed.success) {
     throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue) => issue.message).join(' ')}`, { cause: parsed.error });
   }
   const decision = parsed.data;
-  const optionIds = [...request.optionIds];
-  if (optionIds.length === 0 || new Set(optionIds).size !== optionIds.length ||
-      optionIds.length !== Object.keys(request.question.options).length ||
-      optionIds.some((optionId) => !(optionId in request.question.options))) {
-    throw new DecisionError('Decision request option IDs must uniquely match the offered options.');
+  const normalizedRequest = parsedRequest.data;
+  if (decision.type !== normalizedRequest.question.type) {
+    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`);
   }
-  if (!optionIds.includes(decision.choice)) {
-    throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
-  }
-  const probabilityLabels = Object.keys(decision.probabilities);
-  if (probabilityLabels.length !== optionIds.length || optionIds.some((optionId) => !(optionId in decision.probabilities))) {
-    throw new DecisionError('Decision probabilities must contain exactly one entry for every offered option ID.');
-  }
-  const probabilityTotal = Object.values(decision.probabilities).reduce((sum, value) => sum + value, 0);
-  if (Math.abs(probabilityTotal - 1) > probabilitySumTolerance) {
-    throw new DecisionError(`Decision probabilities must sum to 1 within ${probabilitySumTolerance}.`);
-  }
+  if (decision.type === 'choice') {
+    if (normalizedRequest.question.type !== 'choice') throw new DecisionError('Choice response does not match the task type.');
+    const optionIds = Object.keys(normalizedRequest.question.options);
+    if (!optionIds.includes(decision.choice)) {
+      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
+    }
+    validateDistribution(decision.probabilities, optionIds, 'Choice');
+  } else if (decision.type === 'score') {
+    if (normalizedRequest.question.type !== 'score') throw new DecisionError('Score response does not match the task type.');
+    const rubric = normalizedRequest.question.rubric;
+    const levelIds = rubric.map((_level, index) => String(index));
+    if (decision.score < 0 || decision.score > rubric.length - 1) {
+      throw new DecisionError('Score result is outside the declared rubric range.');
+    }
+    validateDistribution(decision.probabilities, levelIds, 'Score');
+    for (const [index, meaning] of rubric.entries()) {
+      if (decision.legend[String(index)] !== meaning) {
+        throw new DecisionError(`Score legend does not match rubric level ${index}.`);
+      }
+    }
+  } else if (normalizedRequest.question.type !== 'noul') throw new DecisionError('Noul response does not match the task type.');
   const maxAttempts = options.maxAttempts ?? 1;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
     throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
@@ -59,17 +71,16 @@ export function validateDecision(
   if (decision.chargeStatus !== 'billed' && decision.chargeUsd !== undefined) {
     throw new DecisionError('Charge amount is present without billed status evidence.');
   }
-  return {
-    choice: decision.choice,
-    probabilities: decision.probabilities,
-    ...(decision.confidence === undefined ? {} : { confidence: decision.confidence }),
-    attempts: decision.attempts,
-    provider: decision.provider,
-    model: decision.model,
-    ...(decision.checkpoint === undefined ? {} : { checkpoint: decision.checkpoint }),
-    latencyMs: decision.latencyMs,
-    usage: decision.usage,
-    chargeStatus: decision.chargeStatus,
-    ...(decision.chargeUsd === undefined ? {} : { chargeUsd: decision.chargeUsd }),
-  };
+  return decision;
+}
+
+function validateDistribution(distribution: Record<string, number>, expectedIds: readonly string[], label: string): void {
+  const ids = Object.keys(distribution);
+  if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
+    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`);
+  }
+  const total = Object.values(distribution).reduce((sum, value) => sum + value, 0);
+  if (Math.abs(total - 1) > probabilitySumTolerance) {
+    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`);
+  }
 }

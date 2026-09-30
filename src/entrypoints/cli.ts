@@ -4,8 +4,9 @@ import { pathToFileURL } from 'node:url';
 import { traceStudy } from '../domain/journey/trace.js';
 import { loadStudy } from '../infrastructure/study-loader.js';
 import { RunManager, checkStudy, type RunConfig } from '../application/run-manager.js';
-import { compareReports, getReport } from '../application/reports.js';
+import { compareReports, compareRunReports, getReport } from '../application/reports.js';
 import { preflightStudy, type PreflightProviderConfig } from '../application/preflight.js';
+import { decisionValueSchema, type DecisionValue } from '../domain/decision/decision.js';
 
 const manager = new RunManager();
 
@@ -32,10 +33,15 @@ export async function runCli(args: readonly string[], io = { out: (value: string
       const study = await loadStudy(manifestPath, cohortPath);
       const profile = study.respondents.find((respondent) => respondent.id === required(options, 'respondent'));
       if (!profile) throw new Error('Respondent ID is not in the frozen cohort.');
-      const choices = required(options, 'choices').split(',').filter(Boolean);
+      if ((options.choices === undefined) === (options.responses === undefined)) {
+        throw new Error('Trace requires exactly one of --choices or --responses.');
+      }
+      const scripted: readonly string[] | readonly DecisionValue[] = options.responses === undefined
+        ? required(options, 'choices').split(',').filter(Boolean)
+        : parseResponses(options.responses);
       const arm = study.manifest.arms.find((candidate) => candidate.id === required(options, 'arm'));
       if (!arm) throw new Error('Arm ID is not in the study.');
-      result = await traceStudy(arm, profile, choices);
+      result = await traceStudy(arm, profile, scripted);
     } else if (command === 'status') result = await manager.runStatus(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'cancel') result = await manager.cancelRun(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'reconcile') result = await manager.reconcileRun(required(options, 'output'), required(options, 'run-id'), Number(required(options, 'unpriced-usd')));
@@ -44,6 +50,10 @@ export async function runCli(args: readonly string[], io = { out: (value: string
     else if (command === 'compare') {
       const report = await getReport(required(options, 'output'), required(options, 'run-id'));
       result = compareReports(report, required(options, 'left-arm'), required(options, 'right-arm'));
+    } else if (command === 'compare-runs') {
+      const left = await getReport(required(options, 'left-output'), required(options, 'left-run-id'));
+      const right = await getReport(required(options, 'right-output'), required(options, 'right-run-id'));
+      result = compareRunReports(left, required(options, 'left-arm'), right, required(options, 'right-arm'));
     } else throw new Error(`Unknown command: ${command}`);
     io.out(JSON.stringify(result));
     return 0;
@@ -57,12 +67,13 @@ const helpText = `sheg <command>
 Commands:
   preflight --manifest <json> [--cohort <json>] [--mode frozen-cohort|maximum-profile] --providers <json-file>
   check --config <json>                         Validate study and provider configuration
-  trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>
+  trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b,...> | --responses <json-array>)
   start --config <json>                         Start a durable run
   status|cancel|resume --output <dir> --run-id <id>
   reconcile --output <dir> --run-id <id> --unpriced-usd <amount>
   report --output <dir> --run-id <id>
-  compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>`;
+  compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>
+  compare-runs --left-output <dir> --left-run-id <id> --left-arm <id> --right-output <dir> --right-run-id <id> --right-arm <id>`;
 
 function parseArgs(args: readonly string[]): Record<string, string> {
   const options: Record<string, string> = {};
@@ -80,6 +91,17 @@ function required(options: Record<string, string>, key: string): string {
   const value = options[key];
   if (!value) throw new Error(`Missing --${key}.`);
   return value;
+}
+
+function parseResponses(value: string): DecisionValue[] {
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw new Error('--responses must be a JSON array of typed response values.'); }
+  if (!Array.isArray(parsed)) throw new Error('--responses must be a JSON array of typed response values.');
+  return parsed.map((response, index) => {
+    const result = decisionValueSchema.safeParse(response);
+    if (!result.success) throw new Error(`--responses[${index}] is not a valid typed response.`);
+    return result.data;
+  });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

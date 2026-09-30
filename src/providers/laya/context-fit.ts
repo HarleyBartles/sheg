@@ -66,7 +66,11 @@ export async function measureLayaContext(request: DecisionRequest, config: LayaC
   }
 
   const tokenizer = tokenizerLike(loaded.data);
-  const question: InternalQ = { t: 'choice', ins: request.question.instructions, crit: request.question.options };
+  const question: InternalQ = {
+    t: request.question.type,
+    ins: request.question.instructions,
+    crit: request.question.type === 'choice' ? request.question.options : request.question.type === 'score' ? request.question.rubric : request.question.criteria,
+  };
   const fullHead = buildSequence(tokenizer, '', question, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
   const configuredHead = buildSequence(tokenizer, '', question, Number.MAX_SAFE_INTEGER, config.headLimit);
   const options = renderOptions(question);

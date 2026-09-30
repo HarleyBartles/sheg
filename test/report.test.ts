@@ -5,13 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import type { RunCheckpoint } from '../src/infrastructure/checkpoint-store.js';
-import { buildReport, compareReports, getReport } from '../src/application/reports.js';
+import { buildReport, compareReports, compareRunReports, getReport } from '../src/application/reports.js';
 import { CheckpointStore, emptyBudgetSnapshot } from '../src/infrastructure/checkpoint-store.js';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
 import { promptContractHash } from '../src/domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
 
-const decision = (choice: string) => ({ choice, probabilities: { continue: choice === 'continue' ? 1 : 0, leave: choice === 'leave' ? 1 : 0, unanswerable: choice === 'unanswerable' ? 1 : 0 }, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 12, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 });
+const decision = (choice: string) => ({ type: 'choice' as const, choice, probabilities: { continue: choice === 'continue' ? 1 : 0, leave: choice === 'leave' ? 1 : 0, unanswerable: choice === 'unanswerable' ? 1 : 0 }, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 12, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 });
 async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'poll-report-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -26,7 +26,7 @@ async function setup(t: TestContext) {
   delete revised.tasks[0].options.unanswerable;
   await writeFile(path.join(directory, 'study.json'), JSON.stringify({ ...original, arms: [original.arms[0], revised] }));
   const checkpoint: RunCheckpoint = {
-    formatVersion: 2, runId: '53a0c895-695b-4bb5-a5e5-b9304fc8b2aa', status: 'completed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    formatVersion: 3, runId: '53a0c895-695b-4bb5-a5e5-b9304fc8b2aa', status: 'completed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     manifestPath: path.join(directory, 'study.json'), cohortPath: path.join(directory, 'cohort.json'), outputDirectory: directory,
     provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'JEV_API_KEY', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
     maxCalls: 10, maxUsd: 1, maxPerCallUsd: 0.1, concurrency: 2, stimulusFingerprint: '', executionFingerprint: '', sourceHashes: [],
@@ -61,6 +61,51 @@ test('report keeps a per-arm matched denominator and answer-key scoring distinct
   assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.unscored, 1);
   assert.equal(report.providerEvidence.billedUsd, 0.002);
 });
+
+test('reports Score and Noul evidence with typed cohort summaries', async (t) => {
+  const { checkpoint } = await setup(t);
+  const manifest = JSON.parse(await readFile(checkpoint.manifestPath, 'utf8')) as { arms: Array<Record<string, unknown>> };
+  const arm = manifest.arms[0]!;
+  arm.tasks = [
+    { id: 'tone', type: 'score', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'], comparisonKey: 'tone' },
+    { id: 'credibility', type: 'noul', instructions: 'Does the article feel credible?', criteria: { true: 'credible', false: 'not credible' }, comparisonKey: 'credibility' },
+  ];
+  arm.presentation = { kind: 'sequence' };
+  await writeFile(checkpoint.manifestPath, JSON.stringify(manifest));
+  const scoreResults = [1.25, 0.75];
+  const noulResults = [0.8, 0.6];
+  checkpoint.journeys = checkpoint.respondentIds.map((respondentId, index) => {
+    const score = scoreResults[index]!;
+    const low = Math.floor(score); const high = Math.ceil(score);
+    const probabilities = { '0': 0, '1': 0, '2': 0 };
+    if (low === high) probabilities[String(low) as keyof typeof probabilities] = 1;
+    else { probabilities[String(low) as keyof typeof probabilities] = high - score; probabilities[String(high) as keyof typeof probabilities] = score - low; }
+    const scoreResult = { type: 'score' as const, score, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' }, probabilities,
+      attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 10, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 };
+    const noulResult = { type: 'noul' as const, noul: noulResults[index]!, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 10, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 };
+    return { armId: 'original', respondentId, status: 'completed' as const,
+      result: { events: [
+        { type: 'response' as const, sequence: 0, nodeId: 'tone', taskId: 'tone', result: { type: 'score' as const, score, legend: scoreResult.legend, probabilities } },
+        { type: 'response' as const, sequence: 1, nodeId: 'credibility', taskId: 'credibility', result: { type: 'noul' as const, noul: noulResult.noul } },
+      ], outcome: 'completed', status: 'completed' as const, decisionCount: 2 },
+      decisions: [
+        { decisionId: 'tone', requestFingerprint: 'a'.repeat(64), result: scoreResult },
+        { decisionId: 'credibility', requestFingerprint: 'b'.repeat(64), result: noulResult },
+      ], attemptHistory: [], presentedTaskIds: ['tone', 'credibility'] };
+  });
+  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
+  checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.sourceHashes = study.sources.map((source) => source.sha256);
+
+  const report = await buildReport(checkpoint);
+  const armReport = report.arms[0]!;
+  assert.equal(armReport.taskResponses.tone?.occurrences[0]?.type, 'score');
+  assert.equal(armReport.taskResponses.tone?.occurrences[0]?.meanScore, 1);
+  assert.deepEqual(armReport.taskResponses.tone?.occurrences[0]?.rubricProbabilities, { '0': 0.125, '1': 0.75, '2': 0.125 });
+  assert.equal(armReport.taskResponses.credibility?.occurrences[0]?.meanProbabilityTrue, 0.7);
+  assert.equal(armReport.journeys[0]?.responses[0]?.answer.type, 'score');
+});
 test('compares two arms within the same run by respondent and comparison key', async (t) => {
   const report = await buildReport((await setup(t)).checkpoint);
   const comparison = compareReports(report, 'original', 'revised');
@@ -74,7 +119,7 @@ test('compares two arms within the same run by respondent and comparison key', a
   assert.deepEqual(comparison.taskChanges[0]?.fields, ['options']);
   assert.throws(() => compareReports(report, 'original', 'missing'), /both arm IDs/i);
 });
-test('aligns repeated task presentations by occurrence order and counts only shared-option pairs', async (t) => {
+test('does not pool repeated Choice outcomes when option meanings changed', async (t) => {
   const { checkpoint } = await setup(t);
   for (const armId of ['original', 'revised']) {
     const journey = checkpoint.journeys.find((cell) => cell.armId === armId && cell.respondentId === 'curious-outside-reader')!;
@@ -87,7 +132,9 @@ test('aligns repeated task presentations by occurrence order and counts only sha
   assert.equal(summary[0]?.occurrence, 1);
   assert.equal(summary[0]?.unpairedResponses, 1);
   assert.equal(summary[1]?.occurrence, 2);
-  assert.deepEqual(summary[1]?.optionTransitions, { leave: { leave: 1 } });
+  assert.equal(summary[1]?.comparableResponses, 0);
+  assert.equal(summary[1]?.unpairedResponses, 1);
+  assert.deepEqual(summary[1]?.optionTransitions, {});
   const originalTask = report.arms[0]?.taskResponses['entry-response']?.occurrences;
   assert.equal(originalTask?.[0]?.reached, 2);
   assert.equal(originalTask?.[0]?.completed, 1);
@@ -96,6 +143,48 @@ test('aligns repeated task presentations by occurrence order and counts only sha
   assert.equal(originalTask?.[1]?.reached, 1);
   assert.equal(originalTask?.[1]?.completed, 1);
   assert.equal(originalTask?.[1]?.notReached, 1);
+});
+test('compares independent runs only for an identical cohort and equivalent typed task meaning', async (t) => {
+  const report = await buildReport((await setup(t)).checkpoint);
+  const secondRun = structuredClone(report);
+  secondRun.runId = 'a0ba155b-9465-4a43-b77b-369e783bdd42';
+  const comparison = compareRunReports(report, 'original', secondRun, 'revised');
+  assert.equal(comparison.matchedRespondents, 2);
+  assert.equal(comparison.comparisonTasks[0]?.pairedResponses, 1);
+  assert.equal(comparison.comparisonTasks[0]?.comparableResponses, 0);
+  assert.equal(comparison.comparisonTasks[0]?.nonComparableResponses, 1);
+  assert.deepEqual(comparison.comparisonTasks[0]?.choiceTransitions, {});
+  assert.equal(comparison.differences.stimulusItems.length, 1);
+  assert.deepEqual(comparison.differences.tasks[0]?.fields, ['options']);
+  assert.equal(comparison.comparisonTasks[0]?.profileGroups.find((group) => group.group === 'all')?.denominator, 2);
+  assert.ok(comparison.comparisonTasks[0]?.profileGroups.some((group) => group.group.startsWith('archetype:')));
+  secondRun.provider.model = 'different-model'; secondRun.status = 'partial';
+  const withRunDifferences = compareRunReports(report, 'original', secondRun, 'revised');
+  assert.notEqual(withRunDifferences.differences.provider, null);
+  assert.deepEqual(withRunDifferences.differences.runStatus, { left: report.status, right: 'partial' });
+  assert.ok(withRunDifferences.differences.completion.left.intended > 0);
+  assert.throws(() => compareRunReports(report, 'original', report, 'revised'), /distinct run IDs/i);
+  assert.throws(() => compareRunReports(report, 'original', { ...secondRun, cohortFingerprint: 'f'.repeat(64) }, 'revised'), /same frozen respondent cohort/i);
+});
+test('cross-run comparison preserves comparable Score and Noul deltas', async (t) => {
+  const report = await buildReport((await setup(t)).checkpoint);
+  const secondRun = structuredClone(report);
+  secondRun.runId = 'a0ba155b-9465-4a43-b77b-369e783bdd42';
+  for (const arm of [report.arms[0]!, secondRun.arms[0]!]) {
+    arm.tasks[0] = { id: 'tone', type: 'score', comparisonKey: 'typed-result', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] };
+    const response = arm.journeys[0]!.responses[0]!;
+    response.comparisonKey = 'typed-result'; response.taskId = 'tone'; response.occurrence = 1;
+    response.answer = { type: 'score', score: arm === report.arms[0] ? 1.25 : 1.75, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' }, probabilities: { '0': 0, '1': 0.25, '2': 0.75 } };
+  }
+  const score = compareRunReports(report, 'original', secondRun, 'original');
+  assert.equal(score.comparisonTasks[0]?.meanScoreDifference, 0.5);
+  for (const arm of [report.arms[0]!, secondRun.arms[0]!]) {
+    arm.tasks[0] = { id: 'truth', type: 'noul', comparisonKey: 'typed-result', instructions: 'Is it credible?', criteria: { true: 'credible', false: 'not credible' } };
+    const response = arm.journeys[0]!.responses[0]!;
+    response.taskId = 'truth'; response.answer = { type: 'noul', noul: arm === report.arms[0] ? 0.4 : 0.8 };
+  }
+  const noul = compareRunReports(report, 'original', secondRun, 'original');
+  assert.ok(Math.abs((noul.comparisonTasks[0]?.meanProbabilityTrueDifference ?? 0) - 0.4) < 1e-8);
 });
 test('rejects reports when the manifest changes after the run', async (t) => {
   const { checkpoint } = await setup(t);

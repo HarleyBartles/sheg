@@ -38,13 +38,34 @@ test('checkpoint store writes an atomic versioned record without source text or 
   const store = new CheckpointStore(directory);
   const created = await store.create(checkpoint(directory));
   const loaded = await store.read(created.runId);
-  assert.equal(loaded.formatVersion, 2);
+  assert.equal(loaded.formatVersion, 3);
   assert.equal(loaded.runId, created.runId);
   assert.deepEqual(await store.list(), [loaded]);
   const raw = await readFile(path.join(directory, `run-${created.runId}.json`), 'utf8');
   assert.doesNotMatch(raw, /JEV_API_KEY=.secret|source prose that should not persist/);
   assert.match(raw, /"keyEnv": "JEV_API_KEY"/);
   await assert.rejects(store.create(checkpoint(directory, { runId: created.runId })), /already exists/);
+});
+
+test('reads version-2 Choice checkpoints and normalizes their stored responses', async (t) => {
+  const directory = await tempDirectory(t);
+  const store = new CheckpointStore(directory);
+  const created = await store.create(checkpoint(directory));
+  const raw = JSON.parse(await readFile(path.join(directory, `run-${created.runId}.json`), 'utf8')) as Record<string, unknown>;
+  raw.formatVersion = 2;
+  raw.journeys = [{ armId: 'control', respondentId: 'reader-a', status: 'completed',
+    result: { events: [
+      { type: 'exposure', sequence: 0, nodeId: 'show', itemId: 'opening' },
+      { type: 'choice', sequence: 1, nodeId: 'ask', taskId: 'entry', choice: 'continue' },
+    ], outcome: 'completed', status: 'completed', decisionCount: 1 },
+    decisions: [{ decisionId: 'entry', requestFingerprint: 'd'.repeat(64), result: { choice: 'continue', probabilities: { continue: 1 }, attempts: 1, provider: 'jev', model: 'jev-latest', latencyMs: 1, usage: {}, chargeStatus: 'billed', chargeUsd: 0.001 } }],
+    attemptHistory: [], presentedTaskIds: ['entry'] }];
+  await writeFile(path.join(directory, `run-${created.runId}.json`), JSON.stringify(raw));
+
+  const loaded = await store.read(created.runId);
+  assert.equal(loaded.formatVersion, 2);
+  assert.equal(loaded.journeys[0]?.decisions[0]?.result.type, 'choice');
+  assert.equal(loaded.journeys[0]?.result?.events[1]?.type, 'response');
 });
 
 test('checkpoint rejects unrecognized fields and malformed provider provenance', async (t) => {
@@ -158,11 +179,12 @@ test('managed run checkpoints sequential provider decisions and reaches complete
   const choices = ['continue', 'continue', 'continue', 'continue'];
   let calls = 0;
   const provider: DecisionProvider = { async decide(request) {
+    if (request.question.type !== 'choice') throw new Error('Expected Choice question.');
     const choice = choices[calls++];
     assert.ok(choice);
     const labels = Object.keys(request.question.options);
     const probabilities = Object.fromEntries(labels.map((label) => [label, label === choice ? 1 : 0]));
-    return { choice, probabilities, attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
+    return { type: 'choice', choice, probabilities, attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
   } };
   const manager = new RunManager({ providerFactory: () => provider });
   const started = await manager.startRun({
@@ -221,9 +243,10 @@ test('matched run executes one cell for every frozen respondent in every arm', a
   await copyFile(path.resolve('test/fixtures/article-source.md'), path.join(directory, 'article-source.md'));
   let calls = 0;
   const provider: DecisionProvider = { async decide(request) {
+    if (request.question.type !== 'choice') throw new Error('Expected Choice question.');
     calls += 1;
     const choice = 'continue';
-    return { choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
+    return { type: 'choice', choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
   } };
   const manager = new RunManager({ providerFactory: () => provider });
   const started = await manager.startRun({ manifestPath, cohortPath: path.join(directory, 'cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: path.join(directory, 'runs'), maxCalls: 10, concurrency: 1 });
@@ -241,10 +264,11 @@ test('resume replays completed responses without charging the same respondent-ta
   let entryCalls = 0;
   let laterCalls = 0;
   const provider: DecisionProvider = { async decide(request) {
+    if (request.question.type !== 'choice') throw new Error('Expected Choice question.');
     if (request.question.id === 'entry-response') entryCalls += 1; else laterCalls += 1;
     if (request.question.id === 'investigation-response' && !failedOnce) { failedOnce = true; throw Object.assign(new Error('temporary failure'), { attempts: 0, chargeStatus: 'not_billed' }); }
     const choice = 'continue';
-    return { choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
+    return { type: 'choice', choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fake-local', checkpoint: 'local-test', latencyMs: 1, usage: {}, chargeStatus: 'not_billed' };
   } };
   const manager = new RunManager({ providerFactory: () => provider });
   const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 10, concurrency: 1 });

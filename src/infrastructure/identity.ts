@@ -33,6 +33,10 @@ export function executionFingerprint(stimulus: string, provider: ExecutionProvid
   return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
 }
 
+export function respondentCohortFingerprint(respondents: FrozenCohort['respondents']): string {
+  return hashCanonical({ version: 1, respondents });
+}
+
 function hashCanonical(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(canonicalize(value))).digest('hex');
 }

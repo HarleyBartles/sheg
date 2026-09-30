@@ -44,7 +44,7 @@ test('the shipped respondent archetype groups follow the contract and have uniqu
 
 test('published schemas carry constraints that consumers can validate directly', async () => {
   const manifest = JSON.parse(await readFile(new URL('study-manifest.schema.json', schemaAssets), 'utf8')) as {
-    properties: { arms: { items: { properties: { tasks: { items: { properties: { options: { minProperties?: number } } } } } } } };
+    properties: { arms: { items: { properties: { tasks: { items: { anyOf: Array<{ properties?: { options?: { minProperties?: number } } }> } } } } } };
     'x-validation-rules': string[];
   };
   const cohort = JSON.parse(await readFile(new URL('respondent-cohort.schema.json', schemaAssets), 'utf8')) as {
@@ -54,8 +54,10 @@ test('published schemas carry constraints that consumers can validate directly',
     'x-validation-rules': string[];
   };
 
-  assert.equal(manifest.properties.arms.items.properties.tasks.items.properties.options.minProperties, 1);
-  assert.ok(manifest['x-validation-rules'].some((rule) => rule.includes('Task option IDs')));
+  const choiceBranches = manifest.properties.arms.items.properties.tasks.items.anyOf.flatMap((branch) => branch.properties?.options ? [branch.properties.options] : []);
+  assert.equal(choiceBranches.length, 1);
+  assert.equal(choiceBranches[0]?.minProperties, 1);
+  assert.ok(manifest['x-validation-rules'].some((rule) => rule.includes('Choice option IDs')));
   assert.ok(cohort['x-validation-rules'].some((rule) => rule.includes('Respondent IDs are unique')));
   assert.ok(profile['x-validation-rules'].some((rule) => rule.includes('1,500 characters')));
 });

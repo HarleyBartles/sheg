@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { respondentPerspectiveSchema, type RespondentPerspective } from '../domain/respondents/profile.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { DecisionRequest } from '../domain/decision/decision.js';
-import { compileDecisionRequest, type DecisionPacketParts, type TrajectorySummary } from '../domain/decision/prompt.js';
+import { compileDecisionRequest, questionForTask, type DecisionPacketParts, type TrajectorySummary } from '../domain/decision/prompt.js';
 import { stimulusItemSchema } from '../domain/study/stimulus.js';
 import { taskSchema, type StudyTask } from '../domain/study/task.js';
 import { JevProvider, type JevConfig } from '../providers/jev.js';
@@ -315,7 +315,7 @@ function expandCases(combination: 'paired' | 'cartesian', variants: Record<typeo
       respondentProfile: selection.respondent.value,
       encounteredItems: selection.stimulus.value,
       trajectory: selection.trajectory.value,
-      question: { id: selection.task.value.id, instructions: selection.task.value.instructions, options: { ...selection.task.value.options } },
+      question: questionForTask(selection.task.value),
     };
     return { caseId, variantIds, request: compileDecisionRequest(parts) };
   });

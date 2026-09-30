@@ -23,7 +23,7 @@ const config: LayaConfig = {
 
 const request: DecisionRequest = {
   state: { reader: { profile: 'Curious reader' }, encounteredItems: [{ id: 'opening', text: 'A short passage.' }], choiceHistory: [] },
-  question: { id: 'continue', instructions: 'What should happen?', options: { continue: 'Continue reading', stop: 'Stop reading' } },
+  question: { type: 'choice', id: 'continue', instructions: 'What should happen?', options: { continue: 'Continue reading', stop: 'Stop reading' } },
   optionIds: ['continue', 'stop'],
 };
 
@@ -73,10 +73,43 @@ test('provider accepts the routed checkpoint while preserving Laya confidence se
     },
   });
   const result = await provider.decide(request, 1);
+  assert.equal(result.type, 'choice');
+  if (result.type !== 'choice') return;
   assert.equal(result.model, 'laya-rl-agent');
   assert.equal(result.checkpoint, config.checkpoint);
   assert.equal(result.confidence, 0.6);
   assert.equal(result.chargeStatus, 'not_billed');
+});
+
+test('encodes Score and Noul criteria and preserves their typed evidence', async () => {
+  const measure: FitMeasurer = async () => fit(20);
+  const bodies: Record<string, unknown>[] = [];
+  const answers = [
+    { type: 'score', score: 1.25, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' }, probabilities: { '0': 0.2, '1': 0.3, '2': 0.5 } },
+    { type: 'noul', noul: 0.74 },
+  ];
+  const provider = new LayaProvider(config, {
+    measureFit: measure,
+    fetchRequest: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return Response.json({ model: 'laya-rl-agent', answers: { 'typed-question': answers[bodies.length - 1] }, usage: {}, routing: { model: config.checkpoint } });
+    },
+  });
+  const scoreRequest = { state: request.state, question: { type: 'score' as const, id: 'typed-question', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] } } as DecisionRequest;
+  const score = await provider.decide(scoreRequest, 1);
+  assert.equal(score.type, 'score');
+  assert.equal(score.score, 1.25);
+  assert.deepEqual((bodies[0]!.questions as Record<string, unknown>)['typed-question'], {
+    type: 'score', instructions: 'How professional?', criteria: ['casual', 'balanced', 'professional'],
+  });
+
+  const noulRequest = { state: request.state, question: { type: 'noul' as const, id: 'typed-question', instructions: 'Does this feel credible?', criteria: { true: 'credible', false: 'not credible' } } } as DecisionRequest;
+  const noul = await provider.decide(noulRequest, 1);
+  assert.equal(noul.type, 'noul');
+  assert.equal(noul.noul, 0.74);
+  assert.deepEqual((bodies[1]!.questions as Record<string, unknown>)['typed-question'], {
+    type: 'noul', instructions: 'Does this feel credible?', criteria: { true: 'credible', false: 'not credible' },
+  });
 });
 
 test('provider rejects missing or mismatched routed checkpoint and malformed probabilities', async () => {

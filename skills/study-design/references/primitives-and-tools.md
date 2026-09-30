@@ -11,28 +11,16 @@ guide explains how those pieces compose for study design.
 | Study | A title, purpose, and one or more arms. |
 | Arm | One version of the study: source references, ordered stimulus items, tasks, and a presentation. Matched arms use the same frozen cohort. |
 | Stimulus item | A bounded piece of authored text with a stable ID. A source reference records the source path and digest. |
-| Task | One stateless model decision: instructions and a typed response contract. The executable contract today is finite Choice, with stable option IDs and descriptions. `unanswerable` is an ordinary option when useful. Answer keys are scoring metadata and are not sent to the model. |
-| Typed response | The kind of answer a task asks for. Choice is executable now. Score and Noul are intended composable response primitives, but the current task/provider contracts do not execute them. |
+| Task | One model decision: instructions and a typed response contract. A task may include or omit earlier response history independently of which respondents are eligible to reach it. `unanswerable` is an ordinary Choice option when useful. Answer keys are scoring metadata and are not sent to the model. |
+| Typed response | Choice returns one stable option ID and its probabilities. Score returns an expected score on an ordered rubric, per-level probabilities, and rubric legend. Noul returns P(true) for the proposition. |
 | Respondent profile | One concrete perspective, with five prose fields: intent, context, desired outcome, engagement cues, and friction cues. The profile is stimulus-specific and bounded by the shared field and aggregate limits. |
 | Archetype | A reusable perspective pattern with invariants and optional variation dimensions. It is a way to propose profiles, not a respondent that the harness runs directly. |
 | Cohort | An ordered, frozen collection of concrete respondent profiles, optionally with snapshots of the archetypes used to create them. |
-| Presentation | A `sequence` or a finite `graph`. A sequence exposes the arm's items in order and asks its tasks in order. A graph uses `expose`, `ask`, and `terminal` nodes; each offered choice routes along its declared transition, and every path must terminate. |
-| Journey | One respondent's path through one arm. Its event history records stimulus exposures and typed choices. The cohort is held fixed across matched arms. |
-| Decision packet | The stateless input for one task. It contains the respondent perspective, stimulus text in scope, current task and offered choices, plus a compact trajectory summary of prior choices and exposure IDs. |
+| Presentation | A `sequence` or a finite `graph`. A sequence exposes the arm's items in order and asks its tasks in order. A graph uses `expose`, `ask`, and `terminal` nodes; Choice routes by option ID, Score/Noul routes by explicit exhaustive, exclusive intervals, and every path terminates. |
+| Journey | One respondent's path through one arm. Its event history records stimulus exposures and typed responses. The cohort is held fixed across matched arms. |
+| Decision packet | The input for one task. It contains the respondent perspective, stimulus text in scope, and current typed task. Prior response events are included by default and can be omitted per task; exposure context remains. |
 
-Choice, Score, and Noul describe response primitives at the product level.
-Score and Noul are not currently accepted by executable task schemas or
-providers. Deterministic threshold routing from typed values is also not
-implemented. Do not encode them as Choice if that changes the intended
-measurement. Explain the current limit and offer an alternative only if it
-preserves the human's question.
-
-The harness does not currently define separately authored state variables.
-History is derived from journey events. Every later decision receives the
-trajectory summary, including prior choices, their meanings, and the stimulus
-IDs exposed before them. A three-turn lookback is not a Sheg default; the
-current trajectory contains prior choices rather than an arbitrary last-N
-window.
+History is derived from journey events, not separately authored state variables. For each task, response-history inclusion is independent of respondent eligibility: a task may receive only respondents routed onward with their own earlier answers, or address the full cohort without prior answers. Later tasks never see another respondent's history. Choice, Score, and Noul are typed outputs end to end; typed threshold routes must declare full-domain, non-overlapping intervals.
 
 ## MCP tools
 
@@ -41,10 +29,11 @@ preview, execute, or report; there is no capability-list tool.
 
 | Tool | Accepted input | Result | Provider behavior |
 | --- | --- | --- | --- |
-| `poll_preview` | `manifestPath` | Each arm's presentation and stable ordered nodes, including stimulus/task wording, choices, destinations, and shared continuations. Every question includes one `routeContexts` entry per route reaching it, with the path, prior choices and their meanings/exposure IDs, and stimulus IDs currently in scope. Shared questions remain one node with multiple route contexts. A stimulus ID resolves to the authored text on its stimulus node. Rejects more than 10,000 route contexts with no partial preview. | No cohort, provider, or inference call. |
+| `poll_capabilities` | No input. | Semantic catalogue of typed tasks, journey/history controls, cohort inputs, provider constraints, and comparison behavior. | No provider call. |
+| `poll_preview` | `manifestPath` | Each arm's presentation and stable ordered nodes, including stimulus/task wording, Choice options or typed threshold routes, destinations, and shared continuations. Every question includes one `routeContexts` entry per route reaching it, with Choice options or typed response intervals, prior response meanings/exposure IDs, and stimulus IDs currently in scope. Shared questions remain one node with multiple route contexts. A stimulus ID resolves to the authored text on its stimulus node. Rejects more than 10,000 route contexts with no partial preview. | No cohort, provider, or inference call. |
 | `poll_check` | `config`: manifest, cohort, output directory, call limits, and provider configuration. | Validation/fingerprints, respondent and arm counts, minimum/maximum reachable decision calls, call-cap sufficiency, and configured Jev spend ceiling. | No provider call. |
 | `poll_preflight` | `manifestPath`, optional `cohortPath`, provider list, optional mode and packet cap. | Per-provider fit, worst packet, overflow/unavailable details, measurement method, and whether traversal completed. | Measures every reachable packet; no inference call. |
-| `poll_trace` | Manifest/cohort paths, arm/respondent IDs, and scripted option IDs. | The deterministic route and outcome for those choices. | No provider call. |
+| `poll_trace` | Manifest/cohort paths, arm/respondent IDs, and exactly one of scripted `choices` or typed `responses`. | The deterministic route and outcome for those responses. | No provider call. |
 | `poll_measure_packets` | Provider configs; `combination`; non-empty `respondents`, `stimuli`, `tasks`, and `trajectories` arrays of `{ id, value }` variants. | Every compiled case with stable case ID, source variant IDs, per-provider token estimate/measurement, fit, headroom, reason, and provider-specific largest case. | Calls provider `measure` only; no inference endpoint. Jev estimates offline; Laya uses its pinned local tokenizer. |
 | `poll_start` | A complete run `config` with manifest/cohort, provider, output directory, and explicit caps. | A durable run ID and initial run status. | Starts respondent inference. |
 | `poll_status` | `outputDirectory`, `runId` | Current durable status; it can recover an abandoned running state. | No new inference call. |
@@ -53,6 +42,7 @@ preview, execute, or report; there is no capability-list tool.
 | `poll_resume` | `outputDirectory`, `runId` | Resumed run state after frozen-input and execution-fingerprint validation. | Resumes respondent inference. |
 | `poll_report` | `outputDirectory`, `runId` | JSON-safe respondent/task/run report. | No provider inference call. |
 | `poll_compare` | `outputDirectory`, `runId`, `leftArmId`, `rightArmId` | Matched comparison of two arms in that run. | No provider inference call. |
+| `poll_compare_runs` | Two report identities and one arm ID from each run. | Compares explicitly aligned typed responses from separate runs, requiring the exact same frozen respondent cohort and matching task meanings. Returns source, stimulus, task, provider, run-status, completion, and declared-profile subgroup differences. | No provider inference call. |
 
 ### Choosing the measurement operation
 
@@ -96,6 +86,12 @@ branching study fits.
    run, then call `poll_start`.
 6. Report and interpret the typed outcomes against the original question and
    source material.
+
+For a follow-up that changes a variable, create a new run. The same frozen
+cohort can be reused and compared with `poll_compare_runs`; a paired comparison
+does not require a two-arm execution. Keep task comparison keys stable only
+when the question's meaning is still aligned. Comparisons describe simulated
+responses and do not establish causal lift.
 
 Optimization of a study's shared trajectory/context policy is a future seam.
 It is not an authoring prerequisite or a current tool.

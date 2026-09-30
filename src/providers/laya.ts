@@ -28,12 +28,20 @@ export class LayaCallError extends Error {
   }
 }
 
-const answerSchema = z.object({
+const choiceAnswerSchema = z.object({
   type: z.literal('choice'),
   choice: z.string().min(1),
   probabilities: z.record(z.string(), z.number().finite().min(0).max(1)),
   confidence: z.number().finite().min(0).max(1).optional(),
 }).passthrough();
+const scoreAnswerSchema = z.object({ type: z.literal('score'), score: z.number().finite(), legend: z.record(z.string(), z.string()), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), confidence: z.number().finite().min(0).max(1).optional() }).passthrough();
+const noulAnswerSchema = z.object({ type: z.literal('noul'), noul: z.number().finite().min(0).max(1) }).passthrough();
+const answerSchema = z.discriminatedUnion('type', [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
+
+function wireQuestion(question: DecisionRequest['question']): Record<string, unknown> {
+  const criteria = question.type === 'choice' ? question.options : question.type === 'score' ? question.rubric : question.criteria;
+  return { type: question.type, instructions: question.instructions, ...(criteria === undefined ? {} : { criteria }) };
+}
 
 const responseSchema = z.object({
   model: z.string().min(1),
@@ -110,7 +118,7 @@ export class LayaProvider implements DecisionProvider {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: { type: 'choice', instructions: question.instructions, criteria: question.options },
+            [question.id]: wireQuestion(question),
           },
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs),
@@ -134,12 +142,10 @@ export class LayaProvider implements DecisionProvider {
       throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1, 'not_billed');
     }
     const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid choice answer for ${question.id}.`, 1, 'not_billed');
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, 'not_billed');
 
     const result: DecisionResult = {
-      choice: answer.data.choice,
-      probabilities: answer.data.probabilities,
-      ...(answer.data.confidence === undefined ? {} : { confidence: answer.data.confidence }),
+      ...answer.data,
       attempts: 1,
       provider: 'laya',
       model: parsedResponse.data.model,

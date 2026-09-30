@@ -3,7 +3,7 @@ import { mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { JourneyResult } from '../domain/journey/run.js';
-import { decisionResultSchema, type DecisionResult } from '../domain/decision/decision.js';
+import { decisionResultSchema, decisionValueSchema, type DecisionResult } from '../domain/decision/decision.js';
 import type { BudgetSnapshot } from '../domain/budget-ledger.js';
 import { ProcessLock } from './process-lock.js';
 
@@ -16,6 +16,7 @@ const journeyResultSchema = z.object({
   events: z.array(z.discriminatedUnion('type', [
     z.object({ type: z.literal('exposure'), sequence: z.number().int().nonnegative(), nodeId: z.string(), itemId: z.string() }).strict(),
     z.object({ type: z.literal('choice'), sequence: z.number().int().nonnegative(), nodeId: z.string(), taskId: z.string(), choice: z.string() }).strict(),
+    z.object({ type: z.literal('response'), sequence: z.number().int().nonnegative(), nodeId: z.string(), taskId: z.string(), result: decisionValueSchema }).strict(),
   ])),
   outcome: z.string().nullable(),
   status: z.enum(['completed', 'decision-limit']),
@@ -38,7 +39,7 @@ export const contextFailureSchema = z.object({
 export type ContextFailure = z.infer<typeof contextFailureSchema>;
 
 export const runCheckpointSchema = z.object({
-  formatVersion: z.literal(2),
+  formatVersion: z.union([z.literal(2), z.literal(3)]),
   runId: z.string().uuid(),
   status: z.enum(['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled']),
   createdAt: z.string().datetime(),
@@ -87,7 +88,7 @@ export class CheckpointStore {
   constructor(readonly directory: string) {}
 
   async create(input: Omit<RunCheckpoint, 'formatVersion' | 'runId'> & { runId?: string }): Promise<RunCheckpoint> {
-    const checkpoint = runCheckpointSchema.parse({ ...input, formatVersion: 2, runId: input.runId ?? randomUUID() });
+    const checkpoint = runCheckpointSchema.parse({ ...input, formatVersion: 3, runId: input.runId ?? randomUUID() });
     await mkdir(this.directory, { recursive: true });
     const filePath = this.filePath(checkpoint.runId);
     try {
@@ -120,6 +121,22 @@ export class CheckpointStore {
     }
     const checkpoint = runCheckpointSchema.safeParse(value);
     if (!checkpoint.success) throw new Error(`Run checkpoint ${runId} failed validation.`, { cause: checkpoint.error });
+    if (checkpoint.data.formatVersion === 2) {
+      return {
+        ...checkpoint.data,
+        journeys: checkpoint.data.journeys.map((journey) => ({
+          ...journey,
+          ...(journey.result === undefined ? {} : {
+            result: {
+              ...journey.result,
+              events: journey.result.events.map((event) => event.type === 'choice'
+                ? { type: 'response' as const, sequence: event.sequence, nodeId: event.nodeId, taskId: event.taskId, result: { type: 'choice' as const, choice: event.choice } }
+                : event),
+            },
+          }),
+        })),
+      };
+    }
     return checkpoint.data;
   }
 

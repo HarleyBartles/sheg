@@ -40,11 +40,12 @@ supports.
    get agreement before changing the question being studied.
 6. Validate the authored manifest and call `poll_preview` before cohort
    construction. Show the preview as one generic respondent's full journey,
-   including every branch, current stimulus scope, route-specific prior choices
-   and their meanings, question, offered choice, destination, and shared
+   including every branch, current stimulus scope, route-specific prior typed
+   responses and their meanings, question, offered choices or threshold
+   intervals, destination, and shared
    continuation. A shared question appears once, with a separate route context
-   for each way of reaching it. Each route context identifies the choice path,
-   prior choice meanings and their exposed stimulus IDs, and the stimulus IDs
+   for each way of reaching it. Each route context identifies the Choice option
+   or typed interval path, prior response meanings and their exposed stimulus IDs, and the stimulus IDs
    currently in scope at the question; stimulus node IDs resolve to their full
    authored text in the same preview. The preview needs no cohort and makes no
    inference call. It rejects a study above 10,000 route contexts instead of
@@ -63,6 +64,43 @@ supports.
    used. The human approves the run. Start it only after that approval. Use
    status and report tools to inspect outcomes, then interpret the evidence
    against the person's original question and material with your own judgement.
+
+## Choose the smallest useful journey
+
+Use the user's question to decide how much study structure is needed:
+
+- A short CV paragraph and a question about professional versus casual tone
+  usually needs one typed task and a cohort of hiring-manager perspectives.
+- To learn where readers stop in a five-section article, propose a staged
+  journey that exposes one editorially chosen section at a time and asks
+  whether each respondent continues, leaves, or is satisfied. Only respondents
+  routed onward receive the next section. Report each stage against the full
+  frozen cohort denominator.
+- To compare whether readers open an inline aside or return to it later, use a
+  designed conditional journey because later questions depend on earlier
+  choices.
+
+The agent and human own editorial cuts and semantic beats. Sheg can recommend
+chunk sizes for provider/token constraints and preflight the exact packets; it
+does not infer article structure or silently rewrite the artefact.
+
+## Continue the next question
+
+After a run, state what the report records, give the editorial interpretation
+for this artefact, and propose the next most useful question. Discuss the
+follow-up's respondent scope and history separately:
+
+- Continue only respondents who qualify or chose to continue inside the same
+  journey, optionally including each respondent's own prior responses.
+- Ask the full frozen cohort another task in that journey while setting that
+  task's `responseHistory` to `omit`.
+- Start a separate run with the same frozen cohort and fresh respondent
+  histories when changing a stimulus or question. Compare the runs with
+  `poll_compare_runs` when task keys and meanings align.
+
+These are choices in one Sheg study system. Propose two-arm control only when
+it helps answer the person's question. Keep design changes and result
+differences visible; do not label a simulation as a causal result.
 
 There are two human approval points in this workflow: approval of the
 human-language study design and approval to start the respondent run. Cohort
@@ -87,6 +125,7 @@ profile limits in the cohort guide.
 ## Tool sequence at a glance
 
 - Static capabilities: read this skill and its references; no tool call.
+- Semantic tool capability catalogue: `poll_capabilities`; no provider call.
 - Draft task fit: `poll_measure_packets`; no inference call.
 - Show all branches and route context before cohort construction: `poll_preview`;
   no cohort or inference call.
@@ -96,7 +135,7 @@ profile limits in the cohort guide.
   no inference call.
 - Run after approval: `poll_start`; this starts inference.
 - Follow and interpret: `poll_status`, `poll_report`, and where appropriate
-  `poll_compare`.
+  `poll_compare` or `poll_compare_runs`.
 
 For exact inputs, outputs, route behavior, and provider semantics, use
 [primitives and tools](references/primitives-and-tools.md). For packet contents

@@ -37,6 +37,7 @@ const profile = (intent: string, context = 'Reading a short research passage.') 
 });
 
 const task = (id: string, instructions: string) => ({
+  type: 'choice' as const,
   id,
   instructions,
   options: { continue: 'Continue', stop: 'Stop' },
@@ -187,6 +188,7 @@ test('projects a validated study task to the inference question without answer-k
   await measurePacketBatch(input({ tasks: [{ id: 'draft-with-key', value: selectedTask }] }), { createProvider: factory.createProvider });
 
   assert.deepEqual(observed[0]?.question, {
+    type: 'choice',
     id: selectedTask.id,
     instructions: selectedTask.instructions,
     options: selectedTask.options,

@@ -7,10 +7,21 @@ The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms 
 - `id` and `label`: stable identity and display name for the arm.
 - `sources`: source paths and SHA-256 hashes, verified before a run.
 - `items`: bounded stimulus segments in presentation order.
-- `tasks`: typed response tasks. The initial response type is finite choice, with stable option IDs and descriptions. `unanswerable` is an ordinary explicit option when relevant. Optional `answerKeyOptionId` is scoring metadata and is never sent to a provider.
-- `presentation`: `sequence` exposes every item in order and then asks each task; `graph` uses `expose`, `ask`, and `terminal` nodes with bounded decisions and one transition per offered option.
+- `tasks`: typed response tasks. Choice uses stable option IDs and descriptions. Score uses an ordered rubric and returns an expected score, per-level probabilities, and rubric legend. Noul returns P(true) for a proposition, optionally with true/false criteria. `unanswerable` is an ordinary explicit Choice option when relevant. Optional `answerKeyOptionId` is Choice scoring metadata and is never sent to a provider.
+- `responseHistory`: optional per-task `include` or `omit` policy. Omitted means `include`. `omit` removes earlier response events from this task's packet while retaining stimulus exposures and the same respondent journey.
+- `presentation`: `sequence` exposes every item in order and then asks each task; `graph` uses `expose`, `ask`, and `terminal` nodes with bounded decisions. Choice transitions match one option ID. Score/Noul transitions use explicit typed intervals that must cover the full response domain exactly once.
 
-For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse option IDs only when they retain the same meaning. Each frozen respondent is run once through every arm in the same run. Reports align task occurrence order within each respondent. They do not pool across runs.
+For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse Choice option IDs only when they retain the same meaning. Each frozen respondent is run once through every arm in the same run. Reports align task occurrence order within each respondent and compare typed values only when their task meanings align.
+
+Independent runs can also be compared with `poll_compare_runs` or the CLI
+`compare-runs` command. The reports must identify the exact same ordered frozen
+respondent profiles. Select one arm from each run; only responses with matching
+`comparisonKey`, occurrence, type, and authored task meaning are comparable.
+This makes a rerun with a changed stimulus comparable without requiring A/B
+arms in one execution. The report is descriptive evidence from simulated
+respondents, not a causal estimate. It keeps source, stimulus, task, provider,
+run-status, and completion-denominator differences visible and includes
+declared archetype/variation subgroup denominators.
 
 ## Example study design
 

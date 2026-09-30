@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { presentationSchema } from './presentation.js';
+import { presentationSchema, type PresentationTransition } from './presentation.js';
 import { sourceReferenceSchema, stimulusItemSchema } from './stimulus.js';
 import { taskSchema } from './task.js';
+import type { StudyTask } from './task.js';
 
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const prose = z.string().trim().min(1);
@@ -55,8 +56,8 @@ export const studyArmSchema = z.object({
     if (source.kind === 'terminal') {
       context.addIssue({ code: 'custom', path: ['presentation', 'transitions', index], message: 'Terminal nodes cannot have outgoing transitions.' });
     }
-    if (source.kind === 'expose' && edge.optionId !== undefined) {
-      context.addIssue({ code: 'custom', path: ['presentation', 'transitions', index, 'optionId'], message: 'Exposure transitions must be unconditional.' });
+    if (source.kind === 'expose' && (edge.optionId !== undefined || edge.when !== undefined)) {
+      context.addIssue({ code: 'custom', path: ['presentation', 'transitions', index], message: 'Exposure transitions must be unconditional.' });
     }
   }
 
@@ -67,19 +68,26 @@ export const studyArmSchema = z.object({
       continue;
     }
     if (node.kind === 'expose') {
-      if (edges.length !== 1 || edges[0]?.optionId !== undefined) {
+      if (edges.length !== 1 || edges[0]?.optionId !== undefined || edges[0]?.when !== undefined) {
         context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index], message: 'Each exposure node must have exactly one unconditional transition.' });
       }
       continue;
     }
     const task = taskById.get(node.taskId);
-    const optionIds = Object.keys(task?.options ?? {});
-    const edgeOptionIds = edges.map((edge) => edge.optionId);
-    if (edgeOptionIds.some((optionId) => optionId === undefined) ||
-        new Set(edgeOptionIds).size !== edgeOptionIds.length ||
-        edgeOptionIds.length !== optionIds.length ||
-        optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
-      context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index], message: 'Task transitions must contain exactly one edge for every offered option and no others.' });
+    if (!task) continue;
+    if (task.type !== 'score' && task.type !== 'noul') {
+      const optionIds = Object.keys(task.options);
+      const edgeOptionIds = edges.map((edge) => edge.optionId);
+      if (edges.some((edge) => edge.when !== undefined) ||
+          edgeOptionIds.some((optionId) => optionId === undefined) ||
+          new Set(edgeOptionIds).size !== edgeOptionIds.length ||
+          edgeOptionIds.length !== optionIds.length ||
+          optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
+        context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index], message: 'Choice task transitions must contain exactly one edge for every offered option and no others.' });
+      }
+    } else {
+      const maximum = task.type === 'score' ? task.rubric.length - 1 : 1;
+      validateResponseIntervals(edges, task.type, maximum, context, index);
     }
   }
 
@@ -144,4 +152,50 @@ export const studyArmSchema = z.object({
   }
 });
 
-export type StudyArm = z.infer<typeof studyArmSchema>;
+type ParsedStudyArm = z.infer<typeof studyArmSchema>;
+export type StudyArm = Omit<ParsedStudyArm, 'tasks'> & { tasks: StudyTask[] };
+
+function validateResponseIntervals(
+  edges: readonly PresentationTransition[],
+  type: 'score' | 'noul',
+  maximum: number,
+  context: z.RefinementCtx,
+  nodeIndex: number,
+): void {
+  const issues = context;
+  const ranges = edges.map((edge, index) => ({ edge, index, range: edge.when }));
+  const fail = (message: string): void => issues.addIssue({
+    code: 'custom', path: ['presentation', 'nodes', nodeIndex], message,
+  });
+  if (ranges.some(({ edge, range }) => edge.optionId !== undefined || range === undefined || range.type !== type)) {
+    fail(`${type.toUpperCase()} task transitions must use matching typed response intervals only.`);
+    return;
+  }
+  const ordered = ranges.toSorted((left, right) => left.range!.minimum - right.range!.minimum || Number(right.range!.minimumInclusive) - Number(left.range!.minimumInclusive));
+  for (const { range } of ordered) {
+    if (range!.minimum > range!.maximum || range!.minimum < 0 || range!.maximum > maximum) {
+      fail(`${type.toUpperCase()} route interval is reversed or outside its response domain.`);
+      return;
+    }
+  }
+  const first = ordered[0]?.range;
+  const last = ordered.at(-1)?.range;
+  if (!first || !last || first.minimum !== 0 || !first.minimumInclusive || last.maximum !== maximum || !last.maximumInclusive) {
+    fail(`${type.toUpperCase()} route intervals must cover the complete response domain.`);
+    return;
+  }
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1]!.range!;
+    const current = ordered[index]!.range!;
+    if (previous.maximum > current.minimum ||
+        (previous.maximum === current.minimum && previous.maximumInclusive && current.minimumInclusive)) {
+      fail(`${type.toUpperCase()} route intervals overlap or leave an ambiguous boundary.`);
+      return;
+    }
+    if (previous.maximum < current.minimum ||
+        (previous.maximum === current.minimum && !previous.maximumInclusive && !current.minimumInclusive)) {
+      fail(`${type.toUpperCase()} route intervals leave a gap in the response domain.`);
+      return;
+    }
+  }
+}

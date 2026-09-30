@@ -25,6 +25,12 @@ network request.
 - Request: `{ model, state, questions }`
 - Choice question: `{ type: "choice", instructions, criteria }`, where
   `criteria` maps every offered stable option ID to its description.
+- Score question: `{ type: "score", instructions, criteria }`, where
+  `criteria` is the ordered rubric. The answer retains `score`, a numeric-keyed
+  `legend`, and numeric-keyed `probabilities`.
+- Noul question: `{ type: "noul", instructions, criteria }`, where `criteria`
+  may describe `true` and `false`. The answer retains `noul`, the probability
+  that the proposition is true.
 - Response: `answers[questionId]` contains `type: "choice"`, `choice`,
   `probabilities`, and `confidence`. The envelope reports the actual `model`,
   provider, and `usage` with `input_tokens`, `output_tokens`, and `cost`.
@@ -32,6 +38,9 @@ network request.
   must not be replaced with zero.
 - The API response has no request-latency field. The adapter records elapsed
   wall time locally.
+- Choice, Score, and Noul are encoded as distinct question types. The adapter
+  validates each answer against the authored task before recording it; typed
+  values are never coerced into Choice.
 - Starting or resuming inference rejects a missing key before creating or relaunching a run. Keyless `poll_check` remains available.
 
 ## Transport and retry policy

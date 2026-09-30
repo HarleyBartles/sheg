@@ -19,22 +19,23 @@ const contracts: Array<{ filename: string; title: string; schema: z.ZodType; val
     'Archetype-derived respondents select exactly one declared value for every variation axis.',
   ] },
   { filename: 'study-manifest.schema.json', title: 'Study manifest', schema: studyManifestSchema, validationRules: [
-    'Each study contains one or more arms, each with its own stimulus, tasks, and presentation.',
-    'Task option IDs are stable response values; answer keys are never sent to providers.',
-    'Graph transitions cover every offered option exactly once; all nodes are reachable.',
-    'A/B comparisons are restricted to arms within one run and align on comparisonKey and occurrence.',
+    'Each study contains one or more arms, each with its own stimulus, typed tasks, and presentation.',
+    'Choice option IDs are stable response values; answer keys are never sent to providers. Score uses an ordered rubric. Noul reports P(true).',
+    'Graph transitions cover every Choice option or typed response domain exactly once; all nodes are reachable.',
+    'Per-task responseHistory controls prior answer context independently from graph routing and respondent eligibility.',
+    'Typed comparisons require matching task meanings; simulated responses are not evidence of human outcomes.',
   ] },
 ];
 await rm(contractDirectory, { recursive: true, force: true });
 await mkdir(contractDirectory, { recursive: true });
 for (const contract of contracts) {
-  const schema = z.toJSONSchema(contract.schema) as Record<string, unknown>;
+  // Emit the accepted JSON input contract. Runtime schemas may normalize legacy
+  // input with Zod transforms, which are intentionally not part of JSON Schema.
+  const schema = z.toJSONSchema(contract.schema, { io: 'input' }) as Record<string, unknown>;
   if (contract.filename === 'study-manifest.schema.json') {
-    const properties = schema.properties as Record<string, unknown>;
-    const arms = properties.arms as { items: { properties: Record<string, unknown> } };
-    const tasks = arms.items.properties.tasks as { items: { properties: Record<string, unknown> } };
-    const options = tasks.items.properties.options as Record<string, unknown>;
-    options.minProperties = 1;
+    const arms = (schema.properties as Record<string, { items: { properties: Record<string, { items: unknown }> } }>).arms!;
+    const taskVariants = arms.items.properties.tasks!.items;
+    annotateChoiceOptions(taskVariants);
   }
   schema.$id = `${schemaBaseUri}${contract.filename}`;
   if (contract.filename === 'respondent-archetype-library.schema.json') {
@@ -51,4 +52,16 @@ for (const contract of contracts) {
     schema.description = 'JSON Schema validators do not enforce the aggregate 1,500-character prose limit in x-validation-rules. Validate the profile with Sheg runtime validation (for example poll_check) before running a study.';
   }
   await writeFile(resolve(contractDirectory, contract.filename), `${JSON.stringify(schema, null, 2)}\n`);
+}
+
+function annotateChoiceOptions(value: unknown): void {
+  if (Array.isArray(value)) { for (const entry of value) annotateChoiceOptions(entry); return; }
+  if (typeof value !== 'object' || value === null) return;
+  const object = value as Record<string, unknown>;
+  const properties = object.properties;
+  if (typeof properties === 'object' && properties !== null) {
+    const options = (properties as Record<string, unknown>).options;
+    if (typeof options === 'object' && options !== null) (options as Record<string, unknown>).minProperties = 1;
+  }
+  for (const child of Object.values(object)) annotateChoiceOptions(child);
 }

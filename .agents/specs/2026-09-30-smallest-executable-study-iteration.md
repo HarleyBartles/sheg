@@ -1,6 +1,6 @@
 # Smallest Executable Study Iteration
 
-- Status: Approved for planning
+- Status: Approved; implementation complete
 - Date: 2026-09-30
 - Linear issue: SHEG-2
 - Related decision: ADR-0008
@@ -25,13 +25,17 @@ audience, and authors the least complex study that can answer it. The user
 steers the cohort and the human-language study design. The agent interprets
 the resulting evidence editorially and proposes the next useful question.
 
-The agent and human can choose where a follow-up belongs. If each respondent's
-answer should determine whether and what they see next, author that as a
-continuing journey in the same run. A respondent who chooses to continue can
-receive the next chunk and question with their own earlier choices in context;
-respondents who exit or finish do not receive later tasks. This can progressively
-narrow the respondents who reach each stage while preserving the original
-cohort denominator in results.
+The agent and human can choose how each follow-up relates to earlier turns.
+Journey progression and context carryover are separate design choices. A later
+task may use the respondent's own prior responses as context, or may ask the
+same respondents a fresh question without showing those responses. Routing can
+also restrict a later task to respondents who continued, or send it to the full
+cohort. Results preserve both the original cohort denominator and the actual
+respondents reached at each task. For example, a staged reading journey can
+ask only the 79 respondents who continued after stage one, then only the 67
+still interested after stage two, with each seeing their own history. Another
+task can ask all 100 respondents a new question with no prior-response
+passthrough.
 
 If the next question changes the design or stimulus and should begin without
 prior response context, clone the earlier design and reuse its frozen cohort in
@@ -82,11 +86,13 @@ separate one-design runs without having authored arms in either run.
    the full intended cohort denominator.
 6. **Interpret and continue.** The agent tells the user what the run produced,
    separates that evidence from its editorial interpretation, and proposes the
-   next useful question. The human can add a respondent-specific follow-up to
-   the current journey when progression should depend on that respondent's
-   earlier choices, or clone the design and frozen cohort into a separate run
-   when the follow-up should have fresh respondent histories. The agent may
-   also propose a deeper controlled design.
+   next useful question. For that follow-up, the agent and human choose whether
+   it uses each respondent's prior answers as context, who should reach it, and
+   whether it is another task in the current journey or a separate run. A new
+   task can target the full cohort with clean context, or be routed only to
+   respondents whose earlier answers qualify them. A separate run also starts
+   with clean respondent histories unless its design explicitly supplies
+   context. The agent may propose a deeper controlled design.
 
 ## Typed response contract
 
@@ -108,14 +114,13 @@ validation rejects missing, overlapping, or ambiguous coverage across the
 declared output domain.
 
 System One's official SDK types document Choice, Score, and Noul request and
-response shapes. Sheg's current contracts, providers, journey events, and
-reports implement finite Choice only. Adapter compatibility must be established
-for each configured provider rather than inferred from the model family. In
-particular, the current Jev adapter uses the OpenRouter Decisions API, and the
-current Laya adapter has its own local HTTP contract. Provider notes and
-behavioral fixtures must verify each type before that type is enabled for that
-provider. See the [TypeSafe SDK type definitions](https://github.com/typesafe-ai/typesafe-sdk-js/blob/main/src/types.ts)
-and the provider notes in `docs/providers/`.
+response shapes. Sheg's current contracts, providers, journey events,
+checkpoints, reports, and deterministic routes preserve all three types.
+Adapters validate each response against its authored task. Jev uses the
+OpenRouter Decisions API and Laya uses its local HTTP contract; deployment
+compatibility remains provider-specific. See the [TypeSafe SDK type
+definitions](https://github.com/typesafe-ai/typesafe-sdk-js/blob/main/src/types.ts)
+and `docs/providers/` for wire evidence and configured-service limitations.
 
 ## Study, run, and comparison model
 
@@ -124,8 +129,11 @@ and the provider notes in `docs/providers/`.
   arm is the normal shape for the smallest study. Within that run, a graph may
   route each respondent to later tasks based on that respondent's typed
   responses; respondents who take terminal paths do not receive later tasks.
-  Arms remain available when the user explicitly wants a controlled within-run
-  comparison.
+  Each task explicitly defines whether prior respondent responses are included
+  in its prompt history. The default policy must be clear in the authored
+  contract, and a task can suppress response-history passthrough while retaining
+  the same respondents and journey. Arms remain available when the user
+  explicitly wants a controlled within-run comparison.
 - A follow-up run can reuse the exact frozen cohort and clone the prior
   manifest, then change its stimulus slicing, task, or other selected variable.
   It starts each respondent with a fresh journey. No respondent-specific
@@ -173,30 +181,29 @@ chunk while keeping the rest of the authored content unchanged. The report
 then records the exposure and choice sequence needed to interpret where
 respondents continued or exited.
 
-## Current repository seams
+## Repository seams at approval
 
 The design builds on these live contracts:
 
-- `src/domain/study/arm.ts` groups sources, ordered items, tasks, and a
+- `src/domain/study/arm.ts` groups sources, ordered items, typed tasks, and a
   presentation in one arm.
 - `src/domain/study/presentation.ts` supports a `sequence` and an acyclic,
-  bounded `graph`. A sequence currently exposes all items before its tasks;
-  staged expose/decide behavior therefore uses graph nodes today. The agent
-  should author this on the user's behalf without making graph construction
-  the user workflow.
-- `src/domain/journey/run.ts` records exposure and choice events and compiles
-  each decision with that respondent's prior journey history. Graphs currently
-  reject cycles, but can express bounded branches and repeated exposures along
-  acyclic paths.
+  bounded `graph`. Staged expose/decide behavior uses graph nodes.
+- `src/domain/journey/run.ts` records typed response events and compiles each
+  decision with that respondent's own earlier history according to the
+  per-task `responseHistory` policy. Graphs remain finite and acyclic.
 - `src/domain/respondents/cohort.ts` defines a frozen ordered set of distinct
   profiles. The same cohort can be reused by a follow-up run.
-- `src/application/reports.ts` reports task reach/completion, option counts,
-  proportions, and respondent journeys. It does not yet report Score or Noul.
-- `src/entrypoints/mcp.ts` exposes `poll_compare` for two arms in one run. It
-  has no cross-run comparison operation.
-- The user-facing skill currently leads with manifest, cohort, sequence, and
-  graph mechanics. Sheg also lacks a semantic capability catalogue for an
-  agent to discover task and journey building blocks in human terms.
+- `src/application/reports.ts` reports typed distributions, task
+  reach/completion, respondent journeys, within-run comparisons, and
+  cross-run comparisons over identical frozen cohorts, including declared
+  archetype/variation groups and subgroup denominators.
+- `src/entrypoints/mcp.ts` exposes deterministic capabilities, preview,
+  preflight, measurement, tracing, reporting, and within-run and cross-run
+  comparison operations.
+- At approval, the user-facing skill led with manifest, cohort, sequence, and
+  graph mechanics, and Sheg lacked a semantic capability catalogue. Plan 3
+  updates those surfaces to the question-first workflow.
 
 ## Required design changes
 
@@ -299,16 +306,13 @@ vertical slice.
 - The report keeps returned typed evidence separate from the agent's
   editorial interpretation and proposed follow-up.
 
-## Planning notes
+## Implementation notes
 
-Before implementation, the plan must resolve provider-specific wire support
-and thresholds from current primary provider sources. In particular, the
-repository's Jev and Laya adapters do not currently implement all three types,
-even though the TypeSafe SDK and upstream Laya source describe all three.
-Provider docs are dated and are not sufficient evidence of compatibility with
-the configured OpenRouter and local Laya transports. See the [TypeSafe SDK
-types](https://github.com/typesafe-ai/typesafe-sdk-js/blob/main/src/types.ts)
-and [Laya's System One server implementation](https://github.com/NandhaKishorM/laya/blob/main/laya/serve.py).
+Provider-specific wire support and deterministic routing were implemented in
+Plans 1 and 2, with exact constraints recorded in `docs/providers/` and
+behavior covered by fake-transport tests. A deployment must still use a
+matching provider/service revision; inspect those notes before changing an
+adapter.
 
 The comparison contract should align outcomes only when their stable task key
 and response meanings are equivalent. A changed stimulus segmentation may

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { compileDecisionPacket, type PromptHistoryEvent } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
+import type { DecisionValue } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 import { studyArmSchema, type StudyArm } from '../study/arm.js';
 
@@ -114,9 +115,10 @@ export function walkStudyPackets(
           const nodeId = `sequence-ask-${task.id}`;
           emitPacket(arm, respondent, task.id, nodeId, decisionIndex, choices, events);
           if (stopped) return;
-          for (const choiceId of Object.keys(task.options)) {
+          for (const response of representativeResponses(task)) {
+            const choiceId = response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`;
             choices.push({ nodeId, choiceId });
-            events.push({ type: 'choice', sequence: events.length, nodeId, taskId: task.id, choice: choiceId });
+            events.push({ type: 'response', sequence: events.length, nodeId, taskId: task.id, result: response });
             visitTask(taskIndex + 1);
             events.pop();
             choices.pop();
@@ -176,14 +178,19 @@ export function walkStudyPackets(
           activeNodes.delete(nodeId);
           return;
         }
-        for (const choiceId of Object.keys(task.options)) {
-          const edge = graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choiceId);
+        const branches = 'options' in task
+          ? Object.keys(task.options).map((choice) => ({ edge: graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choice), response: { type: 'choice' as const, choice } }))
+          : graph.transitions.filter((candidate) => candidate.fromNodeId === nodeId && candidate.when !== undefined).map((edge) => ({ edge, response: representativeResponses(task, edge.when)[0]! }));
+        for (const branch of branches) {
+          const response = branch.response;
+          const choiceId = response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`;
+          const edge = branch.edge;
           if (!edge) {
-            markIncomplete(`Ask node ${nodeId} has no transition for choice ${choiceId} in ${respondent.id}/${arm.id}.`);
+            markIncomplete(`Ask node ${nodeId} has no transition for response ${choiceId} in ${respondent.id}/${arm.id}.`);
             break;
           }
           choices.push({ nodeId, choiceId });
-          events.push({ type: 'choice', sequence: events.length, nodeId, taskId: task.id, choice: choiceId });
+          events.push({ type: 'response', sequence: events.length, nodeId, taskId: task.id, result: response });
           visitNode(edge.toNodeId, decisionCount + 1);
           events.pop();
           choices.pop();
@@ -201,4 +208,29 @@ export function walkStudyPackets(
     terminalJourneyCount,
     ...(incompleteReason === undefined ? {} : { incompleteReason }),
   };
+}
+
+function representativeResponses(task: StudyArm['tasks'][number], interval?: NonNullable<Extract<StudyArm['presentation'], { kind: 'graph' }>['transitions'][number]['when']>): DecisionValue[] {
+  if ('options' in task) return Object.keys(task.options).map((choice) => ({ type: 'choice', choice }));
+  const values: number[] = [];
+  if (interval) {
+    values.push(interval.minimum === interval.maximum ? interval.minimum : (interval.minimum + interval.maximum) / 2);
+  } else if ('rubric' in task) {
+    const last = task.rubric.length - 1;
+    for (let level = 0; level <= last; level += 0.5) values.push(level);
+  } else values.push(0, 0.5, 1);
+  return values.map((value): DecisionValue => {
+    if ('rubric' in task) {
+      const probabilities = Object.fromEntries(task.rubric.map((_meaning, index) => [String(index), 0]));
+      const low = Math.floor(value);
+      const high = Math.ceil(value);
+      if (low === high) probabilities[String(low)] = 1;
+      else {
+        probabilities[String(low)] = high - value;
+        probabilities[String(high)] = value - low;
+      }
+      return { type: 'score', score: value, legend: Object.fromEntries(task.rubric.map((meaning, index) => [String(index), meaning])), probabilities };
+    }
+    return { type: 'noul', noul: value };
+  });
 }

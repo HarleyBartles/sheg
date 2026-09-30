@@ -1,4 +1,5 @@
 import { studyArmSchema, type StudyArm } from '../study/arm.js';
+import type { ResponseInterval } from '../study/presentation.js';
 
 export const MAX_JOURNEY_PREVIEW_CONTEXTS = 10_000;
 
@@ -8,26 +9,37 @@ export type JourneyPreviewOption = {
   nextNodeId: string;
 };
 
+export type JourneyPreviewRoute = { when: ResponseInterval; description: string; nextNodeId: string };
+
 export type JourneyPreviewNode =
   | { id: string; kind: 'stimulus'; stimulusId: string; text: string; nextNodeId: string }
   | {
     id: string;
     kind: 'question';
     taskId: string;
+    responseType: 'choice' | 'score' | 'noul';
     instructions: string;
     options: JourneyPreviewOption[];
+    routes: JourneyPreviewRoute[];
+    responseHistory: 'include' | 'omit';
     routeContexts: JourneyPreviewRouteContext[];
   }
   | { id: string; kind: 'terminal'; outcome: string };
 
 export type JourneyPreviewRouteContext = {
-  path: Array<{ nodeId: string; optionId?: string }>;
+  path: Array<{ nodeId: string; optionId?: string; response?: { type: 'score' | 'noul'; when?: ResponseInterval; value?: number; meaning: string } }>;
   exposedStimulusIds: string[];
   priorChoices: Array<{
     nodeId: string;
     taskId: string;
     optionId: string;
     meaning: string;
+    exposedItemIds: string[];
+  }>;
+  priorResponses: Array<{
+    nodeId: string;
+    taskId: string;
+    response: { type: 'score' | 'noul'; when?: ResponseInterval; value?: number; meaning: string };
     exposedItemIds: string[];
   }>;
 };
@@ -63,11 +75,14 @@ function previewArm(arm: StudyArm, budget: { contexts: number }): StudyArmJourne
         kind: 'question',
         taskId: task.id,
         instructions: task.instructions,
-        options: Object.entries(task.options).map(([optionId, description]) => ({
-          optionId,
-          description,
+        responseType: responseType(task),
+        responseHistory: task.responseHistory === 'omit' ? 'omit' : 'include',
+        options: taskOutcomeEntries(task).flatMap((entry) => entry.optionId === undefined ? [] : [{
+          optionId: entry.optionId,
+          description: entry.meaning,
           nextNodeId: index + 1 < arm.tasks.length ? `sequence-ask-${arm.tasks[index + 1]!.id}` : `sequence-terminal-${arm.id}`,
-        })),
+        }]),
+        routes: [],
         routeContexts,
       };
     });
@@ -93,13 +108,16 @@ function previewArm(arm: StudyArm, budget: { contexts: number }): StudyArmJourne
       return { id: node.id, kind: 'stimulus', stimulusId: item.id, text: item.text, nextNodeId: edge!.toNodeId };
     }
     const task = tasksById.get(node.taskId)!;
-    const options: JourneyPreviewOption[] = Object.entries(task.options).map(([optionId, description]) => {
-      const edge = arm.presentation.kind === 'graph'
-        ? arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === optionId)
-        : undefined;
-      return { optionId, description, nextNodeId: edge!.toNodeId };
-    });
-    return { id: node.id, kind: 'question', taskId: task.id, instructions: task.instructions, options, routeContexts: routeContextsByNode.get(node.id) ?? [] };
+    const options: JourneyPreviewOption[] = 'options' in task
+      ? Object.entries(task.options).map(([optionId, description]) => {
+        const edge = arm.presentation.kind === 'graph' ? arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === optionId) : undefined;
+        return { optionId, description, nextNodeId: edge!.toNodeId };
+      })
+      : [];
+    const routes: JourneyPreviewRoute[] = 'options' in task || arm.presentation.kind !== 'graph' ? [] : arm.presentation.transitions
+      .filter((candidate) => candidate.fromNodeId === node.id && candidate.when !== undefined)
+      .map((edge) => ({ when: edge.when!, description: intervalLabel(edge.when!), nextNodeId: edge.toNodeId }));
+    return { id: node.id, kind: 'question', taskId: task.id, responseType: responseType(task), instructions: task.instructions, options, routes, responseHistory: task.responseHistory === 'omit' ? 'omit' : 'include', routeContexts: routeContextsByNode.get(node.id) ?? [] };
   });
 
   return {
@@ -115,25 +133,26 @@ function sequenceRouteContexts(arm: StudyArm, taskIndex: number, budget: { conte
   const priorTasks = arm.tasks.slice(0, taskIndex);
   let contextCount = 1;
   for (const task of priorTasks) {
-    const optionCount = Object.keys(task.options).length;
+    const optionCount = taskOutcomeEntries(task).length;
     if (contextCount > MAX_JOURNEY_PREVIEW_CONTEXTS / optionCount) throw contextLimitError();
     contextCount *= optionCount;
   }
   reserveContexts(budget, contextCount);
 
   const exposedStimulusIds = arm.items.map(({ id }) => id);
-  let contexts: JourneyPreviewRouteContext[] = [{ path: arm.items.map((item) => ({ nodeId: `sequence-expose-${item.id}` })), exposedStimulusIds, priorChoices: [] }];
+  let contexts: JourneyPreviewRouteContext[] = [{ path: arm.items.map((item) => ({ nodeId: `sequence-expose-${item.id}` })), exposedStimulusIds, priorChoices: [], priorResponses: [] }];
   for (const task of priorTasks) {
-    contexts = contexts.flatMap((context) => Object.entries(task.options).map(([optionId, meaning]) => ({
-      path: [...context.path, { nodeId: `sequence-ask-${task.id}`, optionId }],
+    contexts = contexts.flatMap((context) => taskOutcomeEntries(task).map((entry) => ({
+      path: [...context.path, { nodeId: `sequence-ask-${task.id}`, ...(entry.optionId ? { optionId: entry.optionId } : {}), ...(entry.response ? { response: entry.response } : {}) }],
       exposedStimulusIds,
-      priorChoices: [...context.priorChoices, {
+      priorChoices: entry.optionId ? [...context.priorChoices, {
         nodeId: `sequence-ask-${task.id}`,
         taskId: task.id,
-        optionId,
-        meaning,
+        optionId: entry.optionId,
+        meaning: entry.meaning,
         exposedItemIds: [...exposedStimulusIds],
-      }],
+      }] : context.priorChoices,
+      priorResponses: entry.response ? [...context.priorResponses, { nodeId: `sequence-ask-${task.id}`, taskId: task.id, response: entry.response, exposedItemIds: [...exposedStimulusIds] }] : context.priorResponses,
     })));
   }
   return contexts.map((context) => ({
@@ -150,35 +169,58 @@ function graphRouteContexts(arm: StudyArm, budget: { contexts: number }): Map<st
   const items = new Map(arm.items.map((item) => [item.id, item]));
   const contexts = new Map<string, JourneyPreviewRouteContext[]>();
 
-  const visit = (nodeId: string, path: JourneyPreviewRouteContext['path'], exposedSinceDecision: string[], allExposures: string[], priorChoices: JourneyPreviewRouteContext['priorChoices']): void => {
+  const visit = (nodeId: string, path: JourneyPreviewRouteContext['path'], exposedSinceDecision: string[], allExposures: string[], priorChoices: JourneyPreviewRouteContext['priorChoices'], priorResponses: JourneyPreviewRouteContext['priorResponses']): void => {
     const node = nodes.get(nodeId)!;
     if (node.kind === 'terminal') return;
     if (node.kind === 'expose') {
       const item = items.get(node.itemId)!;
       const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id)!;
-      visit(edge.toNodeId, [...path, { nodeId }], [...exposedSinceDecision, item.id], [...allExposures, item.id], priorChoices);
+      visit(edge.toNodeId, [...path, { nodeId }], [...exposedSinceDecision, item.id], [...allExposures, item.id], priorChoices, priorResponses);
       return;
     }
 
     const task = tasks.get(node.taskId)!;
     reserveContexts(budget, 1);
     const nodeContexts = contexts.get(node.id) ?? [];
-    nodeContexts.push({ path: [...path, { nodeId }], exposedStimulusIds: [...exposedSinceDecision], priorChoices });
+    nodeContexts.push({ path: [...path, { nodeId }], exposedStimulusIds: [...exposedSinceDecision], priorChoices, priorResponses });
     contexts.set(node.id, nodeContexts);
-    for (const [optionId, meaning] of Object.entries(task.options)) {
-      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === optionId)!;
-      visit(edge.toNodeId, [...path, { nodeId, optionId }], [], allExposures, [...priorChoices, {
+    const branches: Array<{ optionId?: string; meaning: string; response?: { type: 'score' | 'noul'; when?: ResponseInterval; value?: number; meaning: string }; edge: { toNodeId: string } }> = 'options' in task
+      ? taskOutcomeEntries(task).map((entry) => ({ ...entry, edge: graph.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === entry.optionId)! }))
+      : graph.transitions.filter((candidate) => candidate.fromNodeId === node.id && candidate.when !== undefined).map((edge) => ({ meaning: intervalLabel(edge.when!), response: { type: edge.when!.type, when: edge.when!, meaning: intervalLabel(edge.when!) }, edge }));
+    for (const branch of branches) {
+      const step = branch.optionId !== undefined ? { nodeId, optionId: branch.optionId } : { nodeId, response: branch.response! };
+      visit(branch.edge.toNodeId, [...path, step], [], allExposures, branch.optionId !== undefined ? [...priorChoices, {
         nodeId,
         taskId: task.id,
-        optionId,
-        meaning,
+        optionId: branch.optionId,
+        meaning: branch.meaning,
         exposedItemIds: [...allExposures],
-      }]);
+      }] : priorChoices, branch.response ? [...priorResponses, { nodeId, taskId: task.id, response: branch.response, exposedItemIds: [...allExposures] }] : priorResponses);
     }
   };
 
-  visit(graph.entryNodeId, [], [], [], []);
+  visit(graph.entryNodeId, [], [], [], [], []);
   return contexts;
+}
+
+function responseType(task: StudyArm['tasks'][number]): 'choice' | 'score' | 'noul' {
+  if ('options' in task) return 'choice';
+  if ('rubric' in task) return 'score';
+  return 'noul';
+}
+
+type TaskOutcomeEntry = { optionId: string; meaning: string; response?: never } | { optionId?: never; meaning: string; response: { type: 'score' | 'noul'; value: number; meaning: string } };
+
+function taskOutcomeEntries(task: StudyArm['tasks'][number]): TaskOutcomeEntry[] {
+  if ('options' in task) return Object.entries(task.options).map(([optionId, meaning]) => ({ optionId, meaning }));
+  if ('rubric' in task) return task.rubric.map((meaning, value) => ({ meaning: `Score ${value}: ${meaning}`, response: { type: 'score' as const, value, meaning: `Score ${value}: ${meaning}` } }));
+  return [0, 0.5, 1].map((value) => ({ meaning: `P(true) = ${value}`, response: { type: 'noul' as const, value, meaning: `P(true) = ${value}` } }));
+}
+
+function intervalLabel(interval: ResponseInterval): string {
+  const left = interval.minimumInclusive ? '[' : '(';
+  const right = interval.maximumInclusive ? ']' : ')';
+  return `${interval.type.toUpperCase()} ${left}${interval.minimum}, ${interval.maximum}${right}`;
 }
 
 function reserveContexts(budget: { contexts: number }, count: number): void {
