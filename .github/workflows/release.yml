@@ -21,11 +21,12 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - name: Validate tag and manifests
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: python3 scripts/package-plugin.py --tag "$RELEASE_TAG" --validate-only
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: python3 scripts/package-plugin.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --validate-only
       - name: Require tag commit on main
         env:
           RELEASE_COMMIT: ${{ github.sha }}
@@ -45,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
@@ -76,6 +77,18 @@ jobs:
         with:
           name: release-zip
           path: release-artifacts
+      - name: Verify tag still identifies triggering commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          TAG_COMMIT="$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)"
+          if [ "$TAG_COMMIT" != "$RELEASE_COMMIT" ]; then
+            echo "Release tag $RELEASE_TAG now resolves to $TAG_COMMIT, not triggering commit $RELEASE_COMMIT." >&2
+            exit 1
+          fi
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

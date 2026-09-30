@@ -36,18 +36,23 @@
 SHEG-4 PR; retire it after the work is merged and the next slice begins.
 
 **Implementation evidence:** `npm run verify` passed locally and again in the
-tracked pre-commit hook (163 tests); `npm run build` passed; all three focused
+tracked pre-commit hook (164 tests); `npm run build` passed; all four focused
 release packaging tests passed; `npm run plugin:package -- --tag v0.1.0`
 created a deterministic 25-file archive. Both workflow YAML files parse, all
 runbook/playbook links resolve, and the Sheg-owned policy contains no required
 ambient plugin or skill identifiers. The GitHub default branch and protection
-rules were verified live. Draft PR [#6](https://github.com/HarleyBartles/sheg/pull/6)
-targeted `develop`; its initial head was `15108fc930526d83b5527142f734bfec6b5c35af`
-and final reviewed head was `df2841ffb262480014907ed11db19db331c5cc98`, with
-`sheg-verify` passing. Independent read-only review found and resolved all
-actionable findings. In private validation repository
-`HarleyBartles/sheg-release-workflow-validation`, tag `v0.1.0` completed all
-release jobs and published a 25-file `sheg-v0.1.0.zip` (SHA-256
+rules were verified live. PR [#6](https://github.com/HarleyBartles/sheg/pull/6) targets `develop`; its initial head was `15108fc930526d83b5527142f734bfec6b5c35af`.
+An independent review at `df2841ffb262480014907ed11db19db331c5cc98` resolved its
+actionable findings. A later review of the evidence update found that the
+release workflow checked out a mutable tag ref and that this review record was
+stale. This iteration pins source checkouts to the push event commit, checks
+that the local tag resolves to that commit before release work, checks the live
+GitHub tag again before publication, and adds annotated-tag retargeting
+behavior coverage. The fresh review cycle covers these corrections before
+handoff. The final PR check and exact head are available from GitHub. In private
+validation repository `HarleyBartles/sheg-release-workflow-validation`, tag
+`v0.1.0` completed all release jobs and published a 25-file
+`sheg-v0.1.0.zip` (SHA-256
 `4d02ff98a85d5b2b92f2114231476aad2338eef76150a90f4d87b30263094823`); tag
 `v0.1.1` failed manifest/tag validation before build and publish, leaving no
 second release. The test release, tag refs, and main branch were removed. GitHub
@@ -149,11 +154,11 @@ remain. No public Sheg release or npm publication was created.
 
 **Interfaces:**
 - Consumes: all preceding task outputs.
-- Produces: reviewable draft PR targeting `develop`, with exact validation and branch settings evidence.
+- Produces: a reviewable PR targeting `develop`, with exact validation and branch settings evidence.
 
 - [x] Run `npm run verify` and the production build as required by SHEG-4.
 - [x] Inspect exact runbook/playbook routes and capability declarations.
 - [x] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing.
 - [x] Verify default branch is develop, protections enforce CI on develop and reviewed release PRs on main, and only administrators can create/update/delete `v*` tags.
-- [x] Request an independent read-only review of the final implementation diff and resolve all actionable findings before handoff.
+- [x] Request an initial independent read-only review and resolve its actionable findings. Run fresh PR reviews after each correction until no new actionable issue is surfaced.
 - [x] Create a Draft PR targeting `develop`, link SHEG-4, and report worktree, branch, base, initial status, final head, changed files, validations, archive listing, workflow evidence, branch settings, and owner actions.

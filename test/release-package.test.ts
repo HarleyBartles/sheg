@@ -10,6 +10,9 @@ import assert from 'node:assert/strict';
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const wrapper = path.join(repositoryRoot, 'scripts/package-plugin.mjs');
 const python = process.platform === 'win32' ? ['py', ['-3']] as const : ['python3', []] as const;
+const isolatedGitEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')),
+);
 const packageManifest = JSON.parse(readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8')) as {
   version: string;
 };
@@ -83,6 +86,82 @@ test('release validation rejects a stale npm lockfile root version', () => {
     const staleLockfileSummary = runFixture();
     assert.notEqual(staleLockfileSummary.status, 0);
     assert.match(staleLockfileSummary.stderr, /package-lock\.json/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test('release validation rejects a tag retargeted away from its triggering commit', () => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'sheg-release-ref-'));
+  try {
+    const scriptDirectory = path.join(temporaryDirectory, 'scripts');
+    const scriptPath = path.join(scriptDirectory, 'package-plugin.py');
+    const packageVersion = '0.1.0';
+    const lockfile = {
+      name: 'sheg',
+      version: packageVersion,
+      lockfileVersion: 3,
+      requires: true,
+      packages: { '': { name: 'sheg', version: packageVersion } },
+    };
+    mkdirSync(scriptDirectory);
+    copyFileSync(path.join(repositoryRoot, 'scripts/package-plugin.py'), scriptPath);
+    writeFileSync(path.join(temporaryDirectory, 'package.json'), JSON.stringify({
+      name: 'sheg', version: packageVersion, private: true,
+    }));
+    writeFileSync(path.join(temporaryDirectory, 'plugin.json'), JSON.stringify({ version: packageVersion }));
+    writeFileSync(path.join(temporaryDirectory, 'package-lock.json'), JSON.stringify(lockfile));
+    writeFileSync(path.join(temporaryDirectory, 'source.txt'), 'first release source');
+    execFileSync('git', ['init', '--initial-branch=main'], {
+      cwd: temporaryDirectory,
+      env: isolatedGitEnv,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['config', 'user.name', 'Sheg Test'], { cwd: temporaryDirectory, env: isolatedGitEnv });
+    execFileSync('git', ['config', 'user.email', 'sheg-test@example.invalid'], {
+      cwd: temporaryDirectory,
+      env: isolatedGitEnv,
+    });
+    execFileSync('git', ['add', '.'], { cwd: temporaryDirectory, env: isolatedGitEnv });
+    execFileSync('git', ['commit', '-m', 'release source'], {
+      cwd: temporaryDirectory,
+      env: isolatedGitEnv,
+      stdio: 'ignore',
+    });
+    const triggeringCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: temporaryDirectory,
+      env: isolatedGitEnv,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['tag', '-a', `v${packageVersion}`, '-m', 'release tag'], {
+      cwd: temporaryDirectory,
+      env: isolatedGitEnv,
+    });
+
+    const [pythonCommand, pythonPrefix] = python;
+    const runValidation = (commit: string) => spawnSync(
+      pythonCommand,
+      [...pythonPrefix, scriptPath, '--tag', `v${packageVersion}`, '--commit', commit, '--validate-only'],
+      { cwd: temporaryDirectory, encoding: 'utf8', env: isolatedGitEnv },
+    );
+    assert.equal(runValidation(triggeringCommit).status, 0);
+
+    writeFileSync(path.join(temporaryDirectory, 'source.txt'), 'retargeted release source');
+    execFileSync('git', ['add', 'source.txt'], { cwd: temporaryDirectory, env: isolatedGitEnv });
+    execFileSync('git', ['commit', '-m', 'retarget release tag'], {
+      cwd: temporaryDirectory,
+      env: isolatedGitEnv,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['tag', '--force', '-a', `v${packageVersion}`, '-m', 'retargeted release tag'], {
+      cwd: temporaryDirectory,
+      env: isolatedGitEnv,
+      stdio: 'ignore',
+    });
+
+    const retargetedTag = runValidation(triggeringCommit);
+    assert.notEqual(retargetedTag.status, 0);
+    assert.match(retargetedTag.stderr, /resolves to .* not triggering commit/);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }

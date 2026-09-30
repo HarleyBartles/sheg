@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -54,11 +55,28 @@ def release_version(tag: str) -> str:
     return ".".join(match.groups())
 
 
-def validate_tag(tag: str) -> str:
+def validate_tag(tag: str, triggering_commit: str | None = None) -> str:
     version = release_version(tag)
     package_version, _plugin_version = validate_manifests()
     if version != package_version:
         raise ValueError(f"release tag version {version} does not match manifest version {package_version}")
+    if triggering_commit is not None:
+        if not re.fullmatch(r"[0-9a-f]{40}", triggering_commit):
+            raise ValueError(f"invalid triggering commit SHA: {triggering_commit!r}")
+        try:
+            tag_commit = subprocess.run(
+                ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise ValueError(f"release tag {tag} does not resolve to a commit in this checkout") from error
+        if tag_commit != triggering_commit:
+            raise ValueError(
+                f"release tag {tag} resolves to {tag_commit}, not triggering commit {triggering_commit}"
+            )
     return version
 
 
@@ -106,17 +124,20 @@ def create_archive(output: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Validate a vMAJOR.MINOR.PATCH release tag before packaging")
+    parser.add_argument("--commit", help="Require the tag to resolve to this triggering GitHub event commit")
     parser.add_argument("--output", type=Path, help="ZIP output path")
     parser.add_argument("--validate-only", action="store_true", help="Validate tag and manifests without packaging")
     parser.add_argument("--list", type=Path, help="Print a JSON listing of an existing archive")
     args = parser.parse_args()
     try:
+        if args.commit and not args.tag:
+            raise ValueError("--commit requires --tag")
         if args.list:
             with zipfile.ZipFile(args.list) as archive:
                 print(json.dumps(archive.namelist(), indent=2))
             return 0
         if args.tag:
-            version = validate_tag(args.tag)
+            version = validate_tag(args.tag, args.commit)
         else:
             version, _plugin_version = validate_manifests()
         if args.validate_only:
