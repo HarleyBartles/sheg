@@ -1,0 +1,3 @@
+[submodule ".agents/plugins/marketplace-source"]
+	path = .agents/plugins/marketplace-source
+	url = https://github.com/HarleyBartles/agent-asset-marketplace.git
