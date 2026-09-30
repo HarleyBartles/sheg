@@ -86,13 +86,14 @@ export async function preflightStudy(input: StudyPreflightInput): Promise<{ prov
       }
     }
     const complete = traversal.status === 'complete';
+    const fitUnverified = traversal.unverifiedReason !== undefined;
     results.push({
       provider: providerConfig.kind === 'jev' ? providerConfig.model : providerConfig.checkpoint,
       executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === 'jev'
         ? { kind: 'jev', model: providerConfig.model }
         : { kind: 'laya', checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...(providerConfig.precision === undefined ? {} : { precision: providerConfig.precision }) }),
       tokenizerSha256: providerConfig.kind === 'laya' ? providerConfig.tokenizerSha256 : null,
-      status: !complete || unavailable.length ? 'unverified' : overflows.length ? 'does-not-fit' : 'fit',
+      status: overflows.length ? 'does-not-fit' : !complete || fitUnverified || unavailable.length ? 'unverified' : 'fit',
       basis: config.mode === 'maximum-profile' ? 'synthetic-profile' : 'frozen-cohort',
       configuration: providerConfig.kind === 'jev'
         ? process.env[providerConfig.keyEnv]?.trim() ? 'configured' : 'incomplete'
@@ -100,7 +101,7 @@ export async function preflightStudy(input: StudyPreflightInput): Promise<{ prov
       availability: 'unverified',
       complete, packetCount: traversal.packetCount, terminalJourneyCount: traversal.terminalJourneyCount,
       measurementMethod, effectiveLimit, maximumTokens, maximumPacket, overflows, unavailable,
-      ...(traversal.incompleteReason === undefined ? {} : { incompleteReason: traversal.incompleteReason }),
+      ...((traversal.incompleteReason ?? traversal.unverifiedReason) === undefined ? {} : { incompleteReason: traversal.incompleteReason ?? traversal.unverifiedReason }),
     });
   }
   return { provisional: config.mode === 'maximum-profile', mode: config.mode, inputFingerprint, compilerFingerprint, providers: results };

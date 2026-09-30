@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -103,4 +105,26 @@ test('preflight identities change with the respondent basis and provider context
   assert.notEqual(frozen.inputFingerprint, synthetic.inputFingerprint);
   assert.equal(frozen.inputFingerprint, differentLimit.inputFingerprint);
   assert.notEqual(frozen.providers[0]!.executionFingerprint, differentLimit.providers[0]!.executionFingerprint);
+});
+
+test('preflight does not claim fit when a later packet includes typed response history', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'sheg-typed-preflight-'));
+  try {
+    const manifest = JSON.parse(readFileSync(path.join(fixtures, 'article.json'), 'utf8')) as { arms: Array<{ tasks: Array<Record<string, unknown>>; presentation: unknown; sources: Array<{ path: string }> }> };
+    const arm = manifest.arms[0]!;
+    arm.tasks[0] = { id: 'tone', type: 'score', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] };
+    arm.presentation = { kind: 'sequence' };
+    await writeFile(path.join(directory, 'study.json'), JSON.stringify(manifest));
+    await writeFile(path.join(directory, 'cohort.json'), await readFile(path.join(fixtures, 'cohort.json')));
+    await writeFile(path.join(directory, 'article-source.md'), await readFile(path.join(fixtures, 'article-source.md')));
+    const result = await preflightStudy({
+      manifestPath: path.join(directory, 'study.json'), cohortPath: path.join(directory, 'cohort.json'),
+      providers: [{ kind: 'laya', baseUrl: 'http://127.0.0.1:8787', checkpoint: 'fixture', contextLimit: 100_000, headLimit: 100_000, tokenizerJsonPath, tokenizerSha256, timeoutMs: 1000 }],
+    });
+    assert.equal(result.providers[0]?.complete, true);
+    assert.equal(result.providers[0]?.status, 'unverified');
+    assert.match(result.providers[0]?.incompleteReason ?? '', /typed response history/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

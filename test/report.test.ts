@@ -42,6 +42,11 @@ async function setup(t: TestContext) {
   checkpoint.sourceHashes = study.sources.map((source) => source.sha256);
   return { directory, checkpoint };
 }
+async function refreshStudyIdentity(checkpoint: RunCheckpoint): Promise<void> {
+  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
+  checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+}
 
 test('report keeps a per-arm matched denominator and answer-key scoring distinct', async (t) => {
   const { checkpoint } = await setup(t);
@@ -128,6 +133,55 @@ test('compares two arms within the same run by respondent and comparison key', a
   assert.equal(comparison.itemChanges.length, 1);
   assert.deepEqual(comparison.taskChanges[0]?.fields, ['options']);
   assert.throws(() => compareReports(report, 'original', 'missing'), /both arm IDs/i);
+});
+
+test('Choice agreement compares selected options rather than confidence evidence', async (t) => {
+  const { checkpoint } = await setup(t);
+  const manifest = JSON.parse(await readFile(checkpoint.manifestPath, 'utf8')) as { arms: Array<{ tasks: Array<{ options: Record<string, string> }> }> };
+  manifest.arms[1]!.tasks[0]!.options = structuredClone(manifest.arms[0]!.tasks[0]!.options);
+  await writeFile(checkpoint.manifestPath, JSON.stringify(manifest));
+  await refreshStudyIdentity(checkpoint);
+  const left = checkpoint.journeys.find((cell) => cell.armId === 'original' && cell.respondentId === 'curious-outside-reader')!;
+  const right = checkpoint.journeys.find((cell) => cell.armId === 'revised' && cell.respondentId === 'curious-outside-reader')!;
+  left.decisions[0]!.result = { ...decision('unanswerable'), probabilities: { unanswerable: 0.7, continue: 0.2, leave: 0.1 }, confidence: 0.7 };
+  right.decisions[0]!.result = { ...decision('leave'), probabilities: { leave: 0.6, continue: 0.3, clarify: 0.1 }, confidence: 0.6 };
+  const comparison = compareReports(await buildReport(checkpoint), 'original', 'revised');
+  assert.equal(comparison.matched.find((item) => item.respondentId === 'curious-outside-reader')?.taskComparisons[0]?.agreement, false);
+  right.decisions[0]!.result = { ...decision('unanswerable'), probabilities: { unanswerable: 0.6, continue: 0.3, leave: 0.1 }, confidence: 0.6 };
+  const sameChoice = compareReports(await buildReport(checkpoint), 'original', 'revised');
+  assert.equal(sameChoice.matched.find((item) => item.respondentId === 'curious-outside-reader')?.taskComparisons[0]?.agreement, true);
+});
+
+test('reconstructs partial journey event paths from durable presentations and decisions', async (t) => {
+  const { checkpoint } = await setup(t);
+  const manifest = JSON.parse(await readFile(checkpoint.manifestPath, 'utf8')) as { arms: Array<{ presentation: unknown }> };
+  manifest.arms[0]!.presentation = { kind: 'sequence' };
+  await writeFile(checkpoint.manifestPath, JSON.stringify(manifest));
+  await refreshStudyIdentity(checkpoint);
+  const partialCell = checkpoint.journeys.find((cell) => cell.armId === 'original' && cell.respondentId === 'craft-reader')!;
+  partialCell.decisions = [{ decisionId: 'entry-response', requestFingerprint: 'f'.repeat(64), result: decision('continue') }];
+  partialCell.presentedTaskIds = ['entry-response', 'investigation-response'];
+  const report = await buildReport(checkpoint);
+  const partial = report.arms[0]?.journeys.find((journey) => journey.respondentId === 'craft-reader');
+  assert.deepEqual(partial?.events.map((event) => (event as { type?: string }).type), ['exposure', 'exposure', 'exposure', 'exposure', 'response', 'pending-response']);
+  const otherRun = structuredClone(report);
+  otherRun.runId = 'a0ba155b-9465-4a43-b77b-369e783bdd42';
+  const comparedPartial = compareRunReports(report, 'original', otherRun, 'original').matched.find((item) => item.respondentId === 'craft-reader');
+  assert.deepEqual(comparedPartial?.leftJourneyPath.events, comparedPartial?.rightJourneyPath.events);
+});
+
+test('reconstructs only graph exposures supported by the next durably presented task', async (t) => {
+  const { checkpoint } = await setup(t);
+  const fixture = JSON.parse(await readFile(path.resolve('test/fixtures/article.json'), 'utf8')) as { arms: Array<{ presentation: { transitions: Array<Record<string, string>> } }> };
+  const manifest = JSON.parse(await readFile(checkpoint.manifestPath, 'utf8')) as { arms: Array<{ presentation: unknown }> };
+  manifest.arms[0]!.presentation = fixture.arms[0]!.presentation;
+  (manifest.arms[0]!.presentation as { transitions: Array<Record<string, string>> }).transitions.push({ fromNodeId: 'choose-entry', optionId: 'unanswerable', toNodeId: 'left' });
+  await writeFile(checkpoint.manifestPath, JSON.stringify(manifest));
+  await refreshStudyIdentity(checkpoint);
+  const report = await buildReport(checkpoint);
+  const partial = report.arms[0]?.journeys.find((journey) => journey.respondentId === 'craft-reader');
+  assert.deepEqual(partial?.events.map((event) => (event as { type?: string }).type), ['exposure', 'pending-response', 'exposure', 'response']);
+  assert.deepEqual(partial?.events.filter((event) => (event as { type?: string }).type === 'exposure').map((event) => (event as { itemId: string }).itemId), ['symptom', 'investigation']);
 });
 test('does not pool repeated Choice outcomes when option meanings changed', async (t) => {
   const { checkpoint } = await setup(t);

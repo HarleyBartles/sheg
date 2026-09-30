@@ -120,6 +120,7 @@ test('enumerates Score threshold routes and carries typed response history to th
   assert.equal(result.terminalJourneyCount, 3);
   assert.equal(followUp?.request.state.trajectory.responses[0]?.type, 'score');
   assert.equal(followUp?.request.state.trajectory.responses[0]?.score, 1.5);
+  assert.match(result.unverifiedReason ?? '', /typed response history/i);
 });
 
 test('returns incomplete rather than dropping work at the packet ceiling or on a cycle', () => {

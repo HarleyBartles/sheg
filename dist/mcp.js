@@ -34918,8 +34918,8 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
   }
   const ordered = ranges.toSorted((left, right) => left.range.minimum - right.range.minimum || Number(right.range.minimumInclusive) - Number(left.range.minimumInclusive));
   for (const { range } of ordered) {
-    if (range.minimum > range.maximum || range.minimum < 0 || range.maximum > maximum) {
-      fail(`${type.toUpperCase()} route interval is reversed or outside its response domain.`);
+    if (range.minimum > range.maximum || range.minimum < 0 || range.maximum > maximum || range.minimum === range.maximum && !(range.minimumInclusive && range.maximumInclusive)) {
+      fail(`${type.toUpperCase()} route interval is reversed, empty, or outside its response domain.`);
       return;
     }
   }
@@ -36794,6 +36794,87 @@ var pollingReportSchema = external_exports.object({
   }).strict()),
   providerEvidence: external_exports.object({ attempts: external_exports.number().int(), billedUsd: external_exports.number().nonnegative(), unknownCharges: external_exports.number().int(), failedCells: external_exports.number().int() }).strict()
 }).strict();
+function reconstructPartialEvents(arm, stored) {
+  const events = [];
+  const used = /* @__PURE__ */ new Set();
+  let sequence = 0;
+  const responseFor = (taskId, nodeId) => {
+    const decisionIndex = stored.decisions.findIndex((decision, index) => !used.has(index) && decision.decisionId === taskId);
+    if (decisionIndex < 0) {
+      events.push({ type: "pending-response", sequence: sequence++, nodeId, taskId });
+      return false;
+    }
+    used.add(decisionIndex);
+    const result = stored.decisions[decisionIndex].result;
+    const value = result.type === "choice" ? { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : result.type === "score" ? { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : { type: "noul", noul: result.noul };
+    events.push({ type: "response", sequence: sequence++, nodeId, taskId, result: value });
+    return true;
+  };
+  const expose = (itemId, nodeId) => {
+    events.push({ type: "exposure", sequence: sequence++, nodeId, itemId });
+  };
+  if (arm.presentation.kind === "sequence") {
+    for (const item of arm.items) expose(item.id, `sequence-expose-${item.id}`);
+    for (const taskId of stored.presentedTaskIds) {
+      if (!responseFor(taskId, `sequence-ask-${taskId}`)) break;
+    }
+    return events;
+  }
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const presented = stored.presentedTaskIds;
+  let presentedIndex = 0;
+  let current = graph.entryNodeId;
+  for (let steps = 0; steps < graph.nodes.length * 2 && presentedIndex < presented.length; steps += 1) {
+    const node2 = nodes.get(current);
+    if (!node2 || node2.kind === "terminal") break;
+    if (node2.kind === "expose") {
+      expose(node2.itemId, node2.id);
+      current = graph.transitions.find((edge2) => edge2.fromNodeId === node2.id)?.toNodeId ?? "";
+      continue;
+    }
+    if (presented[presentedIndex] !== node2.taskId) break;
+    presentedIndex += 1;
+    const hasResponse = responseFor(node2.taskId, node2.id);
+    if (!hasResponse) {
+      const nextTaskId = presented[presentedIndex];
+      if (!nextTaskId) break;
+      const findPaths = (start, visited = /* @__PURE__ */ new Set()) => {
+        if (visited.has(start)) return [];
+        const candidate = nodes.get(start);
+        if (!candidate) return [];
+        if (candidate.kind === "ask") return candidate.taskId === nextTaskId ? [[start]] : [];
+        if (candidate.kind === "terminal") return [];
+        const nextVisited = new Set(visited).add(start);
+        const paths = [];
+        for (const edge2 of graph.transitions.filter((item) => item.fromNodeId === start)) {
+          for (const found of findPaths(edge2.toNodeId, nextVisited)) {
+            paths.push(candidate.kind === "expose" ? [start, ...found] : found);
+            if (paths.length > 1) return paths;
+          }
+        }
+        return paths;
+      };
+      const candidateEdges = graph.transitions.filter((edge2) => edge2.fromNodeId === node2.id && findPaths(edge2.toNodeId).length === 1);
+      if (candidateEdges.length !== 1) break;
+      current = candidateEdges[0].toNodeId;
+      continue;
+    }
+    const decision = stored.decisions.find((item, index) => used.has(index) && item.decisionId === node2.taskId);
+    if (!decision) break;
+    const edge = graph.transitions.find((candidate) => {
+      if (candidate.fromNodeId !== node2.id) return false;
+      if (decision.result.type === "choice") return candidate.optionId === decision.result.choice;
+      const range = candidate.when;
+      if (!range || range.type !== decision.result.type) return false;
+      const value = decision.result.type === "score" ? decision.result.score : decision.result.noul;
+      return (value > range.minimum || range.minimumInclusive && value === range.minimum) && (value < range.maximum || range.maximumInclusive && value === range.maximum);
+    });
+    if (!edge) break;
+    current = edge.toNodeId;
+  }
+  return events;
+}
 async function buildReport(checkpoint) {
   checkpoint = runCheckpointSchema.parse(checkpoint);
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
@@ -36844,7 +36925,7 @@ async function buildReport(checkpoint) {
         status: stored?.status ?? "not-started",
         outcome: stored?.result?.outcome ?? null,
         presentedTaskIds: stored?.presentedTaskIds ?? [],
-        events: stored?.result?.events ?? [],
+        events: stored?.result?.events ?? (stored ? reconstructPartialEvents(arm, stored) : []),
         responses,
         ...stored?.failureEvidence === void 0 ? {} : { failureEvidence: stored.failureEvidence }
       };
@@ -36942,7 +37023,7 @@ function compareReports(report, leftArmId, rightArmId) {
       const counterpart = otherResponses.get(`${response.comparisonKey}:${response.occurrence}`);
       if (!counterpart) return [];
       const comparable = equivalentTasks(left, right, response.comparisonKey) && response.answer.type === counterpart.answer.type;
-      const answersMatch = comparable && JSON.stringify(response.answer) === JSON.stringify(counterpart.answer);
+      const answersMatch = comparable && (response.answer.type === "choice" && counterpart.answer.type === "choice" ? response.answer.choice === counterpart.answer.choice : JSON.stringify(response.answer) === JSON.stringify(counterpart.answer));
       return [{ comparisonKey: response.comparisonKey, occurrence: response.occurrence, leftAnswer: response.answer, rightAnswer: counterpart.answer, ...response.answer.type === "choice" && counterpart.answer.type === "choice" ? { leftChoice: response.answer.choice, rightChoice: counterpart.answer.choice, agreement: answersMatch } : {}, comparable }];
     });
     return [{ respondentId: journey.respondentId, taskComparisons }];
@@ -37205,6 +37286,7 @@ function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
   let packetBytes = 0;
   let terminalJourneyCount = 0;
   let incompleteReason;
+  let unverifiedReason;
   let stopped = false;
   const markIncomplete = (reason) => {
     incompleteReason ??= reason;
@@ -37231,6 +37313,9 @@ function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
     } catch (error62) {
       markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error62 instanceof Error ? error62.message : String(error62)}`);
       return;
+    }
+    if (request.state.trajectory.responses.some((response) => response.type === "score" || response.type === "noul")) {
+      unverifiedReason ??= "Typed response history can vary in serialized size; future packet fit is not conservatively bounded.";
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
     const packetId = `packet-${createHash7("sha256").update(identity).digest("hex")}`;
@@ -37355,7 +37440,8 @@ function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
     status: incompleteReason === void 0 ? "complete" : "incomplete",
     packetCount,
     terminalJourneyCount,
-    ...incompleteReason === void 0 ? {} : { incompleteReason }
+    ...incompleteReason === void 0 ? {} : { incompleteReason },
+    ...unverifiedReason === void 0 ? {} : { unverifiedReason }
   };
 }
 function representativeResponses(task, interval) {
@@ -37437,11 +37523,12 @@ async function preflightStudy(input2) {
       }
     }
     const complete = traversal.status === "complete";
+    const fitUnverified = traversal.unverifiedReason !== void 0;
     results.push({
       provider: providerConfig.kind === "jev" ? providerConfig.model : providerConfig.checkpoint,
       executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === "jev" ? { kind: "jev", model: providerConfig.model } : { kind: "laya", checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...providerConfig.precision === void 0 ? {} : { precision: providerConfig.precision } }),
       tokenizerSha256: providerConfig.kind === "laya" ? providerConfig.tokenizerSha256 : null,
-      status: !complete || unavailable2.length ? "unverified" : overflows.length ? "does-not-fit" : "fit",
+      status: overflows.length ? "does-not-fit" : !complete || fitUnverified || unavailable2.length ? "unverified" : "fit",
       basis: config2.mode === "maximum-profile" ? "synthetic-profile" : "frozen-cohort",
       configuration: providerConfig.kind === "jev" ? process.env[providerConfig.keyEnv]?.trim() ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
       availability: "unverified",
@@ -37454,7 +37541,7 @@ async function preflightStudy(input2) {
       maximumPacket,
       overflows,
       unavailable: unavailable2,
-      ...traversal.incompleteReason === void 0 ? {} : { incompleteReason: traversal.incompleteReason }
+      ...(traversal.incompleteReason ?? traversal.unverifiedReason) === void 0 ? {} : { incompleteReason: traversal.incompleteReason ?? traversal.unverifiedReason }
     });
   }
   return { provisional: config2.mode === "maximum-profile", mode: config2.mode, inputFingerprint, compilerFingerprint, providers: results };

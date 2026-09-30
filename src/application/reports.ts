@@ -6,6 +6,7 @@ import { CheckpointStore, contextFailureSchema, runCheckpointSchema, type RunChe
 import { executionFingerprint, legacyChoiceStimulusFingerprint, respondentCohortFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 import { decisionValueSchema } from '../domain/decision/decision.js';
 import { legacyPromptContractHash, promptContractHash } from '../domain/decision/prompt.js';
+import type { StudyArm } from '../domain/study/arm.js';
 
 const responseSchema = z.object({ taskId: z.string(), comparisonKey: z.string().nullable(), occurrence: z.number().int().positive(), presentationOccurrence: z.number().int().positive(), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), answer: decisionValueSchema, optionIds: z.array(z.string()), choice: z.string().optional(), correct: z.boolean().nullable(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), confidence: z.number().nullable(), chargeUsd: z.number().nonnegative().nullable() }).strict();
 export const pollingReportSchema = z.object({
@@ -23,6 +24,92 @@ export const pollingReportSchema = z.object({
   providerEvidence: z.object({ attempts: z.number().int(), billedUsd: z.number().nonnegative(), unknownCharges: z.number().int(), failedCells: z.number().int() }).strict(),
 }).strict();
 export type PollingReport = z.infer<typeof pollingReportSchema>;
+
+function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys'][number]): unknown[] {
+  const events: unknown[] = [];
+  const used = new Set<number>();
+  let sequence = 0;
+  const responseFor = (taskId: string, nodeId: string): boolean => {
+    const decisionIndex = stored.decisions.findIndex((decision, index) => !used.has(index) && decision.decisionId === taskId);
+    if (decisionIndex < 0) {
+      events.push({ type: 'pending-response', sequence: sequence++, nodeId, taskId });
+      return false;
+    }
+    used.add(decisionIndex);
+    const result = stored.decisions[decisionIndex]!.result;
+    const value = result.type === 'choice'
+      ? { type: 'choice', choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
+      : result.type === 'score'
+        ? { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
+        : { type: 'noul', noul: result.noul };
+    events.push({ type: 'response', sequence: sequence++, nodeId, taskId, result: value });
+    return true;
+  };
+  const expose = (itemId: string, nodeId: string): void => { events.push({ type: 'exposure', sequence: sequence++, nodeId, itemId }); };
+
+  if (arm.presentation.kind === 'sequence') {
+    for (const item of arm.items) expose(item.id, `sequence-expose-${item.id}`);
+    for (const taskId of stored.presentedTaskIds) {
+      if (!responseFor(taskId, `sequence-ask-${taskId}`)) break;
+    }
+    return events;
+  }
+
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const presented = stored.presentedTaskIds;
+  let presentedIndex = 0;
+  let current = graph.entryNodeId;
+  for (let steps = 0; steps < graph.nodes.length * 2 && presentedIndex < presented.length; steps += 1) {
+    const node = nodes.get(current);
+    if (!node || node.kind === 'terminal') break;
+    if (node.kind === 'expose') {
+      expose(node.itemId, node.id);
+      current = graph.transitions.find((edge) => edge.fromNodeId === node.id)?.toNodeId ?? '';
+      continue;
+    }
+    if (presented[presentedIndex] !== node.taskId) break;
+    presentedIndex += 1;
+    const hasResponse = responseFor(node.taskId, node.id);
+    if (!hasResponse) {
+      const nextTaskId = presented[presentedIndex];
+      if (!nextTaskId) break;
+      const findPaths = (start: string, visited = new Set<string>()): string[][] => {
+        if (visited.has(start)) return [];
+        const candidate = nodes.get(start);
+        if (!candidate) return [];
+        if (candidate.kind === 'ask') return candidate.taskId === nextTaskId ? [[start]] : [];
+        if (candidate.kind === 'terminal') return [];
+        const nextVisited = new Set(visited).add(start);
+        const paths: string[][] = [];
+        for (const edge of graph.transitions.filter((item) => item.fromNodeId === start)) {
+          for (const found of findPaths(edge.toNodeId, nextVisited)) {
+            paths.push(candidate.kind === 'expose' ? [start, ...found] : found);
+            if (paths.length > 1) return paths;
+          }
+        }
+        return paths;
+      };
+      const candidateEdges = graph.transitions.filter((edge) => edge.fromNodeId === node.id && findPaths(edge.toNodeId).length === 1);
+      if (candidateEdges.length !== 1) break;
+      current = candidateEdges[0]!.toNodeId;
+      continue;
+    }
+    const decision = stored.decisions.find((item, index) => used.has(index) && item.decisionId === node.taskId);
+    if (!decision) break;
+    const edge = graph.transitions.find((candidate) => {
+      if (candidate.fromNodeId !== node.id) return false;
+      if (decision.result.type === 'choice') return candidate.optionId === decision.result.choice;
+      const range = candidate.when;
+      if (!range || range.type !== decision.result.type) return false;
+      const value = decision.result.type === 'score' ? decision.result.score : decision.result.noul;
+      return (value > range.minimum || (range.minimumInclusive && value === range.minimum)) && (value < range.maximum || (range.maximumInclusive && value === range.maximum));
+    });
+    if (!edge) break;
+    current = edge.toNodeId;
+  }
+  return events;
+}
 
 export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingReport> {
   checkpoint = runCheckpointSchema.parse(checkpoint);
@@ -64,7 +151,7 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
           correct: result.type === 'choice' && choiceTask?.answerKeyOptionId ? result.choice === choiceTask.answerKeyOptionId : null, attempts: result.attempts, latencyMs: result.latencyMs,
           confidence: 'confidence' in result ? result.confidence ?? null : null, chargeUsd: result.chargeUsd ?? null };
       });
-      return { respondentId: respondent.id, archetypeId: respondent.archetypeId ?? null, ...(respondent.variation === undefined ? {} : { variation: respondent.variation }), status: stored?.status ?? 'not-started', outcome: stored?.result?.outcome ?? null, presentedTaskIds: stored?.presentedTaskIds ?? [], events: stored?.result?.events ?? [], responses,
+      return { respondentId: respondent.id, archetypeId: respondent.archetypeId ?? null, ...(respondent.variation === undefined ? {} : { variation: respondent.variation }), status: stored?.status ?? 'not-started', outcome: stored?.result?.outcome ?? null, presentedTaskIds: stored?.presentedTaskIds ?? [], events: stored?.result?.events ?? (stored ? reconstructPartialEvents(arm, stored) : []), responses,
         ...(stored?.failureEvidence === undefined ? {} : { failureEvidence: stored.failureEvidence }) };
     });
     const excludedByStatus: Record<string, number> = {};
@@ -137,7 +224,9 @@ export function compareReports(report: PollingReport, leftArmId: string, rightAr
       const counterpart = otherResponses.get(`${response.comparisonKey}:${response.occurrence}`);
       if (!counterpart) return [];
       const comparable = equivalentTasks(left, right, response.comparisonKey!) && response.answer.type === counterpart.answer.type;
-      const answersMatch = comparable && JSON.stringify(response.answer) === JSON.stringify(counterpart.answer);
+      const answersMatch = comparable && (response.answer.type === 'choice' && counterpart.answer.type === 'choice'
+        ? response.answer.choice === counterpart.answer.choice
+        : JSON.stringify(response.answer) === JSON.stringify(counterpart.answer));
       return [{ comparisonKey: response.comparisonKey, occurrence: response.occurrence, leftAnswer: response.answer, rightAnswer: counterpart.answer, ...(response.answer.type === 'choice' && counterpart.answer.type === 'choice' ? { leftChoice: response.answer.choice, rightChoice: counterpart.answer.choice, agreement: answersMatch } : {}), comparable }];
     });
     return [{ respondentId: journey.respondentId, taskComparisons }];

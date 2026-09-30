@@ -143,6 +143,30 @@ test('validates Noul routes across the full probability domain and rejects a thr
   assert.match(invalid.error.issues.map((issue) => issue.message).join('\n'), /gap|cover|partition|exactly one/i);
 });
 
+test('rejects zero-width typed route intervals that exclude their endpoint', () => {
+  const arm = {
+    ...comprehensionArm('score-empty-route'),
+    tasks: [{ id: 'interest', instructions: 'How interested?', type: 'score', rubric: ['low', 'medium', 'high'] }],
+    presentation: {
+      kind: 'graph', entryNodeId: 'ask-interest', maxDecisions: 1,
+      nodes: [
+        { id: 'ask-interest', kind: 'ask', taskId: 'interest' },
+        { id: 'low', kind: 'terminal', outcome: 'low' },
+        { id: 'empty', kind: 'terminal', outcome: 'empty' },
+        { id: 'high', kind: 'terminal', outcome: 'high' },
+      ],
+      transitions: [
+        { fromNodeId: 'ask-interest', toNodeId: 'low', when: { type: 'score', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'ask-interest', toNodeId: 'empty', when: { type: 'score', minimum: 0.5, maximum: 0.5, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'ask-interest', toNodeId: 'high', when: { type: 'score', minimum: 0.5, maximum: 2, minimumInclusive: true, maximumInclusive: true } },
+      ],
+    },
+  };
+  const result = studyManifestSchema.safeParse(study([arm as unknown as StudyArm]));
+  assert.equal(result.success, false);
+  assert.match(result.error.issues.map((issue) => issue.message).join('\n'), /empty|zero-width|exclusive/i);
+});
+
 test('accepts a frozen cohort of distinct stimulus respondents', () => {
   const cohort = respondentCohortSchema.safeParse({ version: '3.0', respondents: [respondent] });
   assert.equal(cohort.success, true, cohort.success ? '' : cohort.error.message);

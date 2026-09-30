@@ -177,8 +177,9 @@ function validateResponseIntervals(
   }
   const ordered = ranges.toSorted((left, right) => left.range!.minimum - right.range!.minimum || Number(right.range!.minimumInclusive) - Number(left.range!.minimumInclusive));
   for (const { range } of ordered) {
-    if (range!.minimum > range!.maximum || range!.minimum < 0 || range!.maximum > maximum) {
-      fail(`${type.toUpperCase()} route interval is reversed or outside its response domain.`);
+    if (range!.minimum > range!.maximum || range!.minimum < 0 || range!.maximum > maximum ||
+        (range!.minimum === range!.maximum && !(range!.minimumInclusive && range!.maximumInclusive))) {
+      fail(`${type.toUpperCase()} route interval is reversed, empty, or outside its response domain.`);
       return;
     }
   }

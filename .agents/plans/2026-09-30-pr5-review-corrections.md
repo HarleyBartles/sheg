@@ -13,11 +13,11 @@
 
 ## Tasks
 
-- [ ] Add focused behavior tests for choice agreement, conservative typed-history preflight, partial journey event paths, and zero-width exclusive intervals; run each to observe the expected failure.
-- [ ] Fix Choice agreement to compare selected option IDs while retaining comparability checks.
-- [ ] Make packet traversal/preflight mark any unbounded future typed response history incomplete or unverified, without suppressing runtime admission checks.
-- [ ] Reconstruct report event paths for incomplete/failed journeys from durable presentation and decision evidence, including an explicit pending response boundary when a task was presented but no decision was stored.
-- [ ] Reject zero-width Score/Noul intervals unless the single endpoint is inclusive.
+- [x] Add focused behavior tests for choice agreement, conservative typed-history preflight, partial journey event paths, and zero-width exclusive intervals; run each to observe the expected failure.
+- [x] Fix Choice agreement to compare selected option IDs while retaining comparability checks.
+- [x] Make packet traversal/preflight mark any unbounded future typed response history incomplete or unverified, without suppressing runtime admission checks.
+- [x] Reconstruct report event paths for incomplete/failed journeys from durable presentation and decision evidence, including an explicit pending response boundary when a task was presented but no decision was stored.
+- [x] Reject zero-width Score/Noul intervals unless the single endpoint is inclusive.
 - [ ] Run focused tests and `npm run verify`; update this plan's boxes and mark it `completed-awaiting-retirement` after success.
 - [ ] Push fixes to PR #5, prepare a fresh full-diff review package, and repeat review/fix/re-review until no findings remain.
 

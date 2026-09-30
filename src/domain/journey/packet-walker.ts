@@ -23,6 +23,7 @@ export type JourneyWalkResult = {
   packetCount: number;
   terminalJourneyCount: number;
   incompleteReason?: string;
+  unverifiedReason?: string;
 };
 
 export type JourneyWalkOptions = { maxPackets?: number; maxPacketBytes?: number };
@@ -45,6 +46,7 @@ export function walkStudyPackets(
   let packetBytes = 0;
   let terminalJourneyCount = 0;
   let incompleteReason: string | undefined;
+  let unverifiedReason: string | undefined;
   let stopped = false;
 
   const markIncomplete = (reason: string): void => {
@@ -74,6 +76,9 @@ export function walkStudyPackets(
     } catch (error) {
       markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error instanceof Error ? error.message : String(error)}`);
       return;
+    }
+    if (request.state.trajectory.responses.some((response) => response.type === 'score' || response.type === 'noul')) {
+      unverifiedReason ??= 'Typed response history can vary in serialized size; future packet fit is not conservatively bounded.';
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
     const packetId = `packet-${createHash('sha256').update(identity).digest('hex')}`;
@@ -207,6 +212,7 @@ export function walkStudyPackets(
     packetCount,
     terminalJourneyCount,
     ...(incompleteReason === undefined ? {} : { incompleteReason }),
+    ...(unverifiedReason === undefined ? {} : { unverifiedReason }),
   };
 }
 
