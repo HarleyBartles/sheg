@@ -24,11 +24,16 @@ Start with the source material, what the person wants to learn, and whose
 perspective would help. The [study-design skill](../../skills/study-design/SKILL.md)
 teaches the agent to propose tasks and a cohort without asking the person to
 author graph JSON. Get approval of that human-language study design, then
-translate it to the manifest. Validate the manifest and cohort with
-`poll_check`, and use `poll_preview` to show the complete generic journey,
-including all branches, stimulus reveals, task wording, choices, destinations,
-and shared continuations. Preview requires neither a cohort nor a provider and
-makes no inference call.
+translate it to the manifest. Validate the manifest, then use `poll_preview`
+before creating the cohort to show the complete generic journey, including all
+branches, stimulus reveals, task wording, choices, destinations, and shared
+continuations. Each question includes route-specific prior choice meanings and
+the stimulus IDs in scope; those IDs resolve to stimulus text in the preview.
+A shared question is shown once with a context for each route that reaches it.
+Preview requires neither a cohort nor a provider and makes no inference call.
+It rejects previews above 10,000 route contexts rather than returning partial
+output. After the cohort and exact run configuration exist, use `poll_check` to
+validate them.
 
 ## Check draft packet fit while authoring
 

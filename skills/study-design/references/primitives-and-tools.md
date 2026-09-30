@@ -41,7 +41,7 @@ preview, execute, or report; there is no capability-list tool.
 
 | Tool | Accepted input | Result | Provider behavior |
 | --- | --- | --- | --- |
-| `poll_preview` | `manifestPath` | Each arm's presentation and stable ordered nodes, including stimulus/task wording, choices, destinations, and shared continuations. | No cohort, provider, or inference call. |
+| `poll_preview` | `manifestPath` | Each arm's presentation and stable ordered nodes, including stimulus/task wording, choices, destinations, and shared continuations. Every question includes one `routeContexts` entry per route reaching it, with the path, prior choices and their meanings/exposure IDs, and stimulus IDs currently in scope. Shared questions remain one node with multiple route contexts. A stimulus ID resolves to the authored text on its stimulus node. Rejects more than 10,000 route contexts with no partial preview. | No cohort, provider, or inference call. |
 | `poll_check` | `config`: manifest, cohort, output directory, call limits, and provider configuration. | Validation/fingerprints, respondent and arm counts, minimum/maximum reachable decision calls, call-cap sufficiency, and configured Jev spend ceiling. | No provider call. |
 | `poll_preflight` | `manifestPath`, optional `cohortPath`, provider list, optional mode and packet cap. | Per-provider fit, worst packet, overflow/unavailable details, measurement method, and whether traversal completed. | Measures every reachable packet; no inference call. |
 | `poll_trace` | Manifest/cohort paths, arm/respondent IDs, and scripted option IDs. | The deterministic route and outcome for those choices. | No provider call. |
@@ -87,10 +87,11 @@ branching study fits.
 1. Discuss material, question, and useful respondent perspective; inspect
    these documented capabilities before proposing unsupported response types.
 2. Co-design and get the human's approval of the human-language study design.
-3. Author the graph from the accepted design, validate it, and use
-   `poll_preview` to show every route. These steps add no approval gate.
-4. Propose and expand a cohort with the human, then use incremental sizing and
-   exhaustive preflight.
+3. Author and validate the manifest, then use `poll_preview` to show every
+   route before building the cohort. Inspect route-specific prior choices and
+   current stimulus scope at each question. These steps add no approval gate.
+4. Propose and expand a cohort with the human, validate exact run settings with
+   `poll_check`, then use incremental sizing and exhaustive preflight.
 5. Report reachable calls and the configured spend ceiling; get approval to
    run, then call `poll_start`.
 6. Report and interpret the typed outcomes against the original question and

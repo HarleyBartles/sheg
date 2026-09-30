@@ -38,18 +38,26 @@ supports.
    and question wording. If the design requires a feature Sheg does not support,
    say exactly what cannot be represented and offer a supported alternative;
    get agreement before changing the question being studied.
-6. Validate the authored manifest and cohort with `poll_check`, then call
-   `poll_preview` on the manifest. Show the preview as one generic respondent's
-   full journey, including every branch, stimulus reveal, question, offered
-   choice, destination, and shared continuation. The preview needs no cohort
-   and makes no inference call. It is an inspection step, not another approval
+6. Validate the authored manifest and call `poll_preview` before cohort
+   construction. Show the preview as one generic respondent's full journey,
+   including every branch, current stimulus scope, route-specific prior choices
+   and their meanings, question, offered choice, destination, and shared
+   continuation. A shared question appears once, with a separate route context
+   for each way of reaching it. Each route context identifies the choice path,
+   prior choice meanings and their exposed stimulus IDs, and the stimulus IDs
+   currently in scope at the question; stimulus node IDs resolve to their full
+   authored text in the same preview. The preview needs no cohort and makes no
+   inference call. It rejects a study above 10,000 route contexts instead of
+   returning partial results. This is an inspection step, not another approval
    gate.
-7. Use `poll_measure_packets` while iterating on selected respondents,
-   stimuli, tasks, or histories. When the design and frozen cohort are ready,
-   use `poll_preflight` to measure every reachable packet on every possible
-   route for the configured provider or providers. Explain fit and limitations
-   in terms of the provider assumptions, then report the reachable call range
-   and configured spend ceiling where applicable.
+7. Build and discuss the cohort with the human. Use `poll_check` to validate
+   the exact manifest, cohort, and run settings. Use `poll_measure_packets`
+   while iterating on selected respondents, stimuli, tasks, or histories. When
+   the design and frozen cohort are ready, use `poll_preflight` to measure
+   every reachable packet on every possible route for the configured provider
+   or providers. Explain fit and limitations in terms of provider assumptions,
+   then report the reachable call range and configured spend ceiling where
+   applicable.
 8. Before `poll_start`, present the provider, distinct respondent and arm
    counts, reachable call range, configured limits, and Jev spend ceiling when
    used. The human approves the run. Start it only after that approval. Use
@@ -80,8 +88,10 @@ profile limits in the cohort guide.
 
 - Static capabilities: read this skill and its references; no tool call.
 - Draft task fit: `poll_measure_packets`; no inference call.
-- Validate exact study and run settings: `poll_check`; no provider call.
-- Show all branches: `poll_preview`; no cohort or inference call.
+- Show all branches and route context before cohort construction: `poll_preview`;
+  no cohort or inference call.
+- Validate the exact study, frozen cohort, and run settings: `poll_check`; no
+  provider call.
 - Check the complete frozen-cohort journey: `poll_preflight`; measurement only,
   no inference call.
 - Run after approval: `poll_start`; this starts inference.

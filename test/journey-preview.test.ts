@@ -29,7 +29,21 @@ test('previews sequence stimuli before the authored questions and routes every c
     assert.equal(firstQuestion.instructions, task.instructions);
     assert.deepEqual(firstQuestion.options.map(({ optionId, description }) => [optionId, description]), Object.entries(task.options));
     assert.ok(firstQuestion.options.every((option) => option.nextNodeId === journey.nodes[arm.items.length + 1]?.id));
-    assert.equal(firstQuestion.trajectoryContextIncluded, true);
+    assert.deepEqual(firstQuestion.routeContexts, [{
+      path: [
+        ...arm.items.map((item) => ({ nodeId: `sequence-expose-${item.id}` })),
+        { nodeId: firstQuestion.id },
+      ],
+      exposedStimulusIds: arm.items.map(({ id }) => id),
+      priorChoices: [],
+    }]);
+    const secondQuestion = questionNodes[1]!;
+    assert.equal(secondQuestion.kind, 'question');
+    if (secondQuestion.kind === 'question') {
+      assert.deepEqual(secondQuestion.routeContexts.map((context) => context.priorChoices.map(({ taskId, optionId, meaning }) => ({ taskId, optionId, meaning }))),
+        Object.entries(task.options).map(([optionId, meaning]) => [{ taskId: task.id, optionId, meaning }]));
+      assert.ok(secondQuestion.routeContexts.every((context) => context.exposedStimulusIds.join(',') === arm.items.map(({ id }) => id).join(',')));
+    }
   }
 });
 
@@ -74,7 +88,25 @@ test('previews every graph branch and represents a shared continuation node once
   assert.equal(investigation?.kind, 'stimulus');
   if (investigation?.kind === 'stimulus') assert.equal(investigation.text, arm.items.find((item) => item.id === 'investigation')?.text);
   assert.equal(shared?.kind, 'question');
-  if (shared?.kind === 'question') assert.equal(shared.instructions, arm.tasks[1]?.instructions);
+  if (shared?.kind === 'question') {
+    assert.equal(shared.instructions, arm.tasks[1]?.instructions);
+    assert.deepEqual(shared.routeContexts.map((context) => ({
+      path: context.path,
+      exposedStimulusIds: context.exposedStimulusIds,
+      priorChoices: context.priorChoices.map(({ taskId, optionId, meaning, exposedItemIds }) => ({ taskId, optionId, meaning, exposedItemIds })),
+    })), [
+      {
+        path: [{ nodeId: 'start', optionId: 'continue' }, { nodeId: 'show-symptom' }, { nodeId: 'shared-question' }],
+        exposedStimulusIds: ['symptom'],
+        priorChoices: [{ taskId: 'entry-response', optionId: 'continue', meaning: arm.tasks[0]!.options.continue!, exposedItemIds: [] }],
+      },
+      {
+        path: [{ nodeId: 'start', optionId: 'leave' }, { nodeId: 'show-investigation' }, { nodeId: 'shared-question' }],
+        exposedStimulusIds: ['investigation'],
+        priorChoices: [{ taskId: 'entry-response', optionId: 'leave', meaning: arm.tasks[0]!.options.leave!, exposedItemIds: [] }],
+      },
+    ]);
+  }
 });
 
 test('rejects invalid graph destinations instead of returning a partial preview', () => {
@@ -83,4 +115,18 @@ test('rejects invalid graph destinations instead of returning a partial preview'
   if (invalidArm.presentation.kind === 'graph') invalidArm.presentation.transitions[0]!.toNodeId = 'missing-node';
 
   assert.throws(() => previewStudyJourney([invalidArm]), /unknown target node missing-node/i);
+});
+
+test('rejects a journey whose route-context count exceeds the preview bound', () => {
+  const manyChoiceTasks: StudyArm = {
+    ...arm,
+    tasks: Array.from({ length: 14 }, (_, index) => ({
+      id: `question-${index + 1}`,
+      instructions: `Choose for question ${index + 1}.`,
+      options: { first: 'Choose first.', second: 'Choose second.' },
+    })),
+    presentation: { kind: 'sequence' },
+  };
+
+  assert.throws(() => previewStudyJourney([manyChoiceTasks]), /10,?000-context limit.*no partial preview/i);
 });

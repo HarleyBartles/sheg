@@ -39,10 +39,16 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   assert.match(measureTool?.description ?? '', /same length/i);
   const preview = await client.callTool({ name: 'poll_preview', arguments: { manifestPath: path.resolve('test/fixtures/article.json') } });
   assert.equal(preview.isError ?? false, false);
-  const previewContent = preview.structuredContent as { arms: Array<{ armId: string; presentation: string; nodes: Array<{ kind: string; id: string }> }> };
+  const previewContent = preview.structuredContent as { arms: Array<{ armId: string; presentation: string; nodes: Array<{ kind: string; id: string; routeContexts?: Array<{ exposedStimulusIds: string[]; priorChoices: Array<{ taskId: string; optionId: string; meaning: string }> }> }> }> };
   assert.equal(previewContent.arms[0]?.armId, 'original');
   assert.equal(previewContent.arms[0]?.presentation, 'graph');
   assert.ok(previewContent.arms[0]?.nodes.some((node) => node.id === 'choose-investigation' && node.kind === 'question'));
+  const investigationPreview = previewContent.arms[0]?.nodes.find((node) => node.id === 'choose-investigation');
+  assert.deepEqual(investigationPreview?.routeContexts, [{
+    path: [{ nodeId: 'show-symptom' }, { nodeId: 'choose-entry', optionId: 'continue' }, { nodeId: 'show-investigation' }, { nodeId: 'choose-investigation' }],
+    exposedStimulusIds: ['investigation'],
+    priorChoices: [{ nodeId: 'choose-entry', taskId: 'entry-response', optionId: 'continue', meaning: 'Continue to the next item.', exposedItemIds: ['symptom'] }],
+  }]);
   assert.equal(JSON.parse((preview.content[0] as { text: string }).text).arms[0]?.armId, 'original');
   const invalidPreview = await client.callTool({ name: 'poll_preview', arguments: { manifestPath: path.resolve('missing-manifest.json') } });
   assert.equal(invalidPreview.isError, true);

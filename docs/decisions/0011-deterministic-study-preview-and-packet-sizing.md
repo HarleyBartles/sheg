@@ -47,7 +47,11 @@ context, but it never calls inference.
 Add `poll_preview` to show every validated sequence or graph route independently
 of cohort construction and provider configuration. Represent shared
 continuations once while retaining their incoming route references and authored
-stimulus, task, choice, and destination details.
+stimulus, task, choice, and destination details. At every question, include a
+route context for each route reaching it: the path, prior choices with their
+meanings and exposed stimulus IDs, and the stimulus IDs currently in scope.
+Resolve stimulus IDs through the preview's stimulus nodes. Reject a preview
+whose total route-context count exceeds 10,000; never return a partial preview.
 
 Extend `poll_check` with deterministic minimum and maximum decision-call
 bounds over the validated study and frozen cohort. Compare the maximum to the
@@ -75,7 +79,9 @@ optimization remain future work.
 - Jev fit remains an estimate with a 20% reserve; Laya fit depends on the
   configured pinned tokenizer, limits, and checkpoint compatibility.
 - Journey preview needs no cohort or provider. It shows the complete generic
-  route structure, not a predicted respondent's choices.
+  route structure and route-specific prior-choice/stimulus context, not a
+  predicted respondent's choices. A hard 10,000-context bound rejects large
+  previews rather than returning partial route information.
 - Run-call bounds are deterministic ranges. The Jev amount is a cap, not a
   probabilistic or expected charge.
 - The skill teaches supported study design; it does not make graph authoring a

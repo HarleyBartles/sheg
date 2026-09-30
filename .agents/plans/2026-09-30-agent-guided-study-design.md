@@ -21,7 +21,7 @@
 - Preserve the two approval points: approve the human-language study design, then approve the respondent run. Do not add approval gates for graph authoring, validation, or preview.
 - Preserve author-provided stimulus and question wording. Explain fit pressure and offer design choices; do not silently truncate or rewrite content.
 - Before any implementation mutation, use a fresh dedicated worktree based on current `main`, and report worktree path, branch, base commit, and initial `git status --short`.
-- Run `npm run verify` before publishing. Do not bypass the tracked pre-commit hook.
+- For uncommitted verification, run `npm run verify` after source and generated outputs are finalized, before staging the final commit. Do not run it immediately before or after that commit: the tracked pre-commit hook runs `npm run verify` against the staged snapshot. Never bypass the hook.
 
 ## Review Focus
 
@@ -155,15 +155,16 @@ Return `{ complete: true, caseCount, providers, cases }`. Each case contains its
 
 **Interfaces:**
 - Consumes: validated study arms, existing sequence and graph presentation contracts, task schemas, and `loadStudy` with `allowMissingCohort: true`.
-- Produces: `previewStudyJourney(arms)`, application operation `previewStudy(manifestPath)`, and MCP tool `poll_preview`.
+- Produces: `previewStudyJourney(arms)`, application operation `previewStudy(manifestPath)`, and MCP tool `poll_preview`. Each question includes route-specific prior choices and stimulus IDs in scope; a single preview is capped at 10,000 route contexts and rejects over-cap work without returning a partial preview.
 
 - [x] Test sequence ordering, stimulus reveal placement, task wording/options, and terminal completion.
 - [x] Test a graph with multiple branches, stimulus exposures, recalled-choice text, short and long routes, and a shared continuation; assert every branch appears and the shared continuation is represented once.
+- [x] Test a shared question reached by distinct earlier choices and stimulus exposures; assert each route context identifies the earlier option meaning and the exact current stimulus IDs. Test that exceeding the preview context cap returns an error rather than a partial preview.
 - [x] Test invalid graphs and unknown destinations return validation errors rather than partial previews.
 - [x] Run focused journey-preview tests and confirm the behavior assertions fail before implementation.
 - [x] Implement a deterministic, cohort-independent branch-tree/step representation. Include stable node and choice IDs, authored stimulus/task/option wording, each choice destination, and explicit references to shared continuation nodes. Do not collapse distinct routes or invent prose about respondent intent.
 - [x] Add `previewStudy(manifestPath)` using the loader's no-cohort mode so preview requires no provider or frozen cohort while source/hash validation remains active.
-- [x] Register `poll_preview`; its schema and description state that it makes no inference calls, needs no cohort, and returns every branch with shared continuations represented once.
+- [x] Register `poll_preview`; its schema and description state that it makes no inference calls, needs no cohort, returns every branch with shared continuations represented once, includes route-specific prior choice and current stimulus context, and rejects over-cap previews without partial output.
 - [x] Test structured and JSON text results through MCP, including invalid manifest input.
 - [x] Run focused preview and MCP tests; confirm a representative branching design is fully represented.
 
@@ -201,13 +202,13 @@ Return `{ complete: true, caseCount, providers, cases }`. Each case contains its
 - Consumes: the accepted product flow and the registered MCP tools `poll_preview`, `poll_check`, `poll_preflight`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_reconcile`, `poll_resume`, `poll_report`, `poll_compare`, and `poll_measure_packets`.
 - Produces: an agent process that starts with the human's stimulus, question, and desired perspective; proposes/revises a human-language design; translates the accepted design into current Sheg contracts; previews every branch from the validated graph; builds and discusses archetype/profile cohorts; performs incremental packet sizing and final whole-study preflight; reports the reachable call range and configured spend ceiling; requires approval of the actual run; and supports the agent's interpretation against the original question.
 
-- [x] Draft the study-design skill so it probes underspecified intent, directs the agent to Sheg's primitives-and-tools reference before proposing unsupported features, distinguishes current availability from target concepts, calls `poll_preview` after graph validation and presents its complete generic branching journey, and observes the two approved human gates.
+- [x] Draft the study-design skill so it probes underspecified intent, directs the agent to Sheg's primitives-and-tools reference before proposing unsupported features, distinguishes current availability from target concepts, previews route-specific prior choices and current stimulus scope before cohort construction, and observes the two approved human gates.
 - [x] Document Sheg's study, arm, stimulus, task, typed response, respondent, cohort, presentation, journey, history, and decision-packet primitives with examples of how they compose. State that Choice is currently executable and Score, Noul, and threshold routing are unavailable until implemented.
 - [x] Document each registered MCP tool by name, purpose, accepted input, output, and provider behavior: `poll_preview` (manifest, no inference); `poll_check` (manifest/provider config, no inference); `poll_preflight` (manifest/cohort/provider config, measures packets without inference); `poll_trace` (manifest/cohort/arm/respondent/scripted choices, no inference); `poll_measure_packets` (packet variants/provider config, measures without inference); `poll_start` (run config, starts inference); `poll_status` (run ID/output directory, reads status); `poll_cancel` (run ID/output directory, requests cancellation and waits for in-flight decisions); `poll_reconcile` (run ID/output directory/verified charge, updates billing state); `poll_resume` (run ID/output directory, resumes inference); `poll_report` (run ID/output directory, builds report); and `poll_compare` (run/arm IDs, compares reports). Static product knowledge lives in these references; do not add a capability-list MCP tool.
 - [x] Draft packet-budgeting guidance with the task input formula from the spec, current sequence/graph stimulus inclusion, trajectory history, provider framing, Laya's measured 1,024-token limit, Jev's estimated 32K context with 20% reserve, and an explanation that profile caps bound only one input component.
 - [x] Explain how to batch variants over any packet dimension, choose paired cases or explicit Cartesian products, inspect each respondent/task fit and largest case, and then run exhaustive whole-study preflight when the design and cohort are complete. Give the 3-profile/3-task positional pairing example, the 3-profile/2-task validation error, singleton broadcasting, and the 3-by-2 Cartesian result so an agent can select the intended semantics without probing the tool.
 - [x] Update cohort guidance to tell profile-producing agents to encode only perspective details that can affect responses, keep prose concise, and treat the five 500-character field limits and 1,500-character aggregate cap as safeguards rather than writing targets.
-- [x] Add a behavioral walkthrough to README and study-manifest guidance that uses `poll_preview` after validation, then sizing and preflight; state that preview/sizing/preflight make no inference calls. Keep graph internals out of the human's starting flow.
+- [x] Add a behavioral walkthrough to README and study-manifest guidance that previews after manifest validation and before cohort construction, then sizes and preflights; state that preview/sizing/preflight make no inference calls. Keep graph internals out of the human's starting flow.
 - [x] Record the shared packet compiler, cohort-independent all-branches preview, bounded packet measurement, and deterministic run-call/spend bounds as a proposed ADR; add it to the decision index in the same change.
 - [x] Manually walk the written example against registered tool schemas and the accepted spec; correct any instruction that implies unsupported Score, Noul, or threshold execution.
 
@@ -230,7 +231,7 @@ Return `{ complete: true, caseCount, providers, cases }`. Each case contains its
 - [x] Update `test/package.test.ts` to copy the new skill into its isolated plugin fixture and verify that links from both packaged skills resolve within the plugin root.
 - [ ] Stage the intended source, tests, docs, skill, and generated build outputs only if the repository tracks them.
 - [ ] Create the final implementation commit through the normal tracked pre-commit hook. The hook runs `npm run verify` against the staged snapshot; do not run that full command immediately before or after the hooked commit, and do not bypass the hook.
-- [ ] Push the implementation branch and open a Draft PR containing the approved plan/spec and complete implementation. Verify the remote branch head, PR draft state, and required checks; keep the PR in Draft for human review.
+- [ ] Push the implementation branch and open a Draft PR containing the approved plan/spec and complete implementation. Verify the remote branch head and PR draft state. Report that GitHub Actions verification is skipped while the PR is Draft (`.github/workflows/ci.yml` gates `sheg-verify` on non-draft); local staged-snapshot verification is provided by the required pre-commit hook. Keep the PR in Draft for human review.
 - [ ] Record final changed files, focused evidence, successful staged-snapshot `npm run verify`, PR link/state, and any provider limits in the implementation handoff.
 
 ## Out of Scope

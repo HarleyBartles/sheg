@@ -36986,10 +36986,12 @@ function packetRef(packet) {
 }
 
 // src/domain/journey/preview.ts
+var MAX_JOURNEY_PREVIEW_CONTEXTS = 1e4;
 function previewStudyJourney(arms) {
-  return { arms: arms.map((rawArm) => previewArm(studyArmSchema.parse(rawArm))) };
+  const budget = { contexts: 0 };
+  return { arms: arms.map((rawArm) => previewArm(studyArmSchema.parse(rawArm), budget)) };
 }
-function previewArm(arm) {
+function previewArm(arm, budget) {
   if (arm.presentation.kind === "sequence") {
     const stimulusNodes = arm.items.map((item, index) => ({
       id: `sequence-expose-${item.id}`,
@@ -36998,18 +37000,21 @@ function previewArm(arm) {
       text: item.text,
       nextNodeId: index + 1 < arm.items.length ? `sequence-expose-${arm.items[index + 1].id}` : `sequence-ask-${arm.tasks[0].id}`
     }));
-    const questionNodes = arm.tasks.map((task, index) => ({
-      id: `sequence-ask-${task.id}`,
-      kind: "question",
-      taskId: task.id,
-      instructions: task.instructions,
-      options: Object.entries(task.options).map(([optionId, description]) => ({
-        optionId,
-        description,
-        nextNodeId: index + 1 < arm.tasks.length ? `sequence-ask-${arm.tasks[index + 1].id}` : `sequence-terminal-${arm.id}`
-      })),
-      trajectoryContextIncluded: true
-    }));
+    const questionNodes = arm.tasks.map((task, index) => {
+      const routeContexts = sequenceRouteContexts(arm, index, budget);
+      return {
+        id: `sequence-ask-${task.id}`,
+        kind: "question",
+        taskId: task.id,
+        instructions: task.instructions,
+        options: Object.entries(task.options).map(([optionId, description]) => ({
+          optionId,
+          description,
+          nextNodeId: index + 1 < arm.tasks.length ? `sequence-ask-${arm.tasks[index + 1].id}` : `sequence-terminal-${arm.id}`
+        })),
+        routeContexts
+      };
+    });
     return {
       armId: arm.id,
       label: arm.label,
@@ -37020,6 +37025,7 @@ function previewArm(arm) {
   }
   const tasksById = new Map(arm.tasks.map((task) => [task.id, task]));
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
+  const routeContextsByNode = graphRouteContexts(arm, budget);
   const nodes = arm.presentation.nodes.map((node2) => {
     if (node2.kind === "terminal") return { id: node2.id, kind: "terminal", outcome: node2.outcome };
     if (node2.kind === "expose") {
@@ -37032,7 +37038,7 @@ function previewArm(arm) {
       const edge = arm.presentation.kind === "graph" ? arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node2.id && candidate.optionId === optionId) : void 0;
       return { optionId, description, nextNodeId: edge.toNodeId };
     });
-    return { id: node2.id, kind: "question", taskId: task.id, instructions: task.instructions, options, trajectoryContextIncluded: true };
+    return { id: node2.id, kind: "question", taskId: task.id, instructions: task.instructions, options, routeContexts: routeContextsByNode.get(node2.id) ?? [] };
   });
   return {
     armId: arm.id,
@@ -37041,6 +37047,77 @@ function previewArm(arm) {
     entryNodeId: arm.presentation.entryNodeId,
     nodes
   };
+}
+function sequenceRouteContexts(arm, taskIndex, budget) {
+  const priorTasks = arm.tasks.slice(0, taskIndex);
+  let contextCount = 1;
+  for (const task of priorTasks) {
+    const optionCount = Object.keys(task.options).length;
+    if (contextCount > MAX_JOURNEY_PREVIEW_CONTEXTS / optionCount) throw contextLimitError();
+    contextCount *= optionCount;
+  }
+  reserveContexts(budget, contextCount);
+  const exposedStimulusIds = arm.items.map(({ id }) => id);
+  let contexts = [{ path: arm.items.map((item) => ({ nodeId: `sequence-expose-${item.id}` })), exposedStimulusIds, priorChoices: [] }];
+  for (const task of priorTasks) {
+    contexts = contexts.flatMap((context) => Object.entries(task.options).map(([optionId, meaning]) => ({
+      path: [...context.path, { nodeId: `sequence-ask-${task.id}`, optionId }],
+      exposedStimulusIds,
+      priorChoices: [...context.priorChoices, {
+        nodeId: `sequence-ask-${task.id}`,
+        taskId: task.id,
+        optionId,
+        meaning,
+        exposedItemIds: [...exposedStimulusIds]
+      }]
+    })));
+  }
+  return contexts.map((context) => ({
+    ...context,
+    path: [...context.path, { nodeId: `sequence-ask-${arm.tasks[taskIndex].id}` }]
+  }));
+}
+function graphRouteContexts(arm, budget) {
+  if (arm.presentation.kind !== "graph") throw new Error("Graph route contexts require a graph presentation.");
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const tasks = new Map(arm.tasks.map((task) => [task.id, task]));
+  const items = new Map(arm.items.map((item) => [item.id, item]));
+  const contexts = /* @__PURE__ */ new Map();
+  const visit2 = (nodeId, path8, exposedSinceDecision, allExposures, priorChoices) => {
+    const node2 = nodes.get(nodeId);
+    if (node2.kind === "terminal") return;
+    if (node2.kind === "expose") {
+      const item = items.get(node2.itemId);
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+      visit2(edge.toNodeId, [...path8, { nodeId }], [...exposedSinceDecision, item.id], [...allExposures, item.id], priorChoices);
+      return;
+    }
+    const task = tasks.get(node2.taskId);
+    reserveContexts(budget, 1);
+    const nodeContexts = contexts.get(node2.id) ?? [];
+    nodeContexts.push({ path: [...path8, { nodeId }], exposedStimulusIds: [...exposedSinceDecision], priorChoices });
+    contexts.set(node2.id, nodeContexts);
+    for (const [optionId, meaning] of Object.entries(task.options)) {
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id && candidate.optionId === optionId);
+      visit2(edge.toNodeId, [...path8, { nodeId, optionId }], [], allExposures, [...priorChoices, {
+        nodeId,
+        taskId: task.id,
+        optionId,
+        meaning,
+        exposedItemIds: [...allExposures]
+      }]);
+    }
+  };
+  visit2(graph.entryNodeId, [], [], [], []);
+  return contexts;
+}
+function reserveContexts(budget, count) {
+  if (budget.contexts + count > MAX_JOURNEY_PREVIEW_CONTEXTS) throw contextLimitError();
+  budget.contexts += count;
+}
+function contextLimitError() {
+  return new RangeError(`Journey preview exceeds the ${MAX_JOURNEY_PREVIEW_CONTEXTS}-context limit; no partial preview was returned.`);
 }
 
 // src/application/study-preview.ts
@@ -37319,7 +37396,7 @@ var configSchema2 = external_exports.object({
 }).strict();
 function createPollingServer(manager = new RunManager()) {
   const server = new McpServer({ name: "sheg", version: "0.1.0" }, { instructions: "Polling decisions are simulations. Check and trace do not contact a provider. Hosted runs require explicit call and spend caps. Reports describe simulated responses, not readership or publication outcomes." });
-  server.registerTool("poll_preview", { description: "Preview every branch of a validated study arm from the manifest, including authored stimulus and question wording, choices and destinations, shared continuations, and trajectory context. Requires no cohort and makes no inference-provider calls.", inputSchema: { manifestPath: external_exports.string().min(1) } }, async ({ manifestPath }) => jsonResult(await previewStudy(manifestPath)));
+  server.registerTool("poll_preview", { description: "Preview every branch from the manifest, including authored stimulus and question wording, choices and destinations, shared continuations, each route\u2019s prior choices, and the stimulus IDs in scope at each question. Requires no cohort or inference-provider call. Rejects previews above 10,000 route contexts instead of returning a partial result.", inputSchema: { manifestPath: external_exports.string().min(1) } }, async ({ manifestPath }) => jsonResult(await previewStudy(manifestPath)));
   server.registerTool("poll_check", { description: "Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls. Return deterministic minimum/maximum reachable decision-call counts, whether maxCalls covers the maximum, and for Jev a configured spend ceiling, not a predicted charge.", inputSchema: { config: configSchema2 } }, async ({ config: config2 }) => {
     const checked = await checkStudy(config2);
     return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint, runBounds: checked.runBounds });
