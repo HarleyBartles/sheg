@@ -22,7 +22,9 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   await cp(path.resolve('skills/stimulus-response-polling/SKILL.md'), path.join(plugin, 'skills/stimulus-response-polling/SKILL.md'), { recursive: true });
   await cp(path.resolve('skills/stimulus-response-polling/references'), path.join(plugin, 'skills/stimulus-response-polling/references'), { recursive: true });
   await cp(path.resolve('skills/stimulus-response-polling/assets'), path.join(plugin, 'skills/stimulus-response-polling/assets'), { recursive: true });
+  await cp(path.resolve('skills/study-design'), path.join(plugin, 'skills/study-design'), { recursive: true });
   await assertSkillLinksResolve(path.join(plugin, 'skills/stimulus-response-polling'), plugin);
+  await assertSkillLinksResolve(path.join(plugin, 'skills/study-design'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
   for (const contract of ['respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
     assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets', contract)), true);

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { DecisionRequest } from './decision.js';
+import { decisionRequestSchema, type DecisionRequest } from './decision.js';
 import type { RespondentPerspective, RespondentProfile } from '../respondents/profile.js';
 import type { StudyArm } from '../study/arm.js';
 
@@ -28,6 +28,13 @@ export type PromptState = {
   respondent: { profile: RespondentPerspective };
   encounteredItems: Array<{ id: string; text: string }>;
   trajectory: TrajectorySummary;
+};
+
+export type DecisionPacketParts = {
+  respondentProfile: RespondentPerspective;
+  encounteredItems: Array<{ id: string; text: string }>;
+  trajectory: TrajectorySummary;
+  question: { id: string; instructions: string; options: Record<string, string> };
 };
 
 const promptContract = {
@@ -110,21 +117,34 @@ export function compileDecisionPacket(
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
     return { id: item.id, text: item.text };
   });
-  const state: PromptState = {
-    respondent: { profile: {
+  return compileDecisionRequest({
+    respondentProfile: {
       intent: profile.intent,
       context: profile.context,
       desired_outcome: profile.desired_outcome,
       engagement_cues: profile.engagement_cues,
       friction_cues: profile.friction_cues,
-    } },
+    },
     encounteredItems,
     trajectory: compactTrajectory(arm, history),
-  };
-  return {
-    state,
     question: { id: task.id, instructions: task.instructions, options: { ...task.options } },
-    optionIds: Object.keys(task.options),
+  });
+}
+
+export function compileDecisionRequest(parts: DecisionPacketParts): DecisionRequest & { state: PromptState } {
+  const state: PromptState = {
+    respondent: { profile: { ...parts.respondentProfile } },
+    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    trajectory: parts.trajectory,
+  };
+  const request = decisionRequestSchema.parse({
+    state,
+    question: { ...parts.question, options: { ...parts.question.options } },
+    optionIds: Object.keys(parts.question.options),
+  });
+  return {
+    ...request,
+    state,
   };
 }
 

@@ -19928,16 +19928,14 @@ var respondentArchetypeLibrarySchema = external_exports.array(respondentArchetyp
 // src/domain/respondents/profile.ts
 var idSchema2 = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 var proseSchema2 = external_exports.string().trim().min(1).max(500);
-var respondentProfileSchema = external_exports.object({
-  id: idSchema2,
-  archetypeId: idSchema2.optional(),
-  variation: external_exports.record(idSchema2, idSchema2).optional(),
+var perspectiveFields = {
   intent: proseSchema2,
   context: proseSchema2,
   desired_outcome: proseSchema2,
   engagement_cues: proseSchema2,
   friction_cues: proseSchema2
-}).strict().superRefine((profile, context) => {
+};
+function enforceAggregateProfileProse(profile, context) {
   const proseLength = profile.intent.length + profile.context.length + profile.desired_outcome.length + profile.engagement_cues.length + profile.friction_cues.length;
   if (proseLength > 1500) {
     context.addIssue({
@@ -19945,7 +19943,14 @@ var respondentProfileSchema = external_exports.object({
       message: "Combined profile prose must not exceed 1,500 characters across the five prose fields."
     });
   }
-});
+}
+var respondentPerspectiveSchema = external_exports.object(perspectiveFields).strict().superRefine(enforceAggregateProfileProse);
+var respondentProfileSchema = external_exports.object({
+  id: idSchema2,
+  archetypeId: idSchema2.optional(),
+  variation: external_exports.record(idSchema2, idSchema2).optional(),
+  ...perspectiveFields
+}).strict().superRefine(enforceAggregateProfileProse);
 
 // src/domain/respondents/cohort.ts
 var respondentCohortSchema = external_exports.object({
@@ -20072,6 +20077,39 @@ async function loadStudy(manifestPath, cohortPath, options = {}) {
 
 // src/domain/decision/prompt.ts
 import { createHash as createHash2 } from "node:crypto";
+
+// src/domain/decision/decision.ts
+var decisionRequestSchema = external_exports.object({
+  state: external_exports.record(external_exports.string(), external_exports.unknown()),
+  question: external_exports.object({
+    id: external_exports.string().min(1),
+    instructions: external_exports.string().min(1),
+    options: external_exports.record(external_exports.string().min(1), external_exports.string().min(1))
+  }).strict(),
+  optionIds: external_exports.array(external_exports.string().min(1)).min(1)
+}).strict().superRefine((request, context) => {
+  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== Object.keys(request.question.options).length || request.optionIds.some((optionId) => !(optionId in request.question.options))) {
+    context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
+  }
+});
+var decisionResultSchema = external_exports.object({
+  choice: external_exports.string().min(1),
+  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
+  confidence: external_exports.number().finite().min(0).max(1).optional(),
+  attempts: external_exports.number().int().positive(),
+  provider: external_exports.enum(["jev", "laya"]),
+  model: external_exports.string().min(1),
+  checkpoint: external_exports.string().min(1).optional(),
+  latencyMs: external_exports.number().finite().nonnegative(),
+  usage: external_exports.object({
+    inputTokens: external_exports.number().int().nonnegative().optional(),
+    outputTokens: external_exports.number().int().nonnegative().optional()
+  }).strict(),
+  chargeStatus: external_exports.enum(["billed", "not_billed", "unknown"]),
+  chargeUsd: external_exports.number().finite().nonnegative().optional()
+}).strict();
+
+// src/domain/decision/prompt.ts
 var promptContract = {
   version: 5,
   stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
@@ -20138,21 +20176,33 @@ function compileDecisionPacket(arm, profile, taskId, history = []) {
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
     return { id: item.id, text: item.text };
   });
-  const state = {
-    respondent: { profile: {
+  return compileDecisionRequest({
+    respondentProfile: {
       intent: profile.intent,
       context: profile.context,
       desired_outcome: profile.desired_outcome,
       engagement_cues: profile.engagement_cues,
       friction_cues: profile.friction_cues
-    } },
+    },
     encounteredItems,
-    trajectory: compactTrajectory(arm, history)
+    trajectory: compactTrajectory(arm, history),
+    question: { id: task.id, instructions: task.instructions, options: { ...task.options } }
+  });
+}
+function compileDecisionRequest(parts) {
+  const state = {
+    respondent: { profile: { ...parts.respondentProfile } },
+    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    trajectory: parts.trajectory
   };
-  return {
+  const request = decisionRequestSchema.parse({
     state,
-    question: { id: task.id, instructions: task.instructions, options: { ...task.options } },
-    optionIds: Object.keys(task.options)
+    question: { ...parts.question, options: { ...parts.question.options } },
+    optionIds: Object.keys(parts.question.options)
+  });
+  return {
+    ...request,
+    state
   };
 }
 function promptContractHash() {
@@ -20309,37 +20359,6 @@ function sameReservation(left, right) {
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir, rename as rename2, rm as rm2 } from "node:fs/promises";
 import path3 from "node:path";
-
-// src/domain/decision/decision.ts
-var decisionRequestSchema = external_exports.object({
-  state: external_exports.record(external_exports.string(), external_exports.unknown()),
-  question: external_exports.object({
-    id: external_exports.string().min(1),
-    instructions: external_exports.string().min(1),
-    options: external_exports.record(external_exports.string().min(1), external_exports.string().min(1))
-  }).strict(),
-  optionIds: external_exports.array(external_exports.string().min(1)).min(1)
-}).strict().superRefine((request, context) => {
-  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== Object.keys(request.question.options).length || request.optionIds.some((optionId) => !(optionId in request.question.options))) {
-    context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
-  }
-});
-var decisionResultSchema = external_exports.object({
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional(),
-  attempts: external_exports.number().int().positive(),
-  provider: external_exports.enum(["jev", "laya"]),
-  model: external_exports.string().min(1),
-  checkpoint: external_exports.string().min(1).optional(),
-  latencyMs: external_exports.number().finite().nonnegative(),
-  usage: external_exports.object({
-    inputTokens: external_exports.number().int().nonnegative().optional(),
-    outputTokens: external_exports.number().int().nonnegative().optional()
-  }).strict(),
-  chargeStatus: external_exports.enum(["billed", "not_billed", "unknown"]),
-  chargeUsd: external_exports.number().finite().nonnegative().optional()
-}).strict();
 
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
@@ -21544,6 +21563,58 @@ function admissionFailure(error62, nodeId) {
   return { decisionId, nodeId, reason: fit.reason ?? fit.status, tokens: fit.tokens, effectiveLimit: fit.effectiveLimit, measurementMethod: fit.method };
 }
 
+// src/domain/journey/route-bounds.ts
+function estimateRunDecisionCalls(arms, respondents) {
+  if (arms.length === 0) throw new Error("Run call bounds require at least one study arm.");
+  if (respondents.length === 0) throw new Error("Run call bounds require at least one frozen respondent.");
+  let minimumDecisionCalls = 0;
+  let maximumDecisionCalls = 0;
+  for (const rawArm of arms) {
+    const arm = studyArmSchema.parse(rawArm);
+    const range = arm.presentation.kind === "sequence" ? { minimum: arm.tasks.length, maximum: arm.tasks.length } : graphDecisionRange(arm);
+    minimumDecisionCalls += range.minimum * respondents.length;
+    maximumDecisionCalls += range.maximum * respondents.length;
+    if (!Number.isSafeInteger(minimumDecisionCalls) || !Number.isSafeInteger(maximumDecisionCalls)) {
+      throw new RangeError("Run decision-call bounds exceed the safe integer range.");
+    }
+  }
+  return { minimumDecisionCalls, maximumDecisionCalls };
+}
+function graphDecisionRange(arm) {
+  if (arm.presentation.kind !== "graph") throw new Error("Graph decision bounds require a graph presentation.");
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const edge of graph.transitions) {
+    const edges = outgoing.get(edge.fromNodeId) ?? [];
+    edges.push(edge);
+    outgoing.set(edge.fromNodeId, edges);
+  }
+  const memo2 = /* @__PURE__ */ new Map();
+  const active = /* @__PURE__ */ new Set();
+  const visit2 = (nodeId) => {
+    const cached3 = memo2.get(nodeId);
+    if (cached3) return cached3;
+    if (active.has(nodeId)) throw new Error(`Run call bounds encountered a graph cycle at ${nodeId}.`);
+    const node2 = nodes.get(nodeId);
+    if (!node2) throw new Error(`Run call bounds encountered an unknown node ${nodeId}.`);
+    if (node2.kind === "terminal") return { minimum: 0, maximum: 0 };
+    active.add(nodeId);
+    const edges = outgoing.get(nodeId) ?? [];
+    if (edges.length === 0) throw new Error(`Run call bounds found no outgoing transition at ${nodeId}.`);
+    const branches = edges.map((edge) => visit2(edge.toNodeId));
+    const decisionCost = node2.kind === "ask" ? 1 : 0;
+    const range = {
+      minimum: decisionCost + Math.min(...branches.map((branch) => branch.minimum)),
+      maximum: decisionCost + Math.max(...branches.map((branch) => branch.maximum))
+    };
+    active.delete(nodeId);
+    memo2.set(nodeId, range);
+    return range;
+  };
+  return visit2(graph.entryNodeId);
+}
+
 // src/application/run-manager.ts
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
@@ -21575,9 +21646,18 @@ async function checkStudy(config2) {
     provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path5.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
   };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
+  const routeBounds = estimateRunDecisionCalls(study.manifest.arms, study.respondents);
+  const runBounds = {
+    ...routeBounds,
+    maximumCallsConfigured: normalized.maxCalls,
+    maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls,
+    ...normalized.provider.kind === "jev" ? {
+      spendCeilingUsd: Math.min(normalized.maxUsd, normalized.maxPerCallUsd * Math.min(routeBounds.maximumDecisionCalls, normalized.maxCalls))
+    } : {}
+  };
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === "laya" ? { kind: "laya", checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...normalized.provider.precision === void 0 ? {} : { precision: normalized.provider.precision } } : normalized.provider;
-  return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider) };
+  return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider), runBounds };
 }
 var RunManager = class {
   constructor(options = {}) {
