@@ -30,14 +30,13 @@ preview, execute, or report; there is no capability-list tool.
 | Tool | Accepted input | Result | Provider behavior |
 | --- | --- | --- | --- |
 | `poll_preview` | `manifestPath` | Each arm's presentation and stable ordered nodes, including stimulus/task wording, Choice options or typed threshold routes, destinations, and shared continuations. Every question includes one `routeContexts` entry per route reaching it, with Choice options or typed response intervals, prior response meanings/exposure IDs, and stimulus IDs currently in scope. Shared questions remain one node with multiple route contexts. A stimulus ID resolves to the authored text on its stimulus node. Rejects more than 10,000 route contexts with no partial preview. | No cohort, provider, or inference call. |
-| `poll_check` | `config`: manifest, cohort, output directory, call limits, and provider configuration. | Validation/fingerprints, respondent and arm counts, minimum/maximum reachable decision calls, call-cap sufficiency, and configured Jev spend ceiling. | No provider call. |
+| `poll_check` | `config`: manifest, cohort, output directory, call limit, and provider configuration. | Validation/fingerprints, respondent and arm counts, minimum/maximum reachable decision calls, and call-limit sufficiency. | No provider call. |
 | `poll_preflight` | `manifestPath`, optional `cohortPath`, provider list, optional mode and packet cap. | Per-provider fit, worst packet, overflow/unavailable details, measurement method, and whether traversal completed. | Measures every reachable packet; no inference call. |
 | `poll_trace` | Manifest/cohort paths, arm/respondent IDs, and exactly one of scripted `choices` or typed `responses`. | The deterministic route and outcome for those responses. | No provider call. |
 | `poll_measure_packets` | Provider configs; `combination`; non-empty `respondents`, `stimuli`, `tasks`, and `trajectories` arrays of `{ id, value }` variants. | Every compiled case with stable case ID, source variant IDs, per-provider token estimate/measurement, fit, headroom, reason, and provider-specific largest case. | Calls provider `measure` only; no inference endpoint. Jev estimates offline; Laya uses its pinned local tokenizer. |
-| `poll_start` | A complete run `config` with manifest/cohort, provider, output directory, and explicit caps. | A durable run ID and initial run status. | Starts respondent inference. |
+| `poll_start` | A complete run `config` with manifest/cohort, provider, output directory, and `maxCalls`. | A durable run ID and initial run status. | Starts respondent inference. |
 | `poll_status` | `outputDirectory`, `runId` | Current durable status; it can recover an abandoned running state. | No new inference call. |
 | `poll_cancel` | `outputDirectory`, `runId` | Cancellation request and settled run state. | Waits for already in-flight decisions to settle; does not start new ones. |
-| `poll_reconcile` | `outputDirectory`, `runId`, user-verified `unpricedUsd` | Billing reconciliation result for uncertain Jev calls. | No provider inference call. |
 | `poll_resume` | `outputDirectory`, `runId` | Resumed run state after frozen-input and execution-fingerprint validation. | Resumes respondent inference. |
 | `poll_report` | `outputDirectory`, `runId` | JSON-safe respondent/task/run report. | No provider inference call. |
 | `poll_compare` | `outputDirectory`, `runId`, `leftArmId`, `rightArmId` | Matched comparison of two arms in that run. | No provider inference call. |
@@ -81,7 +80,7 @@ branching study fits.
    current stimulus scope at each question. These steps add no approval gate.
 4. Propose and expand a cohort with the human, validate exact run settings with
    `poll_check`, then use incremental sizing and exhaustive preflight.
-5. Report reachable calls and the configured spend ceiling; get approval to
+5. Report reachable calls and the configured call limit; get approval to
    run, then call `poll_start`.
 6. Report and interpret the typed outcomes against the original question and
    source material.

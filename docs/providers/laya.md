@@ -28,7 +28,7 @@ The fit count measures input tokens. It is machine-independent for the same toke
 - `usage.input_tokens` and `usage.output_tokens` are retained when supplied. The preflight count is kept separately by the fit result.
 - Confidence is copied without converting it into Jev's confidence semantics or applying a Jev threshold.
 - Choice, Score, and Noul remain distinct wire and report types. The adapter validates the response against the authored task, including rubric-level distribution keys and score bounds, before recording a decision.
-- Successful local inference is marked `not_billed`; no zero-dollar charge is invented.
+- Local inference returns no hosted cost evidence.
 - A transport failure has unknown execution status. HTTP and invalid-response failures are not retried; the adapter makes at most one inference request.
 - The configured checkpoint is sent explicitly. The adapter rejects a response routed to another checkpoint and never falls back to a different provider.
 

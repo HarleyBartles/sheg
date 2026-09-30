@@ -29,7 +29,7 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
    ```
 
 2. Restart the Codex desktop app, open the Plugins Directory, select the **Sheg** marketplace, and install the plugin.
-3. Confirm the `poll_preview`, `poll_check`, `poll_preflight`, `poll_measure_packets`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_reconcile`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
+3. Confirm the `poll_preview`, `poll_check`, `poll_preflight`, `poll_measure_packets`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).
 
@@ -40,15 +40,13 @@ existing Git-based marketplace route remains available.
 ## Prepare and run a study
 
 1. Start with the text and what you want to learn. The [study-design skill](skills/study-design/SKILL.md) helps an agent work with you on the question, useful respondent perspectives, and a study you can review before it is translated into Sheg's contracts.
-2. Configure one provider. Jev runs require an API key available to the Codex process and explicit `maxUsd` and `maxPerCallUsd` limits. Local Laya runs require a running service and the matching checkpoint tokenizer JSON and SHA-256 digest. See the [Jev setup and wire contract](docs/providers/jev.md) and [Laya capability notes](docs/providers/laya.md).
-3. Use `poll_preview` after manifest validation and before cohort construction to inspect every branch as one generic respondent journey, including route-specific prior choices and current stimulus scope at each question. Shared questions appear once with a context for each route. Preview needs no cohort or inference call and rejects more than 10,000 route contexts rather than returning partial output. Use `poll_measure_packets` to check draft respondent/task/stimulus/history combinations as you build the study. Call `poll_check` with the exact manifest, cohort, provider, and budgets; it validates and fingerprints inputs without a provider inference call. Use `poll_preflight` on the complete frozen cohort to measure every reachable request, and `poll_trace` to check a scripted route without inference.
-4. Review the proposed respondent-arm cell count and spend limits, then start an authorized run with `poll_start`. Use `poll_status` and `poll_report` to follow and inspect it. Compare arms with `poll_compare` within that same run.
+2. Configure one provider. Jev runs require a key in the selected Windows Credential Manager target and a `maxCalls` limit. Local Laya runs require a running service and the matching checkpoint tokenizer JSON and SHA-256 digest. See the [Jev setup and wire contract](docs/providers/jev.md) and [Laya capability notes](docs/providers/laya.md).
+3. Use `poll_preview` after manifest validation and before cohort construction to inspect every branch as one generic respondent journey, including route-specific prior choices and current stimulus scope at each question. Shared questions appear once with a context for each route. Preview needs no cohort or inference call and rejects more than 10,000 route contexts rather than returning partial output. Use `poll_measure_packets` to check draft respondent/task/stimulus/history combinations as you build the study. Call `poll_check` with the exact manifest, cohort, provider, and call limit; it validates and fingerprints inputs without a provider inference call. Use `poll_preflight` on the complete frozen cohort to measure every reachable request, and `poll_trace` to check a scripted route without inference.
+4. Review the proposed respondent-arm cell count and maximum physical calls, then start an authorized run with `poll_start`. Use `poll_status` and `poll_report` to follow and inspect it. Compare arms with `poll_compare` within that same run.
 
 In Codex, you can start with a request such as: “I have this article and want to know where readers lose interest. Help me decide what to ask and whose perspectives to include, then show me the proposed study journey.” The agent uses Sheg's design guidance to shape the human-language design, translates it into the harness, and checks fit before asking for approval to run.
 
-Jev is a hosted, paid provider. Keep its key in the environment, never in a manifest or chat, and set conservative call and spend caps before starting. `poll_check` and `poll_trace` do not make inference calls or require a key. `poll_start` and `poll_resume` reject a missing key before launching.
-
-If a run stops with uncertain charges, check the provider's billing record for the total actual charge of all unresolved calls. Use `poll_reconcile` with that verified USD amount before `poll_resume`. Keep the run blocked if the charge cannot be established. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md).
+Jev is a hosted provider. Connect its key through the bundled Windows Credential Manager helper, never in a manifest or chat. The call limit bounds physical requests, including retries. `poll_check` and `poll_trace` do not make inference calls or require a key. `poll_start` and `poll_resume` reject a missing key before launching. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md).
 
 The local Laya adapter bundles a pinned tokenizer and sequence builder for a pre-inference context-fit check. It sends a request only when the configured tokenizer matches its digest and the complete request fits; otherwise it rejects the request before inference. The service and checkpoint must be configured separately, and the integration still needs an operator smoke test against that service. See the [Laya capability notes](docs/providers/laya.md).
 
@@ -70,20 +68,15 @@ Create a config such as `study-run.json` using your study and cohort paths:
   "cohortPath": "./cohort.json",
   "provider": {
     "kind": "jev",
-    "model": "<Jev model ID>",
-    "keyEnv": "OPENROUTER_API_KEY",
-    "endpoint": "https://openrouter.ai/api/alpha/decisions",
-    "timeoutMs": 30000
+    "route": "openrouter"
   },
   "outputDirectory": "./.polling-runs",
   "maxCalls": 10,
-  "maxUsd": 0.10,
-  "maxPerCallUsd": 0.02,
   "concurrency": 1
 }
 ```
 
-Make the environment variable named by `keyEnv` available to the process. Replace the model ID and set limits appropriate for the study. Check first, inspect the result, then start:
+Connect the route's key to Windows Credential Manager with the helper in [Jev provider routes](docs/providers/jev.md). Choose `openrouter` or `typesafe` explicitly. Check first, inspect the result, then start:
 
 ```sh
 node dist/cli.js check --config study-run.json
@@ -92,7 +85,7 @@ node dist/cli.js report --output ./.polling-runs --run-id <run-id>
 node dist/cli.js compare --output ./.polling-runs --run-id <run-id> --left-arm original --right-arm revised
 ```
 
-The CLI also supports `trace`, `status`, `cancel`, `reconcile`, and `resume`. For uncertain charges, use `node dist/cli.js reconcile --output ./.polling-runs --run-id <run-id> --unpriced-usd <verified-total>` after checking provider billing. See `node dist/cli.js --help` for the full syntax.
+The CLI also supports `trace`, `status`, `cancel`, and `resume`. See `node dist/cli.js --help` for the full syntax.
 
 The build recreates `dist/` from the current source, bundles the MCP server and CLI, and copies the domain-owned archetype groups into the plugin package.
 

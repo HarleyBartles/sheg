@@ -21,9 +21,12 @@ Use `Sheg/Jev/OpenRouter` to connect OpenRouter. The helper prompts without
 echoing the key and writes directly to Credential Manager. Run `Status` to
 check an entry, `Setup` again to replace it, or `Remove` to delete it. The
 setup prompt is local and interactive; never paste a key into chat or an MCP
-tool argument. Windows Credential Manager is the only secure-store backend in
-this implementation. macOS Keychain and Linux Secret Service support are
-future work.
+tool argument. An agent setting up Sheg can give the user this command or open
+a user-visible terminal and ask them to paste the key into the helper's hidden
+prompt. Connecting a key is optional until a Jev run starts; users can defer
+setup and use local Laya. Windows Credential Manager is the only secure-store
+backend in this implementation. macOS Keychain and Linux Secret Service
+support are future work.
 
 ## Provider evidence
 
