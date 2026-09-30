@@ -9,7 +9,7 @@ test('CLI help lists all supported workflow commands', async () => {
   const lines: string[] = [];
   const status = await runCli(['--help'], { out: (text) => { lines.push(text); return true; }, error: (text) => { lines.push(text); return true; } });
   assert.equal(status, 0);
-  for (const command of ['check', 'preflight', 'trace', 'start', 'status', 'cancel', 'reconcile', 'resume', 'report', 'compare']) assert.match(lines[0] ?? '', new RegExp(command));
+  for (const command of ['check', 'preflight', 'trace', 'start', 'status', 'cancel', 'reconcile', 'resume', 'report', 'compare', 'compare-runs']) assert.match(lines[0] ?? '', new RegExp(command));
 });
 
 test('CLI check validates explicit provider config without key or network', async (t) => {
@@ -28,7 +28,7 @@ test('CLI check validates explicit provider config without key or network', asyn
   assert.equal(errors.length, 0);
 });
 
-test('CLI preflight reports fit for every packet without provider calls', async (t) => {
+test('CLI preflight reports incomplete fit evidence for variable response histories without provider calls', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'polling-preflight-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const providersPath = path.join(directory, 'providers.json');
@@ -38,8 +38,9 @@ test('CLI preflight reports fit for every packet without provider calls', async 
     out: (text) => { output.push(text); return true; }, error: (text) => { errors.push(text); return true; },
   });
   assert.equal(status, 0, errors.join('\n'));
-  const result = JSON.parse(output[0] ?? '{}') as { providers: Array<{ status: string; packetCount: number }> };
-  assert.equal(result.providers[0]?.status, 'fit');
+  const result = JSON.parse(output[0] ?? '{}') as { providers: Array<{ status: string; packetCount: number; incompleteReason?: string }> };
+  assert.equal(result.providers[0]?.status, 'unverified');
+  assert.match(result.providers[0]?.incompleteReason ?? '', /response history/i);
   assert.ok((result.providers[0]?.packetCount ?? 0) > 0);
 });
 
@@ -59,6 +60,26 @@ test('CLI scripted trace is keyless and uses the shared graph runner', async () 
   });
   assert.equal(status, 0);
   assert.equal(JSON.parse(output[0] ?? '{}').outcome, 'completed');
+});
+
+test('CLI trace accepts typed response JSON while preserving the Choice trace path', async () => {
+  const output: string[] = [];
+  const status = await runCli(['trace', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--arm', 'original', '--respondent', 'curious-outside-reader', '--responses', JSON.stringify([{ type: 'choice', choice: 'continue' }, { type: 'choice', choice: 'continue' }])], {
+    out: (text) => { output.push(text); return true; }, error: (text) => { output.push(text); return true; },
+  });
+  assert.equal(status, 0);
+  assert.equal(JSON.parse(output[0] ?? '{}').outcome, 'completed');
+});
+
+test('CLI trace rejects missing or conflicting scripted response forms', async () => {
+  for (const options of [[], ['--choices', 'continue', '--responses', '[]']]) {
+    const errors: string[] = [];
+    const status = await runCli(['trace', '--manifest', path.resolve('test/fixtures/article.json'), '--cohort', path.resolve('test/fixtures/cohort.json'), '--arm', 'original', '--respondent', 'curious-outside-reader', ...options], {
+      out: () => true, error: (text) => { errors.push(text); return true; },
+    });
+    assert.equal(status, 1);
+    assert.match(errors[0] ?? '', /exactly one/i);
+  }
 });
 
 test('CLI returns a bounded JSON error without stack or secret details', async () => {

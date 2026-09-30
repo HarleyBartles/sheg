@@ -15,6 +15,15 @@ export function stimulusFingerprint(
   return hashCanonical({ version: 1, study, cohort, promptContractHash });
 }
 
+export function legacyChoiceStimulusFingerprint(study: StudyManifest, cohort: FrozenCohort, promptHash: string): string {
+  const legacyStudy = { ...study, arms: study.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task) => {
+    const legacyTask: Record<string, unknown> = { ...task };
+    delete legacyTask.type;
+    return legacyTask;
+  }) })) };
+  return hashCanonical({ version: 1, study: legacyStudy, cohort, promptContractHash: promptHash });
+}
+
 export function executionFingerprint(stimulus: string, provider: ExecutionProvider): string {
   if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError('Stimulus fingerprint must be a SHA-256 hex digest.');
   let decisionSettings: Record<string, string | number | undefined>;
@@ -31,6 +40,10 @@ export function executionFingerprint(stimulus: string, provider: ExecutionProvid
     };
   }
   return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
+}
+
+export function respondentCohortFingerprint(cohort: FrozenCohort): string {
+  return hashCanonical({ version: 2, archetypes: cohort.archetypes, respondents: cohort.respondents });
 }
 
 function hashCanonical(value: unknown): string {

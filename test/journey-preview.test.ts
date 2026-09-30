@@ -23,6 +23,8 @@ test('previews sequence stimuli before the authored questions and routes every c
   assert.equal(journey.nodes.slice(arm.items.length, arm.items.length + arm.tasks.length).every((node) => node.kind === 'question'), true);
   assert.equal(journey.nodes.at(-1)?.kind, 'terminal');
   const task = arm.tasks[0]!;
+  assert.ok('options' in task);
+  if (!('options' in task)) return;
   const firstQuestion = questionNodes[0]!;
   assert.equal(firstQuestion.kind, 'question');
   if (firstQuestion.kind === 'question') {
@@ -36,6 +38,7 @@ test('previews sequence stimuli before the authored questions and routes every c
       ],
       exposedStimulusIds: arm.items.map(({ id }) => id),
       priorChoices: [],
+      priorResponses: [],
     }]);
     const secondQuestion = questionNodes[1]!;
     assert.equal(secondQuestion.kind, 'question');
@@ -48,6 +51,9 @@ test('previews sequence stimuli before the authored questions and routes every c
 });
 
 test('previews every graph branch and represents a shared continuation node once', () => {
+  const entryTask = arm.tasks[0]!;
+  assert.ok('options' in entryTask);
+  if (!('options' in entryTask)) return;
   const sharedArm: StudyArm = {
     ...arm,
     presentation: {
@@ -94,19 +100,56 @@ test('previews every graph branch and represents a shared continuation node once
       path: context.path,
       exposedStimulusIds: context.exposedStimulusIds,
       priorChoices: context.priorChoices.map(({ taskId, optionId, meaning, exposedItemIds }) => ({ taskId, optionId, meaning, exposedItemIds })),
+      priorResponses: context.priorResponses,
     })), [
       {
         path: [{ nodeId: 'start', optionId: 'continue' }, { nodeId: 'show-symptom' }, { nodeId: 'shared-question' }],
         exposedStimulusIds: ['symptom'],
-        priorChoices: [{ taskId: 'entry-response', optionId: 'continue', meaning: arm.tasks[0]!.options.continue!, exposedItemIds: [] }],
+        priorChoices: [{ taskId: 'entry-response', optionId: 'continue', meaning: entryTask.options.continue!, exposedItemIds: [] }],
+        priorResponses: [],
       },
       {
         path: [{ nodeId: 'start', optionId: 'leave' }, { nodeId: 'show-investigation' }, { nodeId: 'shared-question' }],
         exposedStimulusIds: ['investigation'],
-        priorChoices: [{ taskId: 'entry-response', optionId: 'leave', meaning: arm.tasks[0]!.options.leave!, exposedItemIds: [] }],
+        priorChoices: [{ taskId: 'entry-response', optionId: 'leave', meaning: entryTask.options.leave!, exposedItemIds: [] }],
+        priorResponses: [],
       },
     ]);
   }
+});
+
+test('previews Score threshold branches as typed intervals, not Choice option IDs', () => {
+  const scoreArm: StudyArm = {
+    ...arm,
+    tasks: [
+      { id: 'tone', type: 'score', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] },
+      arm.tasks[0]!,
+    ],
+    presentation: {
+      kind: 'graph', entryNodeId: 'rate-tone', maxDecisions: 2,
+      nodes: [
+        { id: 'rate-tone', kind: 'ask', taskId: 'tone' },
+        { id: 'next-question', kind: 'ask', taskId: arm.tasks[0]!.id },
+        { id: 'done', kind: 'terminal', outcome: 'done' },
+      ],
+      transitions: [
+        { fromNodeId: 'rate-tone', when: { type: 'score', minimum: 0, maximum: 1.5, minimumInclusive: true, maximumInclusive: false }, toNodeId: 'next-question' },
+        { fromNodeId: 'rate-tone', when: { type: 'score', minimum: 1.5, maximum: 2, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'next-question' },
+        { fromNodeId: 'next-question', optionId: 'continue', toNodeId: 'done' },
+        { fromNodeId: 'next-question', optionId: 'leave', toNodeId: 'done' },
+      ],
+    },
+  };
+  const journey = previewStudyJourney([scoreArm]).arms[0]!;
+  const question = journey.nodes.find((node) => node.id === 'next-question');
+  assert.equal(question?.kind, 'question');
+  if (question?.kind !== 'question') return;
+  assert.deepEqual(question.routeContexts.map((context) => context.path[0]), [
+    { nodeId: 'rate-tone', response: { type: 'score', when: scoreArm.presentation.kind === 'graph' ? scoreArm.presentation.transitions[0]?.when : undefined, meaning: 'SCORE [0, 1.5)' } },
+    { nodeId: 'rate-tone', response: { type: 'score', when: scoreArm.presentation.kind === 'graph' ? scoreArm.presentation.transitions[1]?.when : undefined, meaning: 'SCORE [1.5, 2]' } },
+  ]);
+  assert.equal(question.routeContexts[0]?.priorResponses[0]?.response.type, 'score');
+  assert.deepEqual(question.routeContexts[0]?.priorChoices, []);
 });
 
 test('rejects invalid graph destinations instead of returning a partial preview', () => {

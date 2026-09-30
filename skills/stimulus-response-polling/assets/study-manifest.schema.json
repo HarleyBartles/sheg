@@ -86,43 +86,200 @@
             "minItems": 1,
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
-                },
-                "instructions": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "options": {
+              "anyOf": [
+                {
                   "type": "object",
-                  "propertyNames": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    },
+                    "instructions": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "comparisonKey": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    },
+                    "responseHistory": {
+                      "type": "string",
+                      "enum": [
+                        "include",
+                        "omit"
+                      ]
+                    },
+                    "options": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minProperties": 1
+                    },
+                    "answerKeyOptionId": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    }
                   },
-                  "additionalProperties": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "minProperties": 1
+                  "required": [
+                    "id",
+                    "instructions",
+                    "options"
+                  ],
+                  "additionalProperties": false
                 },
-                "comparisonKey": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
-                },
-                "answerKeyOptionId": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonKey": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "responseHistory": {
+                          "type": "string",
+                          "enum": [
+                            "include",
+                            "omit"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "choice"
+                        },
+                        "options": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                          },
+                          "additionalProperties": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "minProperties": 1
+                        },
+                        "answerKeyOptionId": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "instructions",
+                        "type",
+                        "options"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonKey": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "responseHistory": {
+                          "type": "string",
+                          "enum": [
+                            "include",
+                            "omit"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "score"
+                        },
+                        "rubric": {
+                          "minItems": 2,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "instructions",
+                        "type",
+                        "rubric"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonKey": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "responseHistory": {
+                          "type": "string",
+                          "enum": [
+                            "include",
+                            "omit"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "noul"
+                        },
+                        "criteria": {
+                          "type": "object",
+                          "properties": {
+                            "true": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "false": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "instructions",
+                        "type"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
-              },
-              "required": [
-                "id",
-                "instructions",
-                "options"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "presentation": {
@@ -237,6 +394,38 @@
                           "type": "string",
                           "pattern": "^[a-z][a-z0-9-]{0,63}$"
                         },
+                        "when": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "score",
+                                "noul"
+                              ]
+                            },
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "minimumInclusive": {
+                              "type": "boolean"
+                            },
+                            "maximumInclusive": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "minimum",
+                            "maximum",
+                            "minimumInclusive",
+                            "maximumInclusive"
+                          ],
+                          "additionalProperties": false
+                        },
                         "toNodeId": {
                           "type": "string",
                           "pattern": "^[a-z][a-z0-9-]{0,63}$"
@@ -292,9 +481,10 @@
   "$id": "urn:sheg:schema:study-manifest.schema.json",
   "title": "Study manifest",
   "x-validation-rules": [
-    "Each study contains one or more arms, each with its own stimulus, tasks, and presentation.",
-    "Task option IDs are stable response values; answer keys are never sent to providers.",
-    "Graph transitions cover every offered option exactly once; all nodes are reachable.",
-    "A/B comparisons are restricted to arms within one run and align on comparisonKey and occurrence."
+    "Each study contains one or more arms, each with its own stimulus, typed tasks, and presentation.",
+    "Choice option IDs are stable response values; answer keys are never sent to providers. Score uses an ordered rubric. Noul reports P(true).",
+    "Graph transitions cover every Choice option or typed response domain exactly once; all nodes are reachable.",
+    "Per-task responseHistory controls prior answer context independently from graph routing and respondent eligibility.",
+    "Typed comparisons require matching task meanings."
   ]
 }

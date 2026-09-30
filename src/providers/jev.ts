@@ -32,6 +32,9 @@ const choiceAnswerSchema = z.object({
   probabilities: z.record(z.string(), z.number().finite().min(0).max(1)),
   confidence: z.number().finite().min(0).max(1).optional(),
 }).passthrough();
+const scoreAnswerSchema = z.object({ type: z.literal('score'), score: z.number().finite(), legend: z.record(z.string(), z.string()), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), confidence: z.number().finite().min(0).max(1).optional() }).passthrough();
+const noulAnswerSchema = z.object({ type: z.literal('noul'), noul: z.number().finite().min(0).max(1) }).passthrough();
+const answerSchema = z.discriminatedUnion('type', [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
 
 const wireResponseSchema = z.object({
   model: z.string().min(1),
@@ -52,7 +55,8 @@ const JEV_MEASUREMENT_METHOD = 'utf8-bytes-div-3+20%-reserve/v1';
 
 function requestBody(request: DecisionRequest, model: string): Record<string, unknown> {
   const { question } = request;
-  return { model, state: request.state, questions: { [question.id]: { type: 'choice', instructions: question.instructions, criteria: question.options } } };
+  const criteria = question.type === 'choice' ? question.options : question.type === 'score' ? question.rubric : question.criteria;
+  return { model, state: request.state, questions: { [question.id]: { type: question.type, instructions: question.instructions, ...(criteria === undefined ? {} : { criteria }) } } };
 }
 
 export function measureJevContext(request: DecisionRequest, model: string): ProviderContextFit {
@@ -140,9 +144,9 @@ export class JevProvider implements DecisionProvider {
       if (!parsedResponse.success) {
         throw new JevCallError('Jev response is missing required identity or usage fields; billing is unknown.', attempts, 'unknown');
       }
-      const answer = choiceAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
+      const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid choice answer for ${question.id}; billing is unknown.`, attempts, 'unknown');
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}; billing is unknown.`, attempts, 'unknown');
       }
       const cost = parsedResponse.data.usage.cost;
       if (cost === undefined) {
@@ -150,9 +154,7 @@ export class JevProvider implements DecisionProvider {
       }
 
       const result: DecisionResult = {
-        choice: answer.data.choice,
-        probabilities: answer.data.probabilities,
-        ...(answer.data.confidence === undefined ? {} : { confidence: answer.data.confidence }),
+        ...answer.data,
         attempts,
         provider: 'jev',
         model: parsedResponse.data.model,

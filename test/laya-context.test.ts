@@ -23,7 +23,7 @@ const config: LayaConfig = {
 };
 const request: DecisionRequest = {
   state: { respondent: { profile: { intent: 'Understand the passage.' } }, encounteredItems: [{ id: 'opening', text: 'A short passage.' }], trajectory: { version: 1, eventCount: 0 } },
-  question: { id: 'continue', instructions: 'What should happen?', options: { continue: 'Continue reading', stop: 'Stop reading' } },
+  question: { type: 'choice', id: 'continue', instructions: 'What should happen?', options: { continue: 'Continue reading', stop: 'Stop reading' } },
   optionIds: ['continue', 'stop'],
 };
 

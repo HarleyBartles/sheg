@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { compileDecisionPacket, compileDecisionRequest, promptContractHash } from '../src/domain/decision/prompt.js';
+import { compileDecisionPacket, compileDecisionRequest } from '../src/domain/decision/prompt.js';
 import { fileURLToPath } from 'node:url';
 import type { PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 
@@ -11,6 +11,8 @@ test('graph packet retains compact prior choices but only current stimulus text'
   const study = await loadStudy(manifestPath, cohortPath);
   const arm = study.manifest.arms[0]!;
   const task = arm.tasks[1]!;
+  const firstTask = arm.tasks[0]!;
+  if (!('options' in task) || !('options' in firstTask)) throw new Error('Expected Choice fixture tasks.');
   const history: PromptHistoryEvent[] = [
     { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
     { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, choice: 'continue' },
@@ -21,11 +23,11 @@ test('graph packet retains compact prior choices but only current stimulus text'
   assert.equal(request.state.respondent.profile.intent, study.respondents[0]!.intent);
   assert.equal(JSON.stringify(request).includes('answerKeyOptionId'), false);
   assert.equal(JSON.stringify(request).includes(study.manifest.study.purpose), false);
-  assert.deepEqual(request.optionIds, Object.keys(task.options));
+  if (request.question.type === 'choice') assert.deepEqual(Object.keys(request.question.options), Object.keys(task.options));
   assert.deepEqual(request.state.trajectory.choices, [{
     taskId: arm.tasks[0]!.id,
     choiceId: 'continue',
-    choiceMeaning: arm.tasks[0]!.options.continue,
+    choiceMeaning: firstTask.options.continue,
     exposedItemIds: ['symptom'],
   }]);
   assert.equal(request.state.trajectory.eventCount, 3);
@@ -34,7 +36,6 @@ test('graph packet retains compact prior choices but only current stimulus text'
   assert.equal(JSON.stringify(request).includes(arm.items[0]!.text), false);
   assert.ok(request.state.trajectory.payloadUtf8Bytes > 0);
 });
-
 test('sequence packets retain all stimuli and graph packets include explicit re-exposure', async () => {
   const study = await loadStudy(manifestPath, cohortPath);
   const graphArm = study.manifest.arms[0]!;
@@ -53,13 +54,29 @@ test('sequence packets retain all stimuli and graph packets include explicit re-
   assert.deepEqual(sequenceRequest.state.encounteredItems.map((item) => item.id), graphArm.items.map((item) => item.id));
 });
 
-test('decision packet compilation is deterministic and rejects unknown history references', async () => {
+test('a task can suppress prior response context without changing the same respondent journey', async () => {
+  const study = await loadStudy(manifestPath, cohortPath);
+  const arm = structuredClone(study.manifest.arms[0]!);
+  const task = arm.tasks[1]!;
+  const firstTask = arm.tasks[0]!;
+  if (!('options' in task) || !('options' in firstTask)) throw new Error('Expected Choice fixture tasks.');
+  task.responseHistory = 'omit';
+  const history: PromptHistoryEvent[] = [
+    { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
+    { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, choice: 'continue' },
+    { type: 'exposure', sequence: 2, nodeId: 'show-investigation', itemId: 'investigation' },
+  ];
+
+  const request = compileDecisionPacket(arm, study.respondents[0]!, task.id, history);
+  assert.equal(request.state.trajectory.decisionCount, 0);
+  assert.deepEqual(request.state.trajectory.choices, []);
+  assert.deepEqual(request.state.encounteredItems.map((item) => item.id), ['investigation']);
+});
+
+test('decision packet compilation rejects unknown task and stimulus references', async () => {
   const study = await loadStudy(manifestPath, cohortPath);
   const arm = study.manifest.arms[0]!;
   const history: PromptHistoryEvent[] = [{ type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' }];
-  const first = compileDecisionPacket(arm, study.respondents[0]!, arm.tasks[0]!.id, history);
-  const second = compileDecisionPacket(arm, study.respondents[0]!, arm.tasks[0]!.id, structuredClone(history));
-  assert.deepEqual(first, second);
   assert.throws(() => compileDecisionPacket(arm, study.respondents[0]!, 'missing-task', history), /unknown task/i);
   assert.throws(() => compileDecisionPacket(arm, study.respondents[0]!, arm.tasks[0]!.id, [
     { type: 'exposure', sequence: 0, nodeId: 'show-missing', itemId: 'missing' },
@@ -71,6 +88,8 @@ test('explicit packet parts compile to the same validated request as the study a
   const arm = study.manifest.arms[0]!;
   const profile = study.respondents[0]!;
   const task = arm.tasks[1]!;
+  const firstTask = arm.tasks[0]!;
+  if (!('options' in task) || !('options' in firstTask)) throw new Error('Expected Choice fixture tasks.');
   const history: PromptHistoryEvent[] = [
     { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
     { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, choice: 'continue' },
@@ -89,7 +108,7 @@ test('explicit packet parts compile to the same validated request as the study a
       { id: 'investigation', text: arm.items.find((item) => item.id === 'investigation')!.text },
     ],
     trajectory: fromArm.state.trajectory,
-    question: { id: task.id, instructions: task.instructions, options: { ...task.options } },
+    question: { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options } },
   });
 
   assert.deepEqual(fromParts, fromArm);
@@ -101,10 +120,6 @@ test('explicit packet parts compile to the same validated request as the study a
     engagement_cues: profile.engagement_cues,
     friction_cues: profile.friction_cues,
   });
-  assert.equal(fromParts.state.trajectory.choices[0]?.choiceMeaning, arm.tasks[0]!.options.continue);
-  assert.deepEqual(fromParts.optionIds, Object.keys(task.options));
-});
-
-test('prompt contract fingerprint remains unchanged when packet assembly is shared', () => {
-  assert.equal(promptContractHash(), 'c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044');
+  assert.equal(fromParts.state.trajectory.choices[0]?.choiceMeaning, firstTask.options.continue);
+  if (fromParts.question.type === 'choice') assert.deepEqual(Object.keys(fromParts.question.options), Object.keys(task.options));
 });

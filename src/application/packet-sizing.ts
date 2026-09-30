@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { respondentPerspectiveSchema, type RespondentPerspective } from '../domain/respondents/profile.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { DecisionRequest } from '../domain/decision/decision.js';
-import { compileDecisionRequest, type DecisionPacketParts, type TrajectorySummary } from '../domain/decision/prompt.js';
+import { compileDecisionRequest, questionForTask, type DecisionPacketParts, type TrajectorySummary } from '../domain/decision/prompt.js';
 import { stimulusItemSchema } from '../domain/study/stimulus.js';
 import { taskSchema, type StudyTask } from '../domain/study/task.js';
 import { JevProvider, type JevConfig } from '../providers/jev.js';
@@ -25,10 +25,11 @@ const trajectorySummarySchema = z.object({
   decisionCount: z.number().int().nonnegative(),
   eventRange: z.object({ firstSequence: z.number().int().nonnegative(), lastSequence: z.number().int().nonnegative() }).strict().nullable(),
   choices: z.array(trajectoryChoiceSchema),
+  responses: z.array(z.object({ type: z.enum(['choice', 'score', 'noul']), taskId: z.string().min(1) }).passthrough()).optional(),
   payloadUtf8Bytes: z.number().int().nonnegative(),
 }).strict().superRefine((trajectory, context) => {
   if (trajectory.eventCount !== trajectory.exposureCount + trajectory.decisionCount ||
-      trajectory.choices.length !== trajectory.decisionCount ||
+      (trajectory.responses?.length ?? trajectory.choices.length) !== trajectory.decisionCount ||
       (trajectory.eventCount === 0) !== (trajectory.eventRange === null)) {
     context.addIssue({ code: 'custom', message: 'Trajectory counts, choices, and event range must describe the same history.' });
   }
@@ -315,7 +316,7 @@ function expandCases(combination: 'paired' | 'cartesian', variants: Record<typeo
       respondentProfile: selection.respondent.value,
       encounteredItems: selection.stimulus.value,
       trajectory: selection.trajectory.value,
-      question: { id: selection.task.value.id, instructions: selection.task.value.instructions, options: { ...selection.task.value.options } },
+      question: questionForTask(selection.task.value),
     };
     return { caseId, variantIds, request: compileDecisionRequest(parts) };
   });

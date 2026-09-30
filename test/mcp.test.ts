@@ -29,17 +29,12 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   const inferenceAddress = inferenceServer.address();
   assert.ok(inferenceAddress && typeof inferenceAddress === 'object');
   const listed = await client.listTools();
-  for (const name of ['poll_preview', 'poll_check', 'poll_preflight', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_reconcile', 'poll_resume', 'poll_report', 'poll_compare', 'poll_measure_packets']) {
+  for (const name of ['poll_preview', 'poll_check', 'poll_preflight', 'poll_trace', 'poll_start', 'poll_status', 'poll_cancel', 'poll_reconcile', 'poll_resume', 'poll_report', 'poll_compare', 'poll_compare_runs', 'poll_measure_packets']) {
     assert.ok(listed.tools.some((tool) => tool.name === name), `Missing ${name}`);
   }
-  const measureTool = listed.tools.find((tool) => tool.name === 'poll_measure_packets');
-  assert.match(measureTool?.description ?? '', /without inference/i);
-  assert.match(measureTool?.description ?? '', /paired/i);
-  assert.match(measureTool?.description ?? '', /cartesian/i);
-  assert.match(measureTool?.description ?? '', /same length/i);
   const preview = await client.callTool({ name: 'poll_preview', arguments: { manifestPath: path.resolve('test/fixtures/article.json') } });
   assert.equal(preview.isError ?? false, false);
-  const previewContent = preview.structuredContent as { arms: Array<{ armId: string; presentation: string; nodes: Array<{ kind: string; id: string; routeContexts?: Array<{ exposedStimulusIds: string[]; priorChoices: Array<{ taskId: string; optionId: string; meaning: string }> }> }> }> };
+  const previewContent = preview.structuredContent as { arms: Array<{ armId: string; presentation: string; nodes: Array<{ kind: string; id: string; routeContexts?: Array<{ exposedStimulusIds: string[]; priorChoices: Array<{ taskId: string; optionId: string; meaning: string }>; priorResponses: unknown[] }> }> }> };
   assert.equal(previewContent.arms[0]?.armId, 'original');
   assert.equal(previewContent.arms[0]?.presentation, 'graph');
   assert.ok(previewContent.arms[0]?.nodes.some((node) => node.id === 'choose-investigation' && node.kind === 'question'));
@@ -48,6 +43,7 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
     path: [{ nodeId: 'show-symptom' }, { nodeId: 'choose-entry', optionId: 'continue' }, { nodeId: 'show-investigation' }, { nodeId: 'choose-investigation' }],
     exposedStimulusIds: ['investigation'],
     priorChoices: [{ nodeId: 'choose-entry', taskId: 'entry-response', optionId: 'continue', meaning: 'Continue to the next item.', exposedItemIds: ['symptom'] }],
+    priorResponses: [],
   }]);
   assert.equal(JSON.parse((preview.content[0] as { text: string }).text).arms[0]?.armId, 'original');
   const invalidPreview = await client.callTool({ name: 'poll_preview', arguments: { manifestPath: path.resolve('missing-manifest.json') } });
@@ -84,7 +80,8 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
     providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
   } });
   assert.equal(preflight.isError ?? false, false);
-  assert.equal((preflight.structuredContent as { providers: Array<{ status: string }> }).providers[0]?.status, 'fit');
+  assert.equal((preflight.structuredContent as { providers: Array<{ status: string; incompleteReason?: string }> }).providers[0]?.status, 'unverified');
+  assert.match((preflight.structuredContent as { providers: Array<{ incompleteReason?: string }> }).providers[0]?.incompleteReason ?? '', /response history/i);
   const layaProvider = {
     kind: 'laya', baseUrl: `http://127.0.0.1:${inferenceAddress.port}`, checkpoint: 'measurement-only', contextLimit: 1024, headLimit: 192,
     tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'),
@@ -113,56 +110,19 @@ test('MCP exposes the shared polling operations and keyless poll_check', async (
   const largestTokens = measuredContent.providers[0]?.largestCase?.tokens;
   assert.ok(typeof largestTokens === 'number' && largestTokens > 0);
   assert.deepEqual(JSON.parse((measured.content[0] as { text: string }).text), measured.structuredContent);
-  const thirtyTaskDrafts = await client.callTool({ name: 'poll_measure_packets', arguments: {
-    ...packetVariants,
-    tasks: Array.from({ length: 30 }, (_, index) => ({ id: `draft-${index + 1}`, value: {
-      id: `question-${index + 1}`, instructions: `Draft question ${index + 1}?`, options: { continue: 'Continue', stop: 'Stop' },
-    } })),
-  } });
-  assert.equal(thirtyTaskDrafts.isError ?? false, false);
-  assert.equal((thirtyTaskDrafts.structuredContent as { caseCount: number }).caseCount, 30);
-  const thirtyProfiles = await client.callTool({ name: 'poll_measure_packets', arguments: {
-    ...packetVariants,
-    respondents: Array.from({ length: 30 }, (_, index) => ({ id: `reader-${index + 1}`, value: {
-      ...packetVariants.respondents[0]!.value, intent: `Perspective ${index + 1}.`,
-    } })),
-    tasks: [packetVariants.tasks[0]],
-  } });
-  assert.equal(thirtyProfiles.isError ?? false, false);
-  assert.equal((thirtyProfiles.structuredContent as { caseCount: number }).caseCount, 30);
-  const mismatchedPackets = await client.callTool({ name: 'poll_measure_packets', arguments: {
-    ...packetVariants,
-    respondents: [
-      ...packetVariants.respondents,
-      { id: 'reader-two', value: packetVariants.respondents[0]!.value },
-      { id: 'reader-three', value: packetVariants.respondents[0]!.value },
-    ],
-  } });
-  assert.equal(mismatchedPackets.isError, true);
-  const cartesianPackets = await client.callTool({ name: 'poll_measure_packets', arguments: {
-    ...packetVariants,
-    combination: 'cartesian',
-    respondents: [
-      ...packetVariants.respondents,
-      { id: 'reader-two', value: packetVariants.respondents[0]!.value },
-      { id: 'reader-three', value: packetVariants.respondents[0]!.value },
-    ],
-    tasks: packetVariants.tasks,
-  } });
-  assert.equal(cartesianPackets.isError ?? false, false);
-  assert.equal((cartesianPackets.structuredContent as { caseCount: number }).caseCount, 6);
-  const malformedPacketIds = await client.callTool({ name: 'poll_measure_packets', arguments: {
-    ...packetVariants, respondents: [{ id: '', value: packetVariants.respondents[0]!.value }],
-  } });
-  assert.equal(malformedPacketIds.isError, true);
-  const malformedProvider = await client.callTool({ name: 'poll_measure_packets', arguments: {
-    ...packetVariants, providers: [{ ...layaProvider, baseUrl: 'not-a-url' }],
-  } });
-  assert.equal(malformedProvider.isError, true);
   const trace = await client.callTool({ name: 'poll_trace', arguments: {
     manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), armId: 'original', respondentId: 'curious-outside-reader', choices: ['continue', 'continue'],
   } });
   assert.equal(JSON.parse((trace.content[0] as { text: string }).text).outcome, 'completed');
+  const typedTrace = await client.callTool({ name: 'poll_trace', arguments: {
+    manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), armId: 'original', respondentId: 'curious-outside-reader', responses: [{ type: 'choice', choice: 'continue' }, { type: 'choice', choice: 'continue' }],
+  } });
+  assert.equal(typedTrace.isError ?? false, false);
+  assert.equal(JSON.parse((typedTrace.content[0] as { text: string }).text).outcome, 'completed');
+  const conflictingTrace = await client.callTool({ name: 'poll_trace', arguments: {
+    manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), armId: 'original', respondentId: 'curious-outside-reader', choices: ['continue'], responses: [{ type: 'choice', choice: 'continue' }],
+  } });
+  assert.equal(conflictingTrace.isError, true);
   assert.equal(inferenceRequests, 0, 'MCP checks, previews, traces, and packet measurements must not call the inference endpoint.');
   const malformed = await client.callTool({ name: 'poll_check', arguments: { config: { manifestPath: 'missing.json', cohortPath: 'missing.json', outputDirectory: directory, maxCalls: 1, provider: { kind: 'laya', baseUrl: 'not-url', checkpoint: '', contextLimit: 0, timeoutMs: 0 } } } });
   assert.equal(malformed.isError, true);

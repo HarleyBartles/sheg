@@ -4,10 +4,10 @@ import path from 'node:path';
 import { z } from 'zod';
 import { loadStudy } from '../infrastructure/study-loader.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
-import { promptContractHash } from '../domain/decision/prompt.js';
+import { legacyPromptContractHash, promptContractHash } from '../domain/decision/prompt.js';
 import { BudgetLedger } from '../domain/budget-ledger.js';
 import { CheckpointStore, emptyBudgetSnapshot, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
-import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
+import { executionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 import { ProcessLock, ProcessLockError } from '../infrastructure/process-lock.js';
 import { JevProvider, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type FitMeasurer, type LayaConfig } from '../providers/laya.js';
@@ -131,7 +131,12 @@ export class RunManager {
     let checkpoint = await store.read(runId);
     if (checkpoint.status === 'completed' || checkpoint.status === 'cancelled') throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...(checkpoint.maxUsd === undefined ? {} : { maxUsd: checkpoint.maxUsd }), ...(checkpoint.maxPerCallUsd === undefined ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }), concurrency: checkpoint.concurrency });
-    if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error('Study or execution settings changed since this run was prepared.');
+    const compatibleExecutionFingerprint = checkpoint.formatVersion === 2
+      ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === 'laya'
+        ? { kind: 'laya', checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...(checked.config.provider.precision === undefined ? {} : { precision: checked.config.provider.precision }) }
+        : checked.config.provider)
+      : checked.executionFingerprint;
+    if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error('Study or execution settings changed since this run was prepared.');
     requireJevKey(checkpoint.provider);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {

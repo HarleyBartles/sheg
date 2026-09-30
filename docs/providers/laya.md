@@ -8,7 +8,9 @@ Configure a running `/v1/systemone` endpoint with the intended checkpoint, `cont
 
 ## Wire contract observed
 
-The Laya service exposes `POST /v1/systemone`. The request carries an explicit `model`, `state`, and `questions` map. A choice question has `type: "choice"`, `instructions`, and a `criteria` map. A successful response has a top-level `model`, `answers`, `usage`, and `routing`; a choice answer carries `choice`, `probabilities`, and optionally `confidence`. `routing.model` identifies the selected checkpoint. The top-level model can be the generic `laya-rl-agent`, so the adapter checks the routed checkpoint rather than treating that generic name as the checkpoint identity.
+The Laya service exposes `POST /v1/systemone`. The request carries an explicit `model`, `state`, and `questions` map. Choice uses `type: "choice"` and a `criteria` map; Score uses `type: "score"` with ordered rubric criteria; Noul uses `type: "noul"` with optional true/false criteria. A successful response has a top-level `model`, `answers`, `usage`, and `routing`. Choice answers carry `choice` and `probabilities`; Score answers carry `score`, `legend`, and `probabilities`; Noul answers carry `noul` (P(true)). `routing.model` identifies the selected checkpoint. The top-level model can be the generic `laya-rl-agent`, so the adapter checks the routed checkpoint rather than treating that generic name as the checkpoint identity.
+
+The `/v1/systemone` service currently limits Score questions to 32 rubric levels. The adapter reports larger rubrics as overflow in measurement and rejects them before inference. This service limit is provider-specific; Sheg's task contract does not impose it on other providers. Verified against the upstream [service limit](https://github.com/NandhaKishorM/laya/blob/main/laya/serve.py) on 2026-09-30; check the installed service revision before use.
 
 These fields were checked against the upstream [Laya service](https://github.com/NandhaKishorM/laya/blob/main/laya/serve.py), [router](https://github.com/NandhaKishorM/laya/blob/main/laya/router.py), and [agent](https://github.com/NandhaKishorM/laya/blob/main/laya/agent.py) on 2026-09-27. The repository is actively changing. A deployment must confirm its installed revision implements the same wire contract before use.
 
@@ -25,6 +27,7 @@ The fit count measures input tokens. It is machine-independent for the same toke
 - A successful result retains the generic served `model` and the exact `routing.model` as `checkpoint`.
 - `usage.input_tokens` and `usage.output_tokens` are retained when supplied. The preflight count is kept separately by the fit result.
 - Confidence is copied without converting it into Jev's confidence semantics or applying a Jev threshold.
+- Choice, Score, and Noul remain distinct wire and report types. The adapter validates the response against the authored task, including rubric-level distribution keys and score bounds, before recording a decision.
 - Successful local inference is marked `not_billed`; no zero-dollar charge is invented.
 - A transport failure has unknown execution status. HTTP and invalid-response failures are not retried; the adapter makes at most one inference request.
 - The configured checkpoint is sent explicitly. The adapter rejects a response routed to another checkpoint and never falls back to a different provider.

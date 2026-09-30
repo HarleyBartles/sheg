@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { BudgetLedger } from '../domain/budget-ledger.js';
 import { CheckpointStore, type ContextFailure, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
-import type { DecisionResult } from '../domain/decision/decision.js';
+import type { DecisionRequest, DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import { JourneyExecutionError, runJourney } from '../domain/journey/run.js';
 import { loadStudy } from '../infrastructure/study-loader.js';
-import { promptContractHash } from '../domain/decision/prompt.js';
-import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
+import { legacyPromptContractHash, promptContractHash } from '../domain/decision/prompt.js';
+import { executionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 
 export class RunCancelled extends Error {
   constructor() { super('Run cancellation was requested.'); this.name = 'RunCancelled'; }
@@ -14,7 +14,9 @@ export class RunCancelled extends Error {
 
 export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoint, provider: DecisionProvider, restoredBudget?: BudgetLedger): Promise<RunCheckpoint> {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = checkpoint.formatVersion === 2
+    ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash)
+    : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === 'laya'
     ? { kind: 'laya' as const, checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...(checkpoint.provider.precision === undefined ? {} : { precision: checkpoint.provider.precision }) }
     : checkpoint.provider;
@@ -39,10 +41,11 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
     await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
+        const providerRequest = checkpoint.formatVersion === 2 ? legacyChoiceRequest(request) : request;
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error('Task sequence changed while recovering the run.');
-          if (replay.requestFingerprint !== requestFingerprint(request)) throw new Error('Rendered task request changed while recovering the run.');
+          if (replay.requestFingerprint !== requestFingerprint(request) && !(checkpoint.formatVersion === 2 && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error('Rendered task request changed while recovering the run.');
           replayCursor += 1;
           decisions.push(replay);
           return replay.result;
@@ -60,14 +63,14 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
         }
         failedNodeId = nodeId;
         let decision: DecisionResult;
-        try { decision = await provider.decide(request, 1); }
+        try { decision = await provider.decide(providerRequest, 1); }
         catch (error) {
           await ledger.settle(reservation, errorEvidence(error));
           await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
           throw error;
         }
         await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...(decision.chargeUsd === undefined ? {} : { chargeUsd: decision.chargeUsd }) });
-        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: requestFingerprint(request), result: decision }];
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: checkpoint.formatVersion === 2 ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
         return decision;
       } });
@@ -108,6 +111,32 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
 
 function cellId(armId: string, respondentId: string): string { return `${armId}/${respondentId}`; }
 function requestFingerprint(request: unknown): string { return createHash('sha256').update(JSON.stringify(request)).digest('hex'); }
+export function legacyChoiceRequestFingerprint(request: unknown): string {
+  if (typeof request !== 'object' || request === null || !('question' in request) || !('state' in request)) return '';
+  const value = request as { question: Record<string, unknown>; state: Record<string, unknown> };
+  if (value.question.type !== 'choice') return '';
+  const question = { ...value.question };
+  delete question.type;
+  const state = legacyChoiceState(value.state);
+  return requestFingerprint({ state, question, ...('optionIds' in (request as object) ? { optionIds: (request as unknown as { optionIds: unknown }).optionIds } : {}) });
+}
+function legacyChoiceRequest(request: DecisionRequest): DecisionRequest {
+  if (request.question.type !== 'choice') throw new Error('Version-2 checkpoints can resume Choice tasks only.');
+  return { ...request, state: legacyChoiceState(request.state) } as DecisionRequest;
+}
+function legacyChoiceState(source: Record<string, unknown>): Record<string, unknown> {
+  const state = structuredClone(source);
+  const trajectory = state.trajectory as Record<string, unknown> | undefined;
+  if (trajectory) {
+    delete trajectory.responses;
+    trajectory.decisionCount = Array.isArray(trajectory.choices) ? trajectory.choices.length : 0;
+    delete trajectory.payloadUtf8Bytes;
+    let bytes = 0;
+    for (;;) { const size = new TextEncoder().encode(JSON.stringify({ ...trajectory, payloadUtf8Bytes: bytes })).length; if (size === bytes) break; bytes = size; }
+    trajectory.payloadUtf8Bytes = bytes;
+  }
+  return state;
+}
 function replaceJourney(journeys: RunCheckpoint['journeys'], replacement: RunCheckpoint['journeys'][number]): RunCheckpoint['journeys'] {
   return [...journeys.filter((journey) => !(journey.armId === replacement.armId && journey.respondentId === replacement.respondentId)), replacement];
 }

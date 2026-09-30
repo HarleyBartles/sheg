@@ -8,9 +8,19 @@ const nodeSchema = z.discriminatedUnion('kind', [
   z.object({ id: identifier, kind: z.literal('terminal'), outcome: identifier }).strict(),
 ]);
 
+const responseIntervalSchema = z.object({
+  type: z.enum(['score', 'noul']),
+  minimum: z.number().finite(),
+  maximum: z.number().finite(),
+  minimumInclusive: z.boolean(),
+  maximumInclusive: z.boolean(),
+}).strict();
+export type ResponseInterval = z.infer<typeof responseIntervalSchema>;
+
 const transitionSchema = z.object({
   fromNodeId: identifier,
   optionId: identifier.optional(),
+  when: responseIntervalSchema.optional(),
   toNodeId: identifier,
 }).strict();
 
@@ -26,3 +36,4 @@ export const presentationSchema = z.discriminatedUnion('kind', [
 ]);
 
 export type StudyPresentation = z.infer<typeof presentationSchema>;
+export type PresentationTransition = Extract<StudyPresentation, { kind: 'graph' }>['transitions'][number];

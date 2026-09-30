@@ -20,6 +20,7 @@ alongside the code.
 | [0009](0009-generalize-and-group-respondent-archetypes.md) | Generalize and group respondent archetypes | Accepted |
 | [0010](0010-preflight-study-context-for-configured-providers.md) | Preflight study context for configured providers | Proposed |
 | [0011](0011-deterministic-study-preview-and-packet-sizing.md) | Share packet assembly and expose deterministic study preview and sizing | Proposed |
+| [0012](0012-system-one-typed-responses-and-routing.md) | Preserve typed System One responses and route explicitly | Accepted |
 
 ## Writing and changing decisions
 

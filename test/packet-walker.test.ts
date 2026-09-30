@@ -82,8 +82,48 @@ test('enumerates every sequence response history and keeps all stimuli in each p
   assert.equal(result.status, 'complete');
   assert.equal(result.terminalJourneyCount, 4);
   assert.equal(result.packetCount, 3);
+  assert.match(result.unverifiedReason ?? '', /response history/i);
+  assert.equal(packets[1]?.request.state.trajectory.responses[0]?.type, 'choice');
+  assert.equal(packets[1]?.request.state.trajectory.responses[0]?.probabilities, undefined);
   assert.deepEqual(packets.map((packet) => packet.pathId), ['root', 'sequence-ask-entry-response=continue', 'sequence-ask-entry-response=leave']);
   assert.ok(packets.every((packet) => packet.request.state.encounteredItems.map((item) => item.id).join(',') === arm.items.map((item) => item.id).join(',')));
+});
+
+test('enumerates Score threshold routes and carries typed response history to the reached task', () => {
+  const typedArm = {
+    ...arm,
+    tasks: [
+      { id: 'tone', type: 'score' as const, instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] },
+      arm.tasks[0]!,
+    ],
+    presentation: {
+      kind: 'graph' as const, entryNodeId: 'show', maxDecisions: 2,
+      nodes: [
+        { id: 'show', kind: 'expose' as const, itemId: 'symptom' },
+        { id: 'rate', kind: 'ask' as const, taskId: 'tone' },
+        { id: 'leave', kind: 'terminal' as const, outcome: 'left' },
+        { id: 'continue', kind: 'expose' as const, itemId: 'investigation' },
+        { id: 'ask-again', kind: 'ask' as const, taskId: arm.tasks[0]!.id },
+        { id: 'done', kind: 'terminal' as const, outcome: 'done' },
+      ],
+      transitions: [
+        { fromNodeId: 'show', toNodeId: 'rate' },
+        { fromNodeId: 'rate', toNodeId: 'leave', when: { type: 'score' as const, minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'rate', toNodeId: 'continue', when: { type: 'score' as const, minimum: 1, maximum: 2, minimumInclusive: true, maximumInclusive: true } },
+        { fromNodeId: 'continue', toNodeId: 'ask-again' },
+        { fromNodeId: 'ask-again', optionId: 'continue', toNodeId: 'done' },
+        { fromNodeId: 'ask-again', optionId: 'leave', toNodeId: 'done' },
+      ],
+    },
+  } as unknown as StudyArm;
+  const packets: PreflightPacket[] = [];
+  const result = walkStudyPackets([typedArm], [profile], (packet) => packets.push(packet));
+  const followUp = packets.find((packet) => packet.nodeId === 'ask-again');
+  assert.equal(result.status, 'complete');
+  assert.equal(result.terminalJourneyCount, 3);
+  assert.equal(followUp?.request.state.trajectory.responses[0]?.type, 'score');
+  assert.equal(followUp?.request.state.trajectory.responses[0]?.score, 1.5);
+  assert.match(result.unverifiedReason ?? '', /response history/i);
 });
 
 test('returns incomplete rather than dropping work at the packet ceiling or on a cycle', () => {

@@ -37,6 +37,7 @@ const profile = (intent: string, context = 'Reading a short research passage.') 
 });
 
 const task = (id: string, instructions: string) => ({
+  type: 'choice' as const,
   id,
   instructions,
   options: { continue: 'Continue', stop: 'Stop' },
@@ -187,6 +188,7 @@ test('projects a validated study task to the inference question without answer-k
   await measurePacketBatch(input({ tasks: [{ id: 'draft-with-key', value: selectedTask }] }), { createProvider: factory.createProvider });
 
   assert.deepEqual(observed[0]?.question, {
+    type: 'choice',
     id: selectedTask.id,
     instructions: selectedTask.instructions,
     options: selectedTask.options,
@@ -217,6 +219,13 @@ test('preserves each supplied trajectory history and measures provider-specific 
   const allEqualFactory = providerFactory((_request, config) => fit(config.kind, config.kind === 'jev' ? config.model : config.checkpoint, 50));
   const tied = await measurePacketBatch(input({ providers: [jev], trajectories }), { createProvider: allEqualFactory.createProvider });
   assert.equal(tied.providers[0]?.largestCase?.caseId, [...tied.cases.map(({ caseId }) => caseId)].sort()[0]);
+});
+
+test('accepts typed response history for packet measurement and counts it as a decision', async () => {
+  const trajectory = { ...emptyTrajectory, eventCount: 1, decisionCount: 1, eventRange: { firstSequence: 0, lastSequence: 0 }, responses: [{ type: 'score' as const, taskId: 'prior-score', score: 1.5, meaning: 'balanced', probabilities: { '0': 0.5, '1': 0.5 }, legend: { '0': 'low', '1': 'high' }, exposedItemIds: ['opening'] }] };
+  const factory = providerFactory((_request, config) => fit(config.kind, config.kind === 'jev' ? config.model : config.checkpoint, 12));
+  const result = await measurePacketBatch(input({ trajectories: [{ id: 'typed-history', value: trajectory }] }), { createProvider: factory.createProvider });
+  assert.equal(result.cases.length, 1);
 });
 
 test('rejects case and serialized packet bounds before invoking provider measurement', async () => {

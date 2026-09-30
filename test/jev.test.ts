@@ -14,6 +14,7 @@ const config: JevConfig = {
 const request: DecisionRequest = {
   state: { reader: { profile: 'Interested but time-limited.' }, encounteredItems: [] },
   question: {
+    type: 'choice',
     id: 'entry-response',
     instructions: 'Would you continue reading?',
     options: { continue: 'Read the next section.', leave: 'Stop reading.' },
@@ -96,6 +97,8 @@ test('sends one typed choice and preserves the served model, distribution, usage
         },
       },
     });
+    assert.equal(result.type, 'choice');
+    if (result.type !== 'choice') return;
     assert.equal(result.choice, 'continue');
     assert.deepEqual(result.probabilities, { continue: 0.8, leave: 0.2 });
     assert.equal(result.confidence, 0.6);
@@ -109,6 +112,37 @@ test('sends one typed choice and preserves the served model, distribution, usage
   } finally {
     restoreKey();
   }
+});
+
+test('encodes Score and Noul criteria and preserves their typed evidence', async () => {
+  const restoreKey = installTestKey();
+  try {
+    const requests: Record<string, unknown>[] = [];
+    const answers = [
+      { type: 'score', score: 1.25, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' }, probabilities: { '0': 0.2, '1': 0.3, '2': 0.5 } },
+      { type: 'noul', noul: 0.74 },
+    ];
+    const provider = new JevProvider(config, fakeFetch(async (_url, init) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      const answer = answers[requests.length - 1]!;
+      return response({ answers: { 'typed-question': answer } });
+    }));
+    const scoreRequest = { state: request.state, question: { type: 'score' as const, id: 'typed-question', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] } } as DecisionRequest;
+    const score = await provider.decide(scoreRequest, 1);
+    assert.equal(score.type, 'score');
+    assert.equal(score.score, 1.25);
+    assert.deepEqual((requests[0]!.questions as Record<string, unknown>)['typed-question'], {
+      type: 'score', instructions: 'How professional?', criteria: ['casual', 'balanced', 'professional'],
+    });
+
+    const noulRequest = { state: request.state, question: { type: 'noul' as const, id: 'typed-question', instructions: 'Does this feel credible?', criteria: { true: 'credible', false: 'not credible' } } } as DecisionRequest;
+    const noul = await provider.decide(noulRequest, 1);
+    assert.equal(noul.type, 'noul');
+    assert.equal(noul.noul, 0.74);
+    assert.deepEqual((requests[1]!.questions as Record<string, unknown>)['typed-question'], {
+      type: 'noul', instructions: 'Does this feel credible?', criteria: { true: 'credible', false: 'not credible' },
+    });
+  } finally { restoreKey(); }
 });
 
 test('retries a retryable HTTP response and counts each physical request', async () => {

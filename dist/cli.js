@@ -9,9 +9,6 @@ import { readFile as readFile5 } from "node:fs/promises";
 import path7 from "node:path";
 import { pathToFileURL } from "node:url";
 
-// src/domain/decision/prompt.ts
-import { createHash } from "node:crypto";
-
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -12936,14 +12933,14 @@ function compileValidator(schema, parser) {
     return parser;
   }
 }
-function compile(schema, options) {
+function compile(schema, options2) {
   try {
     const parser = compileFn(schema);
     const clone2 = withParser(schema, parser);
     clone2._zod.bag.validator = compileValidator(schema, parser);
     return clone2;
   } catch (err) {
-    if (options?.strict)
+    if (options2?.strict)
       throw err;
     return schema;
   }
@@ -13003,7 +13000,7 @@ function installCompiledUserMethods(target, source, parser) {
     };
   }
 }
-function compileFn(schema, options) {
+function compileFn(schema, options2) {
   let recursive2 = true;
   try {
     recursive2 = isRecursiveSchema(schema);
@@ -13019,12 +13016,12 @@ function compileFn(schema, options) {
     definite: true
   };
   const doc = new Doc(["input"]);
-  const outputAccessor = generateCheck(doc, ctx, schema, "input", !options?.assertOnly);
+  const outputAccessor = generateCheck(doc, ctx, schema, "input", !options2?.assertOnly);
   doc.write(outputAccessor === null ? `return true;` : `return ${outputAccessor};`);
   const constantNames = ["INVALID", ...ctx.constants.keys()];
   const constantValues = [INVALID, ...ctx.constants.values()];
   const code = doc.content.join("\n");
-  const fullCode = options?.debug ? constantNames.length > 0 ? `// Constants: ${constantNames.join(", ")}
+  const fullCode = options2?.debug ? constantNames.length > 0 ? `// Constants: ${constantNames.join(", ")}
 ${code}` : code : "";
   const F = Function;
   const factoryCode = `return (input) => {
@@ -13037,7 +13034,7 @@ ${code}
   } catch (err) {
     throw new ZodCompileUnsupportedError(`this schema (generated code failed to evaluate: ${err.message})`);
   }
-  if (options?.debug) {
+  if (options2?.debug) {
     fn.code = fullCode;
   }
   fn.definite = ctx.definite;
@@ -14138,31 +14135,31 @@ function getTupleOptStart2(items, key) {
 }
 function generateUnionCheck(doc, ctx, schema, accessor) {
   const def = schema._zod.def;
-  const options = def.options;
+  const options2 = def.options;
   if (def.discriminator) {
     return generateDiscriminatedUnionCheck(doc, ctx, def, accessor);
   }
   if (def.inclusive === false) {
     throw new ZodCompileUnsupportedError("exclusive unions (z.xor)");
   }
-  if (options.length === 0) {
+  if (options2.length === 0) {
     doc.write("return INVALID;");
     return accessor;
   }
-  if (options.length === 1) {
-    return generateCheck(doc, ctx, options[0], accessor);
+  if (options2.length === 1) {
+    return generateCheck(doc, ctx, options2[0], accessor);
   }
-  const allLiterals = options.every((opt) => opt._zod.def.type === "literal" && !opt._zod.def.checks?.length);
+  const allLiterals = options2.every((opt) => opt._zod.def.type === "literal" && !opt._zod.def.checks?.length);
   if (allLiterals) {
-    const values = new Set(options.flatMap((opt) => opt._zod.def.values));
+    const values = new Set(options2.flatMap((opt) => opt._zod.def.values));
     const valuesConst = addConstant(ctx, values);
     doc.write(`if (!${valuesConst}.has(${accessor})) return INVALID;`);
     return accessor;
   }
   const outputVar = newVar(ctx);
   doc.write(`let ${outputVar};`);
-  for (let i = 0; i < options.length; i++) {
-    const opt = options[i];
+  for (let i = 0; i < options2.length; i++) {
+    const opt = options2[i];
     if (i === 0) {
       doc.write(`${outputVar} = (() => {`);
     } else {
@@ -15231,26 +15228,26 @@ function _array(Class2, element, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _union(Class2, options, params) {
+function _union(Class2, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     ...normalizeParams(params)
   });
 }
-function _xor(Class2, options, params) {
+function _xor(Class2, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     inclusive: false,
     ...normalizeParams(params)
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _discriminatedUnion(Class2, discriminator, options, params) {
+function _discriminatedUnion(Class2, discriminator, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     discriminator,
     ...normalizeParams(params)
   });
@@ -15491,12 +15488,12 @@ function describe(description) {
   return ch;
 }
 // @__NO_SIDE_EFFECTS__
-function meta(metadata) {
+function meta(metadata2) {
   const ch = new $ZodCheck({ check: "meta" });
   ch._zod.onattach = [
     (inst) => {
       const existing = globalRegistry.get(inst) ?? {};
-      globalRegistry.add(inst, { ...existing, ...metadata });
+      globalRegistry.add(inst, { ...existing, ...metadata2 });
     }
   ];
   ch._zod.check = () => {
@@ -15772,11 +15769,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     ctx.sharedDefsExtractedFor = ctx.external;
 }
 function compactTypeUnion(schema) {
-  const options = schema.anyOf;
-  if (!Array.isArray(options) || options.length === 0 || schema.type !== void 0)
+  const options2 = schema.anyOf;
+  if (!Array.isArray(options2) || options2.length === 0 || schema.type !== void 0)
     return;
   const types = [];
-  for (const option of options) {
+  for (const option of options2) {
     if (!option || typeof option !== "object")
       return;
     compactTypeUnion(option);
@@ -16480,14 +16477,14 @@ var objectProcessor = (schema, ctx, _json, params) => {
 var unionProcessor = (schema, ctx, json2, params) => {
   const def = schema._zod.def;
   const isExclusive = def.inclusive === false;
-  const options = def.options.map((x, i) => processSchema(x, ctx, {
+  const options2 = def.options.map((x, i) => processSchema(x, ctx, {
     ...params,
     path: [...params.path, isExclusive ? "oneOf" : "anyOf", i]
   }));
   if (isExclusive) {
-    json2.oneOf = options;
+    json2.oneOf = options2;
   } else {
-    json2.anyOf = options;
+    json2.anyOf = options2;
   }
 };
 var intersectionProcessor = (schema, ctx, json2, params) => {
@@ -18101,10 +18098,10 @@ var ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => unionProcessor(inst, ctx, json2, params);
   inst.options = def.options;
 });
-function union(options, params) {
+function union(options2, params) {
   return new ZodUnion({
     type: "union",
-    options,
+    options: options2,
     ...util_exports.normalizeParams(params)
   });
 }
@@ -18114,10 +18111,10 @@ var ZodXor = /* @__PURE__ */ $constructor("ZodXor", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => unionProcessor(inst, ctx, json2, params);
   inst.options = def.options;
 });
-function xor(options, params) {
+function xor(options2, params) {
   return new ZodXor({
     type: "union",
-    options,
+    options: options2,
     inclusive: false,
     ...util_exports.normalizeParams(params)
   });
@@ -18126,10 +18123,10 @@ var ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("ZodDiscriminatedUnion"
   ZodUnion.init(inst, def);
   $ZodDiscriminatedUnion.init(inst, def);
 });
-function discriminatedUnion(discriminator, options, params) {
+function discriminatedUnion(discriminator, options2, params) {
   return new ZodDiscriminatedUnion({
     type: "union",
-    options,
+    options: options2,
     discriminator,
     ...util_exports.normalizeParams(params)
   });
@@ -19361,13 +19358,13 @@ function convertSchema(schema, ctx) {
   let baseSchema = convertBaseSchema(schema, ctx);
   const hasExplicitType = schema.type || schema.enum !== void 0 || schema.const !== void 0;
   if (schema.anyOf && Array.isArray(schema.anyOf)) {
-    const options = schema.anyOf.map((s) => convertSchema(s, ctx));
-    const anyOfUnion = z.union(options);
+    const options2 = schema.anyOf.map((s) => convertSchema(s, ctx));
+    const anyOfUnion = z.union(options2);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, anyOfUnion) : anyOfUnion;
   }
   if (schema.oneOf && Array.isArray(schema.oneOf)) {
-    const options = schema.oneOf.map((s) => convertSchema(s, ctx));
-    const oneOfUnion = z.xor(options);
+    const options2 = schema.oneOf.map((s) => convertSchema(s, ctx));
+    const oneOfUnion = z.xor(options2);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, oneOfUnion) : oneOfUnion;
   }
   if (schema.allOf && Array.isArray(schema.allOf)) {
@@ -19681,23 +19678,11 @@ function date4(params) {
 }
 
 // src/domain/decision/decision.ts
-var decisionRequestSchema = external_exports.object({
-  state: external_exports.record(external_exports.string(), external_exports.unknown()),
-  question: external_exports.object({
-    id: external_exports.string().min(1),
-    instructions: external_exports.string().min(1),
-    options: external_exports.record(external_exports.string().min(1), external_exports.string().min(1))
-  }).strict(),
-  optionIds: external_exports.array(external_exports.string().min(1)).min(1)
-}).strict().superRefine((request, context) => {
-  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== Object.keys(request.question.options).length || request.optionIds.some((optionId) => !(optionId in request.question.options))) {
-    context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
-  }
-});
-var decisionResultSchema = external_exports.object({
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional(),
+var identifier = external_exports.string().min(1);
+var prose = external_exports.string().min(1);
+var probability = external_exports.number().finite().min(0).max(1);
+var probabilities = external_exports.record(external_exports.string(), probability);
+var metadata = external_exports.object({
   attempts: external_exports.number().int().positive(),
   provider: external_exports.enum(["jev", "laya"]),
   model: external_exports.string().min(1),
@@ -19710,14 +19695,72 @@ var decisionResultSchema = external_exports.object({
   chargeStatus: external_exports.enum(["billed", "not_billed", "unknown"]),
   chargeUsd: external_exports.number().finite().nonnegative().optional()
 }).strict();
+var choiceQuestionSchema = external_exports.object({
+  type: external_exports.literal("choice"),
+  id: identifier,
+  instructions: prose,
+  options: external_exports.record(identifier, prose).refine((value) => Object.keys(value).length > 0)
+}).strict();
+var scoreQuestionSchema = external_exports.object({
+  type: external_exports.literal("score"),
+  id: identifier,
+  instructions: prose,
+  rubric: external_exports.array(prose).min(2)
+}).strict();
+var noulQuestionSchema = external_exports.object({
+  type: external_exports.literal("noul"),
+  id: identifier,
+  instructions: prose,
+  criteria: external_exports.object({ true: prose.optional(), false: prose.optional() }).strict().optional()
+}).strict();
+var requestStateSchema = external_exports.object({ state: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict();
+var choiceRequestSchema = requestStateSchema.extend({
+  question: choiceQuestionSchema,
+  optionIds: external_exports.array(identifier).min(1)
+}).strict().superRefine((request, context) => {
+  const options2 = Object.keys(request.question.options);
+  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== options2.length || request.optionIds.some((id) => !options2.includes(id))) {
+    context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
+  }
+});
+var scoreRequestSchema = requestStateSchema.extend({ question: scoreQuestionSchema }).strict();
+var noulRequestSchema = requestStateSchema.extend({ question: noulQuestionSchema }).strict();
+var decisionRequestSchema = external_exports.union([choiceRequestSchema, scoreRequestSchema, noulRequestSchema]);
+var choiceResultSchema = external_exports.object({
+  type: external_exports.literal("choice").default("choice"),
+  choice: identifier,
+  probabilities,
+  confidence: probability.optional()
+}).extend(metadata.shape).strict();
+var scoreResultSchema = external_exports.object({
+  type: external_exports.literal("score"),
+  score: external_exports.number().finite(),
+  legend: external_exports.record(external_exports.string().regex(/^\d+$/), prose),
+  probabilities: external_exports.record(external_exports.string().regex(/^\d+$/), probability),
+  confidence: probability.optional()
+}).extend(metadata.shape).strict();
+var noulResultSchema = external_exports.object({ type: external_exports.literal("noul"), noul: probability }).extend(metadata.shape).strict();
+var decisionResultSchema = external_exports.discriminatedUnion("type", [choiceResultSchema, scoreResultSchema, noulResultSchema]);
+var decisionValueSchema = external_exports.discriminatedUnion("type", [
+  external_exports.object({ type: external_exports.literal("choice"), choice: identifier, probabilities: probabilities.optional(), confidence: probability.optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string().regex(/^\d+$/), prose), probabilities: external_exports.record(external_exports.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("noul"), noul: probability }).strict()
+]);
 
 // src/domain/decision/prompt.ts
+import { createHash } from "node:crypto";
+function questionForTask(task) {
+  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options } };
+  if ("rubric" in task) return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
+  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
+}
 var promptContract = {
-  version: 5,
+  version: 6,
   stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
   graphExposureWindow: "items exposed since the previous decision",
   sequenceExposureWindow: "all arm items for every task",
-  trajectory: ["prior task and choice IDs", "selected choice meanings", "prior exposure IDs", "event counts and range"],
+  trajectory: ["prior task IDs and typed responses with meanings", "prior exposure IDs", "event counts and range"],
+  responseHistory: "per-task include or omit; omitted legacy setting includes prior responses",
   onlyCurrentGraphExposureText: true,
   preserveEncounterOrder: true,
   historyOrder: "chronological",
@@ -19726,33 +19769,41 @@ var promptContract = {
   otherArmsExcluded: true,
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
+var legacyPromptContractHash = "c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044";
 function compactTrajectory(arm, history) {
   const exposureIds = [];
   const choices = [];
+  const responses = [];
   for (const event of history) {
     if (event.type === "exposure") {
       exposureIds.push(event.itemId);
       continue;
     }
     const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
-    const choiceMeaning = task?.options[event.choice];
-    if (!task || choiceMeaning === void 0) {
-      throw new Error(`Unknown choice ${event.choice} for task ${event.taskId} in journey history.`);
+    const result = event.type === "response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
+    if (!task) throw new Error(`Unknown task ${event.taskId} in journey history.`);
+    if (result.type === "choice") {
+      const choiceMeaning = task.type !== "score" && task.type !== "noul" ? task.options[result.choice] : void 0;
+      if (choiceMeaning === void 0) throw new Error(`Unknown choice ${result.choice} for task ${event.taskId} in journey history.`);
+      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+      responses.push(response);
+      choices.push({ taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds] });
+    } else if (result.type === "score") {
+      if (task.type !== "score" || result.legend[String(Math.round(result.score))] === void 0) throw new Error(`Score response does not match task ${event.taskId}.`);
+      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds] });
+    } else {
+      if (task.type !== "noul") throw new Error(`Noul response does not match task ${event.taskId}.`);
+      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds] });
     }
-    choices.push({
-      taskId: event.taskId,
-      choiceId: event.choice,
-      choiceMeaning,
-      exposedItemIds: [...exposureIds]
-    });
   }
   const body = {
     version: 1,
     eventCount: history.length,
     exposureCount: exposureIds.length,
-    decisionCount: choices.length,
+    decisionCount: responses.length,
     eventRange: history.length === 0 ? null : { firstSequence: history[0].sequence, lastSequence: history.at(-1).sequence },
-    choices
+    choices,
+    responses
   };
   let payloadUtf8Bytes = 0;
   for (; ; ) {
@@ -19770,7 +19821,7 @@ function compileDecisionPacket(arm, profile, taskId, history = []) {
   if (arm.presentation.kind === "sequence") {
     itemIds = arm.items.map((item) => item.id);
   } else {
-    const lastChoiceIndex = history.findLastIndex((event) => event.type === "choice");
+    const lastChoiceIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
     itemIds = history.slice(lastChoiceIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
   }
   const encounteredItems = itemIds.map((id) => {
@@ -19787,8 +19838,11 @@ function compileDecisionPacket(arm, profile, taskId, history = []) {
       friction_cues: profile.friction_cues
     },
     encounteredItems,
-    trajectory: compactTrajectory(arm, history),
-    question: { id: task.id, instructions: task.instructions, options: { ...task.options } }
+    trajectory: compactTrajectory(
+      arm,
+      task.responseHistory === "omit" ? history.filter((event) => event.type === "exposure") : history
+    ),
+    question: questionForTask(task)
   });
 }
 function compileDecisionRequest(parts) {
@@ -19799,8 +19853,8 @@ function compileDecisionRequest(parts) {
   };
   const request = decisionRequestSchema.parse({
     state,
-    question: { ...parts.question, options: { ...parts.question.options } },
-    optionIds: Object.keys(parts.question.options)
+    question: parts.question,
+    ...parts.question.type === "choice" ? { optionIds: Object.keys(parts.question.options) } : {}
   });
   return {
     ...request,
@@ -19826,13 +19880,12 @@ async function runJourney({ arm, profile, ask }) {
   };
   const answer = async (taskId, nodeId) => {
     const request = compileDecisionPacket(arm, profile, taskId, events);
-    const result = await ask(request, nodeId);
-    if (typeof result?.choice !== "string" || !Object.hasOwn(request.question.options, result.choice)) {
-      throw new JourneyExecutionError(`Task ${taskId} returned an option that was not offered.`);
-    }
+    const result = normalizeResponse(await ask(request, nodeId), request.question.type);
+    if (result.type !== request.question.type) throw new JourneyExecutionError(`Task ${taskId} returned ${result.type} for a ${request.question.type} question.`);
+    if (result.type === "choice" && (typeof result.choice !== "string" || request.question.type !== "choice" || !Object.hasOwn(request.question.options, result.choice))) throw new JourneyExecutionError(`Task ${taskId} returned an option that was not offered.`);
     decisionCount += 1;
-    events.push({ type: "choice", sequence: events.length, nodeId, taskId, choice: result.choice });
-    return result.choice;
+    events.push({ type: "response", sequence: events.length, nodeId, taskId, result });
+    return result;
   };
   if (arm.presentation.kind === "sequence") {
     for (const item of arm.items) expose(item.id, `sequence-expose-${item.id}`);
@@ -19854,11 +19907,27 @@ async function runJourney({ arm, profile, ask }) {
       continue;
     }
     if (decisionCount >= graph.maxDecisions) return { events, outcome: null, status: "decision-limit", decisionCount };
-    const choice = await answer(node2.taskId, node2.id);
-    const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id && candidate.optionId === choice);
-    if (!edge) throw new JourneyExecutionError(`Task node ${node2.id} has no transition for ${choice}.`);
+    const response = await answer(node2.taskId, node2.id);
+    const edge = graph.transitions.find((candidate) => {
+      if (candidate.fromNodeId !== node2.id) return false;
+      if (response.type === "choice") return candidate.optionId === response.choice;
+      if (!candidate.when || candidate.when.type !== response.type) return false;
+      const value = response.type === "score" ? response.score : response.noul;
+      return (value > candidate.when.minimum || candidate.when.minimumInclusive && value === candidate.when.minimum) && (value < candidate.when.maximum || candidate.when.maximumInclusive && value === candidate.when.maximum);
+    });
+    if (!edge) throw new JourneyExecutionError(`Task node ${node2.id} has no transition for ${response.type} response.`);
     current = edge.toNodeId;
   }
+}
+function normalizeResponse(answer, expectedType) {
+  if (typeof answer !== "object" || answer === null) throw new JourneyExecutionError("Task returned a response that is not an object.");
+  const raw = answer;
+  const actualType = raw.type ?? expectedType;
+  if (actualType !== expectedType) throw new JourneyExecutionError(`Task returned ${String(actualType)} for a ${expectedType} question.`);
+  const value = actualType === "choice" ? { type: "choice", choice: raw.choice, ...raw.probabilities === void 0 ? {} : { probabilities: raw.probabilities }, ...raw.confidence === void 0 ? {} : { confidence: raw.confidence } } : actualType === "score" ? { type: "score", score: raw.score, legend: raw.legend, probabilities: raw.probabilities, ...raw.confidence === void 0 ? {} : { confidence: raw.confidence } } : { type: "noul", noul: raw.noul };
+  const parsed = decisionValueSchema.safeParse(value);
+  if (!parsed.success) throw new JourneyExecutionError(`Task returned an invalid ${expectedType} response.`);
+  return parsed.data;
 }
 
 // src/domain/journey/trace.ts
@@ -19868,11 +19937,11 @@ async function traceStudy(arm, profile, scriptedChoices) {
     arm,
     profile,
     ask: async (request) => {
-      const choice = scriptedChoices[choiceIndex++];
-      if (choice === void 0) {
+      const scripted = scriptedChoices[choiceIndex++];
+      if (scripted === void 0) {
         throw new JourneyExecutionError(`Script ended before task ${request.question.id}.`);
       }
-      return { choice };
+      return typeof scripted === "string" ? { choice: scripted } : scripted;
     }
   });
   if (choiceIndex < scriptedChoices.length) {
@@ -19888,23 +19957,31 @@ import path from "node:path";
 
 // src/domain/study-input-error.ts
 var StudyInputError = class extends Error {
-  constructor(message, options) {
-    super(message, options);
+  constructor(message, options2) {
+    super(message, options2);
     this.name = "StudyInputError";
   }
 };
 
 // src/domain/study/presentation.ts
-var identifier = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 var nodeSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ id: identifier, kind: external_exports.literal("expose"), itemId: identifier }).strict(),
-  external_exports.object({ id: identifier, kind: external_exports.literal("ask"), taskId: identifier }).strict(),
-  external_exports.object({ id: identifier, kind: external_exports.literal("terminal"), outcome: identifier }).strict()
+  external_exports.object({ id: identifier2, kind: external_exports.literal("expose"), itemId: identifier2 }).strict(),
+  external_exports.object({ id: identifier2, kind: external_exports.literal("ask"), taskId: identifier2 }).strict(),
+  external_exports.object({ id: identifier2, kind: external_exports.literal("terminal"), outcome: identifier2 }).strict()
 ]);
+var responseIntervalSchema = external_exports.object({
+  type: external_exports.enum(["score", "noul"]),
+  minimum: external_exports.number().finite(),
+  maximum: external_exports.number().finite(),
+  minimumInclusive: external_exports.boolean(),
+  maximumInclusive: external_exports.boolean()
+}).strict();
 var transitionSchema = external_exports.object({
-  fromNodeId: identifier,
-  optionId: identifier.optional(),
-  toNodeId: identifier
+  fromNodeId: identifier2,
+  optionId: identifier2.optional(),
+  when: responseIntervalSchema.optional(),
+  toNodeId: identifier2
 }).strict();
 var presentationSchema = external_exports.discriminatedUnion("kind", [
   external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
@@ -19912,44 +19989,71 @@ var presentationSchema = external_exports.discriminatedUnion("kind", [
     kind: external_exports.literal("graph"),
     nodes: external_exports.array(nodeSchema).min(1),
     transitions: external_exports.array(transitionSchema),
-    entryNodeId: identifier,
+    entryNodeId: identifier2,
     maxDecisions: external_exports.number().int().positive()
   }).strict()
 ]);
 
 // src/domain/study/stimulus.ts
-var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose = external_exports.string().trim().min(1);
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose2 = external_exports.string().trim().min(1);
 var sourceReferenceSchema = external_exports.object({
   path: external_exports.string().min(1),
   sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
 }).strict();
 var stimulusItemSchema = external_exports.object({
-  id: identifier2,
-  text: prose
+  id: identifier3,
+  text: prose2
 }).strict();
 
 // src/domain/study/task.ts
-var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose2 = external_exports.string().trim().min(1);
-var taskSchema = external_exports.object({
-  id: identifier3,
-  instructions: prose2,
-  options: external_exports.record(identifier3, prose2).refine((options) => Object.keys(options).length > 0, "A choice task requires at least one option."),
-  comparisonKey: identifier3.optional(),
-  answerKeyOptionId: identifier3.optional()
-}).strict().superRefine((task, context) => {
-  if (task.answerKeyOptionId && !(task.answerKeyOptionId in task.options)) {
-    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${task.answerKeyOptionId}.` });
-  }
-});
-
-// src/domain/study/arm.ts
 var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 var prose3 = external_exports.string().trim().min(1);
-var studyArmSchema = external_exports.object({
+var taskFields = {
   id: identifier4,
-  label: prose3,
+  instructions: prose3,
+  comparisonKey: identifier4.optional(),
+  responseHistory: external_exports.enum(["include", "omit"]).optional()
+};
+var options = external_exports.record(identifier4, prose3).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+function validateChoiceTask(task, context) {
+  if (typeof task !== "object" || task === null || !("options" in task) || !("answerKeyOptionId" in task)) return;
+  const options2 = task.options;
+  const answerKeyOptionId = task.answerKeyOptionId;
+  if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in options2)) {
+    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+  }
+}
+var legacyChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  options,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var typedChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("choice"),
+  options,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var scoreTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("score"),
+  rubric: external_exports.array(prose3).min(2)
+}).strict();
+var noulTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("noul"),
+  criteria: external_exports.object({ true: prose3.optional(), false: prose3.optional() }).strict().optional()
+}).strict();
+var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
+var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
+
+// src/domain/study/arm.ts
+var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose4 = external_exports.string().trim().min(1);
+var studyArmSchema = external_exports.object({
+  id: identifier5,
+  label: prose4,
   sources: external_exports.array(sourceReferenceSchema).min(1),
   items: external_exports.array(stimulusItemSchema).min(1),
   tasks: external_exports.array(taskSchema).min(1),
@@ -19963,6 +20067,10 @@ var studyArmSchema = external_exports.object({
   const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
+  }
+  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
+  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
   }
   if (presentation.kind === "sequence") return;
   const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
@@ -19992,8 +20100,8 @@ var studyArmSchema = external_exports.object({
     if (source.kind === "terminal") {
       context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
     }
-    if (source.kind === "expose" && edge.optionId !== void 0) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "optionId"], message: "Exposure transitions must be unconditional." });
+    if (source.kind === "expose" && (edge.optionId !== void 0 || edge.when !== void 0)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Exposure transitions must be unconditional." });
     }
   }
   for (const [index, node2] of presentation.nodes.entries()) {
@@ -20003,16 +20111,22 @@ var studyArmSchema = external_exports.object({
       continue;
     }
     if (node2.kind === "expose") {
-      if (edges.length !== 1 || edges[0]?.optionId !== void 0) {
+      if (edges.length !== 1 || edges[0]?.optionId !== void 0 || edges[0]?.when !== void 0) {
         context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
       }
       continue;
     }
     const task = taskById.get(node2.taskId);
-    const optionIds = Object.keys(task?.options ?? {});
-    const edgeOptionIds = edges.map((edge) => edge.optionId);
-    if (edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Task transitions must contain exactly one edge for every offered option and no others." });
+    if (!task) continue;
+    if (task.type !== "score" && task.type !== "noul") {
+      const optionIds = Object.keys(task.options);
+      const edgeOptionIds = edges.map((edge) => edge.optionId);
+      if (edges.some((edge) => edge.when !== void 0) || edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Choice task transitions must contain exactly one edge for every offered option and no others." });
+      }
+    } else {
+      const maximum = task.type === "score" ? task.rubric.length - 1 : 1;
+      validateResponseIntervals(edges, task.type, maximum, context, index);
     }
   }
   if (nodesById.has(presentation.entryNodeId)) {
@@ -20072,14 +20186,52 @@ var studyArmSchema = external_exports.object({
     }
   }
 });
+function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
+  const issues = context;
+  const ranges = edges.map((edge, index) => ({ edge, index, range: edge.when }));
+  const fail = (message) => issues.addIssue({
+    code: "custom",
+    path: ["presentation", "nodes", nodeIndex],
+    message
+  });
+  if (ranges.some(({ edge, range }) => edge.optionId !== void 0 || range === void 0 || range.type !== type)) {
+    fail(`${type.toUpperCase()} task transitions must use matching typed response intervals only.`);
+    return;
+  }
+  const ordered = ranges.toSorted((left, right) => left.range.minimum - right.range.minimum || Number(right.range.minimumInclusive) - Number(left.range.minimumInclusive));
+  for (const { range } of ordered) {
+    if (range.minimum > range.maximum || range.minimum < 0 || range.maximum > maximum || range.minimum === range.maximum && !(range.minimumInclusive && range.maximumInclusive)) {
+      fail(`${type.toUpperCase()} route interval is reversed, empty, or outside its response domain.`);
+      return;
+    }
+  }
+  const first = ordered[0]?.range;
+  const last = ordered.at(-1)?.range;
+  if (!first || !last || first.minimum !== 0 || !first.minimumInclusive || last.maximum !== maximum || !last.maximumInclusive) {
+    fail(`${type.toUpperCase()} route intervals must cover the complete response domain.`);
+    return;
+  }
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1].range;
+    const current = ordered[index].range;
+    if (previous.maximum > current.minimum || previous.maximum === current.minimum && previous.maximumInclusive && current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals overlap or leave an ambiguous boundary.`);
+      return;
+    }
+    if (previous.maximum < current.minimum || previous.maximum === current.minimum && !previous.maximumInclusive && !current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals leave a gap in the response domain.`);
+      return;
+    }
+  }
+}
 
 // src/domain/study/study.ts
-var prose4 = external_exports.string().trim().min(1);
+var prose5 = external_exports.string().trim().min(1);
 var studyManifestSchema = external_exports.object({
   version: external_exports.literal("2.0"),
   study: external_exports.object({
-    title: prose4,
-    purpose: prose4
+    title: prose5,
+    purpose: prose5
   }).strict(),
   arms: external_exports.array(studyArmSchema).min(1)
 }).strict().superRefine((study, context) => {
@@ -20225,8 +20377,8 @@ async function parseJsonFile(filePath, label) {
     throw new StudyInputError(`${label} must be valid UTF-8 JSON.`, { cause: error62 });
   }
 }
-async function loadStudy(manifestPath, cohortPath, options = {}) {
-  if (!cohortPath && !options.allowMissingCohort) throw new StudyInputError("An explicit frozen cohort is required.");
+async function loadStudy(manifestPath, cohortPath, options2 = {}) {
+  if (!cohortPath && !options2.allowMissingCohort) throw new StudyInputError("An explicit frozen cohort is required.");
   const absoluteManifestPath = path.resolve(manifestPath);
   let manifestBytes;
   try {
@@ -20520,7 +20672,8 @@ var providerConfigSchema = external_exports.discriminatedUnion("kind", [
 var journeyResultSchema = external_exports.object({
   events: external_exports.array(external_exports.discriminatedUnion("type", [
     external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), itemId: external_exports.string() }).strict(),
-    external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), choice: external_exports.string() }).strict()
+    external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), choice: external_exports.string() }).strict(),
+    external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), result: decisionValueSchema }).strict()
   ])),
   outcome: external_exports.string().nullable(),
   status: external_exports.enum(["completed", "decision-limit"]),
@@ -20547,7 +20700,7 @@ var contextFailureSchema = external_exports.object({
   measurementMethod: external_exports.string().min(1)
 }).strict();
 var runCheckpointSchema = external_exports.object({
-  formatVersion: external_exports.literal(2),
+  formatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]),
   runId: external_exports.string().uuid(),
   status: external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled"]),
   createdAt: external_exports.string().datetime(),
@@ -20593,7 +20746,7 @@ var CheckpointStore = class {
   }
   directory;
   async create(input2) {
-    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 2, runId: input2.runId ?? randomUUID3() });
+    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 3, runId: input2.runId ?? randomUUID3() });
     await mkdir2(this.directory, { recursive: true });
     const filePath = this.filePath(checkpoint.runId);
     try {
@@ -20625,6 +20778,20 @@ var CheckpointStore = class {
     }
     const checkpoint = runCheckpointSchema.safeParse(value);
     if (!checkpoint.success) throw new Error(`Run checkpoint ${runId} failed validation.`, { cause: checkpoint.error });
+    if (checkpoint.data.formatVersion === 2) {
+      return {
+        ...checkpoint.data,
+        journeys: checkpoint.data.journeys.map((journey) => ({
+          ...journey,
+          ...journey.result === void 0 ? {} : {
+            result: {
+              ...journey.result,
+              events: journey.result.events.map((event) => event.type === "choice" ? { type: "response", sequence: event.sequence, nodeId: event.nodeId, taskId: event.taskId, result: { type: "choice", choice: event.choice } } : event)
+            }
+          }
+        }))
+      };
+    }
     return checkpoint.data;
   }
   async save(checkpoint) {
@@ -20717,6 +20884,14 @@ function stimulusFingerprint(study, cohort, promptContractHash2) {
   if (!promptContractHash2) throw new TypeError("Prompt contract hash is required.");
   return hashCanonical({ version: 1, study, cohort, promptContractHash: promptContractHash2 });
 }
+function legacyChoiceStimulusFingerprint(study, cohort, promptHash) {
+  const legacyStudy = { ...study, arms: study.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task) => {
+    const legacyTask = { ...task };
+    delete legacyTask.type;
+    return legacyTask;
+  }) })) };
+  return hashCanonical({ version: 1, study: legacyStudy, cohort, promptContractHash: promptHash });
+}
 function executionFingerprint(stimulus, provider) {
   if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
   let decisionSettings;
@@ -20733,6 +20908,9 @@ function executionFingerprint(stimulus, provider) {
     };
   }
   return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
+}
+function respondentCohortFingerprint(cohort) {
+  return hashCanonical({ version: 2, archetypes: cohort.archetypes, respondents: cohort.respondents });
 }
 function hashCanonical(value) {
   return createHash3("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
@@ -20767,39 +20945,53 @@ import { setTimeout as wait } from "node:timers/promises";
 
 // src/domain/decision/validate.ts
 var DecisionError = class extends Error {
-  constructor(message, options) {
-    super(message, options);
+  constructor(message, options2) {
+    super(message, options2);
     this.name = "DecisionError";
   }
 };
 var probabilitySumTolerance = 0.01;
-function validateDecision(request, result, options = {}) {
+function validateDecision(request, result, options2 = {}) {
+  const parsedRequest = decisionRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
+  }
   const parsed = decisionResultSchema.safeParse(result);
   if (!parsed.success) {
     throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error });
   }
   const decision = parsed.data;
-  const optionIds = [...request.optionIds];
-  if (optionIds.length === 0 || new Set(optionIds).size !== optionIds.length || optionIds.length !== Object.keys(request.question.options).length || optionIds.some((optionId) => !(optionId in request.question.options))) {
-    throw new DecisionError("Decision request option IDs must uniquely match the offered options.");
+  const normalizedRequest = parsedRequest.data;
+  if (decision.type !== normalizedRequest.question.type) {
+    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`);
   }
-  if (!optionIds.includes(decision.choice)) {
-    throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
-  }
-  const probabilityLabels = Object.keys(decision.probabilities);
-  if (probabilityLabels.length !== optionIds.length || optionIds.some((optionId) => !(optionId in decision.probabilities))) {
-    throw new DecisionError("Decision probabilities must contain exactly one entry for every offered option ID.");
-  }
-  const probabilityTotal = Object.values(decision.probabilities).reduce((sum, value) => sum + value, 0);
-  if (Math.abs(probabilityTotal - 1) > probabilitySumTolerance) {
-    throw new DecisionError(`Decision probabilities must sum to 1 within ${probabilitySumTolerance}.`);
-  }
-  const maxAttempts = options.maxAttempts ?? 1;
+  if (decision.type === "choice") {
+    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.");
+    const optionIds = Object.keys(normalizedRequest.question.options);
+    if (!optionIds.includes(decision.choice)) {
+      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
+    }
+    validateDistribution(decision.probabilities, optionIds, "Choice");
+  } else if (decision.type === "score") {
+    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.");
+    const rubric = normalizedRequest.question.rubric;
+    const levelIds = rubric.map((_level, index) => String(index));
+    if (decision.score < 0 || decision.score > rubric.length - 1) {
+      throw new DecisionError("Score result is outside the declared rubric range.");
+    }
+    validateDistribution(decision.probabilities, levelIds, "Score");
+    for (const [index, meaning] of rubric.entries()) {
+      if (decision.legend[String(index)] !== meaning) {
+        throw new DecisionError(`Score legend does not match rubric level ${index}.`);
+      }
+    }
+  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.");
+  const maxAttempts = options2.maxAttempts ?? 1;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
     throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
   }
   for (const key of ["provider", "model", "checkpoint"]) {
-    if (options[key] !== void 0 && decision[key] !== options[key]) {
+    if (options2[key] !== void 0 && decision[key] !== options2[key]) {
       throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
     }
   }
@@ -20809,19 +21001,17 @@ function validateDecision(request, result, options = {}) {
   if (decision.chargeStatus !== "billed" && decision.chargeUsd !== void 0) {
     throw new DecisionError("Charge amount is present without billed status evidence.");
   }
-  return {
-    choice: decision.choice,
-    probabilities: decision.probabilities,
-    ...decision.confidence === void 0 ? {} : { confidence: decision.confidence },
-    attempts: decision.attempts,
-    provider: decision.provider,
-    model: decision.model,
-    ...decision.checkpoint === void 0 ? {} : { checkpoint: decision.checkpoint },
-    latencyMs: decision.latencyMs,
-    usage: decision.usage,
-    chargeStatus: decision.chargeStatus,
-    ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd }
-  };
+  return decision;
+}
+function validateDistribution(distribution, expectedIds, label) {
+  const ids = Object.keys(distribution);
+  if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
+    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`);
+  }
+  const total = Object.values(distribution).reduce((sum, value) => sum + value, 0);
+  if (Math.abs(total - 1) > probabilitySumTolerance) {
+    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`);
+  }
 }
 
 // src/providers/jev.ts
@@ -20847,6 +21037,9 @@ var choiceAnswerSchema = external_exports.object({
   probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
   confidence: external_exports.number().finite().min(0).max(1).optional()
 }).passthrough();
+var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
+var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
+var answerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
 var wireResponseSchema = external_exports.object({
   model: external_exports.string().min(1),
   answers: external_exports.record(external_exports.string(), external_exports.unknown()),
@@ -20864,7 +21057,8 @@ var JEV_EFFECTIVE_LIMIT = JEV_CONTEXT_LIMIT - JEV_HEADROOM;
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
 function requestBody(request, model) {
   const { question } = request;
-  return { model, state: request.state, questions: { [question.id]: { type: "choice", instructions: question.instructions, criteria: question.options } } };
+  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
+  return { model, state: request.state, questions: { [question.id]: { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } } } };
 }
 function measureJevContext(request, model) {
   const serialized = JSON.stringify(requestBody(request, model));
@@ -20950,18 +21144,16 @@ var JevProvider = class {
       if (!parsedResponse.success) {
         throw new JevCallError("Jev response is missing required identity or usage fields; billing is unknown.", attempts, "unknown");
       }
-      const answer = choiceAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
+      const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid choice answer for ${question.id}; billing is unknown.`, attempts, "unknown");
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}; billing is unknown.`, attempts, "unknown");
       }
       const cost = parsedResponse.data.usage.cost;
       if (cost === void 0) {
         throw new JevCallError("Jev response did not report usage cost; billing is unknown.", attempts, "unknown");
       }
       const result = {
-        choice: answer.data.choice,
-        probabilities: answer.data.probabilities,
-        ...answer.data.confidence === void 0 ? {} : { confidence: answer.data.confidence },
+        ...answer.data,
         attempts,
         provider: "jev",
         model: parsedResponse.data.model,
@@ -21226,8 +21418,8 @@ var tokenizerCache = /* @__PURE__ */ new Map();
 async function tokenizerPromise(config2) {
   const absolutePath = path4.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
-  const metadata = await stat(absolutePath, { bigint: true });
-  const signature = `${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`;
+  const metadata2 = await stat(absolutePath, { bigint: true });
+  const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
   const existing = tokenizerCache.get(key);
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
@@ -21281,11 +21473,15 @@ async function measureLayaContext(request, config2) {
     return unavailable(config2, error62 instanceof Error ? error62.message : "tokenizer-load-failed");
   }
   const tokenizer = tokenizerLike(loaded.data);
-  const question = { t: "choice", ins: request.question.instructions, crit: request.question.options };
+  const question = {
+    t: request.question.type,
+    ins: request.question.instructions,
+    crit: request.question.type === "choice" ? request.question.options : request.question.type === "score" ? request.question.rubric : request.question.criteria
+  };
   const fullHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
   const configuredHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, config2.headLimit);
-  const options = renderOptions(question);
-  const optionTokenLengths = options.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
+  const options2 = renderOptions(question);
+  const optionTokenLengths = options2.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
   const fullState = tokenizer.encode(serializeState(request.state).split(tokenizer.maskToken).join(" "));
   const stateBudget = config2.contextLimit - fullHead.ids.length;
   const tokens = fullHead.ids.length + fullState.length;
@@ -21318,6 +21514,7 @@ async function measureLayaContext(request, config2) {
 }
 
 // src/providers/laya.ts
+var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
   constructor(message, attempts, chargeStatus, contextFit, decisionId) {
     super(message);
@@ -21332,12 +21529,19 @@ var LayaCallError = class extends Error {
   contextFit;
   decisionId;
 };
-var answerSchema = external_exports.object({
+var choiceAnswerSchema2 = external_exports.object({
   type: external_exports.literal("choice"),
   choice: external_exports.string().min(1),
   probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
   confidence: external_exports.number().finite().min(0).max(1).optional()
 }).passthrough();
+var scoreAnswerSchema2 = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
+var noulAnswerSchema2 = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
+var answerSchema2 = external_exports.discriminatedUnion("type", [choiceAnswerSchema2, scoreAnswerSchema2, noulAnswerSchema2]);
+function wireQuestion(question) {
+  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
+  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
+}
 var responseSchema = external_exports.object({
   model: external_exports.string().min(1),
   answers: external_exports.record(external_exports.string(), external_exports.unknown()),
@@ -21348,6 +21552,9 @@ var responseSchema = external_exports.object({
   routing: external_exports.object({ model: external_exports.string().min(1) }).passthrough()
 }).passthrough();
 async function checkLayaFit(request, config2, measureFit) {
+  if (request.question.type === "score" && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
+    return { provider: "laya", status: "overflow", method: "laya-score-rubric-limit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: request.question.rubric.length, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
+  }
   let measurement;
   try {
     measurement = await (measureFit ?? measureLayaContext)(request, config2);
@@ -21360,13 +21567,13 @@ async function checkLayaFit(request, config2, measureFit) {
   return measurement;
 }
 var LayaProvider = class {
-  constructor(config2, options = {}) {
+  constructor(config2, options2 = {}) {
     this.config = config2;
-    this.options = options;
+    this.options = options2;
     if (config2.kind !== "laya" || !config2.baseUrl || !config2.checkpoint || !config2.tokenizerJsonPath || !/^[a-f\d]{64}$/i.test(config2.tokenizerSha256) || !Number.isInteger(config2.contextLimit) || config2.contextLimit < 1 || !Number.isInteger(config2.headLimit) || config2.headLimit < 1 || !Number.isInteger(config2.timeoutMs) || config2.timeoutMs < 1 || config2.precision !== void 0 && !config2.precision) {
       throw new TypeError("Laya configuration requires a base URL, checkpoint, positive context limit, and positive timeout.");
     }
-    this.fetchRequest = options.fetchRequest ?? fetch;
+    this.fetchRequest = options2.fetchRequest ?? fetch;
   }
   config;
   options;
@@ -21396,7 +21603,7 @@ var LayaProvider = class {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: { type: "choice", instructions: question.instructions, criteria: question.options }
+            [question.id]: wireQuestion(question)
           }
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs)
@@ -21418,12 +21625,10 @@ var LayaProvider = class {
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
       throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, "not_billed");
     }
-    const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid choice answer for ${question.id}.`, 1, "not_billed");
+    const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, "not_billed");
     const result = {
-      choice: answer.data.choice,
-      probabilities: answer.data.probabilities,
-      ...answer.data.confidence === void 0 ? {} : { confidence: answer.data.confidence },
+      ...answer.data,
       attempts: 1,
       provider: "laya",
       model: parsedResponse.data.model,
@@ -21459,7 +21664,7 @@ var RunCancelled = class extends Error {
 };
 async function runWorker(store, checkpoint, provider, restoredBudget) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint) throw new Error("Study or provider settings changed since this run was prepared.");
   const { maxUsd, ...budgetRest } = checkpoint.budget;
@@ -21480,10 +21685,11 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
+        const providerRequest = checkpoint.formatVersion === 2 ? legacyChoiceRequest(request) : request;
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error("Task sequence changed while recovering the run.");
-          if (replay.requestFingerprint !== requestFingerprint(request)) throw new Error("Rendered task request changed while recovering the run.");
+          if (replay.requestFingerprint !== requestFingerprint(request) && !(checkpoint.formatVersion === 2 && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error("Rendered task request changed while recovering the run.");
           replayCursor += 1;
           decisions.push(replay);
           return replay.result;
@@ -21502,14 +21708,14 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         failedNodeId = nodeId;
         let decision;
         try {
-          decision = await provider.decide(request, 1);
+          decision = await provider.decide(providerRequest, 1);
         } catch (error62) {
           await ledger.settle(reservation, errorEvidence(error62));
           await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
           throw error62;
         }
         await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd } });
-        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: requestFingerprint(request), result: decision }];
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: checkpoint.formatVersion === 2 ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
         return decision;
       } });
@@ -21556,6 +21762,36 @@ function cellId(armId, respondentId) {
 }
 function requestFingerprint(request) {
   return createHash5("sha256").update(JSON.stringify(request)).digest("hex");
+}
+function legacyChoiceRequestFingerprint(request) {
+  if (typeof request !== "object" || request === null || !("question" in request) || !("state" in request)) return "";
+  const value = request;
+  if (value.question.type !== "choice") return "";
+  const question = { ...value.question };
+  delete question.type;
+  const state = legacyChoiceState(value.state);
+  return requestFingerprint({ state, question, ..."optionIds" in request ? { optionIds: request.optionIds } : {} });
+}
+function legacyChoiceRequest(request) {
+  if (request.question.type !== "choice") throw new Error("Version-2 checkpoints can resume Choice tasks only.");
+  return { ...request, state: legacyChoiceState(request.state) };
+}
+function legacyChoiceState(source) {
+  const state = structuredClone(source);
+  const trajectory = state.trajectory;
+  if (trajectory) {
+    delete trajectory.responses;
+    trajectory.decisionCount = Array.isArray(trajectory.choices) ? trajectory.choices.length : 0;
+    delete trajectory.payloadUtf8Bytes;
+    let bytes = 0;
+    for (; ; ) {
+      const size = new TextEncoder().encode(JSON.stringify({ ...trajectory, payloadUtf8Bytes: bytes })).length;
+      if (size === bytes) break;
+      bytes = size;
+    }
+    trajectory.payloadUtf8Bytes = bytes;
+  }
+  return state;
 }
 function replaceJourney(journeys, replacement) {
   return [...journeys.filter((journey) => !(journey.armId === replacement.armId && journey.respondentId === replacement.respondentId)), replacement];
@@ -21683,8 +21919,8 @@ async function checkStudy(config2) {
   return { config: normalized, study, stimulusFingerprint: stimulus, executionFingerprint: executionFingerprint(stimulus, identityProvider), runBounds };
 }
 var RunManager = class {
-  constructor(options = {}) {
-    this.options = options;
+  constructor(options2 = {}) {
+    this.options = options2;
   }
   options;
   active = /* @__PURE__ */ new Map();
@@ -21775,7 +22011,8 @@ var RunManager = class {
     let checkpoint = await store.read(runId);
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
     const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
-    if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
+    const compatibleExecutionFingerprint = checkpoint.formatVersion === 2 ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === "laya" ? { kind: "laya", checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...checked.config.provider.precision === void 0 ? {} : { precision: checked.config.provider.precision } } : checked.config.provider) : checked.executionFingerprint;
+    if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
     requireJevKey(checkpoint.provider);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
@@ -21815,13 +22052,14 @@ function requireJevKey(provider) {
 // src/application/reports.ts
 import { createHash as createHash6 } from "node:crypto";
 import path6 from "node:path";
-var responseSchema2 = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), presentationOccurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), optionIds: external_exports.array(external_exports.string()), choice: external_exports.string(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), chargeUsd: external_exports.number().nonnegative().nullable() }).strict();
+var responseSchema2 = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), presentationOccurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), answer: decisionValueSchema, optionIds: external_exports.array(external_exports.string()), choice: external_exports.string().optional(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), chargeUsd: external_exports.number().nonnegative().nullable() }).strict();
 var pollingReportSchema = external_exports.object({
-  formatVersion: external_exports.literal(2),
+  formatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]),
   runId: external_exports.string().uuid(),
   status: external_exports.string(),
   stimulusFingerprint: external_exports.string(),
   executionFingerprint: external_exports.string(),
+  cohortFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
   provider: external_exports.object({ kind: external_exports.enum(["jev", "laya"]), model: external_exports.string().nullable(), checkpoint: external_exports.string().nullable() }).strict(),
   cohortSize: external_exports.number().int().nonnegative(),
   arms: external_exports.array(external_exports.object({
@@ -21829,17 +22067,98 @@ var pollingReportSchema = external_exports.object({
     label: external_exports.string(),
     denominator: external_exports.object({ intended: external_exports.number().int(), started: external_exports.number().int(), completed: external_exports.number().int(), excluded: external_exports.number().int(), excludedByStatus: external_exports.record(external_exports.string(), external_exports.number().int()) }).strict(),
     fingerprint: external_exports.string(),
+    presentation: external_exports.unknown(),
     sources: external_exports.array(external_exports.object({ path: external_exports.string(), sha256: external_exports.string() }).strict()),
     stimulusItems: external_exports.array(external_exports.object({ id: external_exports.string(), text: external_exports.string() }).strict()),
-    tasks: external_exports.array(external_exports.object({ id: external_exports.string(), comparisonKey: external_exports.string().nullable(), instructions: external_exports.string(), options: external_exports.record(external_exports.string(), external_exports.string()) }).strict()),
-    taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()) }).strict()) }).strict()),
-    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), status: external_exports.string(), outcome: external_exports.string().nullable(), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failureEvidence: contextFailureSchema.optional() }).strict())
+    tasks: external_exports.array(external_exports.object({ id: external_exports.string(), type: external_exports.enum(["choice", "score", "noul"]).optional(), comparisonKey: external_exports.string().nullable(), instructions: external_exports.string(), options: external_exports.record(external_exports.string(), external_exports.string()).optional(), rubric: external_exports.array(external_exports.string()).optional(), criteria: external_exports.object({ true: external_exports.string().optional(), false: external_exports.string().optional() }).nullable().optional(), responseHistory: external_exports.enum(["include", "omit"]).optional() }).strict()),
+    taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), type: external_exports.enum(["choice", "score", "noul"]).optional(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()), meanScore: external_exports.number().finite().optional(), rubricProbabilities: external_exports.record(external_exports.string(), external_exports.number().min(0).max(1)).optional(), meanProbabilityTrue: external_exports.number().min(0).max(1).optional() }).strict()) }).strict()),
+    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), variation: external_exports.record(external_exports.string(), external_exports.string()).optional(), status: external_exports.string(), outcome: external_exports.string().nullable(), presentedTaskIds: external_exports.array(external_exports.string()), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failureEvidence: contextFailureSchema.optional() }).strict())
   }).strict()),
   providerEvidence: external_exports.object({ attempts: external_exports.number().int(), billedUsd: external_exports.number().nonnegative(), unknownCharges: external_exports.number().int(), failedCells: external_exports.number().int() }).strict()
 }).strict();
+function reconstructPartialEvents(arm, stored) {
+  const events = [];
+  const used = /* @__PURE__ */ new Set();
+  let sequence = 0;
+  const responseFor = (taskId, nodeId) => {
+    const decisionIndex = stored.decisions.findIndex((decision, index) => !used.has(index) && decision.decisionId === taskId);
+    if (decisionIndex < 0) {
+      events.push({ type: "pending-response", sequence: sequence++, nodeId, taskId });
+      return null;
+    }
+    used.add(decisionIndex);
+    const result = stored.decisions[decisionIndex].result;
+    const value = result.type === "choice" ? { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : result.type === "score" ? { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : { type: "noul", noul: result.noul };
+    events.push({ type: "response", sequence: sequence++, nodeId, taskId, result: value });
+    return stored.decisions[decisionIndex];
+  };
+  const expose = (itemId, nodeId) => {
+    events.push({ type: "exposure", sequence: sequence++, nodeId, itemId });
+  };
+  if (arm.presentation.kind === "sequence") {
+    for (const item of arm.items) expose(item.id, `sequence-expose-${item.id}`);
+    for (const taskId of stored.presentedTaskIds) {
+      if (!responseFor(taskId, `sequence-ask-${taskId}`)) break;
+    }
+    return events;
+  }
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const presented = stored.presentedTaskIds;
+  let presentedIndex = 0;
+  let current = graph.entryNodeId;
+  for (let steps = 0; steps < graph.nodes.length * 2 && presentedIndex < presented.length; steps += 1) {
+    const node2 = nodes.get(current);
+    if (!node2 || node2.kind === "terminal") break;
+    if (node2.kind === "expose") {
+      expose(node2.itemId, node2.id);
+      current = graph.transitions.find((edge2) => edge2.fromNodeId === node2.id)?.toNodeId ?? "";
+      continue;
+    }
+    if (presented[presentedIndex] !== node2.taskId) break;
+    presentedIndex += 1;
+    const decision = responseFor(node2.taskId, node2.id);
+    if (!decision) {
+      const nextTaskId = presented[presentedIndex];
+      if (!nextTaskId) break;
+      const findPaths = (start, visited = /* @__PURE__ */ new Set()) => {
+        if (visited.has(start)) return [];
+        const candidate = nodes.get(start);
+        if (!candidate) return [];
+        if (candidate.kind === "ask") return candidate.taskId === nextTaskId ? [[start]] : [];
+        if (candidate.kind === "terminal") return [];
+        const nextVisited = new Set(visited).add(start);
+        const paths = [];
+        for (const edge2 of graph.transitions.filter((item) => item.fromNodeId === start)) {
+          for (const found of findPaths(edge2.toNodeId, nextVisited)) {
+            paths.push(candidate.kind === "expose" ? [start, ...found] : found);
+            if (paths.length > 1) return paths;
+          }
+        }
+        return paths;
+      };
+      const candidateEdges = graph.transitions.filter((edge2) => edge2.fromNodeId === node2.id && findPaths(edge2.toNodeId).length === 1);
+      if (candidateEdges.length !== 1) break;
+      current = candidateEdges[0].toNodeId;
+      continue;
+    }
+    const edge = graph.transitions.find((candidate) => {
+      if (candidate.fromNodeId !== node2.id) return false;
+      if (decision.result.type === "choice") return candidate.optionId === decision.result.choice;
+      const range = candidate.when;
+      if (!range || range.type !== decision.result.type) return false;
+      const value = decision.result.type === "score" ? decision.result.score : decision.result.noul;
+      return (value > range.minimum || range.minimumInclusive && value === range.minimum) && (value < range.maximum || range.maximumInclusive && value === range.maximum);
+    });
+    if (!edge) break;
+    current = edge.toNodeId;
+  }
+  return events;
+}
 async function buildReport(checkpoint) {
+  checkpoint = runCheckpointSchema.parse(checkpoint);
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index]) || study.sources.length !== checkpoint.sourceHashes.length) {
     throw new Error("Study inputs or provider settings changed since this run was prepared; the report cannot be reproduced.");
@@ -21861,27 +22180,32 @@ async function buildReport(checkpoint) {
         occurrenceByKey.set(key, occurrence);
         const presentationOccurrence = (presentationOccurrenceByTask.get(decisionId) ?? 0) + 1;
         presentationOccurrenceByTask.set(decisionId, presentationOccurrence);
+        const choiceTask = task && "options" in task ? task : void 0;
+        const answer = result.type === "choice" ? { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : result.type === "score" ? { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : { type: "noul", noul: result.noul };
         return {
           taskId: decisionId,
           comparisonKey: task?.comparisonKey ?? null,
           occurrence,
           presentationOccurrence,
           requestFingerprint: checkpointDecision.requestFingerprint,
-          optionIds: Object.keys(task?.options ?? {}),
-          choice: result.choice,
-          correct: task?.answerKeyOptionId ? result.choice === task.answerKeyOptionId : null,
+          answer,
+          optionIds: choiceTask ? Object.keys(choiceTask.options) : [],
+          ...result.type === "choice" ? { choice: result.choice } : {},
+          correct: result.type === "choice" && choiceTask?.answerKeyOptionId ? result.choice === choiceTask.answerKeyOptionId : null,
           attempts: result.attempts,
           latencyMs: result.latencyMs,
-          confidence: result.confidence ?? null,
+          confidence: "confidence" in result ? result.confidence ?? null : null,
           chargeUsd: result.chargeUsd ?? null
         };
       });
       return {
         respondentId: respondent.id,
         archetypeId: respondent.archetypeId ?? null,
+        ...respondent.variation === void 0 ? {} : { variation: respondent.variation },
         status: stored?.status ?? "not-started",
         outcome: stored?.result?.outcome ?? null,
-        events: stored?.result?.events ?? [],
+        presentedTaskIds: stored?.presentedTaskIds ?? [],
+        events: stored?.result?.events ?? (stored ? reconstructPartialEvents(arm, stored) : []),
         responses,
         ...stored?.failureEvidence === void 0 ? {} : { failureEvidence: stored.failureEvidence }
       };
@@ -21895,14 +22219,25 @@ async function buildReport(checkpoint) {
         const occurrence = index + 1;
         const reachedJourneys = journeys.filter((journey) => journey.responses.some((response) => response.taskId === task.id && response.presentationOccurrence === occurrence) || (checkpoint.journeys.find((cell) => cell.armId === arm.id && cell.respondentId === journey.respondentId)?.presentedTaskIds.filter((taskId) => taskId === task.id).length ?? 0) >= occurrence);
         const responses = reachedJourneys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id && response.presentationOccurrence === occurrence));
+        const choiceTask = "options" in task ? task : void 0;
+        const scoreTask = "rubric" in task ? task : void 0;
+        const taskType = choiceTask ? "choice" : scoreTask ? "score" : "noul";
         const counts = {};
-        for (const response of responses) counts[response.choice] = (counts[response.choice] ?? 0) + 1;
-        const options = Object.fromEntries(Object.keys(task.options).map((optionId) => {
+        for (const response of responses) if (response.answer.type === "choice") counts[response.answer.choice] = (counts[response.answer.choice] ?? 0) + 1;
+        const options2 = Object.fromEntries(Object.keys(choiceTask?.options ?? {}).map((optionId) => {
           const count = counts[optionId] ?? 0;
           return [optionId, { count, proportion: responses.length ? count / responses.length : 0 }];
         }));
+        const scoreResponses = responses.filter((response) => response.answer.type === "score");
+        const noulResponses = responses.filter((response) => response.answer.type === "noul");
+        const rubricProbabilities = scoreTask ? Object.fromEntries(scoreTask.rubric.map((_meaning, index2) => {
+          const levelId = String(index2);
+          const average = scoreResponses.length ? scoreResponses.reduce((total, response) => total + (response.answer.type === "score" ? response.answer.probabilities[levelId] ?? 0 : 0), 0) / scoreResponses.length : 0;
+          return [levelId, average];
+        })) : void 0;
         return {
           occurrence,
+          type: taskType,
           reached: reachedJourneys.length,
           completed: responses.length,
           incomplete: reachedJourneys.length - responses.length,
@@ -21910,24 +22245,36 @@ async function buildReport(checkpoint) {
           correct: responses.filter((response) => response.correct === true).length,
           incorrect: responses.filter((response) => response.correct === false).length,
           unscored: responses.filter((response) => response.correct === null).length,
-          options
+          options: options2,
+          ...scoreResponses.length ? { meanScore: scoreResponses.reduce((total, response) => total + (response.answer.type === "score" ? response.answer.score : 0), 0) / scoreResponses.length, rubricProbabilities } : {},
+          ...noulResponses.length ? { meanProbabilityTrue: noulResponses.reduce((total, response) => total + (response.answer.type === "noul" ? response.answer.noul : 0), 0) / noulResponses.length } : {}
         };
       });
       taskResponses[task.id] = { occurrences };
     }
     const completed = journeys.filter((journey) => journey.status === "completed").length;
     const started = checkpoint.journeys.filter((journey) => journey.armId === arm.id).length;
-    const snapshot = { sources: arm.sources, items: arm.items, tasks: arm.tasks };
+    const snapshot = { sources: arm.sources, items: arm.items, tasks: arm.tasks, presentation: arm.presentation };
     const fingerprint = createHash6("sha256").update(JSON.stringify(snapshot)).digest("hex");
-    return { id: arm.id, label: arm.label, fingerprint, sources: arm.sources, stimulusItems: arm.items, tasks: arm.tasks.map((task) => ({ id: task.id, comparisonKey: task.comparisonKey ?? null, instructions: task.instructions, options: task.options })), denominator: { intended: cohort.respondents.length, started, completed, excluded: cohort.respondents.length - completed, excludedByStatus }, taskResponses, journeys };
+    return { id: arm.id, label: arm.label, fingerprint, presentation: arm.presentation, sources: arm.sources, stimulusItems: arm.items, tasks: arm.tasks.map((task) => ({
+      id: task.id,
+      type: "options" in task ? "choice" : "rubric" in task ? "score" : "noul",
+      comparisonKey: task.comparisonKey ?? null,
+      instructions: task.instructions,
+      ..."options" in task ? { options: task.options } : {},
+      ..."rubric" in task ? { rubric: task.rubric } : {},
+      ..."criteria" in task ? { criteria: task.criteria ?? null } : {},
+      responseHistory: task.responseHistory === "omit" ? "omit" : "include"
+    })), denominator: { intended: cohort.respondents.length, started, completed, excluded: cohort.respondents.length - completed, excludedByStatus }, taskResponses, journeys };
   });
   const rawProvider = checkpoint.provider;
   return pollingReportSchema.parse({
-    formatVersion: 2,
+    formatVersion: 3,
     runId: checkpoint.runId,
     status: checkpoint.status,
     stimulusFingerprint: checkpoint.stimulusFingerprint,
     executionFingerprint: checkpoint.executionFingerprint,
+    cohortFingerprint: respondentCohortFingerprint(cohort),
     provider: { kind: rawProvider.kind, model: rawProvider.kind === "jev" ? rawProvider.model : null, checkpoint: rawProvider.kind === "laya" ? rawProvider.checkpoint : null },
     cohortSize: profiles.size,
     arms,
@@ -21955,8 +22302,9 @@ function compareReports(report, leftArmId, rightArmId) {
     const taskComparisons = journey.responses.filter((response) => response.comparisonKey).flatMap((response) => {
       const counterpart = otherResponses.get(`${response.comparisonKey}:${response.occurrence}`);
       if (!counterpart) return [];
-      const commonOptionIds = response.optionIds.filter((id) => counterpart.optionIds.includes(id));
-      return [{ comparisonKey: response.comparisonKey, occurrence: response.occurrence, leftChoice: response.choice, rightChoice: counterpart.choice, comparable: commonOptionIds.includes(response.choice) && commonOptionIds.includes(counterpart.choice), agreement: response.choice === counterpart.choice }];
+      const comparable = equivalentTasks(left, right, response.comparisonKey) && response.answer.type === counterpart.answer.type;
+      const answersMatch = comparable && (response.answer.type === "choice" && counterpart.answer.type === "choice" ? response.answer.choice === counterpart.answer.choice : JSON.stringify(response.answer) === JSON.stringify(counterpart.answer));
+      return [{ comparisonKey: response.comparisonKey, occurrence: response.occurrence, leftAnswer: response.answer, rightAnswer: counterpart.answer, ...response.answer.type === "choice" && counterpart.answer.type === "choice" ? { leftChoice: response.answer.choice, rightChoice: counterpart.answer.choice, agreement: answersMatch } : {}, comparable }];
     });
     return [{ respondentId: journey.respondentId, taskComparisons }];
   });
@@ -21971,6 +22319,8 @@ function compareReports(report, leftArmId, rightArmId) {
     const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
     const occurrence = Number(occurrenceText);
     const optionTransitions = {};
+    const pairedScoreDifferences = [];
+    const pairedNoulDifferences = [];
     let leftResponses = 0;
     let rightResponses = 0;
     let pairedResponses = 0;
@@ -21983,13 +22333,28 @@ function compareReports(report, leftArmId, rightArmId) {
       if (rightResponse) rightResponses += 1;
       if (!leftResponse || !rightResponse) continue;
       pairedResponses += 1;
-      const commonOptionIds = leftResponse.optionIds.filter((id) => rightResponse.optionIds.includes(id));
-      if (!commonOptionIds.includes(leftResponse.choice) || !commonOptionIds.includes(rightResponse.choice)) continue;
+      if (!equivalentTasks(left, right, comparisonKey) || leftResponse.answer.type !== rightResponse.answer.type) continue;
       comparableResponses += 1;
-      const row = optionTransitions[leftResponse.choice] ??= {};
-      row[rightResponse.choice] = (row[rightResponse.choice] ?? 0) + 1;
+      if (leftResponse.answer.type === "choice" && rightResponse.answer.type === "choice") {
+        const row = optionTransitions[leftResponse.answer.choice] ??= {};
+        row[rightResponse.answer.choice] = (row[rightResponse.answer.choice] ?? 0) + 1;
+      } else if (leftResponse.answer.type === "score" && rightResponse.answer.type === "score") pairedScoreDifferences.push(rightResponse.answer.score - leftResponse.answer.score);
+      else if (leftResponse.answer.type === "noul" && rightResponse.answer.type === "noul") pairedNoulDifferences.push(rightResponse.answer.noul - leftResponse.answer.noul);
     }
-    return { comparisonKey, occurrence, leftResponses, rightResponses, pairedResponses, comparableResponses, unpairedResponses: pairedResponses - comparableResponses, leftOnlyResponses: Math.max(0, leftResponses - pairedResponses), rightOnlyResponses: Math.max(0, rightResponses - pairedResponses), optionTransitions };
+    return {
+      comparisonKey,
+      occurrence,
+      leftResponses,
+      rightResponses,
+      pairedResponses,
+      comparableResponses,
+      unpairedResponses: pairedResponses - comparableResponses,
+      leftOnlyResponses: Math.max(0, leftResponses - pairedResponses),
+      rightOnlyResponses: Math.max(0, rightResponses - pairedResponses),
+      optionTransitions,
+      ...pairedScoreDifferences.length ? { meanScoreDifference: pairedScoreDifferences.reduce((sum, value) => sum + value, 0) / pairedScoreDifferences.length } : {},
+      ...pairedNoulDifferences.length ? { meanProbabilityTrueDifference: pairedNoulDifferences.reduce((sum, value) => sum + value, 0) / pairedNoulDifferences.length } : {}
+    };
   });
   const leftByItem = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
   const rightByItem = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
@@ -22018,6 +22383,174 @@ function indexResponses(journeys) {
   }
   return indexed;
 }
+function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
+  if (leftReport.runId === rightReport.runId) throw new Error("Cross-run comparison requires two distinct run IDs.");
+  if (leftReport.cohortFingerprint !== rightReport.cohortFingerprint) throw new Error("Cross-run comparison requires the exact same frozen respondent cohort.");
+  const left = leftReport.arms.find((arm) => arm.id === leftArmId);
+  const right = rightReport.arms.find((arm) => arm.id === rightArmId);
+  if (!left || !right) throw new Error("Both arm IDs must exist in their respective reports.");
+  const leftCells = indexResponses(left.journeys);
+  const rightCells = indexResponses(right.journeys);
+  const respondentIds = [...new Set([...left.journeys, ...right.journeys].map((journey) => journey.respondentId))].sort();
+  const groups = /* @__PURE__ */ new Map([["all", new Set(respondentIds)]]);
+  for (const journey of left.journeys) {
+    if (journey.archetypeId) (groups.get(`archetype:${journey.archetypeId}`) ?? groups.set(`archetype:${journey.archetypeId}`, /* @__PURE__ */ new Set()).get(`archetype:${journey.archetypeId}`)).add(journey.respondentId);
+    for (const [axis, value] of Object.entries(journey.variation ?? {})) {
+      const key = `variation:${axis}=${value}`;
+      (groups.get(key) ?? groups.set(key, /* @__PURE__ */ new Set()).get(key)).add(journey.respondentId);
+    }
+  }
+  const keys = /* @__PURE__ */ new Set([
+    ...[...left.journeys, ...right.journeys].flatMap((journey) => journey.responses.flatMap((response) => response.comparisonKey ? [`${response.comparisonKey}:${response.occurrence}`] : [])),
+    ...[left, right].flatMap((arm) => arm.tasks.flatMap((task) => task.comparisonKey ? (arm.taskResponses[task.id]?.occurrences ?? []).map((entry) => `${task.comparisonKey}:${entry.occurrence}`) : []))
+  ]);
+  const comparisonTasks = [...keys].sort().map((key) => {
+    const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
+    const occurrence = Number(occurrenceText);
+    const choiceTransitions = {};
+    const scoreDifferences = [];
+    const noulDifferences = [];
+    let leftResponses = 0;
+    let rightResponses = 0;
+    let pairedResponses = 0;
+    let comparableResponses = 0;
+    for (const respondentId of respondentIds) {
+      const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
+      const a = leftCells.get(cell);
+      const b = rightCells.get(cell);
+      if (a) leftResponses += 1;
+      if (b) rightResponses += 1;
+      if (!a || !b) continue;
+      pairedResponses += 1;
+      if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
+      comparableResponses += 1;
+      if (a.answer.type === "choice" && b.answer.type === "choice") {
+        const row = choiceTransitions[a.answer.choice] ??= {};
+        row[b.answer.choice] = (row[b.answer.choice] ?? 0) + 1;
+      } else if (a.answer.type === "score" && b.answer.type === "score") scoreDifferences.push(b.answer.score - a.answer.score);
+      else if (a.answer.type === "noul" && b.answer.type === "noul") noulDifferences.push(b.answer.noul - a.answer.noul);
+    }
+    const profileGroups = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([group, members2]) => {
+      const transitions = {};
+      const scores = [];
+      const nouls = [];
+      let groupLeft = 0;
+      let groupRight = 0;
+      let groupPaired = 0;
+      let groupComparable = 0;
+      for (const respondentId of members2) {
+        const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
+        const a = leftCells.get(cell);
+        const b = rightCells.get(cell);
+        if (a) groupLeft += 1;
+        if (b) groupRight += 1;
+        if (!a || !b) continue;
+        groupPaired += 1;
+        if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
+        groupComparable += 1;
+        if (a.answer.type === "choice" && b.answer.type === "choice") {
+          const row = transitions[a.answer.choice] ??= {};
+          row[b.answer.choice] = (row[b.answer.choice] ?? 0) + 1;
+        } else if (a.answer.type === "score" && b.answer.type === "score") scores.push(b.answer.score - a.answer.score);
+        else if (a.answer.type === "noul" && b.answer.type === "noul") nouls.push(b.answer.noul - a.answer.noul);
+      }
+      return {
+        group,
+        denominator: members2.size,
+        leftResponses: groupLeft,
+        rightResponses: groupRight,
+        pairedResponses: groupPaired,
+        comparableResponses: groupComparable,
+        nonComparableResponses: groupPaired - groupComparable,
+        choiceTransitions: transitions,
+        ...scores.length ? { meanScoreDifference: scores.reduce((sum, value) => sum + value, 0) / scores.length } : {},
+        ...nouls.length ? { meanProbabilityTrueDifference: nouls.reduce((sum, value) => sum + value, 0) / nouls.length } : {}
+      };
+    });
+    return {
+      comparisonKey,
+      occurrence,
+      leftResponses,
+      rightResponses,
+      pairedResponses,
+      comparableResponses,
+      nonComparableResponses: pairedResponses - comparableResponses,
+      leftOnlyResponses: Math.max(0, leftResponses - pairedResponses),
+      rightOnlyResponses: Math.max(0, rightResponses - pairedResponses),
+      choiceTransitions,
+      ...scoreDifferences.length ? { meanScoreDifference: scoreDifferences.reduce((sum, value) => sum + value, 0) / scoreDifferences.length } : {},
+      ...noulDifferences.length ? { meanProbabilityTrueDifference: noulDifferences.reduce((sum, value) => sum + value, 0) / noulDifferences.length } : {},
+      profileGroups
+    };
+  });
+  const matched = respondentIds.map((respondentId) => ({
+    respondentId,
+    leftJourneyPath: { presentedTaskIds: left.journeys.find((journey) => journey.respondentId === respondentId)?.presentedTaskIds ?? [], events: left.journeys.find((journey) => journey.respondentId === respondentId)?.events ?? [] },
+    rightJourneyPath: { presentedTaskIds: right.journeys.find((journey) => journey.respondentId === respondentId)?.presentedTaskIds ?? [], events: right.journeys.find((journey) => journey.respondentId === respondentId)?.events ?? [] },
+    taskComparisons: [...keys].sort().map((key) => {
+      const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
+      const occurrence = Number(occurrenceText);
+      const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
+      const a = leftCells.get(cell);
+      const b = rightCells.get(cell);
+      const leftJourney = left.journeys.find((journey) => journey.respondentId === respondentId);
+      const rightJourney = right.journeys.find((journey) => journey.respondentId === respondentId);
+      const taskIds = (arm) => arm.tasks.filter((task) => task.comparisonKey === comparisonKey).map((task) => task.id);
+      const reached = (arm, journey) => !!journey && taskIds(arm).some((taskId) => journey.presentedTaskIds.filter((id) => id === taskId).length >= occurrence);
+      const outcome = (response, wasReached) => response ? "completed" : wasReached ? "incomplete" : "not-reached";
+      const leftReached = reached(left, leftJourney);
+      const rightReached = reached(right, rightJourney);
+      return { comparisonKey, occurrence, leftAnswer: a?.answer ?? null, rightAnswer: b?.answer ?? null, leftOutcome: outcome(a, leftReached), rightOutcome: outcome(b, rightReached), comparable: !!a && !!b && equivalentTasks(left, right, comparisonKey) && a.answer.type === b.answer.type };
+    })
+  }));
+  const leftSources = new Map(left.sources.map((source) => [source.path, source.sha256]));
+  const rightSources = new Map(right.sources.map((source) => [source.path, source.sha256]));
+  const sourceChanges = [.../* @__PURE__ */ new Set([...leftSources.keys(), ...rightSources.keys()])].flatMap((sourcePath) => leftSources.get(sourcePath) === rightSources.get(sourcePath) ? [] : [{ path: sourcePath, leftSha256: leftSources.get(sourcePath) ?? null, rightSha256: rightSources.get(sourcePath) ?? null }]);
+  const leftItems = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
+  const rightItems = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
+  const stimulusChanges = [.../* @__PURE__ */ new Set([...leftItems.keys(), ...rightItems.keys()])].flatMap((id) => leftItems.get(id) === rightItems.get(id) ? [] : [{ id, leftText: leftItems.get(id) ?? null, rightText: rightItems.get(id) ?? null }]);
+  const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
+  const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
+  const taskChanges = [.../* @__PURE__ */ new Set([...leftTasks.keys(), ...rightTasks.keys()])].flatMap((key) => {
+    const a = leftTasks.get(key);
+    const b = rightTasks.get(key);
+    if (!a || !b) return [{ comparisonKey: key, fields: ["task-presence"] }];
+    const fields = ["type", "instructions", "options", "rubric", "criteria", "responseHistory"].filter((field) => JSON.stringify(a[field] ?? null) !== JSON.stringify(b[field] ?? null));
+    return fields.length ? [{ comparisonKey: key, fields }] : [];
+  });
+  const providerChanges = JSON.stringify(leftReport.provider) === JSON.stringify(rightReport.provider) ? null : { left: leftReport.provider, right: rightReport.provider };
+  const presentationChanges = JSON.stringify(left.presentation) === JSON.stringify(right.presentation) ? null : { left: left.presentation, right: right.presentation };
+  return {
+    leftRunId: leftReport.runId,
+    rightRunId: rightReport.runId,
+    leftArmId,
+    rightArmId,
+    cohortFingerprint: leftReport.cohortFingerprint,
+    leftFingerprint: left.fingerprint,
+    rightFingerprint: right.fingerprint,
+    matchedRespondents: respondentIds.length,
+    comparisonTasks,
+    matched,
+    differences: {
+      sources: sourceChanges,
+      stimulusItems: stimulusChanges,
+      tasks: taskChanges,
+      presentation: presentationChanges,
+      provider: providerChanges,
+      runStatus: leftReport.status === rightReport.status ? null : { left: leftReport.status, right: rightReport.status },
+      completion: { left: left.denominator, right: right.denominator }
+    }
+  };
+}
+function equivalentTasks(left, right, comparisonKey) {
+  const leftTask = left.tasks.find((task) => task.comparisonKey === comparisonKey);
+  const rightTask = right.tasks.find((task) => task.comparisonKey === comparisonKey);
+  if (!leftTask || !rightTask || leftTask.type !== rightTask.type) return false;
+  if (leftTask.instructions !== rightTask.instructions) return false;
+  if (leftTask.type === "choice") return JSON.stringify(leftTask.options) === JSON.stringify(rightTask.options);
+  if (leftTask.type === "score") return JSON.stringify(leftTask.rubric) === JSON.stringify(rightTask.rubric);
+  return JSON.stringify(leftTask.criteria ?? null) === JSON.stringify(rightTask.criteria ?? null);
+}
 
 // src/domain/journey/packet-walker.ts
 import { createHash as createHash7 } from "node:crypto";
@@ -22026,13 +22559,14 @@ var DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
 function pathIdentity(choices) {
   return choices.length === 0 ? "root" : choices.map(({ nodeId, choiceId }) => `${nodeId}=${choiceId}`).join(">");
 }
-function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
-  const maxPackets = options.maxPackets ?? DEFAULT_MAX_PREFLIGHT_PACKETS;
-  const maxPacketBytes = options.maxPacketBytes ?? DEFAULT_MAX_PREFLIGHT_PACKET_BYTES;
+function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
+  const maxPackets = options2.maxPackets ?? DEFAULT_MAX_PREFLIGHT_PACKETS;
+  const maxPacketBytes = options2.maxPacketBytes ?? DEFAULT_MAX_PREFLIGHT_PACKET_BYTES;
   let packetCount = 0;
   let packetBytes = 0;
   let terminalJourneyCount = 0;
   let incompleteReason;
+  let unverifiedReason;
   let stopped = false;
   const markIncomplete = (reason) => {
     incompleteReason ??= reason;
@@ -22059,6 +22593,9 @@ function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
     } catch (error62) {
       markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error62 instanceof Error ? error62.message : String(error62)}`);
       return;
+    }
+    if (request.state.trajectory.responses.length > 0) {
+      unverifiedReason ??= "Prior response history can include provider probabilities or confidence with variable serialized size; future packet fit is not conservatively bounded.";
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
     const packetId = `packet-${createHash7("sha256").update(identity).digest("hex")}`;
@@ -22098,9 +22635,10 @@ function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
           const nodeId = `sequence-ask-${task.id}`;
           emitPacket(arm, respondent, task.id, nodeId, decisionIndex, choices, events);
           if (stopped) return;
-          for (const choiceId of Object.keys(task.options)) {
+          for (const response of representativeResponses(task)) {
+            const choiceId = response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`;
             choices.push({ nodeId, choiceId });
-            events.push({ type: "choice", sequence: events.length, nodeId, taskId: task.id, choice: choiceId });
+            events.push({ type: "response", sequence: events.length, nodeId, taskId: task.id, result: response });
             visitTask(taskIndex + 1);
             events.pop();
             choices.pop();
@@ -22157,14 +22695,17 @@ function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
           activeNodes.delete(nodeId);
           return;
         }
-        for (const choiceId of Object.keys(task.options)) {
-          const edge = graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choiceId);
+        const branches = "options" in task ? Object.keys(task.options).map((choice) => ({ edge: graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choice), response: { type: "choice", choice } })) : graph.transitions.filter((candidate) => candidate.fromNodeId === nodeId && candidate.when !== void 0).map((edge) => ({ edge, response: representativeResponses(task, edge.when)[0] }));
+        for (const branch of branches) {
+          const response = branch.response;
+          const choiceId = response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`;
+          const edge = branch.edge;
           if (!edge) {
-            markIncomplete(`Ask node ${nodeId} has no transition for choice ${choiceId} in ${respondent.id}/${arm.id}.`);
+            markIncomplete(`Ask node ${nodeId} has no transition for response ${choiceId} in ${respondent.id}/${arm.id}.`);
             break;
           }
           choices.push({ nodeId, choiceId });
-          events.push({ type: "choice", sequence: events.length, nodeId, taskId: task.id, choice: choiceId });
+          events.push({ type: "response", sequence: events.length, nodeId, taskId: task.id, result: response });
           visitNode(edge.toNodeId, decisionCount + 1);
           events.pop();
           choices.pop();
@@ -22179,8 +22720,33 @@ function walkStudyPackets(arms, respondents, visitPacket, options = {}) {
     status: incompleteReason === void 0 ? "complete" : "incomplete",
     packetCount,
     terminalJourneyCount,
-    ...incompleteReason === void 0 ? {} : { incompleteReason }
+    ...incompleteReason === void 0 ? {} : { incompleteReason },
+    ...unverifiedReason === void 0 ? {} : { unverifiedReason }
   };
+}
+function representativeResponses(task, interval) {
+  if ("options" in task) return Object.keys(task.options).map((choice) => ({ type: "choice", choice }));
+  const values = [];
+  if (interval) {
+    values.push(interval.minimum === interval.maximum ? interval.minimum : (interval.minimum + interval.maximum) / 2);
+  } else if ("rubric" in task) {
+    const last = task.rubric.length - 1;
+    for (let level = 0; level <= last; level += 0.5) values.push(level);
+  } else values.push(0, 0.5, 1);
+  return values.map((value) => {
+    if ("rubric" in task) {
+      const probabilities2 = Object.fromEntries(task.rubric.map((_meaning, index) => [String(index), 0]));
+      const low = Math.floor(value);
+      const high = Math.ceil(value);
+      if (low === high) probabilities2[String(low)] = 1;
+      else {
+        probabilities2[String(low)] = high - value;
+        probabilities2[String(high)] = value - low;
+      }
+      return { type: "score", score: value, legend: Object.fromEntries(task.rubric.map((meaning, index) => [String(index), meaning])), probabilities: probabilities2 };
+    }
+    return { type: "noul", noul: value };
+  });
 }
 
 // src/application/preflight.ts
@@ -22237,11 +22803,12 @@ async function preflightStudy(input2) {
       }
     }
     const complete = traversal.status === "complete";
+    const fitUnverified = traversal.unverifiedReason !== void 0;
     results.push({
       provider: providerConfig.kind === "jev" ? providerConfig.model : providerConfig.checkpoint,
       executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === "jev" ? { kind: "jev", model: providerConfig.model } : { kind: "laya", checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...providerConfig.precision === void 0 ? {} : { precision: providerConfig.precision } }),
       tokenizerSha256: providerConfig.kind === "laya" ? providerConfig.tokenizerSha256 : null,
-      status: !complete || unavailable2.length ? "unverified" : overflows.length ? "does-not-fit" : "fit",
+      status: overflows.length ? "does-not-fit" : !complete || fitUnverified || unavailable2.length ? "unverified" : "fit",
       basis: config2.mode === "maximum-profile" ? "synthetic-profile" : "frozen-cohort",
       configuration: providerConfig.kind === "jev" ? process.env[providerConfig.keyEnv]?.trim() ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
       availability: "unverified",
@@ -22254,7 +22821,7 @@ async function preflightStudy(input2) {
       maximumPacket,
       overflows,
       unavailable: unavailable2,
-      ...traversal.incompleteReason === void 0 ? {} : { incompleteReason: traversal.incompleteReason }
+      ...(traversal.incompleteReason ?? traversal.unverifiedReason) === void 0 ? {} : { incompleteReason: traversal.incompleteReason ?? traversal.unverifiedReason }
     });
   }
   return { provisional: config2.mode === "maximum-profile", mode: config2.mode, inputFingerprint, compilerFingerprint, providers: results };
@@ -22274,40 +22841,47 @@ async function runCli(args, io = { out: (value) => process.stdout.write(`${value
 `) }) {
   try {
     const [command, ...rest] = args;
-    const options = parseArgs(rest);
+    const options2 = parseArgs(rest);
     let result;
     if (command === "--help" || command === "help" || command === void 0) {
       io.out(helpText);
       return 0;
     }
     if (command === "preflight") {
-      if (options.mode !== void 0 && options.mode !== "frozen-cohort" && options.mode !== "maximum-profile") {
+      if (options2.mode !== void 0 && options2.mode !== "frozen-cohort" && options2.mode !== "maximum-profile") {
         throw new Error("Preflight --mode must be frozen-cohort or maximum-profile.");
       }
-      const providers = JSON.parse(await readFile5(required2(options, "providers"), "utf8"));
-      const mode = options.mode === "maximum-profile" ? "maximum-profile" : "frozen-cohort";
-      result = await preflightStudy({ manifestPath: path7.resolve(required2(options, "manifest")), ...options.cohort === void 0 ? {} : { cohortPath: path7.resolve(options.cohort) }, mode, providers });
+      const providers = JSON.parse(await readFile5(required2(options2, "providers"), "utf8"));
+      const mode = options2.mode === "maximum-profile" ? "maximum-profile" : "frozen-cohort";
+      result = await preflightStudy({ manifestPath: path7.resolve(required2(options2, "manifest")), ...options2.cohort === void 0 ? {} : { cohortPath: path7.resolve(options2.cohort) }, mode, providers });
     } else if (command === "check" || command === "start") {
-      const config2 = JSON.parse(await readFile5(required2(options, "config"), "utf8"));
+      const config2 = JSON.parse(await readFile5(required2(options2, "config"), "utf8"));
       result = command === "check" ? await checkStudy(config2).then(({ study, stimulusFingerprint: stimulusFingerprint2, executionFingerprint: executionFingerprint2 }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint: stimulusFingerprint2, executionFingerprint: executionFingerprint2 })) : await manager.startRun(config2);
     } else if (command === "trace") {
-      const manifestPath = path7.resolve(required2(options, "manifest"));
-      const cohortPath = path7.resolve(required2(options, "cohort"));
+      const manifestPath = path7.resolve(required2(options2, "manifest"));
+      const cohortPath = path7.resolve(required2(options2, "cohort"));
       const study = await loadStudy(manifestPath, cohortPath);
-      const profile = study.respondents.find((respondent) => respondent.id === required2(options, "respondent"));
+      const profile = study.respondents.find((respondent) => respondent.id === required2(options2, "respondent"));
       if (!profile) throw new Error("Respondent ID is not in the frozen cohort.");
-      const choices = required2(options, "choices").split(",").filter(Boolean);
-      const arm = study.manifest.arms.find((candidate) => candidate.id === required2(options, "arm"));
+      if (options2.choices === void 0 === (options2.responses === void 0)) {
+        throw new Error("Trace requires exactly one of --choices or --responses.");
+      }
+      const scripted = options2.responses === void 0 ? required2(options2, "choices").split(",").filter(Boolean) : parseResponses(options2.responses);
+      const arm = study.manifest.arms.find((candidate) => candidate.id === required2(options2, "arm"));
       if (!arm) throw new Error("Arm ID is not in the study.");
-      result = await traceStudy(arm, profile, choices);
-    } else if (command === "status") result = await manager.runStatus(required2(options, "output"), required2(options, "run-id"));
-    else if (command === "cancel") result = await manager.cancelRun(required2(options, "output"), required2(options, "run-id"));
-    else if (command === "reconcile") result = await manager.reconcileRun(required2(options, "output"), required2(options, "run-id"), Number(required2(options, "unpriced-usd")));
-    else if (command === "resume") result = await manager.resumeRun(required2(options, "output"), required2(options, "run-id"));
-    else if (command === "report") result = await getReport(required2(options, "output"), required2(options, "run-id"));
+      result = await traceStudy(arm, profile, scripted);
+    } else if (command === "status") result = await manager.runStatus(required2(options2, "output"), required2(options2, "run-id"));
+    else if (command === "cancel") result = await manager.cancelRun(required2(options2, "output"), required2(options2, "run-id"));
+    else if (command === "reconcile") result = await manager.reconcileRun(required2(options2, "output"), required2(options2, "run-id"), Number(required2(options2, "unpriced-usd")));
+    else if (command === "resume") result = await manager.resumeRun(required2(options2, "output"), required2(options2, "run-id"));
+    else if (command === "report") result = await getReport(required2(options2, "output"), required2(options2, "run-id"));
     else if (command === "compare") {
-      const report = await getReport(required2(options, "output"), required2(options, "run-id"));
-      result = compareReports(report, required2(options, "left-arm"), required2(options, "right-arm"));
+      const report = await getReport(required2(options2, "output"), required2(options2, "run-id"));
+      result = compareReports(report, required2(options2, "left-arm"), required2(options2, "right-arm"));
+    } else if (command === "compare-runs") {
+      const left = await getReport(required2(options2, "left-output"), required2(options2, "left-run-id"));
+      const right = await getReport(required2(options2, "right-output"), required2(options2, "right-run-id"));
+      result = compareRunReports(left, required2(options2, "left-arm"), right, required2(options2, "right-arm"));
     } else throw new Error(`Unknown command: ${command}`);
     io.out(JSON.stringify(result));
     return 0;
@@ -22320,27 +22894,42 @@ var helpText = `sheg <command>
 Commands:
   preflight --manifest <json> [--cohort <json>] [--mode frozen-cohort|maximum-profile] --providers <json-file>
   check --config <json>                         Validate study and provider configuration
-  trace --manifest <json> --cohort <json> --arm <id> --respondent <id> --choices <a,b,...>
+  trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b,...> | --responses <json-array>)
   start --config <json>                         Start a durable run
   status|cancel|resume --output <dir> --run-id <id>
   reconcile --output <dir> --run-id <id> --unpriced-usd <amount>
   report --output <dir> --run-id <id>
-  compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>`;
+  compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>
+  compare-runs --left-output <dir> --left-run-id <id> --left-arm <id> --right-output <dir> --right-run-id <id> --right-arm <id>`;
 function parseArgs(args) {
-  const options = {};
+  const options2 = {};
   for (let index = 0; index < args.length; index += 1) {
     const key = args[index];
     if (!key?.startsWith("--")) throw new Error(`Expected an option, got ${key ?? "end of input"}.`);
     const value = args[++index];
     if (!value || value.startsWith("--")) throw new Error(`Option ${key} requires a value.`);
-    options[key.slice(2)] = value;
+    options2[key.slice(2)] = value;
   }
-  return options;
+  return options2;
 }
-function required2(options, key) {
-  const value = options[key];
+function required2(options2, key) {
+  const value = options2[key];
   if (!value) throw new Error(`Missing --${key}.`);
   return value;
+}
+function parseResponses(value) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("--responses must be a JSON array of typed response values.");
+  }
+  if (!Array.isArray(parsed)) throw new Error("--responses must be a JSON array of typed response values.");
+  return parsed.map((response, index) => {
+    const result = decisionValueSchema.safeParse(response);
+    if (!result.success) throw new Error(`--responses[${index}] is not a valid typed response.`);
+    return result.data;
+  });
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path7.resolve(process.argv[1])).href) {
   process.exitCode = await runCli(process.argv.slice(2));

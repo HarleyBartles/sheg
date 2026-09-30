@@ -6,6 +6,7 @@ import type { DecisionRequest, DecisionResult } from '../src/domain/decision/dec
 const request: DecisionRequest = {
   state: { respondent: { profile: 'Wants a concrete, accessible account.' }, visibleText: 'The repair began with a confusing symptom.' },
   question: {
+    type: 'choice',
     id: 'attention:symptom',
     instructions: 'Choose the action that best matches this reader’s experience.',
     options: { continue: 'Continue reading.', leave: 'Leave now.' },
@@ -13,8 +14,9 @@ const request: DecisionRequest = {
   optionIds: ['continue', 'leave'],
 };
 
-function result(overrides: Partial<DecisionResult> = {}): DecisionResult {
+function result(overrides: Partial<Extract<DecisionResult, { type: 'choice' }>> = {}): Extract<DecisionResult, { type: 'choice' }> {
   return {
+    type: 'choice',
     choice: 'continue',
     probabilities: { continue: 0.7, leave: 0.3 },
     attempts: 1,
@@ -33,13 +35,15 @@ test('accepts a complete finite distribution within the documented normalization
     probabilities: { continue: 0.695, leave: 0.3 },
   }), { maxAttempts: 2, provider: 'jev', model: 'typesafe/jev-1.13' });
 
+  assert.equal(accepted.type, 'choice');
+  if (accepted.type !== 'choice') return;
   assert.equal(accepted.choice, 'continue');
   assert.equal(accepted.probabilities.leave, 0.3);
 });
 
 test('preserves provider confidence as a separate signal from the choice distribution', () => {
   const accepted = validateDecision(request, { ...result(), confidence: 0.67 });
-  assert.equal(accepted.confidence, 0.67);
+  assert.equal(accepted.type === 'choice' ? accepted.confidence : undefined, 0.67);
 });
 
 test('rejects confidence outside its finite zero-to-one range', () => {
@@ -117,4 +121,67 @@ test('requires billed cost and refuses invented local zero-cost billing', () => 
   });
   assert.equal(local.chargeStatus, 'not_billed');
   assert.equal(local.chargeUsd, undefined);
+});
+
+test('validates typed Score and Noul responses without converting them to Choice', () => {
+  const scoreRequest = {
+    state: request.state,
+    question: { type: 'score', id: 'professional-tone', instructions: 'How professional does this sound?', rubric: ['casual', 'balanced', 'professional'] },
+  } as unknown as DecisionRequest;
+  const scoreResult = {
+    type: 'score', score: 1.25, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' },
+    probabilities: { '0': 0.25, '1': 0.25, '2': 0.5 }, confidence: 0.8,
+    attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 120,
+    usage: { inputTokens: 18, outputTokens: 2 }, chargeStatus: 'billed', chargeUsd: 0.0001,
+  };
+  const score = validateDecision(scoreRequest, scoreResult);
+  assert.equal(score.type, 'score');
+  assert.equal(score.score, 1.25);
+  assert.deepEqual(score.probabilities, scoreResult.probabilities);
+  assert.deepEqual(score.legend, scoreResult.legend);
+
+  const noulRequest = {
+    state: request.state,
+    question: { type: 'noul', id: 'holds-attention', instructions: 'Does this hold attention?', criteria: { true: 'Yes', false: 'No' } },
+  } as unknown as DecisionRequest;
+  const noul = validateDecision(noulRequest, {
+    type: 'noul', noul: 0.74, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 120,
+    usage: { inputTokens: 18, outputTokens: 2 }, chargeStatus: 'billed', chargeUsd: 0.0001,
+  });
+  assert.equal(noul.type, 'noul');
+  assert.equal(noul.noul, 0.74);
+});
+
+test('rejects out-of-domain typed values, incomplete evidence, and responses with the wrong task type', () => {
+  const scoreRequest = {
+    ...request,
+    question: { type: 'score', id: 'professional-tone', instructions: 'Rate the tone.', rubric: ['casual', 'balanced', 'professional'] },
+  } as unknown as DecisionRequest;
+  const score = {
+    type: 'score', score: 1, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' },
+    probabilities: { '0': 0.2, '1': 0.3, '2': 0.5 },
+    attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 120,
+    usage: { inputTokens: 18, outputTokens: 2 }, chargeStatus: 'billed', chargeUsd: 0.0001,
+  };
+  for (const invalid of [
+    { ...score, type: 'noul', noul: 0.4 },
+    { ...score, score: 3 },
+    { ...score, score: Number.NaN },
+    { ...score, probabilities: { '0': 0.2, '1': 0.8 } },
+    { ...score, probabilities: { '0': 0.2, '1': 0.3, '2': 0.8 } },
+    { ...score, legend: { '0': 'other', '1': 'balanced', '2': 'professional' } },
+  ]) {
+    assert.throws(() => validateDecision(scoreRequest, invalid), DecisionError);
+  }
+
+  const noulRequest = {
+    ...request,
+    question: { type: 'noul', id: 'holds-attention', instructions: 'Does this hold attention?' },
+  } as unknown as DecisionRequest;
+  for (const noul of [-0.01, 1.01, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => validateDecision(noulRequest, {
+      type: 'noul', noul, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1,
+      usage: {}, chargeStatus: 'billed', chargeUsd: 0.0001,
+    }), DecisionError);
+  }
 });

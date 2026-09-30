@@ -4,10 +4,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { z } from 'zod';
 import { respondentCohortSchema } from '../src/domain/respondents/cohort.js';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
+import { taskSchema } from '../src/domain/study/task.js';
 import type { StudyArm } from '../src/domain/study/arm.js';
-import { studyManifestSchema, type StudyManifest } from '../src/domain/study/study.js';
+import { studyManifestSchema } from '../src/domain/study/study.js';
 
 const sourceText = 'The passage gives enough evidence to answer the question.';
 const sourceHash = createHash('sha256').update(sourceText).digest('hex');
@@ -19,6 +21,7 @@ function comprehensionArm(id: string, text = sourceText): StudyArm {
     sources: [{ path: `${id}.md`, sha256: sourceHash }],
     items: [{ id: 'passage', text }],
     tasks: [{
+      type: 'choice',
       id: 'comprehension',
       instructions: 'Which answer is supported by the passage?',
       comparisonKey: 'passage-comprehension',
@@ -34,7 +37,7 @@ function comprehensionArm(id: string, text = sourceText): StudyArm {
 }
 
 
-function study(arms: StudyArm[] = [comprehensionArm('control')]): StudyManifest {
+function study(arms: StudyArm[] = [comprehensionArm('control')]): z.input<typeof studyManifestSchema> {
   return {
     version: '2.0',
     study: { title: 'Passage comprehension', purpose: 'Check whether the passage supports the answer.' },
@@ -54,6 +57,114 @@ const respondent = {
 test('accepts a graph-free comprehension study with an unanswerable option and hidden answer key', () => {
   const result = studyManifestSchema.safeParse(study());
   assert.equal(result.success, true, result.success ? '' : result.error.message);
+});
+
+test('normalizes legacy Choice tasks and accepts typed Score and Noul tasks in the same study', () => {
+  const arm = {
+    ...comprehensionArm('typed'),
+    tasks: [
+      comprehensionArm('typed').tasks[0],
+      { id: 'professional-tone', instructions: 'How professional does this sound?', type: 'score', rubric: ['casual', 'balanced', 'professional'] },
+      { id: 'holds-attention', instructions: 'Does this hold the reader’s attention?', type: 'noul', criteria: { true: 'It holds their attention.', false: 'It does not hold their attention.' } },
+    ],
+  };
+  const result = studyManifestSchema.safeParse(study([arm as unknown as StudyArm]));
+
+  assert.equal(result.success, true, result.success ? '' : result.error.message);
+  if (!result.success) return;
+  assert.equal(result.data.arms[0]?.tasks[0]?.type, 'choice');
+  assert.deepEqual(result.data.arms[0]?.tasks[1], {
+    id: 'professional-tone', instructions: 'How professional does this sound?', type: 'score', rubric: ['casual', 'balanced', 'professional'],
+  });
+  assert.equal(result.data.arms[0]?.tasks[2]?.type, 'noul');
+});
+
+test('task response history defaults to the legacy include behavior and supports explicit omission', () => {
+  const base = {
+    id: 'ask-first',
+    instructions: 'Does this hold your attention?',
+    options: { continue: 'Continue', exit: 'Exit' },
+  };
+  assert.equal(taskSchema.parse(base).responseHistory, undefined);
+  assert.equal(taskSchema.parse({ ...base, responseHistory: 'omit' }).responseHistory, 'omit');
+});
+
+test('validates Score route intervals as a complete nonoverlapping partition with explicit equality ownership', () => {
+  const arm = {
+    ...comprehensionArm('score-route'),
+    tasks: [{ id: 'interest', instructions: 'How interested are you?', type: 'score', rubric: ['not interested', 'interested', 'very interested'] }],
+    presentation: {
+      kind: 'graph', entryNodeId: 'ask-interest', maxDecisions: 1,
+      nodes: [
+        { id: 'ask-interest', kind: 'ask', taskId: 'interest' },
+        { id: 'exit', kind: 'terminal', outcome: 'exit' },
+        { id: 'continue', kind: 'terminal', outcome: 'continue' },
+      ],
+      transitions: [
+        { fromNodeId: 'ask-interest', toNodeId: 'exit', when: { type: 'score', minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'ask-interest', toNodeId: 'continue', when: { type: 'score', minimum: 1, maximum: 2, minimumInclusive: true, maximumInclusive: true } },
+      ],
+    },
+  };
+  const valid = studyManifestSchema.safeParse(study([arm as unknown as StudyArm]));
+  assert.equal(valid.success, true, valid.success ? '' : valid.error.message);
+
+  const overlapping = structuredClone(arm);
+  overlapping.presentation.transitions[0]!.when.maximumInclusive = true;
+  const invalid = studyManifestSchema.safeParse(study([overlapping as unknown as StudyArm]));
+  assert.equal(invalid.success, false);
+  assert.match(invalid.error.issues.map((issue) => issue.message).join('\n'), /overlap|ambiguous|exactly one/i);
+});
+
+test('validates Noul routes across the full probability domain and rejects a threshold gap', () => {
+  const arm = {
+    ...comprehensionArm('noul-route'),
+    tasks: [{ id: 'holds-attention', instructions: 'Does this hold attention?', type: 'noul', criteria: { true: 'Yes', false: 'No' } }],
+    presentation: {
+      kind: 'graph', entryNodeId: 'ask-attention', maxDecisions: 1,
+      nodes: [
+        { id: 'ask-attention', kind: 'ask', taskId: 'holds-attention' },
+        { id: 'exit', kind: 'terminal', outcome: 'exit' },
+        { id: 'continue', kind: 'terminal', outcome: 'continue' },
+      ],
+      transitions: [
+        { fromNodeId: 'ask-attention', toNodeId: 'exit', when: { type: 'noul', minimum: 0, maximum: 0.6, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'ask-attention', toNodeId: 'continue', when: { type: 'noul', minimum: 0.6, maximum: 1, minimumInclusive: true, maximumInclusive: true } },
+      ],
+    },
+  };
+  const valid = studyManifestSchema.safeParse(study([arm as unknown as StudyArm]));
+  assert.equal(valid.success, true, valid.success ? '' : valid.error.message);
+
+  const gap = structuredClone(arm);
+  gap.presentation.transitions[1]!.when.minimum = 0.7;
+  const invalid = studyManifestSchema.safeParse(study([gap as unknown as StudyArm]));
+  assert.equal(invalid.success, false);
+  assert.match(invalid.error.issues.map((issue) => issue.message).join('\n'), /gap|cover|partition|exactly one/i);
+});
+
+test('rejects zero-width typed route intervals that exclude their endpoint', () => {
+  const arm = {
+    ...comprehensionArm('score-empty-route'),
+    tasks: [{ id: 'interest', instructions: 'How interested?', type: 'score', rubric: ['low', 'medium', 'high'] }],
+    presentation: {
+      kind: 'graph', entryNodeId: 'ask-interest', maxDecisions: 1,
+      nodes: [
+        { id: 'ask-interest', kind: 'ask', taskId: 'interest' },
+        { id: 'low', kind: 'terminal', outcome: 'low' },
+        { id: 'empty', kind: 'terminal', outcome: 'empty' },
+        { id: 'high', kind: 'terminal', outcome: 'high' },
+      ],
+      transitions: [
+        { fromNodeId: 'ask-interest', toNodeId: 'low', when: { type: 'score', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'ask-interest', toNodeId: 'empty', when: { type: 'score', minimum: 0.5, maximum: 0.5, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'ask-interest', toNodeId: 'high', when: { type: 'score', minimum: 0.5, maximum: 2, minimumInclusive: true, maximumInclusive: true } },
+      ],
+    },
+  };
+  const result = studyManifestSchema.safeParse(study([arm as unknown as StudyArm]));
+  assert.equal(result.success, false);
+  assert.match(result.error.issues.map((issue) => issue.message).join('\n'), /empty|zero-width|exclusive/i);
 });
 
 test('accepts a frozen cohort of distinct stimulus respondents', () => {
@@ -101,6 +212,8 @@ test('validates graph task transitions against stable offered option IDs', () =>
 
 function graphArm(decisionCount: number, maxDecisions = 4): StudyArm {
   const arm = comprehensionArm('control');
+  const firstTask = arm.tasks[0]!;
+  if (!('options' in firstTask)) throw new Error('Expected a Choice task.');
   const nodes: Extract<StudyArm['presentation'], { kind: 'graph' }>['nodes'] = Array.from({ length: decisionCount }, (_, index) => ({
     id: `ask-${index}`,
     kind: 'ask' as const,
@@ -115,7 +228,7 @@ function graphArm(decisionCount: number, maxDecisions = 4): StudyArm {
       maxDecisions,
       nodes,
       transitions: nodes.flatMap((node) => node.kind === 'ask'
-        ? Object.keys(arm.tasks[0]!.options).map((optionId) => ({
+        ? Object.keys(firstTask.options).map((optionId) => ({
           fromNodeId: node.id,
           optionId,
           toNodeId: node.id === `ask-${decisionCount - 1}` ? 'finished' : `ask-${Number(node.id.slice(4)) + 1}`,
