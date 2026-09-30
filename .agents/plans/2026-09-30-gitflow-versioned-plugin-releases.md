@@ -48,10 +48,16 @@ release workflow checked out a mutable tag ref and that this review record was
 stale. This iteration pins source checkouts to the push event commit, checks
 that the local tag resolves to that commit before release work, checks the live
 GitHub tag again before publication, and adds annotated-tag retargeting
-behavior coverage. The fresh review cycle covers these corrections before
-handoff. The final PR check and exact head are available from GitHub. In private
-validation repository `HarleyBartles/sheg-release-workflow-validation`, tag
-`v0.1.0` completed all release jobs and published a 25-file
+behavior coverage. The private-repository release exercise below tested the
+workflow before these tag-binding checks were added; it is prior-revision
+evidence only and does not establish that this exact hardened workflow has
+completed a live release. The private validation repository is no longer
+accessible, so current-head live release validation remains outstanding. The
+current script and retargeting behavior are covered locally, and the PR CI
+passed on the exact current head. The final PR check and exact head are
+available from GitHub. In private validation repository
+`HarleyBartles/sheg-release-workflow-validation`, tag `v0.1.0` completed all
+release jobs and published a 25-file
 `sheg-v0.1.0.zip` (SHA-256
 `4d02ff98a85d5b2b92f2114231476aad2338eef76150a90f4d87b30263094823`); tag
 `v0.1.1` failed manifest/tag validation before build and publish, leaving no
@@ -144,7 +150,7 @@ remain. No public Sheg release or npm publication was created.
 - [x] Workflow runs `npm ci`, `npm run verify`, production build, and package generation before GitHub Release publication.
 - [x] Grant minimum token permissions for release creation; ensure ordinary PRs and develop pushes cannot publish.
 - [x] Restrict version tag creation, updates, and deletion to repository administrators.
-- [x] Exercise a valid and mismatched tag/version through GitHub Actions in a private validation repository; inspect the release ZIP and remove its release, tags, and main branch without publishing to npm or creating a Sheg release.
+- [x] Exercise a valid and mismatched tag/version through GitHub Actions in a private validation repository at the earlier workflow revision; inspect the release ZIP and remove its release, tags, and main branch without publishing to npm or creating a Sheg release. This evidence does not cover the later tag-binding checks described above.
 - [x] Document release/<version> stabilization-only edits, main promotion, tag identity, reconciliation into develop, patch/minor decision, hotfix path, retry safety, and v1 compatibility threshold.
 
 ### Task 6: Verify the full contract and prepare review handoff
@@ -158,7 +164,7 @@ remain. No public Sheg release or npm publication was created.
 
 - [x] Run `npm run verify` and the production build as required by SHEG-4.
 - [x] Inspect exact runbook/playbook routes and capability declarations.
-- [x] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing.
+- [x] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing. Current-head live valid-tag publication remains outstanding as noted in the implementation evidence.
 - [x] Verify default branch is develop, protections enforce CI on develop and reviewed release PRs on main, and only administrators can create/update/delete `v*` tags.
 - [x] Request an initial independent read-only review and resolve its actionable findings. Run fresh PR reviews after each correction until no new actionable issue is surfaced.
 - [x] Create a Draft PR targeting `develop`, link SHEG-4, and report worktree, branch, base, initial status, final head, changed files, validations, archive listing, workflow evidence, branch settings, and owner actions.
