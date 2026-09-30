@@ -17,12 +17,11 @@ async function studyFixture(t: TestContext) {
   return loadStudy(path.join(directory, 'article.json'), path.join(directory, 'cohort.json'));
 }
 
-test('provider changes preserve stimulus identity and change execution identity', async (t) => {
+test('execution fingerprints distinguish providers for a fixed stimulus', async (t) => {
   const study = await studyFixture(t);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1');
   const jev = executionFingerprint(stimulus, { kind: 'jev', model: 'jev-latest' });
   const laya = executionFingerprint(stimulus, { kind: 'laya', checkpoint: 'typed-decisions', contextLimit: 1024, headLimit: 192, tokenizerSha256: 'a'.repeat(64) });
-  assert.equal(stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1'), stimulus);
   assert.notEqual(jev, laya);
 });
 

@@ -1,6 +1,6 @@
 # Test Suite Value Audit
 
-**Status:** in-progress
+**Status:** completed-awaiting-retirement
 **Scope:** Audit the repository's tests in the context of the current PR. Remove tests that are change detectors, tautological, redundant with stronger coverage, or otherwise unable to catch a meaningful regression. Preserve valuable behavioral coverage and avoid expanding the test suite or broad refactoring.
 
 ## Decisions
@@ -12,10 +12,17 @@
 
 ## Tasks
 
-- [ ] Inventory and review test cases across `test/`, including helpers, fixtures, and package-level checks.
-- [ ] Remove only tests whose regression-detection value does not justify their maintenance cost; document the rationale in the change.
-- [ ] Run the full repository verification and review the resulting diff for lost behavior coverage.
-- [ ] Mark this plan `completed-awaiting-retirement`, commit the audit, and push the PR update.
+- [x] Inventory and review test cases across `test/`, including helpers, fixtures, and package-level checks.
+- [x] Remove only tests whose regression-detection value does not justify their maintenance cost; document the rationale in the change.
+- [x] Run the full repository verification and review the resulting diff for lost behavior coverage.
+- [x] Mark this plan `completed-awaiting-retirement`, commit the audit, and push the PR update.
+
+## Audit findings
+
+- Removed the exact prompt-contract hash assertion, which only pinned a source-derived value, and repeated same-input fingerprint equality; runtime fingerprints already incorporate the declared prompt contract hash, and other tests cover fingerprint inputs.
+- Removed packaged-skill prose assertions; the copied-plugin smoke test still checks the executable package and verifies every relative skill link resolves.
+- Removed packet-size variant scenarios duplicated at the MCP layer; packet-sizing behavior remains covered in `packet-sizing.test.ts`, and MCP retains a successful measurement call and output-shape checks.
+- Removed tests that fixed schema `$ref` factoring and exact shipped archetype counts/order; consumer-facing schema constraints, valid cohort loading, nonempty catalogue data, and unique respondent archetype IDs remain covered.
 
 ## Exit criteria
 
