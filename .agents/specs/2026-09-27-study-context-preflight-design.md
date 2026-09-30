@@ -1,8 +1,10 @@
 # Study context compilation and provider preflight
 
-- Status: Draft for review
+- Status: completed-awaiting-retirement
 - Date: 2026-09-27
 - Related decision: Proposed ADR-0010
+
+This accepted design was implemented by merged [PR #3](https://github.com/HarleyBartles/sheg/pull/3). Keep it tracked through the current completing PR so it remains in canonical Git history; retire it in a successor substantive slice.
 
 ## Purpose
 

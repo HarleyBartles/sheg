@@ -1,5 +1,9 @@
 # Study Context Preflight Implementation Plan
 
+**Status:** completed-awaiting-retirement
+
+This plan was implemented by merged [PR #3](https://github.com/HarleyBartles/sheg/pull/3). Keep it tracked through the current completing PR so it remains in canonical Git history; retire it in a successor substantive slice.
+
 **Goal:** Let study authors preflight every possible respondent journey against each configured provider before launching a run, using Laya's pinned tokenizer and Jev's reserved context estimate.
 
 **Architecture:** Add deterministic study and profile validation, compile the exact compact decision packets used at runtime, exhaustively walk every branch for every frozen respondent and arm, and evaluate each packet through provider-specific measurement. Reuse the same packet compiler and provider measurement contracts for preflight and runtime admission. Laya measurement pins and follows the tokenizer and prompt assembly from the source revision validated by the spike. Jev uses a conservative estimator with explicit headroom below its configured 32K context limit.
