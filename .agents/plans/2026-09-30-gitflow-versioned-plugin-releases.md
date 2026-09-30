@@ -36,15 +36,24 @@
 SHEG-4 PR; retire it after the work is merged and the next slice begins.
 
 **Implementation evidence:** `npm run verify` passed locally and again in the
-tracked pre-commit hook (162 tests); `npm run build` passed; the focused release
-packaging tests passed (2 tests); `npm run plugin:package -- --tag v0.1.0`
+tracked pre-commit hook (163 tests); `npm run build` passed; all three focused
+release packaging tests passed; `npm run plugin:package -- --tag v0.1.0`
 created a deterministic 25-file archive. Both workflow YAML files parse, all
 runbook/playbook links resolve, and the Sheg-owned policy contains no required
 ambient plugin or skill identifiers. The GitHub default branch and protection
 rules were verified live. Draft PR [#6](https://github.com/HarleyBartles/sheg/pull/6)
-targets `develop` at head `15108fc930526d83b5527142f734bfec6b5c35af`; its
-`sheg-verify` check passed. The final diff review found no remaining changes.
-No public release was created.
+targeted `develop`; its initial head was `15108fc930526d83b5527142f734bfec6b5c35af`
+and final reviewed head was `df2841ffb262480014907ed11db19db331c5cc98`, with
+`sheg-verify` passing. Independent read-only review found and resolved all
+actionable findings. In private validation repository
+`HarleyBartles/sheg-release-workflow-validation`, tag `v0.1.0` completed all
+release jobs and published a 25-file `sheg-v0.1.0.zip` (SHA-256
+`4d02ff98a85d5b2b92f2114231476aad2338eef76150a90f4d87b30263094823`); tag
+`v0.1.1` failed manifest/tag validation before build and publish, leaving no
+second release. The test release, tag refs, and main branch were removed. GitHub
+denied deleting the private repository because the current login lacks the
+`delete_repo` OAuth scope; the empty private repository and a cleanup branch
+remain. No public Sheg release or npm publication was created.
 
 ---
 
@@ -130,7 +139,7 @@ No public release was created.
 - [x] Workflow runs `npm ci`, `npm run verify`, production build, and package generation before GitHub Release publication.
 - [x] Grant minimum token permissions for release creation; ensure ordinary PRs and develop pushes cannot publish.
 - [x] Restrict version tag creation, updates, and deletion to repository administrators.
-- [x] Exercise valid and mismatched tag/version validation locally without polluting Sheg's public release history.
+- [x] Exercise a valid and mismatched tag/version through GitHub Actions in a private validation repository; inspect the release ZIP and remove its release, tags, and main branch without publishing to npm or creating a Sheg release.
 - [x] Document release/<version> stabilization-only edits, main promotion, tag identity, reconciliation into develop, patch/minor decision, hotfix path, retry safety, and v1 compatibility threshold.
 
 ### Task 6: Verify the full contract and prepare review handoff
@@ -146,5 +155,5 @@ No public release was created.
 - [x] Inspect exact runbook/playbook routes and capability declarations.
 - [x] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing.
 - [x] Verify default branch is develop, protections enforce CI on develop and reviewed release PRs on main, and only administrators can create/update/delete `v*` tags.
-- [ ] Request an independent read-only review of the final diff and resolve any actionable findings before handoff.
+- [x] Request an independent read-only review of the final implementation diff and resolve all actionable findings before handoff.
 - [x] Create a Draft PR targeting `develop`, link SHEG-4, and report worktree, branch, base, initial status, final head, changed files, validations, archive listing, workflow evidence, branch settings, and owner actions.
