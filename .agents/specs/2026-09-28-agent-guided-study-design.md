@@ -1,8 +1,8 @@
 # Agent-guided study design in Sheg
 
-**Status:** Design accepted for planning handoff. This describes the target
-agent and human experience; it is not an implementation plan or authorization
-to begin implementation.
+**Status:** completed-awaiting-retirement
+
+This accepted design has been implemented in [Draft PR #4](https://github.com/HarleyBartles/sheg/pull/4). Keep this artifact tracked through merge so its content enters canonical Git history; retire it in a successor substantive slice.
 
 ## Scope
 

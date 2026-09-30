@@ -1,5 +1,9 @@
 # Agent-Guided Study Design Implementation Plan
 
+**Status:** completed-awaiting-retirement
+
+This plan is fully executed in [Draft PR #4](https://github.com/HarleyBartles/sheg/pull/4). Keep it tracked through merge so it enters canonical Git history; retire it in a successor substantive slice.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give an operating agent shipped documentation of Sheg's capabilities, fast packet-fit checks for study drafts, and a collaborative study-design skill that takes the human from stimulus and question through a validated, runnable study.
