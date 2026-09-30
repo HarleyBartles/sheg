@@ -22,7 +22,7 @@ None.
 
 ## Composition
 
-Before `1.0.0`, increment the patch for compatible fixes and the minor version for a coherent backward-compatible functionality bundle. Document breaking changes clearly. Do not bump on every merge. Keep `package.json` and `plugin.json` versions equal. Tag a release as `v<version>` only after the release PR is merged to `main`; the tag and manifests must agree. Reserve `1.0.0` for a stable usable product with an explicitly declared compatibility contract. After promotion, reconcile the release commit into `develop` so fixes and version metadata are retained.
+Before `1.0.0`, increment the patch for compatible fixes and the minor version for a coherent backward-compatible functionality bundle. Document breaking changes clearly. Do not bump on every merge. Keep `package.json`, both root version fields in `package-lock.json`, and `plugin.json` versions equal. Tag a release as `v<version>` only after the release PR is merged to `main`; the tag and all three version sources must agree. Reserve `1.0.0` for a stable usable product with an explicitly declared compatibility contract. After promotion, reconcile the release commit into `develop` so fixes and version metadata are retained.
 
 ## Doctrine and contracts
 

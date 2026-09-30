@@ -12,21 +12,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: sheg-release
+  validate:
+    name: validate-release-source
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.ref }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
-      - run: npm ci
       - name: Validate tag and manifests
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -40,12 +35,47 @@ jobs:
             echo "Release tag must point to a commit already merged to main." >&2
             exit 1
           }
+
+  build:
+    name: build-release-artifact
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
       - run: npm run verify
       - run: npm run build
       - name: Package plugin
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: python3 scripts/package-plugin.py --tag "$RELEASE_TAG" --output "release-artifacts/sheg-${RELEASE_TAG}.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-zip
+          path: release-artifacts/sheg-${{ github.ref_name }}.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: publish-github-release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-zip
+          path: release-artifacts
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

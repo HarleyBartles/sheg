@@ -65,13 +65,24 @@ def validate_tag(tag: str) -> str:
 def validate_manifests() -> tuple[str, str]:
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     plugin = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
+    lockfile = json.loads((ROOT / "package-lock.json").read_text(encoding="utf-8"))
     if package.get("private") is not True:
         raise ValueError("package.json must remain private; npm publication is not supported")
     package_version = package.get("version")
     plugin_version = plugin.get("version")
+    lock_root_version = lockfile.get("version")
+    lock_packages = lockfile.get("packages")
+    lock_package = lock_packages.get("") if isinstance(lock_packages, dict) else None
+    lock_package_version = lock_package.get("version") if isinstance(lock_package, dict) else None
     if package_version != plugin_version:
         raise ValueError(
             f"manifest versions do not match: package.json={package_version!r}, plugin.json={plugin_version!r}"
+        )
+    if lock_root_version != package_version or lock_package_version != package_version:
+        raise ValueError(
+            "package versions do not match: "
+            f"package.json={package_version!r}, package-lock.json={lock_root_version!r}, "
+            f"package-lock.json packages['']={lock_package_version!r}"
         )
     version_pattern = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     if not isinstance(package_version, str) or not re.fullmatch(version_pattern, package_version):
@@ -109,7 +120,7 @@ def main() -> int:
         else:
             version, _plugin_version = validate_manifests()
         if args.validate_only:
-            print(f"OK v{version} matches package.json and plugin.json")
+            print(f"OK v{version} matches package.json, plugin.json, and package-lock.json")
             return 0
         output = args.output or Path("release-artifacts") / f"sheg-v{version}.zip"
         if not output.is_absolute():

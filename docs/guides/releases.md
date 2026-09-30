@@ -6,8 +6,9 @@ The repository remains private to npm and is not published as an npm package.
 
 ## Version policy
 
-Keep `package.json` and `plugin.json` on the same version. Do not change either
-version on ordinary feature merges to `develop`.
+Keep `package.json`, both root version fields in `package-lock.json`, and
+`plugin.json` on the same version. Do not change them on ordinary feature
+merges to `develop`.
 
 Before `1.0.0`:
 
@@ -36,10 +37,12 @@ the v1 condition.
   Gitflow ancestry stays explicit.
 - Merge the reviewed release pull request to `main`, then create and push the
   matching `v<version>` tag at that merge commit.
-- The tag workflow verifies the tag format, verifies `package.json` and
-  `plugin.json` match it, runs the repository verification and production
-  build, assembles the ZIP, and creates the GitHub Release with generated
-  notes. The tag commit must already be an ancestor of `main`.
+- Only repository administrators can create or change `v*` tags; GitHub rules
+  prevent other actors from creating, updating, or deleting version tags.
+- The tag workflow validates the tag, all version fields, and ancestry on `main`
+  before installing dependencies. It builds the ZIP in a read-only job; a
+  separate publication job receives only that ZIP and the minimum release
+  permission needed to create the GitHub Release with generated notes.
 - After promotion, reconcile the release branch into `develop` so release
   fixes and version metadata remain in the integration line. Close the release
   branch after reconciliation.
@@ -63,9 +66,9 @@ npm run build
 npm run plugin:package -- --tag v0.1.0
 ```
 
-The package command rejects a malformed tag, a mismatch between the two
-manifest versions, or a tag that does not match those versions. To verify an
-identity without creating an archive, use:
+The package command rejects a malformed tag, a mismatch among package,
+plugin, and lockfile versions, or a tag that does not match those versions. To
+verify an identity without creating an archive, use:
 
 ```sh
 python3 scripts/package-plugin.py --tag v0.1.0 --validate-only
@@ -83,10 +86,11 @@ bundled MCP entrypoint runs with Node.js 24 and does not need TypeScript or
 ## Install a GitHub Release ZIP
 
 1. Download `sheg-v<version>.zip` from the matching GitHub Release.
-2. Extract the archive into an empty directory. Keep the archive's paths intact.
-3. Open that directory as a Codex workspace. Its `.agents/plugins/marketplace.json`
-   makes the local Sheg plugin available in the Plugins Directory.
-4. Install Sheg from the Plugins Directory and confirm its polling tools load.
+2. Extract the archive into a stable directory. Keep the archive's paths intact.
+3. Register the extracted directory as a local marketplace with
+   `codex plugin marketplace add <extracted-directory>`.
+4. Restart Codex, install or enable Sheg from the Plugins Directory, and
+   confirm its polling tools load.
 
 Alternatively, continue to add the Git repository as a marketplace and install
 from Git. The repository source remains available separately from the release
@@ -94,13 +98,13 @@ ZIP.
 
 ## Failure and retry behavior
 
-If the tag format or either manifest version is invalid, the workflow stops
-before creating or changing a GitHub Release. If verification, build, or
-packaging fails, no release is published. Correct the source on the release
-branch, merge the correction to `main`, and create a new version tag; do not
-move an existing tag. If the release was created but asset upload failed, rerun
-the same tag workflow to replace the asset. Investigate any other publication
-failure before retrying.
+If the tag format or any package, plugin, or lockfile version is invalid, the
+workflow stops before creating or changing a GitHub Release. If verification,
+build, or packaging fails, no release is published. Correct the source on the
+release branch, merge the correction to `main`, and create a new version tag;
+do not move an existing tag. If the release was created but asset upload
+failed, rerun the same tag workflow to replace the asset. Investigate any other
+publication failure before retrying.
 
 Never force-move or reuse a published version tag. The repository state at the
 tag remains the source of truth for the release.

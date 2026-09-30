@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,50 @@ test('release package validates tags against private package and plugin versions
   const malformed = runPackageResult(['--tag', 'v0.01.0', '--validate-only']);
   assert.notEqual(malformed.status, 0);
   assert.match(malformed.stderr, /invalid release tag/);
+});
+
+test('release validation rejects a stale npm lockfile root version', () => {
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'sheg-release-lock-'));
+  try {
+    const scriptDirectory = path.join(temporaryDirectory, 'scripts');
+    const scriptPath = path.join(scriptDirectory, 'package-plugin.py');
+    const packageVersion = '0.1.0';
+    const packageManifest = { name: 'sheg', version: packageVersion, private: true };
+    const pluginManifest = { version: packageVersion };
+    const lockfile = {
+      name: 'sheg',
+      version: packageVersion,
+      lockfileVersion: 3,
+      requires: true,
+      packages: { '': { name: 'sheg', version: packageVersion } },
+    };
+    const [pythonCommand, pythonPrefix] = python;
+    const runFixture = () => spawnSync(pythonCommand, [...pythonPrefix, scriptPath, '--tag', `v${packageVersion}`, '--validate-only'], {
+      encoding: 'utf8',
+    });
+
+    mkdirSync(scriptDirectory);
+    copyFileSync(path.join(repositoryRoot, 'scripts/package-plugin.py'), scriptPath);
+    writeFileSync(path.join(temporaryDirectory, 'package.json'), JSON.stringify(packageManifest));
+    writeFileSync(path.join(temporaryDirectory, 'plugin.json'), JSON.stringify(pluginManifest));
+    writeFileSync(path.join(temporaryDirectory, 'package-lock.json'), JSON.stringify(lockfile));
+    assert.equal(runFixture().status, 0);
+
+    lockfile.packages[''].version = '0.0.9';
+    writeFileSync(path.join(temporaryDirectory, 'package-lock.json'), JSON.stringify(lockfile));
+    const staleLockfile = runFixture();
+    assert.notEqual(staleLockfile.status, 0);
+    assert.match(staleLockfile.stderr, /package-lock\.json/);
+
+    lockfile.packages[''].version = packageVersion;
+    lockfile.version = '0.0.9';
+    writeFileSync(path.join(temporaryDirectory, 'package-lock.json'), JSON.stringify(lockfile));
+    const staleLockfileSummary = runFixture();
+    assert.notEqual(staleLockfileSummary.status, 0);
+    assert.match(staleLockfileSummary.stderr, /package-lock\.json/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
 });
 
 test('release package contains plugin runtime inputs and is byte-for-byte reproducible', () => {

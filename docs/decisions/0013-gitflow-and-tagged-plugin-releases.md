@@ -23,13 +23,16 @@ Feature pull requests may be squash-merged. Release and hotfix promotions to
 `main`, and their reconciliation into `develop`, use merge commits so the
 release ancestry remains explicit.
 
-Keep `package.json` and `plugin.json` versions equal. Before `1.0.0`, use patch
-for compatible fixes and minor for coherent backward-compatible functionality
-bundles. Reserve `1.0.0` for a stable usable product with a declared public
-compatibility contract. Keep npm publication disabled. Build a self-contained
-Codex plugin ZIP from each verified tag and attach it to a GitHub Release; the
-Git tag remains source truth and Git marketplace installation remains
-available.
+Keep `package.json`, both root version fields in `package-lock.json`, and
+`plugin.json` versions equal. Before `1.0.0`, use patch for compatible fixes
+and minor for coherent backward-compatible functionality bundles. Reserve
+`1.0.0` for a stable usable product with a declared public compatibility
+contract. Keep npm publication disabled. Build a self-contained Codex plugin
+ZIP from each verified tag and attach it to a GitHub Release; the Git tag
+remains source truth and Git marketplace installation remains available.
+Restrict `v*` tag creation, updates, and deletion to repository administrators,
+and keep release publication credentials away from dependency installation
+and packaging steps.
 
 Codex is the first supported harness. Adding another harness requires a later
 decision and explicit compatibility, packaging, and validation for that
