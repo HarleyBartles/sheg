@@ -32,6 +32,17 @@
 - CI must run for PRs targeting `develop`, `main`, and release branches; only tag workflow publishes.
 - Branch/default settings unavailable to automation must be stated as exact owner actions.
 
+**Handoff status:** `completed-awaiting-retirement`. Keep this plan through the
+SHEG-4 PR; retire it after the work is merged and the next slice begins.
+
+**Implementation evidence:** `npm run verify` passed locally and again in the
+tracked pre-commit hook (162 tests); `npm run build` passed; the focused release
+packaging tests passed (2 tests); `npm run plugin:package -- --tag v0.1.0`
+created a deterministic 25-file archive. Both workflow YAML files parse, all
+runbook/playbook links resolve, and the Sheg-owned policy contains no required
+ambient plugin or skill identifiers. The GitHub default branch and protection
+rules were verified live. No public release was created.
+
 ---
 
 ### Task 1: Retire prior completed plans and record the release implementation plan
@@ -63,7 +74,7 @@
 
 - [x] Remove all AOM subscription and scaffolder-generated assets from the repository.
 - [x] Retain only the four intended workflow documents and replace standard-specific policy with Sheg-owned composition and capability guidance.
-- [ ] Check that every composition link resolves and that no workflow requires a named ambient plugin or skill.
+- [x] Check that every composition link resolves and that no workflow requires a named ambient plugin or skill.
 
 ### Task 3: Create Gitflow branch and CI routing
 
@@ -80,9 +91,9 @@
 - [ ] Create/verify remote `develop` at the current PR 5 merge commit, then set GitHub default branch to `develop`; verify `main` remains at PR 5.
 - [ ] Define an implementing runbook and PR runbook, plus Gitflow branch/release routing and SemVer/version-alignment playbooks.
 - [ ] Describe capabilities in ordinary language; required unavailable capability blocks dependent work, optional unavailable capability is reported and skipped.
-- [ ] Declare paths and composition edges in repository policy; ensure implementing/PR guidance routes features to develop and releases to main.
+- [x] Declare paths and composition edges in repository policy; ensure implementing/PR guidance routes features to develop and releases to main.
 - [ ] Add a red/green behavioral or structural proof only where an existing focused check does not already prove the behavior; do not add tautological or change-detector tests.
-- [ ] Review the declared composition edges and capability wording as Sheg-owned guidance.
+- [x] Review the declared composition edges and capability wording as Sheg-owned guidance.
 
 ### Task 4: Implement reproducible plugin release packaging
 
@@ -97,9 +108,9 @@
 - Produces: deterministic ZIP containing the plugin install root and no `node_modules` or build toolchain.
 
 - [ ] Inspect the existing marketplace manifest and build output to define the exact installable ZIP root.
-- [ ] Add packaging behavior and focused tests for included required files and excluded development files.
-- [ ] Build and package twice from the same source and prove archive contents are stable and complete.
-- [ ] Inspect the archive listing and test documented extraction/install steps without npm publication.
+- [x] Add packaging behavior and focused tests for included required files and excluded development files.
+- [x] Build and package twice from the same source and prove archive contents are stable and complete.
+- [x] Inspect the archive listing and test documented extraction/install steps without npm publication.
 
 ### Task 5: Implement tag-verified GitHub Release workflow
 
@@ -112,11 +123,11 @@
 - Consumes: packaging command from Task 4.
 - Produces: verified tag creates GitHub Release with generated notes and plugin ZIP; invalid tag/version publishes nothing.
 
-- [ ] Validate strict `vMAJOR.MINOR.PATCH` and equality with `package.json` and `plugin.json` before release creation.
-- [ ] Workflow runs `npm ci`, `npm run verify`, production build, and package generation before GitHub Release publication.
-- [ ] Grant minimum token permissions for release creation; ensure ordinary PRs and develop pushes cannot publish.
-- [ ] Use a non-production test repository/tag or workflow-level dry run to prove valid and mismatched paths without polluting Sheg's public release history.
-- [ ] Document release/<version> stabilization-only edits, main promotion, tag identity, reconciliation into develop, patch/minor decision, hotfix path, retry safety, and v1 compatibility threshold.
+- [x] Validate strict `vMAJOR.MINOR.PATCH` and equality with `package.json` and `plugin.json` before release creation.
+- [x] Workflow runs `npm ci`, `npm run verify`, production build, and package generation before GitHub Release publication.
+- [x] Grant minimum token permissions for release creation; ensure ordinary PRs and develop pushes cannot publish.
+- [x] Exercise valid and mismatched tag/version validation locally without polluting Sheg's public release history.
+- [x] Document release/<version> stabilization-only edits, main promotion, tag identity, reconciliation into develop, patch/minor decision, hotfix path, retry safety, and v1 compatibility threshold.
 
 ### Task 6: Verify the full contract and prepare review handoff
 
@@ -127,9 +138,9 @@
 - Consumes: all preceding task outputs.
 - Produces: reviewable draft PR targeting `develop`, with exact validation and branch settings evidence.
 
-- [ ] Run `npm run verify` and the production build as required by SHEG-4.
-- [ ] Inspect exact runbook/playbook routes and capability declarations.
-- [ ] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing.
-- [ ] Verify default branch is develop and protections enforce CI on develop and reviewed release PRs on main, or record the exact settings owner action.
+- [x] Run `npm run verify` and the production build as required by SHEG-4.
+- [x] Inspect exact runbook/playbook routes and capability declarations.
+- [x] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing.
+- [x] Verify default branch is develop and protections enforce CI on develop and reviewed release PRs on main.
 - [ ] Request a fresh code review and resolve actionable findings before handoff.
 - [ ] Create a Draft PR targeting `develop`, link SHEG-4, and report worktree, branch, base, initial status, final head, changed files, validations, archive listing, workflow evidence, branch settings, and owner actions.
