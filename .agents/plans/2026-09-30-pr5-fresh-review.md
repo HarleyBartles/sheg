@@ -1,6 +1,6 @@
 # PR 5 Fresh Review Loop
 
-**Status:** in-progress
+**Status:** completed-awaiting-retirement
 **Scope:** Independently review the current full PR #5 diff after the review-correction commit. Resolve any supported findings and repeat whole-diff review until no further findings are surfaced.
 
 ## Guardrails
@@ -16,7 +16,9 @@
 - [x] Have an independent reviewer inspect the full diff and report concrete findings with severity and file/line evidence. Finding: graph reconstruction reuses the first stored decision for a repeated task ID instead of the exact decision consumed at the current node.
 - [x] Verify the repeated-task routing and Choice-history preflight findings against current code; both have regression tests and implementation fixes in the active follow-on JIT plan. The staged gate passed with 163 tests, and generated outputs were rebuilt.
 - [x] Commit and push the repair at `3e79bb548467229a690b3820842fd88e5bd821d7`; the remote branch and PR #5 head match.
-- [ ] When a fresh independent review reports no findings, confirm the pushed PR head, checks, clean worktree, and mark this plan `completed-awaiting-retirement`.
+- [x] Prepare a new full-diff package from base `0e7929f003e3f60c1f15e14c435be0b80d4b9526` through pushed head `f6afe9f9b8d4bb64538eea6fb9f6c41bed6be3fa`, then request an independent review of that exact diff. Package: `review-f6afe9f.diff` (765408 bytes).
+- [x] Resolve valid new findings with behavior coverage, a JIT plan, the staged repository gate, and a refreshed whole-diff review. No new findings were reported at `f6afe9f`; the previous repeated-task and Choice-history findings were fixed and passed the full gate.
+- [x] Confirm PR #5 is open Draft at `f6afe9f9b8d4bb64538eea6fb9f6c41bed6be3fa`, remote branch matches, and the worktree is clean after this plan update is committed. Local staged verification passed 163 tests and generated-file checks; GitHub `sheg-verify` is skipped for Draft PR state.
 
 ## Exit criteria
 
