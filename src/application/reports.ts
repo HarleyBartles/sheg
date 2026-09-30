@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { loadStudy } from '../infrastructure/study-loader.js';
-import { CheckpointStore, contextFailureSchema, runCheckpointSchema, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
+import { CheckpointStore, contextFailureSchema, interruptionEvidenceSchema, runCheckpointSchema, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import { executionFingerprint, respondentCohortFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 import { decisionValueSchema } from '../domain/decision/decision.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
@@ -21,7 +21,7 @@ export const pollingReportSchema = z.object({
     taskResponses: z.record(z.string(), z.object({ occurrences: z.array(z.object({ occurrence: z.number().int().positive(), type: z.enum(['choice', 'score', 'noul']).optional(), reached: z.number().int(), completed: z.number().int(), incomplete: z.number().int(), notReached: z.number().int(), correct: z.number().int(), incorrect: z.number().int(), unscored: z.number().int(), options: z.record(z.string(), z.object({ count: z.number().int(), proportion: z.number().min(0).max(1) }).strict()), meanScore: z.number().finite().optional(), rubricProbabilities: z.record(z.string(), z.number().min(0).max(1)).optional(), meanProbabilityTrue: z.number().min(0).max(1).optional() }).strict()) }).strict()),
     journeys: z.array(z.object({ respondentId: z.string(), archetypeId: z.string().nullable(), variation: z.record(z.string(), z.string()).optional(), status: z.string(), outcome: z.string().nullable(), presentedTaskIds: z.array(z.string()), events: z.array(z.unknown()), responses: z.array(responseSchema), failedAttempts: z.number().int().nonnegative(), failureEvidence: contextFailureSchema.optional() }).strict()),
   }).strict()),
-  providerEvidence: z.object({ attempts: z.number().int(), maxCalls: z.number().int().positive(), reservedCalls: z.number().int().nonnegative(), remainingCalls: z.number().int().nonnegative(), failedCells: z.number().int() }).strict(),
+  providerEvidence: z.object({ interruptions: z.array(interruptionEvidenceSchema), attempts: z.number().int(), maxCalls: z.number().int().positive(), reservedCalls: z.number().int().nonnegative(), remainingCalls: z.number().int().nonnegative(), failedCells: z.number().int() }).strict(),
 }).strict();
 export type PollingReport = z.infer<typeof pollingReportSchema>;
 
@@ -201,7 +201,7 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
   const rawProvider = checkpoint.provider;
   return pollingReportSchema.parse({ formatVersion: 4, runId: checkpoint.runId, status: checkpoint.status, stimulusFingerprint: checkpoint.stimulusFingerprint, executionFingerprint: checkpoint.executionFingerprint, cohortFingerprint: respondentCohortFingerprint(cohort),
     provider: { kind: rawProvider.kind, model: rawProvider.kind === 'jev' ? rawProvider.model : null, checkpoint: rawProvider.kind === 'laya' ? rawProvider.checkpoint : null, route: rawProvider.kind === 'jev' ? rawProvider.route : null, endpoint: rawProvider.kind === 'jev' ? rawProvider.endpoint : null }, cohortSize: profiles.size, arms,
-    providerEvidence: { attempts: checkpoint.budget.usedCalls, maxCalls: checkpoint.budget.maxCalls, reservedCalls: checkpoint.budget.reservedCalls, remainingCalls: checkpoint.budget.remainingCalls,
+    providerEvidence: { interruptions: checkpoint.interruptions ?? [], attempts: checkpoint.budget.usedCalls, maxCalls: checkpoint.budget.maxCalls, reservedCalls: checkpoint.budget.reservedCalls, remainingCalls: checkpoint.budget.remainingCalls,
       failedCells: checkpoint.journeys.filter((journey) => journey.status === 'failed').length } });
 }
 export async function getReport(outputDirectory: string, runId: string): Promise<PollingReport> { return buildReport(await new CheckpointStore(path.resolve(outputDirectory)).read(runId)); }

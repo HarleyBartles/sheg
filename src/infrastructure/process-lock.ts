@@ -33,7 +33,8 @@ export class ProcessLock {
         }
         return new ProcessLock(lockPath, record);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
       }
 
       const existing = await readLock(lockPath);
@@ -79,3 +80,4 @@ function processExists(pid: number): boolean {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
+

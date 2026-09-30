@@ -64,6 +64,8 @@ test('native TypeSafe preflight reports its credential and keeps unknown context
   }, { credentialStore: { availability: async () => 'available', readForAuthentication: async () => 'fixture-key' } });
 
   assert.equal(result.providers[0]?.configuration, 'configured');
+  assert.equal(result.providers[0]?.route, 'typesafe');
+  assert.equal(result.providers[0]?.credentialAvailability, 'available');
   assert.equal(result.providers[0]?.status, 'unverified');
   assert.ok(result.providers[0]?.unavailable.some(({ reason }) => reason === 'typesafe-model-context-unverified'));
 });
@@ -142,4 +144,14 @@ test('preflight does not claim fit when a later packet includes typed response h
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+
+test('preflight identifies both routes and distinguishes missing from unavailable vault entries', async () => {
+  const result = await preflightStudy({
+    manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
+    providers: [{ kind: 'jev', route: 'openrouter', model: 'shared-alias' }, { kind: 'jev', route: 'typesafe', model: 'shared-alias' }],
+  }, { credentialStore: { availability: async route => route === 'openrouter' ? 'missing' : 'unavailable', readForAuthentication: async () => { throw new Error('status must not read keys'); } } });
+  assert.deepEqual(result.providers.map(entry => [entry.route, entry.credentialAvailability]), [['openrouter', 'missing'], ['typesafe', 'unavailable']]);
+  assert.ok(result.providers.every(entry => entry.availability === 'unverified'));
 });

@@ -275,7 +275,7 @@ test('a partial study stops at its run-wide physical-attempt limit', async (t) =
     await new Promise((resolve) => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, started.runId);
   }
-  assert.equal(current.status, 'partial');
+    assert.equal(current.status, 'partial', JSON.stringify({ status: current.status, budget: current.budget, journeys: current.journeys }));
   assert.equal(calls, 2);
   assert.deepEqual(current.budget, { maxCalls: 2, usedCalls: 2, reservedCalls: 0, remainingCalls: 0 });
 });
@@ -288,7 +288,7 @@ test('direct resume consumes interrupted reservations before dispatching further
     outputDirectory: directory, maxCalls: 4, concurrency: 1,
   });
   const abandoned = await new CheckpointStore(directory).create(checkpoint(directory, {
-    ...checked.config, status: 'running', stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint,
+    ...checked.config, status: 'running', activeCellIds: ['original/curious-outside-reader'], stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint,
     sourceHashes: checked.study.sources.map((source) => source.sha256), respondentIds: checked.study.respondents.map((respondent) => respondent.id),
     budget: { maxCalls: 4, usedCalls: 1, reservedCalls: 1, remainingCalls: 2 },
   }));
@@ -301,12 +301,18 @@ test('direct resume consumes interrupted reservations before dispatching further
   const manager = new RunManager({ providerFactory: () => provider });
   let current = await manager.resumeRun(directory, abandoned.runId);
   const resumedBudget = current.budget;
+  const interruptions = current.interruptions;
   for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, abandoned.runId);
   }
   assert.equal(resumedBudget.usedCalls, 2);
   assert.equal(resumedBudget.reservedCalls, 0);
+  assert.equal(interruptions?.length, 1);
+  assert.equal(interruptions?.[0]?.attempts, 1);
+  assert.deepEqual(interruptions?.[0]?.candidateCellIds, ['original/curious-outside-reader']);
+  const report = await getReport(directory, current.runId);
+  assert.deepEqual(report.providerEvidence.interruptions, interruptions);
   assert.equal(calls, 2);
   assert.deepEqual(current.budget, { maxCalls: 4, usedCalls: 4, reservedCalls: 0, remainingCalls: 0 });
 });
@@ -330,7 +336,7 @@ test('runtime context rejection records actionable admission evidence in checkpo
     current = await manager.runStatus(directory, started.runId);
   }
   assert.equal(calls, 0);
-  assert.equal(current.status, 'partial');
+    assert.equal(current.status, 'partial', JSON.stringify({ status: current.status, budget: current.budget, journeys: current.journeys }));
   assert.equal(current.journeys[0]?.status, 'failed');
   assert.deepEqual(current.journeys[0]?.failureEvidence, {
     decisionId: 'entry-response', nodeId: 'choose-entry', reason: 'state-would-be-truncated', tokens: 1035, effectiveLimit: 1024,
@@ -387,7 +393,7 @@ test('resume replays completed responses without charging the same respondent-ta
   const started = await manager.startRun({ manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), provider: { kind: 'laya', baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192, tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 }, outputDirectory: directory, maxCalls: 10, concurrency: 1 });
   let current = started;
   for (let attempt = 0; attempt < 1000 && current.status === 'running'; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 10)); current = await manager.runStatus(directory, started.runId); }
-  assert.equal(current.status, 'partial');
+    assert.equal(current.status, 'partial', JSON.stringify({ status: current.status, budget: current.budget, journeys: current.journeys }));
   const study = await loadStudy(path.resolve('test/fixtures/article.json'), path.resolve('test/fixtures/cohort.json'));
   const legacyStimulus = legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash);
   const legacyRequest = compileDecisionPacket(study.manifest.arms[0]!, study.respondents[0]!, study.manifest.arms[0]!.tasks[0]!.id,
@@ -425,10 +431,28 @@ test('failed provider attempts remain visible per cell and unknown failures cons
     await new Promise(resolve => setTimeout(resolve, 10));
     current = await manager.runStatus(directory, started.runId);
   }
-  assert.equal(current.status, 'partial');
+    assert.equal(current.status, 'partial', JSON.stringify({ status: current.status, budget: current.budget, journeys: current.journeys }));
   assert.deepEqual(current.budget, { maxCalls: 2, usedCalls: 2, reservedCalls: 0, remainingCalls: 0 });
   assert.equal(current.journeys.length, 2);
   assert.ok(current.journeys.every(journey => journey.failedAttempts === 1));
   const report = await getReport(directory, started.runId);
   assert.ok(report.arms[0]?.journeys.every(journey => journey.failedAttempts === 1));
+});
+
+
+test('status recovery records interrupted attempts once without inventing cell attribution', async (t) => {
+  const directory = await tempDirectory(t);
+  const created = await new CheckpointStore(directory).create(checkpoint(directory, {
+    status: 'running', activeCellIds: ['candidate-a', 'candidate-b'],
+    budget: { maxCalls: 10, usedCalls: 1, reservedCalls: 1, remainingCalls: 8 },
+  }));
+  const manager = new RunManager();
+  const recovered = await manager.runStatus(directory, created.runId);
+  const repeated = await manager.runStatus(directory, created.runId);
+  assert.equal(recovered.budget.usedCalls, 2);
+  assert.equal(recovered.budget.reservedCalls, 0);
+  assert.deepEqual(repeated.interruptions, recovered.interruptions);
+  assert.equal(recovered.interruptions?.length, 1);
+  assert.equal(recovered.interruptions?.[0]?.attempts, 1);
+  assert.deepEqual(recovered.interruptions?.[0]?.candidateCellIds, ['candidate-a', 'candidate-b']);
 });

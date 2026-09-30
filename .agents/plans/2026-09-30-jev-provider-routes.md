@@ -226,5 +226,20 @@ Concurrent-failure coverage also exposed checkpoint write contention; writes now
 wait for the short-lived checkpoint lock. Failed attempts remain visible per
 cell, and unknown failures conservatively consume the reserved allowance.
 
-Full verification after these corrections passed with 174 tests. Repeat the
-fresh review before claiming the review cycle is complete.
+Full verification after these corrections passed with 174 tests. 
+A second fresh review identified missing per-run interrupted-attempt evidence,
+ambiguous installation onboarding placement, and preflight output that collapsed
+route-specific vault availability into a configured flag. The correction
+persists interruption counts, recovery time, and candidate active cells
+atomically with reservation settlement; reports retain that evidence without
+assigning the uncertain request to a particular cell. Preflight and packet
+sizing identify Jev route and exact credential availability. Installation docs
+and the polling reference offer connect TypeSafe, connect OpenRouter, or skip,
+and explain that only the key is typed into the hidden local prompt. The reviewer
+confirmed candidate cells are the accurate attribution boundary. Repeated concurrent
+run testing then exposed Windows `EPERM` results from exclusive lock creation
+when another worker already owned the lock. The lock path now treats `EPERM`
+as contention and follows the existing bounded owner/stale-lock checks.
+
+Repeat the fresh review after final corrections before claiming the review cycle
+is complete.

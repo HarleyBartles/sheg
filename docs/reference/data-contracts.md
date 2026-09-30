@@ -27,3 +27,10 @@ Reports retain the selected Jev route and endpoint beside the model, and expose
 Each journey also exposes `failedAttempts`; failures do not require billing
 reconciliation. Published-rate estimates require metadata for the served model,
 not just the requested alias.
+
+Preflight identifies Jev `route` and `endpoint` and returns exact
+`credentialAvailability` independently of inference reachability. `availability`
+remains unverified because preflight performs no network probe. Checkpoints and
+reports preserve interruption records with consumed attempts, recovery time,
+and `candidateCellIds`. Those cells span ongoing journeys, so they are candidates,
+not evidence of which cell owned a request when the process stopped.

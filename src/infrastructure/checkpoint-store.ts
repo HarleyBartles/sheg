@@ -46,6 +46,12 @@ export const contextFailureSchema = z.object({
 }).strict();
 export type ContextFailure = z.infer<typeof contextFailureSchema>;
 
+export const interruptionEvidenceSchema = z.object({
+  attempts: z.number().int().positive(),
+  candidateCellIds: z.array(z.string().min(1)),
+  recoveredAt: z.string().datetime(),
+}).strict();
+
 export const runCheckpointSchema = z.object({
   formatVersion: z.literal(4),
   migratedFromFormatVersion: z.union([z.literal(2), z.literal(3)]).optional(),
@@ -75,6 +81,7 @@ export const runCheckpointSchema = z.object({
     failedAttempts: z.number().int().nonnegative().optional(),
     failureEvidence: contextFailureSchema.optional(),
   }).strict()),
+  interruptions: z.array(interruptionEvidenceSchema).optional(),
   activeCellIds: z.array(z.string().min(1)),
   cancellationRequested: z.boolean(),
   budget: attemptSnapshotSchema,
@@ -116,6 +123,11 @@ function normalizeLegacyShape(value: unknown): unknown | null {
   delete migrated.maxUsd;
   delete migrated.maxPerCallUsd;
   migrated.provider = normalizeLegacyProvider(migrated.provider);
+  if (budget.reservedCalls > 0) migrated.interruptions = [{
+    attempts: budget.reservedCalls,
+    candidateCellIds: Array.isArray(migrated.activeCellIds) ? migrated.activeCellIds : [],
+    recoveredAt: new Date().toISOString(),
+  }];
   migrated.budget = {
     maxCalls: budget.maxCalls,
     usedCalls: budget.usedCalls + budget.reservedCalls,

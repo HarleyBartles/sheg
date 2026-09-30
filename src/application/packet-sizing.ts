@@ -6,9 +6,9 @@ import type { DecisionRequest } from '../domain/decision/decision.js';
 import { compileDecisionRequest, questionForTask, type DecisionPacketParts, type TrajectorySummary } from '../domain/decision/prompt.js';
 import { stimulusItemSchema } from '../domain/study/stimulus.js';
 import { taskSchema, type StudyTask } from '../domain/study/task.js';
-import { JevProvider, jevConfigSchema, type JevConfig } from '../providers/jev.js';
+import { JevProvider, jevConfigSchema, type JevConfig, type JevRoute } from '../providers/jev.js';
 import { LayaProvider, type LayaConfig } from '../providers/laya.js';
-import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
+import { WindowsCredentialStore, type CredentialAvailability } from '../infrastructure/credentials/windows.js';
 
 export const MAX_PACKET_SIZING_CASES = 1_000;
 export const MAX_PACKET_SIZING_BYTES = 16 * 1024 * 1024;
@@ -115,6 +115,8 @@ export type PacketSizingResult = {
     provider: 'jev' | 'laya';
     modelIdentity: string;
     configuration: 'configured' | 'incomplete';
+    route: JevRoute | null;
+    credentialAvailability: CredentialAvailability | null;
     status: 'fits' | 'overflow' | 'unavailable';
     largestCase: { caseId: string; tokens: number } | null;
   }>;
@@ -186,11 +188,14 @@ export async function measurePacketBatch(rawInput: PacketSizingInput, dependenci
       const statuses = measurements.map(({ measurement }) => measurement.status);
       const status = statuses.includes('unavailable') ? 'unavailable' : statuses.includes('overflow') ? 'overflow' : 'fits';
       const first = measured[0];
+      const credentialAvailability = config.kind === 'jev' ? await credentialStore.availability(config.route) : null;
       return {
         providerId: id,
         provider: config.kind,
         modelIdentity,
-        configuration: config.kind === 'jev' && await credentialStore.availability(config.route) !== 'available' ? 'incomplete' as const : 'configured' as const,
+        route: config.kind === 'jev' ? config.route : null,
+        credentialAvailability,
+        configuration: config.kind === 'jev' && credentialAvailability !== 'available' ? 'incomplete' as const : 'configured' as const,
         status,
         largestCase: first ? { caseId: first.caseId, tokens: first.measurement.tokens! } : null,
       };

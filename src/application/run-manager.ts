@@ -91,10 +91,7 @@ export class RunManager {
       try {
         const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
         try {
-          const current = await store.read(runId);
-          const ledger = AttemptLedger.restore(current.budget);
-          ledger.consumeInterruptedReservations();
-          return await store.update(runId, (latest) => ({ ...latest, status: 'partial', activeCellIds: [], budget: ledger.snapshot(), updatedAt: new Date().toISOString() }));
+          return await store.update(runId, (latest) => ({ ...recoverInterruptedAttempts(latest), status: 'partial', updatedAt: new Date().toISOString() }));
         } finally { await lock.release(); }
       } catch (error) { if (!(error instanceof ProcessLockError)) throw error; }
     }
@@ -117,11 +114,7 @@ export class RunManager {
     await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
-      checkpoint = await store.update(runId, (current) => {
-        const ledger = AttemptLedger.restore(current.budget);
-        ledger.consumeInterruptedReservations();
-        return { ...current, status: 'running', cancellationRequested: false, activeCellIds: [], budget: ledger.snapshot(), updatedAt: new Date().toISOString() };
-      });
+      checkpoint = await store.update(runId, (current) => ({ ...recoverInterruptedAttempts(current), status: 'running', cancellationRequested: false, updatedAt: new Date().toISOString() }));
       this.launch(store, checkpoint, lock);
       return checkpoint;
     } catch (error) { await lock.release(); throw error; }
@@ -144,4 +137,15 @@ async function requireJevCredential(provider: ParsedConfig['provider'], credenti
   if (provider.kind !== 'jev') return;
   const availability = await credentialStore.availability(provider.route);
   if (availability !== 'available') throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
+}
+
+
+function recoverInterruptedAttempts(checkpoint: RunCheckpoint): RunCheckpoint {
+  const ledger = AttemptLedger.restore(checkpoint.budget);
+  ledger.consumeInterruptedReservations();
+  const interruptions = checkpoint.budget.reservedCalls === 0 ? checkpoint.interruptions : [
+    ...(checkpoint.interruptions ?? []),
+    { attempts: checkpoint.budget.reservedCalls, candidateCellIds: checkpoint.activeCellIds, recoveredAt: new Date().toISOString() },
+  ];
+  return { ...checkpoint, activeCellIds: [], budget: ledger.snapshot(), ...(interruptions === undefined ? {} : { interruptions }) };
 }

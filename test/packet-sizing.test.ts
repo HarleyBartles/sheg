@@ -247,6 +247,8 @@ test('keeps provider fit separate from configuration and never turns unavailable
   const measurement = result.cases[0]!.measurements[0]!;
 
   assert.equal(summary.configuration, 'incomplete');
+  assert.equal(summary.route, 'openrouter');
+  assert.equal(summary.credentialAvailability, 'missing');
   assert.equal(summary.status, 'unavailable');
   assert.equal(summary.largestCase, null);
   assert.equal(measurement.status, 'unavailable');
@@ -283,6 +285,8 @@ test('uses Jev measurement offline without requiring credentials or invoking fet
   const summary = result!.providers[0]!;
   const measurement = result!.cases[0]!.measurements[0]!;
   assert.equal(summary.configuration, 'incomplete');
+  assert.equal(summary.route, 'openrouter');
+  assert.equal(summary.credentialAvailability, 'missing');
   assert.equal(measurement.status, 'fits');
   assert.equal(measurement.tokenCount, 'estimated');
   assert.equal(measurement.headroomTokens, measurement.effectiveLimit! - measurement.tokens!);

@@ -11,6 +11,7 @@ The study unit is a bounded text stimulus, a task with typed response options, a
 | --- | --- | --- |
 | Write or review archetypes, expand them into stimulus-specific respondents, or author respondents directly | [Archetypes and cohorts](references/archetypes-and-cohorts.md), plus its linked archetype, respondent, and cohort schemas | `poll_check` after cohort authoring |
 | Design tasks, size draft packets, preview a journey, validate fit, or inspect a route | [Study design](../study-design/SKILL.md), [packet budgeting](../study-design/references/packet-budgeting.md), [prepare and trace](references/prepare-and-trace.md), the [study manifest](assets/study-manifest.schema.json), and the [respondent cohort](assets/respondent-cohort.schema.json) | `poll_measure_packets`, `poll_preview`, `poll_check`, `poll_preflight`, `poll_trace` |
+| Connect a Jev key during installation or after deferring setup | [Secure setup in run and recovery](references/run-and-recovery.md) | Local interactive PowerShell helper, no key-bearing MCP tool |
 | Start, manage, or recover a run | [Run and recovery](references/run-and-recovery.md), plus [prepare and trace](references/prepare-and-trace.md) for a new run | `poll_start`, `poll_status`, `poll_cancel`, `poll_resume` |
 | Report results or compare arms | [Interpret results](references/interpret-results.md); check `poll_status` if completion is unknown | `poll_status`, `poll_report`, `poll_compare` |
 | Compare a rerun over the same cohort | [Interpret results](references/interpret-results.md) | `poll_compare_runs` |

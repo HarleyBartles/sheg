@@ -20465,7 +20465,8 @@ var ProcessLock = class _ProcessLock {
         }
         return new _ProcessLock(lockPath, record2);
       } catch (error62) {
-        if (error62.code !== "EEXIST") throw error62;
+        const code = error62.code;
+        if (code !== "EEXIST" && code !== "EPERM") throw error62;
       }
       const existing = await readLock(lockPath);
       if (!existing) {
@@ -20651,6 +20652,11 @@ var contextFailureSchema = external_exports.object({
   effectiveLimit: external_exports.number().int().nonnegative(),
   measurementMethod: external_exports.string().min(1)
 }).strict();
+var interruptionEvidenceSchema = external_exports.object({
+  attempts: external_exports.number().int().positive(),
+  candidateCellIds: external_exports.array(external_exports.string().min(1)),
+  recoveredAt: external_exports.string().datetime()
+}).strict();
 var runCheckpointSchema = external_exports.object({
   formatVersion: external_exports.literal(4),
   migratedFromFormatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]).optional(),
@@ -20680,6 +20686,7 @@ var runCheckpointSchema = external_exports.object({
     failedAttempts: external_exports.number().int().nonnegative().optional(),
     failureEvidence: contextFailureSchema.optional()
   }).strict()),
+  interruptions: external_exports.array(interruptionEvidenceSchema).optional(),
   activeCellIds: external_exports.array(external_exports.string().min(1)),
   cancellationRequested: external_exports.boolean(),
   budget: attemptSnapshotSchema
@@ -20717,6 +20724,11 @@ function normalizeLegacyShape(value) {
   delete migrated.maxUsd;
   delete migrated.maxPerCallUsd;
   migrated.provider = normalizeLegacyProvider(migrated.provider);
+  if (budget.reservedCalls > 0) migrated.interruptions = [{
+    attempts: budget.reservedCalls,
+    candidateCellIds: Array.isArray(migrated.activeCellIds) ? migrated.activeCellIds : [],
+    recoveredAt: (/* @__PURE__ */ new Date()).toISOString()
+  }];
   migrated.budget = {
     maxCalls: budget.maxCalls,
     usedCalls: budget.usedCalls + budget.reservedCalls,
@@ -22149,10 +22161,7 @@ var RunManager = class {
       try {
         const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
         try {
-          const current = await store.read(runId2);
-          const ledger = AttemptLedger.restore(current.budget);
-          ledger.consumeInterruptedReservations();
-          return await store.update(runId2, (latest) => ({ ...latest, status: "partial", activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+          return await store.update(runId2, (latest) => ({ ...recoverInterruptedAttempts(latest), status: "partial", updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
         } finally {
           await lock.release();
         }
@@ -22177,11 +22186,7 @@ var RunManager = class {
     await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId2}`);
     try {
-      checkpoint = await store.update(runId2, (current) => {
-        const ledger = AttemptLedger.restore(current.budget);
-        ledger.consumeInterruptedReservations();
-        return { ...current, status: "running", cancellationRequested: false, activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-      });
+      checkpoint = await store.update(runId2, (current) => ({ ...recoverInterruptedAttempts(current), status: "running", cancellationRequested: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
       this.launch(store, checkpoint, lock);
       return checkpoint;
     } catch (error62) {
@@ -22207,6 +22212,15 @@ async function requireJevCredential(provider, credentialStore) {
   if (provider.kind !== "jev") return;
   const availability = await credentialStore.availability(provider.route);
   if (availability !== "available") throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
+}
+function recoverInterruptedAttempts(checkpoint) {
+  const ledger = AttemptLedger.restore(checkpoint.budget);
+  ledger.consumeInterruptedReservations();
+  const interruptions = checkpoint.budget.reservedCalls === 0 ? checkpoint.interruptions : [
+    ...checkpoint.interruptions ?? [],
+    { attempts: checkpoint.budget.reservedCalls, candidateCellIds: checkpoint.activeCellIds, recoveredAt: (/* @__PURE__ */ new Date()).toISOString() }
+  ];
+  return { ...checkpoint, activeCellIds: [], budget: ledger.snapshot(), ...interruptions === void 0 ? {} : { interruptions } };
 }
 
 // src/entrypoints/worker.ts

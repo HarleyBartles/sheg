@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { respondentProfileSchema } from '../domain/respondents/profile.js';
 import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
 import type { ProviderContextFit } from '../domain/decision/provider.js';
-import { JevProvider, jevConfigInputSchema, jevConfigSchema, type JevConfigInput } from '../providers/jev.js';
+import { JevProvider, jevConfigInputSchema, jevConfigSchema, type JevConfigInput, type JevRoute } from '../providers/jev.js';
 import { LayaProvider, type LayaConfig } from '../providers/laya.js';
 import { WindowsCredentialStore, type CredentialAvailability } from '../infrastructure/credentials/windows.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
@@ -30,6 +30,9 @@ export const preflightInputSchema = z.object({
 
 export type ProviderStudyFit = {
   provider: string;
+  route: JevRoute | null;
+  endpoint: string | null;
+  credentialAvailability: CredentialAvailability | null;
   executionFingerprint: string;
   tokenizerSha256: string | null;
   status: 'fit' | 'does-not-fit' | 'unverified';
@@ -94,6 +97,9 @@ export async function preflightStudy(input: StudyPreflightInput, dependencies: {
       ? await credentialStore.availability(providerConfig.route)
       : null;
     results.push({
+      route: providerConfig.kind === 'jev' ? providerConfig.route : null,
+      endpoint: providerConfig.kind === 'jev' ? providerConfig.endpoint : null,
+      credentialAvailability,
       provider: providerConfig.kind === 'jev' ? providerConfig.model : providerConfig.checkpoint,
       executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === 'jev'
         ? { kind: 'jev', route: providerConfig.route, model: providerConfig.model, endpoint: providerConfig.endpoint }

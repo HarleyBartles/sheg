@@ -20553,7 +20553,8 @@ var ProcessLock = class _ProcessLock {
         }
         return new _ProcessLock(lockPath, record2);
       } catch (error62) {
-        if (error62.code !== "EEXIST") throw error62;
+        const code = error62.code;
+        if (code !== "EEXIST" && code !== "EPERM") throw error62;
       }
       const existing = await readLock(lockPath);
       if (!existing) {
@@ -20742,6 +20743,11 @@ var contextFailureSchema = external_exports.object({
   effectiveLimit: external_exports.number().int().nonnegative(),
   measurementMethod: external_exports.string().min(1)
 }).strict();
+var interruptionEvidenceSchema = external_exports.object({
+  attempts: external_exports.number().int().positive(),
+  candidateCellIds: external_exports.array(external_exports.string().min(1)),
+  recoveredAt: external_exports.string().datetime()
+}).strict();
 var runCheckpointSchema = external_exports.object({
   formatVersion: external_exports.literal(4),
   migratedFromFormatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]).optional(),
@@ -20771,6 +20777,7 @@ var runCheckpointSchema = external_exports.object({
     failedAttempts: external_exports.number().int().nonnegative().optional(),
     failureEvidence: contextFailureSchema.optional()
   }).strict()),
+  interruptions: external_exports.array(interruptionEvidenceSchema).optional(),
   activeCellIds: external_exports.array(external_exports.string().min(1)),
   cancellationRequested: external_exports.boolean(),
   budget: attemptSnapshotSchema
@@ -20808,6 +20815,11 @@ function normalizeLegacyShape(value) {
   delete migrated.maxUsd;
   delete migrated.maxPerCallUsd;
   migrated.provider = normalizeLegacyProvider(migrated.provider);
+  if (budget.reservedCalls > 0) migrated.interruptions = [{
+    attempts: budget.reservedCalls,
+    candidateCellIds: Array.isArray(migrated.activeCellIds) ? migrated.activeCellIds : [],
+    recoveredAt: (/* @__PURE__ */ new Date()).toISOString()
+  }];
   migrated.budget = {
     maxCalls: budget.maxCalls,
     usedCalls: budget.usedCalls + budget.reservedCalls,
@@ -22173,10 +22185,7 @@ var RunManager = class {
       try {
         const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
         try {
-          const current = await store.read(runId);
-          const ledger = AttemptLedger.restore(current.budget);
-          ledger.consumeInterruptedReservations();
-          return await store.update(runId, (latest) => ({ ...latest, status: "partial", activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+          return await store.update(runId, (latest) => ({ ...recoverInterruptedAttempts(latest), status: "partial", updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
         } finally {
           await lock.release();
         }
@@ -22201,11 +22210,7 @@ var RunManager = class {
     await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
-      checkpoint = await store.update(runId, (current) => {
-        const ledger = AttemptLedger.restore(current.budget);
-        ledger.consumeInterruptedReservations();
-        return { ...current, status: "running", cancellationRequested: false, activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-      });
+      checkpoint = await store.update(runId, (current) => ({ ...recoverInterruptedAttempts(current), status: "running", cancellationRequested: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
       this.launch(store, checkpoint, lock);
       return checkpoint;
     } catch (error62) {
@@ -22231,6 +22236,15 @@ async function requireJevCredential(provider, credentialStore) {
   if (provider.kind !== "jev") return;
   const availability = await credentialStore.availability(provider.route);
   if (availability !== "available") throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
+}
+function recoverInterruptedAttempts(checkpoint) {
+  const ledger = AttemptLedger.restore(checkpoint.budget);
+  ledger.consumeInterruptedReservations();
+  const interruptions = checkpoint.budget.reservedCalls === 0 ? checkpoint.interruptions : [
+    ...checkpoint.interruptions ?? [],
+    { attempts: checkpoint.budget.reservedCalls, candidateCellIds: checkpoint.activeCellIds, recoveredAt: (/* @__PURE__ */ new Date()).toISOString() }
+  ];
+  return { ...checkpoint, activeCellIds: [], budget: ledger.snapshot(), ...interruptions === void 0 ? {} : { interruptions } };
 }
 
 // src/application/reports.ts
@@ -22258,7 +22272,7 @@ var pollingReportSchema = external_exports.object({
     taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), type: external_exports.enum(["choice", "score", "noul"]).optional(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()), meanScore: external_exports.number().finite().optional(), rubricProbabilities: external_exports.record(external_exports.string(), external_exports.number().min(0).max(1)).optional(), meanProbabilityTrue: external_exports.number().min(0).max(1).optional() }).strict()) }).strict()),
     journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), variation: external_exports.record(external_exports.string(), external_exports.string()).optional(), status: external_exports.string(), outcome: external_exports.string().nullable(), presentedTaskIds: external_exports.array(external_exports.string()), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failedAttempts: external_exports.number().int().nonnegative(), failureEvidence: contextFailureSchema.optional() }).strict())
   }).strict()),
-  providerEvidence: external_exports.object({ attempts: external_exports.number().int(), maxCalls: external_exports.number().int().positive(), reservedCalls: external_exports.number().int().nonnegative(), remainingCalls: external_exports.number().int().nonnegative(), failedCells: external_exports.number().int() }).strict()
+  providerEvidence: external_exports.object({ interruptions: external_exports.array(interruptionEvidenceSchema), attempts: external_exports.number().int(), maxCalls: external_exports.number().int().positive(), reservedCalls: external_exports.number().int().nonnegative(), remainingCalls: external_exports.number().int().nonnegative(), failedCells: external_exports.number().int() }).strict()
 }).strict();
 function reconstructPartialEvents(arm, stored) {
   const events = [];
@@ -22464,6 +22478,7 @@ async function buildReport(checkpoint) {
     cohortSize: profiles.size,
     arms,
     providerEvidence: {
+      interruptions: checkpoint.interruptions ?? [],
       attempts: checkpoint.budget.usedCalls,
       maxCalls: checkpoint.budget.maxCalls,
       reservedCalls: checkpoint.budget.reservedCalls,
@@ -22994,6 +23009,9 @@ async function preflightStudy(input2, dependencies = {}) {
     const fitUnverified = traversal.unverifiedReason !== void 0;
     const credentialAvailability = providerConfig.kind === "jev" ? await credentialStore.availability(providerConfig.route) : null;
     results.push({
+      route: providerConfig.kind === "jev" ? providerConfig.route : null,
+      endpoint: providerConfig.kind === "jev" ? providerConfig.endpoint : null,
+      credentialAvailability,
       provider: providerConfig.kind === "jev" ? providerConfig.model : providerConfig.checkpoint,
       executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === "jev" ? { kind: "jev", route: providerConfig.route, model: providerConfig.model, endpoint: providerConfig.endpoint } : { kind: "laya", checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...providerConfig.precision === void 0 ? {} : { precision: providerConfig.precision } }),
       tokenizerSha256: providerConfig.kind === "laya" ? providerConfig.tokenizerSha256 : null,
