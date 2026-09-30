@@ -1,6 +1,6 @@
 # Gitflow and Versioned Plugin Releases Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Establish a repeatable Gitflow process, SemVer-aligned Codex plugin releases, and validated runbook/playbook guidance for Sheg.
 
@@ -10,7 +10,7 @@
 
 **Spec:** Linear issue SHEG-4, `https://linear.app/harleys-workspace/issue/SHEG-4/establish-gitflow-and-versioned-plugin-releases` (full issue retrieved; no linked Linear documents).
 
-**Execution Strategy:** `executing-plans` because branch settings, Sheg-owned workflow composition, package contents, and release automation share ordering and must be reviewed as one integrated workflow; an agent-per-task lane would add context reconstruction around mutable branch and policy state.
+**Execution Strategy:** Execute the tasks in sequence because branch settings, Sheg-owned workflow composition, package contents, and release automation share ordering and must be reviewed as one integrated workflow. Splitting this work by task would require repeated reconstruction of mutable branch and policy state.
 
 ## Global Constraints
 
