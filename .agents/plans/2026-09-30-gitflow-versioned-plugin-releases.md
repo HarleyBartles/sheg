@@ -4,9 +4,9 @@
 
 **Goal:** Establish a repeatable Gitflow process, SemVer-aligned Codex plugin releases, and validated runbook/playbook guidance for Sheg.
 
-**Architecture:** Keep `main` as the stable release line and `develop` as the integration/default branch. Build a tagged plugin ZIP from the repository's existing self-contained `dist/` output, and use the selected repository composition standards to route implementing and PR stages into the branch and version playbooks.
+**Architecture:** Keep `main` as the stable release line and `develop` as the integration/default branch. Build a tagged plugin ZIP from the repository's existing self-contained `dist/` output, and use Sheg-owned runbooks, playbooks, and doctrine to route contribution stages into branch and version workflows.
 
-**Tech Stack:** GitHub Actions, Node.js/npm, TypeScript build, GitHub CLI/API, repository operating-standard deployment and composition checks.
+**Tech Stack:** GitHub Actions, Node.js/npm, TypeScript build, GitHub CLI/API, Sheg-owned workflow documentation.
 
 **Spec:** Linear issue SHEG-4, `https://linear.app/harleys-workspace/issue/SHEG-4/establish-gitflow-and-versioned-plugin-releases` (full issue retrieved; no linked Linear documents).
 
@@ -19,7 +19,7 @@
 - Start from `v0.1.0`; patch is for compatible fixes and minor for coherent backward-compatible functionality bundles before v1.
 - Reserve `1.0.0` for a stable usable product with a declared compatibility contract.
 - Codex is the only supported harness implemented in this issue.
-- Subscribe only to `runbook-composition` and `playbook-composition`; do not name ambient skills as workflow dependencies.
+- Keep workflow documentation and capability composition repository-owned; do not subscribe to external operating standards or name ambient skills as workflow dependencies.
 - Feature PRs target `develop`; release PRs target `main` from `release/<version>`; document urgent hotfix routing.
 - Git tags are release source truth; normal merges to `develop` never publish stable releases or change versions.
 - Preserve existing Git-based marketplace installation as a supported route.
@@ -37,42 +37,40 @@
 ### Task 1: Retire prior completed plans and record the release implementation plan
 
 **Files:**
-- Delete only standalone `.agents/plans/*.md` files explicitly marked `completed-awaiting-retirement` and not retained by an active unmarked roadmap/spec bundle.
+- Delete completed `.agents/plans/*.md`, roadmaps, and specs from the completed SHEG-2 study bundle as directed by the user.
 - Create `.agents/plans/2026-09-30-gitflow-versioned-plugin-releases.md`.
-- Preserve the unmarked smallest-executable-study roadmap/spec and the three completed child plans they still index; do not infer their retirement marker.
+- Retain the active SHEG-4 plan through its completing PR.
 
 **Interfaces:**
 - Consumes: current main snapshot at `976aa05d1c8219e50ca5b9dcae262469a21244bf`.
 - Produces: a committed executable plan and a clean worktree except the active plan.
 
-- [ ] Confirm there are no inbound references to each candidate retirement file and that durable decisions have been promoted to ADRs/current contracts.
-- [ ] Remove only the independently marked and unreferenced completed plans; retain the referenced roadmap bundle.
-- [ ] Save and self-review this plan against every SHEG-4 scope, guardrail, and validation item.
-- [ ] Commit the retirement and plan as the first task commit; allow the tracked pre-commit hook to run its canonical gate.
+- [x] Confirm the completed study decisions are represented in ADR-0012 and current contracts, then retire the completed SHEG-2 study spec, roadmap, and child plans as directed.
+- [x] Retire the standalone completed PR and audit plans with no live references.
+- [x] Save and self-review this plan against every SHEG-4 scope, guardrail, and validation item.
+- [x] Commit the retirement and plan as the first task commit; allow the tracked pre-commit hook to run its canonical gate.
 
-### Task 2: Pin and deploy the two adopted operating standards
+### Task 2: Remove scaffolded standards and retain Sheg-owned composition
 
 **Files:**
-- Create `.gitmodules` and `.agents/plugins/marketplace-source` submodule pinned to the reviewed Agent Asset Marketplace commit.
-- Create `.agents/contracts/operating-standards.json` selecting only runbook-composition and playbook-composition.
-- Generate only standard-owned deployed resources and provenance outputs using the marketplace migration/deployment commands.
-- Modify `.agents/plugins/marketplace.json` only if the standard checks show it is required; plugin availability does not select standards.
+- Remove the AOM subscription contract, pinned marketplace source submodule, generated standards and provenance, and the temporary checker.
+- Remove scaffold-required baseline runbooks/playbooks, retain the implementing and PR runbooks, and retain the Gitflow and SemVer playbooks.
+- Keep a concise Sheg-owned policy that declares lifecycle roots, topical workflows, composition edges, and capability selection in ordinary language.
 
 **Interfaces:**
-- Consumes: pinned marketplace standard source at commit `3b39cc051f1fb4241c9ee36a1fca411190f9b1a8`.
-- Produces: reproducible standard check/apply declarations with source provenance and the two standards' contract resources.
+- Consumes: existing Sheg Gitflow and release decisions.
+- Produces: a small standalone composition policy and no external standards subscription.
 
-- [ ] Inspect the pinned source and use its migration preview to determine exact contract schema and generated paths.
-- [ ] Add the submodule at the reviewed commit and run `git submodule update` to verify the pin.
-- [ ] Declare exactly the selected two standards and deploy their resources with the documented `--prepare-migration` sequence.
-- [ ] Run each selected standard's check and confirm no unrelated standard is declared or generated.
+- [x] Remove all AOM subscription and scaffolder-generated assets from the repository.
+- [x] Retain only the four intended workflow documents and replace standard-specific policy with Sheg-owned composition and capability guidance.
+- [ ] Check that every composition link resolves and that no workflow requires a named ambient plugin or skill.
 
 ### Task 3: Create Gitflow branch and CI routing
 
 **Files:**
 - Modify `.github/workflows/ci.yml` to include PR targets `develop`, `main`, and `release/**` while preserving `npm run verify`.
 - Update root `AGENTS.md` with a concise pointer to repo policy and stage routing.
-- Create runbook/playbook policy and initial four documents in the paths prescribed by the selected standards.
+- Create the runbook/playbook policy and the four SHEG-4 lifecycle/topic documents. Retain no scaffold-required baseline books.
 - Update README or focused release guide with branch targets and urgent fix route.
 
 **Interfaces:**
@@ -83,8 +81,8 @@
 - [ ] Define an implementing runbook and PR runbook, plus Gitflow branch/release routing and SemVer/version-alignment playbooks.
 - [ ] Describe capabilities in ordinary language; required unavailable capability blocks dependent work, optional unavailable capability is reported and skipped.
 - [ ] Declare paths and composition edges in repository policy; ensure implementing/PR guidance routes features to develop and releases to main.
-- [ ] Add a red/green behavioral or structural proof only where the adopted standards do not already prove the behavior; do not add tautological or change-detector tests.
-- [ ] Run the selected standards' structural checks and resolve all diagnostics.
+- [ ] Add a red/green behavioral or structural proof only where an existing focused check does not already prove the behavior; do not add tautological or change-detector tests.
+- [ ] Review the declared composition edges and capability wording as Sheg-owned guidance.
 
 ### Task 4: Implement reproducible plugin release packaging
 
@@ -130,7 +128,7 @@
 - Produces: reviewable draft PR targeting `develop`, with exact validation and branch settings evidence.
 
 - [ ] Run `npm run verify` and the production build as required by SHEG-4.
-- [ ] Run the selected standards' checks and inspect exact runbook/playbook routes and capability declarations.
+- [ ] Inspect exact runbook/playbook routes and capability declarations.
 - [ ] Verify CI branch triggers, release workflow tag-only behavior, invalid tag rejection, and archive listing.
 - [ ] Verify default branch is develop and protections enforce CI on develop and reviewed release PRs on main, or record the exact settings owner action.
 - [ ] Request a fresh code review and resolve actionable findings before handoff.

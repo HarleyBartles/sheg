@@ -21,6 +21,7 @@ alongside the code.
 | [0010](0010-preflight-study-context-for-configured-providers.md) | Preflight study context for configured providers | Proposed |
 | [0011](0011-deterministic-study-preview-and-packet-sizing.md) | Share packet assembly and expose deterministic study preview and sizing | Proposed |
 | [0012](0012-system-one-typed-responses-and-routing.md) | Preserve typed System One responses and route explicitly | Accepted |
+| [0013](0013-gitflow-and-tagged-plugin-releases.md) | Use Gitflow and tagged plugin releases | Accepted |
 
 ## Writing and changing decisions
 
