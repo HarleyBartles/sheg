@@ -11,6 +11,10 @@ const missingCredentialStore = {
   availability: async () => 'missing' as const,
   readForAuthentication: async () => { throw new Error('missing'); },
 };
+const malformedCredentialStore = {
+  availability: async () => 'malformed' as const,
+  readForAuthentication: async () => { throw new Error('malformed'); },
+};
 
 test('CLI start rejects a missing Jev key before creating a run', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'sheg-missing-key-'));
@@ -26,5 +30,25 @@ test('CLI start rejects a missing Jev key before creating a run', async (t) => {
   const exitCode = await runCli(['start', '--config', configPath], { out: () => true, error: (value) => { errors.push(value); return true; } }, new RunManager({ credentialStore: missingCredentialStore }));
   assert.equal(exitCode, 1);
   assert.match(JSON.parse(errors[0] ?? '{}').error, /openrouter secure credential is missing/i);
+  assert.deepEqual(await new CheckpointStore(outputDirectory).list(), []);
+});
+
+test('CLI start explains how to repair a present but unreadable Jev credential', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'sheg-malformed-key-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = path.join(directory, 'run.json');
+  const outputDirectory = path.join(directory, 'runs');
+  await writeFile(configPath, JSON.stringify({
+    manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'),
+    outputDirectory, maxCalls: 4,
+    provider: { kind: 'jev', model: 'test-jev', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 5000 },
+  }));
+  const errors: string[] = [];
+  const exitCode = await runCli(['start', '--config', configPath], { out: () => true, error: (value) => { errors.push(value); return true; } }, new RunManager({ credentialStore: malformedCredentialStore }));
+  assert.equal(exitCode, 1);
+  const reported = JSON.parse(errors[0] ?? '{}').error as string;
+  assert.match(reported, /present but uses an unsupported encoding/i);
+  assert.match(reported, /re-enter it with Sheg's credential setup/i);
+  assert.doesNotMatch(reported, /token|bytes/i);
   assert.deepEqual(await new CheckpointStore(outputDirectory).list(), []);
 });

@@ -22348,6 +22348,7 @@ var RunManager = class {
 async function requireJevCredential(provider, credentialStore) {
   if (provider.kind !== "jev") return;
   const availability = await credentialStore.availability(provider.route);
+  if (availability === "malformed") throw new CredentialStoreError("credential_malformed", provider.route);
   if (availability !== "available") throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
 }
 function recoverInterruptedAttempts(checkpoint) {

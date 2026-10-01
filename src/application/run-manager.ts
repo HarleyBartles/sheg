@@ -12,7 +12,7 @@ import { ProcessLock, ProcessLockError } from '../infrastructure/process-lock.js
 import { JevProvider, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type FitMeasurer, type LayaConfig } from '../providers/laya.js';
 import { providerConfigSchema } from '../providers/config.js';
-import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
+import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import { runWorker } from './worker.js';
 import { estimateRunDecisionCalls, type RunDecisionCallBounds } from '../domain/journey/route-bounds.js';
 
@@ -134,6 +134,7 @@ export class RunManager {
 async function requireJevCredential(provider: ParsedConfig['provider'], credentialStore: Pick<WindowsCredentialStore, 'availability'>): Promise<void> {
   if (provider.kind !== 'jev') return;
   const availability = await credentialStore.availability(provider.route);
+  if (availability === 'malformed') throw new CredentialStoreError('credential_malformed', provider.route);
   if (availability !== 'available') throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
 }
 
