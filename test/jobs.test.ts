@@ -12,7 +12,7 @@ import { getReport } from '../src/application/reports.js';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import { LayaProvider } from '../src/providers/laya.js';
 import { compileDecisionPacket, legacyPromptContractHash, promptContractHash } from '../src/domain/decision/prompt.js';
-import { legacyChoiceRequestFingerprint } from '../src/application/worker.js';
+import { legacyChoiceRequestFingerprint, runWorker } from '../src/application/worker.js';
 import { legacyChoiceStimulusFingerprint, legacyExecutionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
 
@@ -455,4 +455,72 @@ test('status recovery records interrupted attempts once without inventing cell a
   assert.equal(recovered.interruptions?.length, 1);
   assert.equal(recovered.interruptions?.[0]?.attempts, 1);
   assert.deepEqual(recovered.interruptions?.[0]?.candidateCellIds, ['candidate-a', 'candidate-b']);
+});
+
+test('run worker drains in-flight siblings before propagating a worker failure', async (t) => {
+  const directory = await tempDirectory(t);
+  const cohort = JSON.parse(await readFile(path.resolve('test/fixtures/cohort.json'), 'utf8')) as { respondents: Array<Record<string, unknown>> };
+  cohort.respondents.push({ ...structuredClone(cohort.respondents[0]!), id: 'additional-reader' });
+  const cohortPath = path.join(directory, 'cohort.json');
+  await writeFile(cohortPath, JSON.stringify(cohort));
+  const providerConfig = { kind: 'laya' as const, baseUrl: 'http://127.0.0.1:8000', checkpoint: 'local-test', contextLimit: 4096, headLimit: 192,
+    tokenizerJsonPath: path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerSha256: 'a'.repeat(64), timeoutMs: 5000 };
+  const config = { manifestPath: path.resolve('test/fixtures/article.json'), cohortPath, provider: providerConfig,
+    outputDirectory: directory, maxCalls: 10, concurrency: 2 };
+  const checked = await checkStudy(config);
+  const store = new CheckpointStore(directory);
+  const created = await store.create(checkpoint(directory, { ...checked.config, provider: providerConfig, status: 'running',
+    stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint,
+    sourceHashes: checked.study.sources.map((source) => source.sha256), respondentIds: checked.study.respondents.map((respondent) => respondent.id) }));
+
+  let providerStartedResolve!: () => void;
+  const providerStarted = new Promise<void>((resolve) => { providerStartedResolve = resolve; });
+  let releaseProvider!: () => void;
+  const providerRelease = new Promise<void>((resolve) => { releaseProvider = resolve; });
+  let firstProviderCall = true;
+  let providerCalls = 0;
+  const provider: DecisionProvider = { async decide(request) {
+    assert.equal(request.question.type, 'choice');
+    providerCalls += 1;
+    if (firstProviderCall) {
+      firstProviderCall = false;
+      providerStartedResolve();
+      await providerRelease;
+    }
+    const choice = 'continue';
+    return { type: 'choice', choice, probabilities: Object.fromEntries(Object.keys(request.question.options).map((id) => [id, id === choice ? 1 : 0])), attempts: 1, provider: 'laya', model: 'fixture', checkpoint: 'local-test', latencyMs: 1, usage: {} };
+  } };
+
+  const originalUpdate = store.update.bind(store);
+  let newJourneyWrites = 0;
+  let rejectSecondJourneyWrite!: () => void;
+  const secondJourneyWriteRejected = new Promise<void>((resolve) => { rejectSecondJourneyWrite = resolve; });
+  store.update = async (runId, mutate) => {
+    const before = await store.read(runId);
+    const after = mutate(before);
+    if (after.journeys.length > before.journeys.length && ++newJourneyWrites === 2) {
+      await providerStarted;
+      rejectSecondJourneyWrite();
+      throw new Error('injected checkpoint failure');
+    }
+    return originalUpdate(runId, mutate);
+  };
+  t.after(() => { store.update = originalUpdate; });
+
+  let settled = false;
+  const outcome = runWorker(store, created, provider).then(
+    () => { settled = true; return null; },
+    (error: unknown) => { settled = true; return error; },
+  );
+  try {
+    await secondJourneyWriteRejected;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, 'runWorker must wait for the in-flight sibling provider call');
+  } finally {
+    releaseProvider();
+  }
+  const error = await outcome;
+  assert.ok(error instanceof Error);
+  assert.match(error.message, /injected checkpoint failure/);
+  assert.equal(providerCalls, 2, 'a healthy worker may finish its current cell but must not schedule another after a sibling fails');
 });

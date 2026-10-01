@@ -36612,6 +36612,7 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
   const respondents = new Map(study.respondents.map((respondent) => [respondent.id, respondent]));
   const cells = study.manifest.arms.flatMap((arm) => study.respondents.map((respondent) => ({ arm, respondent, id: cellId(arm.id, respondent.id) })));
   const cursor = { next: 0 };
+  let stopWorkers = false;
   const runCell = async (arm, respondentId, id) => {
     const profile = respondents.get(respondentId);
     if (!profile) throw new Error(`Frozen respondent ${respondentId} is no longer present.`);
@@ -36686,16 +36687,28 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     }
   };
   const worker = async () => {
-    while (cursor.next < cells.length) {
+    while (!stopWorkers && cursor.next < cells.length) {
       if (await cancellationRequested(store, checkpoint.runId)) return;
+      if (stopWorkers) return;
       const cell = cells[cursor.next++];
       if (!cell) return;
       const current = await store.read(checkpoint.runId);
+      if (stopWorkers) return;
       if (current.journeys.some((journey) => journey.armId === cell.arm.id && journey.respondentId === cell.respondent.id && journey.status === "completed")) continue;
       await runCell(cell.arm, cell.respondent.id, cell.id);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(checkpoint.concurrency, cells.length) }, () => worker()));
+  const workers = Array.from({ length: Math.min(checkpoint.concurrency, cells.length) }, async () => {
+    try {
+      await worker();
+    } catch (error62) {
+      stopWorkers = true;
+      throw error62;
+    }
+  });
+  const workerResults = await Promise.allSettled(workers);
+  const workerFailure = workerResults.find((result) => result.status === "rejected");
+  if (workerFailure?.status === "rejected") throw workerFailure.reason;
   return updateCheckpoint(store, checkpoint.runId, (current) => {
     const completed = new Set(current.journeys.filter((journey) => journey.status === "completed").map((journey) => cellId(journey.armId, journey.respondentId)));
     const failed = current.journeys.some((journey) => journey.status === "failed");

@@ -192,7 +192,7 @@ npm run verify
 
 **Exit:** The feature PR targets develop, its verification evidence is current, versions are unchanged, and the human can review the complete implementation. If native fit evidence or paid-run approval is absent, report precisely which live proof remains unavailable.
 
-**Execution evidence:** Branch `codex/jev-auth-modes` is based on `origin/develop` at `3955863a0a69ab93d377bcbd408b3e6f57efc68d`. Draft PR [#7](https://github.com/HarleyBartles/sheg/pull/7) is open against `develop`. The commit hook passed `npm run verify` with 170 tests. Both production vault targets report available. Native TypeSafe inference remains unverified because its context limit is unknown.
+**Execution evidence:** Branch `codex/jev-auth-modes` is based on `origin/develop` at `3955863a0a69ab93d377bcbd408b3e6f57efc68d`. Draft PR [#7](https://github.com/HarleyBartles/sheg/pull/7) is open against `develop`. The latest local `npm run verify` passed with 177 tests, 177 passed, 0 failed, and 0 skipped. Both production vault targets report available. Native TypeSafe inference remains unverified because its context limit is unknown.
 
 ## Acceptance Coverage
 
@@ -226,7 +226,7 @@ Concurrent-failure coverage also exposed checkpoint write contention; writes now
 wait for the short-lived checkpoint lock. Failed attempts remain visible per
 cell, and unknown failures conservatively consume the reserved allowance.
 
-Full verification after these corrections passed with 174 tests. 
+Earlier verification milestones passed with 174 tests; the latest corrected local verification is recorded in the execution evidence above.
 A second fresh review identified missing per-run interrupted-attempt evidence,
 ambiguous installation onboarding placement, and preflight output that collapsed
 route-specific vault availability into a configured flag. The correction
@@ -240,6 +240,15 @@ confirmed candidate cells are the accurate attribution boundary. Repeated concur
 run testing then exposed Windows `EPERM` results from exclusive lock creation
 when another worker already owned the lock. The lock path now treats `EPERM`
 as contention and follows the existing bounded owner/stale-lock checks.
+
+A third fresh review found that fail-fast worker rejection could release run
+ownership while a sibling provider request was still active. The worker pool
+now stops assigning cells after an unexpected worker failure, drains in-flight
+siblings, and propagates the original failure only after they settle. A
+controlled regression test holds one provider request open, injects a
+checkpoint failure in another cell, verifies the worker run remains pending
+until release, and confirms no additional cell is dispatched. The current head
+still requires a fresh review and updated hosted CI evidence after publication.
 
 Repeat the fresh review after final corrections before claiming the review cycle
 is complete.
