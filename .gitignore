@@ -12,6 +12,7 @@
 
 # Local run data and caches
 /.polling-runs/
+/release-artifacts/
 /.cache/
 *.log
 npm-debug.log*

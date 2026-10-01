@@ -57,11 +57,10 @@ supports.
    the design and frozen cohort are ready, use `poll_preflight` to measure
    every reachable packet on every possible route for the configured provider
    or providers. Explain fit and limitations in terms of provider assumptions,
-   then report the reachable call range and configured spend ceiling where
-   applicable.
+   then report the reachable call range and configured maximum calls.
 8. Before `poll_start`, present the provider, distinct respondent and arm
-   counts, reachable call range, configured limits, and Jev spend ceiling when
-   used. The human approves the run. Start it only after that approval. Use
+   counts, reachable call range, and configured call limit. The human approves
+   the run. Start it only after that approval. Use
    status and report tools to inspect outcomes, then interpret the evidence
    against the person's original question and material with your own judgement.
 

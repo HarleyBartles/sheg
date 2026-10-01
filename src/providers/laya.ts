@@ -22,8 +22,7 @@ export type FitResult = ProviderContextFit;
 const MAX_LAYA_SCORE_LEVELS = 32;
 
 export class LayaCallError extends Error {
-  constructor(message: string, readonly attempts: number, readonly chargeStatus: 'not_billed' | 'unknown',
-    readonly contextFit?: ProviderContextFit, readonly decisionId?: string) {
+  constructor(message: string, readonly attempts: number, readonly contextFit?: ProviderContextFit, readonly decisionId?: string) {
     super(message);
     this.name = 'LayaCallError';
   }
@@ -100,13 +99,13 @@ export class LayaProvider implements DecisionProvider {
 
   async decide(request: DecisionRequest, maxAttempts: number): Promise<DecisionResult> {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new LayaCallError('Laya call limit must be a positive integer.', 0, 'not_billed');
+      throw new LayaCallError('Laya call limit must be a positive integer.', 0);
     }
     const parsedRequest = decisionRequestSchema.safeParse(request);
-    if (!parsedRequest.success) throw new LayaCallError('Laya decision request is invalid.', 0, 'not_billed');
+    if (!parsedRequest.success) throw new LayaCallError('Laya decision request is invalid.', 0);
     const fit = await this.measure(parsedRequest.data);
     if (fit.status !== 'fits') {
-      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, 'not_billed', fit, parsedRequest.data.question.id);
+      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     }
 
     const { question } = parsedRequest.data;
@@ -127,25 +126,25 @@ export class LayaProvider implements DecisionProvider {
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });
     } catch {
-      throw new LayaCallError('Laya local service request failed.', 1, 'unknown');
+      throw new LayaCallError('Laya local service request failed.', 1);
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, 'not_billed');
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1);
 
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
-      throw new LayaCallError('Laya local service returned unreadable JSON.', 1, 'not_billed');
+      throw new LayaCallError('Laya local service returned unreadable JSON.', 1);
     }
     const parsedResponse = responseSchema.safeParse(payload);
     if (!parsedResponse.success) {
-      throw new LayaCallError('Laya response is missing model, answer, usage, or checkpoint routing metadata.', 1, 'not_billed');
+      throw new LayaCallError('Laya response is missing model, answer, usage, or checkpoint routing metadata.', 1);
     }
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
-      throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1, 'not_billed');
+      throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1);
     }
     const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, 'not_billed');
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
 
     const result: DecisionResult = {
       ...answer.data,
@@ -158,13 +157,12 @@ export class LayaProvider implements DecisionProvider {
         ...(parsedResponse.data.usage.input_tokens === undefined ? {} : { inputTokens: parsedResponse.data.usage.input_tokens }),
         ...(parsedResponse.data.usage.output_tokens === undefined ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }),
       },
-      chargeStatus: 'not_billed',
     };
     try {
       return validateDecision(request, result, { maxAttempts, provider: 'laya', checkpoint: this.config.checkpoint });
     } catch (error) {
       if (error instanceof DecisionError) {
-        throw new LayaCallError('Laya response failed decision validation.', 1, 'not_billed');
+        throw new LayaCallError('Laya response failed decision validation.', 1);
       }
       throw error;
     }

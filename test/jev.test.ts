@@ -2,14 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JevCallError, JevProvider, measureJevContext, type JevConfig } from '../src/providers/jev.js';
 import type { DecisionRequest } from '../src/domain/decision/decision.js';
+import { defaultJevConfig } from '../src/providers/jev/config.js';
 
-const config: JevConfig = {
-  kind: 'jev',
-  model: 'typesafe/jev-1.13',
-  keyEnv: 'SHEG_TEST_OPENROUTER_KEY',
-  endpoint: 'https://openrouter.ai/api/alpha/decisions',
-  timeoutMs: 2_000,
+const config: JevConfig = defaultJevConfig();
+const testKeyEnv = 'SHEG_TEST_OPENROUTER_KEY';
+const testCredentialStore = {
+  availability: async () => 'available' as const,
+  readForAuthentication: async () => 'secret-test-key',
 };
+
+function makeJevProvider(fetchRequest: typeof fetch): JevProvider {
+  return new JevProvider(config, fetchRequest, { credentialStore: testCredentialStore });
+}
 
 const request: DecisionRequest = {
   state: { reader: { profile: 'Interested but time-limited.' }, encounteredItems: [] },
@@ -41,11 +45,11 @@ function response(overrides: Record<string, unknown> = {}): Response {
 }
 
 function installTestKey(): () => void {
-  const previous = process.env[config.keyEnv];
-  process.env[config.keyEnv] = 'secret-test-key';
+  const previous = process.env[testKeyEnv];
+  process.env[testKeyEnv] = 'secret-test-key';
   return () => {
-    if (previous === undefined) delete process.env[config.keyEnv];
-    else process.env[config.keyEnv] = previous;
+    if (previous === undefined) delete process.env[testKeyEnv];
+    else process.env[testKeyEnv] = previous;
   };
 }
 
@@ -56,13 +60,17 @@ test('estimates the exact request with fixed context reserve and refuses unknown
   assert.equal(fit.contextLimit, 32_768);
   assert.equal(fit.effectiveLimit, 26_214);
   assert.equal(measureJevContext(request, 'typesafe/jev-latest').status, 'unavailable');
+  const nativeFit = measureJevContext(request, 'jev-latest', 'typesafe');
+  assert.equal(nativeFit.status, 'unavailable');
+  assert.equal(nativeFit.contextLimit, null);
+  assert.equal(nativeFit.effectiveLimit, null);
 
   const oversized = { ...request, state: { text: 'x'.repeat(100_000) } };
   assert.equal(measureJevContext(oversized, config.model).status, 'overflow');
   const restore = installTestKey();
   let calls = 0;
   try {
-    const provider = new JevProvider(config, async () => { calls += 1; throw new Error('must not call'); });
+    const provider = makeJevProvider( async () => { calls += 1; throw new Error('must not call'); });
     await assert.rejects(provider.decide(oversized, 1), /estimated-context-over-limit/);
     assert.equal(calls, 0);
   } finally { restore(); }
@@ -76,7 +84,7 @@ test('sends one typed choice and preserves the served model, distribution, usage
   const restoreKey = installTestKey();
   try {
     let captured: { url: string; init: RequestInit } | undefined;
-    const provider = new JevProvider(config, fakeFetch(async (url, init) => {
+    const provider = makeJevProvider( fakeFetch(async (url, init) => {
       captured = { url, init };
       return response();
     }));
@@ -84,6 +92,7 @@ test('sends one typed choice and preserves the served model, distribution, usage
     const result = await provider.decide(request, 1);
 
     assert.equal(captured?.url, config.endpoint);
+    assert.equal(captured?.init.redirect, 'error');
     assert.equal((captured?.init.headers as Record<string, string>).Authorization, 'Bearer secret-test-key');
     const body = JSON.parse(String(captured?.init.body)) as Record<string, unknown>;
     assert.deepEqual(body, {
@@ -106,8 +115,7 @@ test('sends one typed choice and preserves the served model, distribution, usage
     assert.equal(result.model, 'typesafe/jev-1.13-20260917');
     assert.equal(result.attempts, 1);
     assert.deepEqual(result.usage, { inputTokens: 120, outputTokens: 12 });
-    assert.equal(result.chargeStatus, 'billed');
-    assert.equal(result.chargeUsd, 0.00000504);
+    assert.deepEqual(result.cost, { amountUsd: 0.00000504, basis: 'provider-reported' });
     assert.ok(result.latencyMs >= 0);
   } finally {
     restoreKey();
@@ -122,7 +130,7 @@ test('encodes Score and Noul criteria and preserves their typed evidence', async
       { type: 'score', score: 1.25, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' }, probabilities: { '0': 0.2, '1': 0.3, '2': 0.5 } },
       { type: 'noul', noul: 0.74 },
     ];
-    const provider = new JevProvider(config, fakeFetch(async (_url, init) => {
+    const provider = makeJevProvider( fakeFetch(async (_url, init) => {
       requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
       const answer = answers[requests.length - 1]!;
       return response({ answers: { 'typed-question': answer } });
@@ -149,7 +157,7 @@ test('retries a retryable HTTP response and counts each physical request', async
   const restoreKey = installTestKey();
   try {
     let calls = 0;
-    const provider = new JevProvider(config, fakeFetch(async () => {
+    const provider = makeJevProvider( fakeFetch(async () => {
       calls += 1;
       return calls === 1 ? new Response('rate limited', { status: 429 }) : response();
     }));
@@ -166,7 +174,7 @@ test('retries a connection failure within the supplied physical-attempt cap', as
   const restoreKey = installTestKey();
   try {
     let calls = 0;
-    const provider = new JevProvider(config, fakeFetch(async () => {
+    const provider = makeJevProvider( fakeFetch(async () => {
       calls += 1;
       if (calls === 1) throw new TypeError('socket disconnected');
       return response();
@@ -184,7 +192,7 @@ test('does not retry authentication failures or leak the key in errors', async (
   const restoreKey = installTestKey();
   try {
     let calls = 0;
-    const provider = new JevProvider(config, fakeFetch(async () => {
+    const provider = makeJevProvider( fakeFetch(async () => {
       calls += 1;
       return new Response(JSON.stringify({ error: { message: 'secret-test-key rejected' } }), { status: 401 });
     }));
@@ -192,7 +200,7 @@ test('does not retry authentication failures or leak the key in errors', async (
     await assert.rejects(provider.decide(request, 4), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 1);
-      assert.equal(error.chargeStatus, 'unknown');
+      assert.equal(error.attempts, 1);
       assert.equal(error.message.includes('secret-test-key'), false);
       return true;
     });
@@ -202,11 +210,11 @@ test('does not retry authentication failures or leak the key in errors', async (
   }
 });
 
-test('stops after the hard attempt limit and marks an uncertain charge unknown', async () => {
+test('stops after the hard physical-attempt limit and reports observed attempts', async () => {
   const restoreKey = installTestKey();
   try {
     let calls = 0;
-    const provider = new JevProvider(config, fakeFetch(async () => {
+    const provider = makeJevProvider( fakeFetch(async () => {
       calls += 1;
       return new Response('temporarily unavailable', { status: 503 });
     }));
@@ -214,7 +222,6 @@ test('stops after the hard attempt limit and marks an uncertain charge unknown',
     await assert.rejects(provider.decide(request, 2), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 2);
-      assert.equal(error.chargeStatus, 'unknown');
       return true;
     });
     assert.equal(calls, 2);
@@ -223,7 +230,7 @@ test('stops after the hard attempt limit and marks an uncertain charge unknown',
   }
 });
 
-test('retains known cost evidence when a billed response fails decision validation', async () => {
+test('does not describe costs in errors when a response fails decision validation', async () => {
   const restoreKey = installTestKey();
   try {
     const invalid = response({
@@ -235,13 +242,13 @@ test('retains known cost evidence when a billed response fails decision validati
         },
       },
     });
-    const provider = new JevProvider(config, fakeFetch(async () => invalid));
+    const provider = makeJevProvider( fakeFetch(async () => invalid));
 
     await assert.rejects(provider.decide(request, 1), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 1);
-      assert.equal(error.chargeStatus, 'billed');
-      assert.equal(error.chargeUsd, 0.00000504);
+      assert.equal(error.message.toLowerCase().includes('charge'), false);
+      assert.equal(error.message.toLowerCase().includes('billing'), false);
       return true;
     });
   } finally {
@@ -250,19 +257,88 @@ test('retains known cost evidence when a billed response fails decision validati
 });
 
 test('rejects a missing key before attempting a request', async () => {
-  const previous = process.env[config.keyEnv];
-  delete process.env[config.keyEnv];
+  const previous = process.env[testKeyEnv];
+  process.env[testKeyEnv] = 'environment-key-must-not-authenticate';
   try {
     const provider = new JevProvider(config, fakeFetch(async () => {
       throw new Error('transport must not be called');
-    }));
+    }), { credentialStore: { availability: async () => 'missing', readForAuthentication: async () => { throw new Error('missing'); } } });
     await assert.rejects(provider.decide(request, 1), (error: unknown) => {
       assert.ok(error instanceof JevCallError);
       assert.equal(error.attempts, 0);
-      assert.equal(error.chargeStatus, 'not_billed');
       return true;
     });
   } finally {
-    if (previous !== undefined) process.env[config.keyEnv] = previous;
+    if (previous === undefined) delete process.env[testKeyEnv];
+    else process.env[testKeyEnv] = previous;
   }
+});
+
+test('native route uses its own vault entry and endpoint for each typed request', async () => {
+  const nativeConfig = defaultJevConfig('typesafe');
+  let capturedUrl = '';
+  let authorization = '';
+  let lookedUpRoute = '';
+  const provider = new JevProvider(nativeConfig, fakeFetch(async (url, init) => {
+    capturedUrl = url;
+    authorization = (init.headers as Record<string, string>).Authorization ?? '';
+    return response();
+  }), {
+    credentialStore: {
+      availability: async () => 'available',
+      readForAuthentication: async (route) => { lookedUpRoute = route; return 'fixture-native-key'; },
+    },
+    measureContext: () => ({ provider: 'jev', status: 'fits', method: 'fixture', modelIdentity: nativeConfig.model, tokenCount: 'estimated', tokens: 1, contextLimit: 1_000, headroomTokens: 0, effectiveLimit: 1_000, details: {} }),
+  });
+  {
+    await provider.decide(request, 1);
+    assert.equal(capturedUrl, 'https://api.typesafe.ai/v1/systemone');
+    assert.equal(authorization, 'Bearer fixture-native-key');
+    assert.equal(lookedUpRoute, 'typesafe');
+
+    const typedRequests: DecisionRequest[] = [
+      { state: request.state, question: { type: 'score', id: 'native-score', instructions: 'How clear is this?', rubric: ['unclear', 'clear'] } } as DecisionRequest,
+      { state: request.state, question: { type: 'noul', id: 'native-noul', instructions: 'Does this feel trustworthy?', criteria: { true: 'trustworthy', false: 'not trustworthy' } } } as DecisionRequest,
+    ];
+    const typedAnswers = [
+      { type: 'score', score: 1, legend: { '0': 'unclear', '1': 'clear' }, probabilities: { '0': 0.2, '1': 0.8 } },
+      { type: 'noul', noul: 0.8 },
+    ];
+    for (const [index, typedRequest] of typedRequests.entries()) {
+      const typedProvider = new JevProvider(nativeConfig, fakeFetch(async () => response({
+        answers: { [typedRequest.question.id]: typedAnswers[index] },
+      })), {
+        credentialStore: {
+          availability: async () => 'available',
+          readForAuthentication: async (route) => { if (route !== 'typesafe') throw new Error('wrong route'); return 'fixture-native-key'; },
+        },
+        measureContext: () => ({ provider: 'jev', status: 'fits', method: 'fixture', modelIdentity: nativeConfig.model, tokenCount: 'estimated', tokens: 1, contextLimit: 1_000, headroomTokens: 0, effectiveLimit: 1_000, details: {} }),
+      });
+      const typedResult = await typedProvider.decide(typedRequest, 1);
+      assert.equal(typedResult.type, typedRequest.question.type);
+    }
+  }
+});
+
+
+test('optional cost evidence uses only known served-model rates and complete token counts', async () => {
+  const native = defaultJevConfig('typesafe');
+  for (const [servedModel, usage, expected] of [
+    ['jev-latest', { input_tokens: 120, output_tokens: 12 }, { amountUsd: 0.00000504, basis: 'published-rate-estimate' }],
+    ['unknown-served-model', { input_tokens: 120, output_tokens: 12 }, undefined],
+    ['jev-latest', { input_tokens: 120 }, undefined],
+    ['jev-latest', {}, undefined],
+    ['unknown-served-model', { cost: 0 }, { amountUsd: 0, basis: 'provider-reported' }],
+  ] as const) {
+    const provider = new JevProvider(native, fakeFetch(async () => response({ model: servedModel, usage })), {
+      credentialStore: testCredentialStore,
+      measureContext: () => ({ provider: 'jev', status: 'fits', method: 'fixture', modelIdentity: native.model, tokenCount: 'estimated', tokens: 1, contextLimit: 100, headroomTokens: 0, effectiveLimit: 100, details: {} }),
+    });
+    const result = await provider.decide(request, 1);
+    assert.deepEqual(result.cost, expected);
+    assert.equal(result.type, 'choice');
+    assert.equal(result.model, servedModel);
+  }
+  const openrouter = makeJevProvider(fakeFetch(async () => response({ model: config.model, usage: { input_tokens: 120, output_tokens: 12 } })));
+  assert.deepEqual((await openrouter.decide(request, 1)).cost, { amountUsd: 0.00000504, basis: 'published-rate-estimate' });
 });

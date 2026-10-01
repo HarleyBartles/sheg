@@ -4,6 +4,11 @@ const identifier = z.string().min(1);
 const prose = z.string().min(1);
 const probability = z.number().finite().min(0).max(1);
 const probabilities = z.record(z.string(), probability);
+export const costEvidenceSchema = z.object({
+  amountUsd: z.number().finite().nonnegative(),
+  basis: z.enum(['provider-reported', 'published-rate-estimate']),
+}).strict();
+export type CostEvidence = z.infer<typeof costEvidenceSchema>;
 const metadata = z.object({
   attempts: z.number().int().positive(),
   provider: z.enum(['jev', 'laya']),
@@ -14,8 +19,7 @@ const metadata = z.object({
     inputTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),
   }).strict(),
-  chargeStatus: z.enum(['billed', 'not_billed', 'unknown']),
-  chargeUsd: z.number().finite().nonnegative().optional(),
+  cost: costEvidenceSchema.optional(),
 }).strict();
 
 const choiceQuestionSchema = z.object({

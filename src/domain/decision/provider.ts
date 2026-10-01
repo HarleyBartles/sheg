@@ -9,9 +9,9 @@ export type ProviderContextFit = {
   modelIdentity: string;
   tokenCount: 'measured' | 'estimated';
   tokens: number;
-  contextLimit: number;
-  headroomTokens: number;
-  effectiveLimit: number;
+  contextLimit: number | null;
+  headroomTokens: number | null;
+  effectiveLimit: number | null;
   details: Record<string, number | string>;
   reason?: string;
 };

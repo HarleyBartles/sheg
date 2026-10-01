@@ -10,7 +10,7 @@ import { decisionValueSchema, type DecisionValue } from '../domain/decision/deci
 
 const manager = new RunManager();
 
-export async function runCli(args: readonly string[], io = { out: (value: string) => process.stdout.write(`${value}\n`), error: (value: string) => process.stderr.write(`${value}\n`) }): Promise<number> {
+export async function runCli(args: readonly string[], io = { out: (value: string) => process.stdout.write(`${value}\n`), error: (value: string) => process.stderr.write(`${value}\n`) }, runManager = manager): Promise<number> {
   try {
     const [command, ...rest] = args;
     const options = parseArgs(rest);
@@ -26,7 +26,7 @@ export async function runCli(args: readonly string[], io = { out: (value: string
     }
     else if (command === 'check' || command === 'start') {
       const config = JSON.parse(await readFile(required(options, 'config'), 'utf8')) as RunConfig;
-      result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint })) : await manager.startRun(config);
+      result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint, runBounds }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint, runBounds })) : await runManager.startRun(config);
     } else if (command === 'trace') {
       const manifestPath = path.resolve(required(options, 'manifest'));
       const cohortPath = path.resolve(required(options, 'cohort'));
@@ -42,10 +42,9 @@ export async function runCli(args: readonly string[], io = { out: (value: string
       const arm = study.manifest.arms.find((candidate) => candidate.id === required(options, 'arm'));
       if (!arm) throw new Error('Arm ID is not in the study.');
       result = await traceStudy(arm, profile, scripted);
-    } else if (command === 'status') result = await manager.runStatus(required(options, 'output'), required(options, 'run-id'));
-    else if (command === 'cancel') result = await manager.cancelRun(required(options, 'output'), required(options, 'run-id'));
-    else if (command === 'reconcile') result = await manager.reconcileRun(required(options, 'output'), required(options, 'run-id'), Number(required(options, 'unpriced-usd')));
-    else if (command === 'resume') result = await manager.resumeRun(required(options, 'output'), required(options, 'run-id'));
+    } else if (command === 'status') result = await runManager.runStatus(required(options, 'output'), required(options, 'run-id'));
+    else if (command === 'cancel') result = await runManager.cancelRun(required(options, 'output'), required(options, 'run-id'));
+    else if (command === 'resume') result = await runManager.resumeRun(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'report') result = await getReport(required(options, 'output'), required(options, 'run-id'));
     else if (command === 'compare') {
       const report = await getReport(required(options, 'output'), required(options, 'run-id'));
@@ -70,7 +69,6 @@ Commands:
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b,...> | --responses <json-array>)
   start --config <json>                         Start a durable run
   status|cancel|resume --output <dir> --run-id <id>
-  reconcile --output <dir> --run-id <id> --unpriced-usd <amount>
   report --output <dir> --run-id <id>
   compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>
   compare-runs --left-output <dir> --left-run-id <id> --left-arm <id> --right-output <dir> --right-run-id <id> --right-arm <id>`;

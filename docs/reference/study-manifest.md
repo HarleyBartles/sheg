@@ -71,6 +71,6 @@ history, and provider framing. See [packet budgeting](../../skills/study-design/
 for current sequence/graph inclusion rules and provider assumptions. After the
 design and frozen cohort are complete, use `poll_preflight` to walk every
 respondent and every possible path. `poll_check` also reports deterministic
-minimum and maximum decision-call bounds; its Jev spend figure is a configured
-ceiling, not an expected charge. Only `poll_start` begins the respondent run,
+minimum and maximum decision-call bounds and whether the call limit covers
+the maximum. Sheg does not calculate a spend ceiling. Only `poll_start` begins the respondent run,
 after the human approves it.

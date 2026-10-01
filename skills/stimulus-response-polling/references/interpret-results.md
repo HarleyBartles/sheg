@@ -8,4 +8,4 @@ Use `poll_compare` for two arms in one report. Use `poll_compare_runs` when comp
 
 When reporting to the user, separate (1) what the run produced and who reached each task, (2) what that evidence suggests editorially about the artefact, and (3) the next useful question to ask. Offer a new task in the current journey or a clean-history rerun over the same frozen cohort when either fits. Do not imply cross-run history passthrough.
 
-Distinct respondent profiles create modeled variation, but profiles can remain correlated and System One models may be highly repeatable. State provider identity, incomplete cells, failures, and unknown charges where relevant.
+Distinct respondent profiles create modeled variation, but profiles can remain correlated and System One models may be highly repeatable. State provider identity, incomplete cells, failures, and per-decision cost evidence when it is supplied.

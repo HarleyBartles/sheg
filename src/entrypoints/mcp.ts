@@ -11,20 +11,21 @@ import { preflightStudy, preflightInputSchema, type StudyPreflightInput } from '
 import { previewStudy } from '../application/study-preview.js';
 import { measurePacketBatch, packetSizingInputSchema, type PacketSizingInput } from '../application/packet-sizing.js';
 import { decisionValueSchema } from '../domain/decision/decision.js';
+import { jevConfigInputSchema, jevConfigSchema } from '../providers/jev/config.js';
 
 const configSchema = z.object({
   manifestPath: z.string(), cohortPath: z.string(), outputDirectory: z.string(), maxCalls: z.number().int().positive(),
-  maxUsd: z.number().positive().optional(), maxPerCallUsd: z.number().positive().optional(), concurrency: z.number().int().positive().max(64).default(1),
-  provider: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('jev'), model: z.string(), keyEnv: z.string(), endpoint: z.string().url(), timeoutMs: z.number().int().positive() }).strict(),
+  concurrency: z.number().int().positive().max(64).default(1),
+  provider: z.union([
+    jevConfigInputSchema.transform((input) => jevConfigSchema.parse(input)),
     z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string(), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
   ]),
 }).strict();
 
 export function createPollingServer(manager = new RunManager()): McpServer {
-  const server = new McpServer({ name: 'sheg', version: '0.1.0' }, { instructions: 'Check and trace do not contact a provider. Hosted runs require explicit call and spend caps.' });
+  const server = new McpServer({ name: 'sheg', version: '0.1.0' }, { instructions: 'Check and trace do not contact a provider. Hosted runs require an explicit maxCalls limit.' });
   server.registerTool('poll_preview', { description: 'Preview every branch from the manifest, including authored stimulus and question wording, choices and destinations, shared continuations, each route’s prior choices, and the stimulus IDs in scope at each question. Requires no cohort or inference-provider call. Rejects previews above 10,000 route contexts instead of returning a partial result.', inputSchema: { manifestPath: z.string().min(1) } }, async ({ manifestPath }) => jsonResult(await previewStudy(manifestPath)));
-  server.registerTool('poll_check', { description: 'Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls. Return deterministic minimum/maximum reachable decision-call counts, whether maxCalls covers the maximum, and for Jev a configured spend ceiling, not a predicted charge.', inputSchema: { config: configSchema } }, async ({ config }) => {
+  server.registerTool('poll_check', { description: 'Validate a manifest, frozen cohort, sources, and explicit provider config without provider calls. Return deterministic minimum/maximum reachable decision-call counts and whether maxCalls covers the maximum.', inputSchema: { config: configSchema } }, async ({ config }) => {
     const checked = await checkStudy(config as RunConfig);
     return jsonResult({ valid: true, respondentCount: checked.study.respondents.length, armCount: checked.study.manifest.arms.length, sourceHashes: checked.study.sources.map((source) => source.sha256), stimulusFingerprint: checked.stimulusFingerprint, executionFingerprint: checked.executionFingerprint, runBounds: checked.runBounds });
   });
@@ -44,7 +45,6 @@ export function createPollingServer(manager = new RunManager()): McpServer {
   server.registerTool('poll_start', { description: 'Start a durable polling run. Returns immediately with its run ID.', inputSchema: { config: configSchema } }, async ({ config }) => jsonResult(await manager.startRun(config as RunConfig)));
   server.registerTool('poll_status', { description: 'Read run status and recover abandoned running state.', inputSchema: { outputDirectory: z.string(), runId: z.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await manager.runStatus(outputDirectory, runId)));
   server.registerTool('poll_cancel', { description: 'Request cancellation and wait for in-flight decisions to settle.', inputSchema: { outputDirectory: z.string(), runId: z.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await manager.cancelRun(outputDirectory, runId)));
-  server.registerTool('poll_reconcile', { description: 'Record the user-verified total provider charge for uncertain Jev calls in a stopped run, then clear its billing block.', inputSchema: { outputDirectory: z.string(), runId: z.string().uuid(), unpricedUsd: z.number().finite().nonnegative() } }, async ({ outputDirectory, runId, unpricedUsd }) => jsonResult(await manager.reconcileRun(outputDirectory, runId, unpricedUsd)));
   server.registerTool('poll_resume', { description: 'Resume a partial run after validating the frozen inputs and execution fingerprint.', inputSchema: { outputDirectory: z.string(), runId: z.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await manager.resumeRun(outputDirectory, runId)));
   server.registerTool('poll_report', { description: 'Build a JSON-safe report from the durable checkpoint.', inputSchema: { outputDirectory: z.string(), runId: z.string().uuid() } }, async ({ outputDirectory, runId }) => jsonResult(await getReport(outputDirectory, runId)));
   server.registerTool('poll_compare', { description: 'Compare two arms from one durable run by matched respondent and task comparison keys.', inputSchema: { outputDirectory: z.string(), runId: z.string().uuid(), leftArmId: z.string(), rightArmId: z.string() } }, async ({ outputDirectory, runId, leftArmId, rightArmId }) => jsonResult(compareReports(await getReport(outputDirectory, runId), leftArmId, rightArmId)));

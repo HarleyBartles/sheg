@@ -11,6 +11,7 @@ import { preflightStudy } from '../src/application/preflight.js';
 const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const tokenizerJsonPath = path.join(fixtures, 'laya-tokenizer.json');
 const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerJsonPath)).digest('hex');
+const missingStore = { availability: async () => 'missing' as const, readForAuthentication: async () => { throw new Error('missing'); } };
 
 test('preflight measures every frozen respondent packet for each configured provider without inference', async () => {
   const result = await preflightStudy({
@@ -18,9 +19,9 @@ test('preflight measures every frozen respondent packet for each configured prov
     cohortPath: path.join(fixtures, 'cohort.json'),
     providers: [
       { kind: 'laya', baseUrl: 'http://127.0.0.1:8787', checkpoint: 'fixture', contextLimit: 1024, headLimit: 192, tokenizerJsonPath, tokenizerSha256, timeoutMs: 1000 },
-      { kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'NO_NETWORK_REQUIRED', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 },
+      { kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 },
     ],
-  });
+  }, { credentialStore: missingStore });
   assert.equal(result.provisional, false);
   assert.equal(result.providers.length, 2);
   assert.ok(result.providers.every((provider) => provider.packetCount > 0 && provider.complete));
@@ -39,8 +40,8 @@ test('an unavailable provider measurement or incomplete traversal cannot report 
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
     maxPackets: 0,
-    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', keyEnv: 'NO_KEY', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
-  });
+    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
+  }, { credentialStore: missingStore });
   assert.equal(result.providers[0]?.status, 'unverified');
   assert.equal(result.providers[0]?.complete, false);
   assert.equal(result.providers[0]?.unavailable.length, 0);
@@ -49,18 +50,31 @@ test('an unavailable provider measurement or incomplete traversal cannot report 
 test('an unknown Jev context window is unverified even after complete path traversal', async () => {
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
-    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
-  });
+    providers: [{ kind: 'jev', model: 'typesafe/jev-latest', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
+  }, { credentialStore: missingStore });
   assert.equal(result.providers[0]?.complete, true);
   assert.equal(result.providers[0]?.status, 'unverified');
   assert.ok((result.providers[0]?.unavailable.length ?? 0) > 0);
 });
 
+test('native TypeSafe preflight reports its credential and keeps unknown context evidence unavailable', async () => {
+  const result = await preflightStudy({
+    manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
+    providers: [{ kind: 'jev', route: 'typesafe' }],
+  }, { credentialStore: { availability: async () => 'available', readForAuthentication: async () => 'fixture-key' } });
+
+  assert.equal(result.providers[0]?.configuration, 'configured');
+  assert.equal(result.providers[0]?.route, 'typesafe');
+  assert.equal(result.providers[0]?.credentialAvailability, 'available');
+  assert.equal(result.providers[0]?.status, 'unverified');
+  assert.ok(result.providers[0]?.unavailable.some(({ reason }) => reason === 'typesafe-model-context-unverified'));
+});
+
 test('maximum-profile mode exercises the full aggregate prose allowance and labels results provisional', async () => {
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), mode: 'maximum-profile',
-    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: 'UNSET', endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
-  });
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
+  }, { credentialStore: missingStore });
   assert.equal(result.provisional, true);
   assert.equal(result.mode, 'maximum-profile');
   assert.equal(result.providers[0]?.status, 'unverified');
@@ -74,8 +88,8 @@ test('provider context fit stays distinct from missing credentials and unverifie
   delete process.env[missingCredential];
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
-    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: missingCredential, endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
-  });
+    providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
+  }, { credentialStore: missingStore });
   assert.equal(result.providers[0]?.status, 'unverified');
   assert.match(result.providers[0]?.incompleteReason ?? '', /response history/i);
   assert.equal(result.providers[0]?.configuration, 'incomplete');
@@ -85,8 +99,8 @@ test('provider context fit stays distinct from missing credentials and unverifie
   try {
     const blankKey = await preflightStudy({
       manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
-      providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', keyEnv: missingCredential, endpoint: 'https://example.invalid/decisions', timeoutMs: 1000 }],
-    });
+      providers: [{ kind: 'jev', model: 'typesafe/jev-1.13', endpoint: 'https://openrouter.ai/api/alpha/decisions', timeoutMs: 1000 }],
+    }, { credentialStore: missingStore });
     assert.equal(blankKey.providers[0]?.configuration, 'incomplete');
   } finally {
     delete process.env[missingCredential];
@@ -130,4 +144,14 @@ test('preflight does not claim fit when a later packet includes typed response h
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+
+test('preflight identifies both routes and distinguishes missing from unavailable vault entries', async () => {
+  const result = await preflightStudy({
+    manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
+    providers: [{ kind: 'jev', route: 'openrouter', model: 'shared-alias' }, { kind: 'jev', route: 'typesafe', model: 'shared-alias' }],
+  }, { credentialStore: { availability: async route => route === 'openrouter' ? 'missing' : 'unavailable', readForAuthentication: async () => { throw new Error('status must not read keys'); } } });
+  assert.deepEqual(result.providers.map(entry => [entry.route, entry.credentialAvailability]), [['openrouter', 'missing'], ['typesafe', 'unavailable']]);
+  assert.ok(result.providers.every(entry => entry.availability === 'unverified'));
 });
