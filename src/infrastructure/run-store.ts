@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { decisionRequestSchema } from '../domain/decision/decision.js';
@@ -20,6 +20,7 @@ export type AttemptOutcome =
 export type RunListQuery = { status?: RunStatus; label?: string; cursor?: string; limit?: number };
 export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean }>; blockedByActiveWork: boolean };
 export type DeleteResult = { deletedRunIds: string[]; removed: { runs: number; evaluations: number; attempts: number } };
+export type StorageInfo = { integrity: 'ok' | 'failed'; databaseBytes: number; runCount: number; evaluationCount: number; attemptCount: number; activeRunCount: number };
 
 export class RunStoreError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -39,6 +40,8 @@ export interface RunStore {
   resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
   previewDelete(runIds: string[]): DeletePreview;
   deleteRuns(runIds: string[]): DeleteResult;
+  storageInfo(): StorageInfo;
+  optimizeStorage(): void;
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null;
   heartbeat(claim: WorkerClaim, nowMs: number): boolean;
   reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null;
@@ -216,13 +219,13 @@ export function openRunStore(dataRoot: string, options: { now?: () => number } =
   const database = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { timeout: 5_000, enableForeignKeyConstraints: true });
   try { initialize(database); }
   catch (error) { database.close(); throw error; }
-  return new SQLiteRunStore(database, options.now ?? Date.now);
+  return new SQLiteRunStore(database, path.join(dataRoot, 'runs.sqlite'), options.now ?? Date.now);
 }
 
 class SQLiteRunStore implements RunStore {
   private isClosed = false;
 
-  constructor(private readonly database: DatabaseSync, private readonly now: () => number) {}
+  constructor(private readonly database: DatabaseSync, private readonly databasePath: string, private readonly now: () => number) {}
 
   findSubmission(submissionId: string, requestFingerprint: string): RunStatusView | null {
     this.ensureOpen();
@@ -466,8 +469,35 @@ class SQLiteRunStore implements RunStore {
       }
       return { deletedRunIds: counts.map(({ runId }) => runId), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
     });
-    this.database.exec('PRAGMA optimize');
+    this.optimizeStorage();
     return result;
+  }
+
+  storageInfo(): StorageInfo {
+    this.ensureOpen();
+    try {
+      const integrityRows = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
+      const integrity = integrityRows.length === 1 && integrityRows[0]?.integrity_check === 'ok' ? 'ok' : 'failed';
+      const count = (table: 'runs' | 'evaluations' | 'attempts', where = '') => asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get() as DatabaseRow).count, `${table} count`);
+      return {
+        integrity,
+        databaseBytes: statSync(this.databasePath).size,
+        runCount: count('runs'),
+        evaluationCount: count('evaluations'),
+        attemptCount: count('attempts'),
+        activeRunCount: count('runs', "WHERE status IN ('prepared', 'running')"),
+      };
+    } catch (error) {
+      if (error instanceof RunStoreError) throw error;
+      throw new RunStoreError('storage_operation_failed', 'Sheg could not inspect datastore health.', { cause: error });
+    }
+  }
+
+  optimizeStorage(): void {
+    this.ensureOpen();
+    if (this.storageInfo().integrity !== 'ok') throw new RunStoreError('storage_integrity_failed', 'Sheg will not optimize a datastore whose integrity check failed.');
+    try { this.database.exec('PRAGMA optimize'); }
+    catch (error) { throw new RunStoreError('storage_operation_failed', 'Sheg could not optimize the datastore.', { cause: error }); }
   }
 
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null {

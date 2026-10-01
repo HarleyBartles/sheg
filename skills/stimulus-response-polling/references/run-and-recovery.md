@@ -77,9 +77,34 @@ the next respondent.
 Provider attempts are not new responses. An uncertain in-flight call consumes
 its reserved physical-call allowance because the provider may have received
 it. Expired workers appear as interrupted, and a read will not retry them.
-Explicit resume is a later capability; until exposed, report the interrupted
-state and preserve the run ID. Deletion is also explicit and controlled by
-dedicated future tools, never by manually changing SQLite or sidecar files.
+An interrupted run does not restart on its own. When the user wants it to
+continue, call `run_resume` with its run ID. The same ID, frozen request,
+completed answers, attempt history, and original `maxCalls` remain in force.
+An uncertain in-flight call is charged once because the provider may have
+received it. Only one concurrent resume request launches a worker. Prepared
+runs are returned as-is; running and terminal runs are not resumable.
+
+## Delete selected runs
+
+Deletion is explicit and accepts 1 to 200 unique run IDs. First call
+`run_delete` with `dryRun: true`. The preview lists each selected run's status,
+evaluation and attempt counts, and whether active work blocks deletion. A
+preview does not remove data. Sheg rechecks the whole selection at deletion
+time, so the preview is not a reservation. If any run is missing or active,
+the delete is all-or-none. Cancel active work, poll until it is terminal, then
+submit the explicit selection again. Deletion removes the run and its
+associated evaluation and attempt records. Never manipulate SQLite files or
+sidecars directly.
+
+## Inspect and optimize storage
+
+Call `run_storage` with `operation: "inspect"` for SQLite integrity status,
+database byte size, and run, evaluation, attempt, and active-run counts. The
+report contains no host path or SQL. Call `run_storage` with
+`operation: "optimize"` to ask Sheg to run SQLite optimization. Sheg refuses
+to optimize when its integrity check fails. Successful deletion also triggers
+Sheg-managed optimization. Do not run maintenance at harness startup or
+manually alter datastore files.
 
 Provider-reported cost or a published-rate estimate may appear per decision
 when available. Cost evidence is optional and may differ by the user's API

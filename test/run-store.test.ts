@@ -516,3 +516,37 @@ test('delete revalidates state after preview and cascades evaluations and attemp
     } finally { verify.close(); }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test('storage inspection reports exact healthy counts and optimization preserves run evidence', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const empty = store.storageInfo();
+    assert.equal(empty.integrity, 'ok');
+    assert.ok(empty.databaseBytes > 0);
+    assert.deepEqual({ runs: empty.runCount, evaluations: empty.evaluationCount, attempts: empty.attemptCount, active: empty.activeRunCount }, { runs: 0, evaluations: 0, attempts: 0, active: 0 });
+
+    const runId = await completedRun(store);
+    const request = store.getRequest(runId);
+    const answers = store.answers(runId);
+    const populated = store.storageInfo();
+    assert.equal(populated.integrity, 'ok');
+    assert.deepEqual({ runs: populated.runCount, evaluations: populated.evaluationCount, attempts: populated.attemptCount, active: populated.activeRunCount }, { runs: 1, evaluations: 2, attempts: 2, active: 0 });
+    store.optimizeStorage();
+    assert.deepEqual(store.getRequest(runId), request);
+    assert.deepEqual(store.answers(runId), answers);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('storage inspection reports failed integrity without calling corrupt data healthy', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const runId = store.accept(randomUUID(), await preparedRun()).run.runId;
+    const db = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try { db.exec('PRAGMA ignore_check_constraints = ON'); db.prepare("UPDATE runs SET status = 'corrupt' WHERE run_id = ?").run(runId); }
+    finally { db.close(); }
+    assert.equal(store.storageInfo().integrity, 'failed');
+    assert.throws(() => store.optimizeStorage(), (error: unknown) => error instanceof RunStoreError && error.code === 'storage_integrity_failed');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

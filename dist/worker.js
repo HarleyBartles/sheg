@@ -20700,7 +20700,7 @@ async function executeQuestionRun(store2, runId2, providerFactory) {
 
 // src/infrastructure/run-store.ts
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -20967,14 +20967,16 @@ function openRunStore(dataRoot, options = {}) {
     database.close();
     throw error62;
   }
-  return new SQLiteRunStore(database, options.now ?? Date.now);
+  return new SQLiteRunStore(database, path3.join(dataRoot, "runs.sqlite"), options.now ?? Date.now);
 }
 var SQLiteRunStore = class {
-  constructor(database, now) {
+  constructor(database, databasePath, now) {
     this.database = database;
+    this.databasePath = databasePath;
     this.now = now;
   }
   database;
+  databasePath;
   now;
   isClosed = false;
   findSubmission(submissionId, requestFingerprint) {
@@ -21223,8 +21225,36 @@ var SQLiteRunStore = class {
       }
       return { deletedRunIds: counts.map(({ runId: runId2 }) => runId2), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
     });
-    this.database.exec("PRAGMA optimize");
+    this.optimizeStorage();
     return result;
+  }
+  storageInfo() {
+    this.ensureOpen();
+    try {
+      const integrityRows = this.database.prepare("PRAGMA integrity_check").all();
+      const integrity = integrityRows.length === 1 && integrityRows[0]?.integrity_check === "ok" ? "ok" : "failed";
+      const count = (table, where = "") => asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count, `${table} count`);
+      return {
+        integrity,
+        databaseBytes: statSync(this.databasePath).size,
+        runCount: count("runs"),
+        evaluationCount: count("evaluations"),
+        attemptCount: count("attempts"),
+        activeRunCount: count("runs", "WHERE status IN ('prepared', 'running')")
+      };
+    } catch (error62) {
+      if (error62 instanceof RunStoreError) throw error62;
+      throw new RunStoreError("storage_operation_failed", "Sheg could not inspect datastore health.", { cause: error62 });
+    }
+  }
+  optimizeStorage() {
+    this.ensureOpen();
+    if (this.storageInfo().integrity !== "ok") throw new RunStoreError("storage_integrity_failed", "Sheg will not optimize a datastore whose integrity check failed.");
+    try {
+      this.database.exec("PRAGMA optimize");
+    } catch (error62) {
+      throw new RunStoreError("storage_operation_failed", "Sheg could not optimize the datastore.", { cause: error62 });
+    }
   }
   claim(runId2, nowMs, workerPid) {
     this.ensureOpen();

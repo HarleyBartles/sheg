@@ -34,6 +34,11 @@ export function createPollingServer(service: RunService = createDefaultRunServic
   server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched respondent call is allowed to settle and its answer is retained.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
   server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work under the same run ID, saved request, and remaining provider-call allowance. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
   server.registerTool('run_delete', { description: 'Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.', inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? service.previewDelete(runIds) : service.deleteRuns(runIds)));
+  server.registerTool('run_storage', { description: 'Inspect Sheg-managed local datastore health or ask Sheg to optimize it. No file paths or SQL are exposed.', inputSchema: z.object({ operation: z.enum(['inspect', 'optimize']) }).strict() }, async ({ operation }) => safeResult(() => {
+    if (operation === 'inspect') return service.storageInfo();
+    service.optimizeStorage();
+    return { optimized: true };
+  }));
   return server;
 }
 

@@ -32,7 +32,7 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
   const f = await connectedFixture();
   try {
     const tools = await f.client.listTools();
-    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_resume', 'run_start']);
+    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_resume', 'run_start', 'run_storage']);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
@@ -59,6 +59,23 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
     assert.equal((unknown.structuredContent as { error: { code: string } }).error.code, 'run_not_found');
     const extra = await f.client.callTool({ name: 'run_get', arguments: { runId: run.runId, view: 'status', cursor: 'ignored' } });
     assert.equal(extra.isError, true);
+  } finally { await f.close(); }
+});
+
+test('run_storage exposes a path-free health report and explicit optimization', async () => {
+  const f = await connectedFixture();
+  try {
+    const inspection = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
+    assert.equal(inspection.isError ?? false, false);
+    const info = inspection.structuredContent as { integrity: string; databaseBytes: number; runCount: number; evaluationCount: number; attemptCount: number; activeRunCount: number };
+    assert.equal(info.integrity, 'ok');
+    assert.ok(info.databaseBytes > 0);
+    assert.deepEqual([info.runCount, info.evaluationCount, info.attemptCount, info.activeRunCount], [0, 0, 0, 0]);
+    assert.doesNotMatch(JSON.stringify(info), /runs\.sqlite|[A-Z]:\\|SELECT|PRAGMA/i);
+    const optimized = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'optimize' } });
+    assert.deepEqual(optimized.structuredContent, { optimized: true });
+    const invalid = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'vacuum' } });
+    assert.equal(invalid.isError, true);
   } finally { await f.close(); }
 });
 

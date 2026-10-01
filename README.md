@@ -29,7 +29,7 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
    ```
 
 2. Restart the Codex desktop app, open the Plugins Directory, select the **Sheg** marketplace, and install the plugin.
-3. Confirm the `run_inspect`, `run_start`, `run_list`, `run_get`, and `run_cancel` tools are available.
+3. Confirm the `run_inspect`, `run_start`, `run_list`, `run_get`, `run_cancel`, `run_resume`, `run_delete`, and `run_storage` tools are available.
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).
 
@@ -42,7 +42,7 @@ existing Git-based marketplace route remains available.
 1. Start with the text and what you want to learn. The [study-design skill](skills/study-design/SKILL.md) helps an agent identify the question, choose the simplest useful material unit and respondent perspectives, and build a direct request without asking the user to author a study file.
 2. Configure one provider. Jev runs require a key in the selected Windows Credential Manager target and a `maxCalls` limit. Local Laya runs require a running service and the matching checkpoint tokenizer JSON and SHA-256 digest. See the [Jev setup and wire contract](docs/providers/jev.md) and [Laya capability notes](docs/providers/laya.md).
 3. Call `run_inspect` with the exact typed question, material, respondents, provider, and call limit. It validates the request and measures fit without inference or persistence. Resolve any fit problem before proceeding.
-4. For an authorized hosted run, call `run_start` with a UUID submission ID and the inspected request. Retain the returned run ID. Use `run_get` with status, request, or answers views and `run_list` to discover runs. Answers are machine-readable; the agent explains what they mean and reports incomplete or failed evaluations. `run_cancel` preserves any answer already in flight. Reads never resume work.
+4. For an authorized hosted run, call `run_start` with a UUID submission ID and the inspected request. Retain the returned run ID. Use `run_get` with status, request, or answers views and `run_list` to discover runs. Answers are machine-readable; the agent explains what they mean and reports incomplete or failed evaluations. `run_cancel` preserves any answer already in flight. An interrupted run can be resumed explicitly with `run_resume`; it keeps its original ID and call ceiling, and uncertain calls remain charged. Before deleting, call `run_delete` with `dryRun: true`; active runs must be cancelled and polled to a terminal state. `run_storage` lets Sheg inspect datastore integrity/counts or run SQLite optimization. Reads never resume work.
 
 In Codex, you can start with a request such as: “I have this article and want to know where readers lose interest. Help me decide what to ask and whose perspectives to include, then show me the proposed study journey.” The agent uses Sheg's design guidance to shape the human-language design, translates it into the harness, and checks fit before asking for approval to run.
 
