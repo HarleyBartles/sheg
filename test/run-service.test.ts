@@ -8,6 +8,7 @@ import type { DecisionProvider, ProviderContextFit } from '../src/domain/decisio
 import type { InlineRunRequest } from '../src/domain/run/request.js';
 import { prepareRun } from '../src/application/run-inspection.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
+import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
 import { createRunService, RunServiceError } from '../src/application/run-service.js';
 
 function request(text = 'Section three') : InlineRunRequest {
@@ -69,6 +70,23 @@ test('an exact submission retry returns its durable run before rechecking creden
     assert.equal(readinessChecks, 1);
     assert.equal(calls.measures, 1);
     assert.equal(launches, 1);
+  } finally { await fixture.close(); }
+});
+
+test('a present malformed provider credential is reported before durable acceptance', async () => {
+  const fixture = await setup();
+  try {
+    const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() { throw new Error('must not launch'); } }, {
+      assertProviderReady: async () => { throw new CredentialStoreError('credential_malformed', 'openrouter'); },
+    });
+    await assert.rejects(service.start(randomUUID(), request()), (error: unknown) => {
+      assert.ok(error instanceof RunServiceError);
+      assert.equal(error.code, 'provider_credential_malformed');
+      assert.match(error.message, /UTF-8 or UTF-16LE/);
+      assert.doesNotMatch(error.message, /fixture-secret|73 bytes/);
+      return true;
+    });
+    assert.equal(fixture.store.list({}).items.length, 0);
   } finally { await fixture.close(); }
 });
 

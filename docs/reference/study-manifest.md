@@ -1,4 +1,9 @@
-# Study manifest
+# Study manifest (CLI journey format)
+
+This file-backed journey format remains available through the Sheg CLI. The
+v0.3.0 MCP accepts direct inline requests instead; see the
+[study-design skill](../../skills/study-design/SKILL.md) for its supported
+request shape and tools. Do not pass this manifest to the current MCP.
 
 The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms under a title and purpose. Each arm is a stimulus variant and has its own sources, ordered stimulus items, typed tasks, and presentation mode. See the [article fixture](../../test/fixtures/article.json), [chapter fixture](../../test/fixtures/chapter.json), and [respondent cohort](../../test/fixtures/cohort.json).
 
@@ -13,8 +18,7 @@ The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms 
 
 For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse Choice option IDs only when they retain the same meaning. Each frozen respondent is run once through every arm in the same run. Reports align task occurrence order within each respondent and compare typed values only when their task meanings align.
 
-Independent runs can also be compared with `poll_compare_runs` or the CLI
-`compare-runs` command. The reports must identify the exact same ordered frozen
+Independent runs can also be compared with the CLI `compare-runs` command. The reports must identify the exact same ordered frozen
 respondent profiles. Select one arm from each run; only responses with matching
 `comparisonKey`, occurrence, type, and authored task meaning are comparable.
 This makes a rerun with a changed stimulus comparable without requiring A/B
@@ -33,25 +37,24 @@ The [study manifest schema](../../skills/stimulus-response-polling/assets/study-
 
 Start with the source material, what the person wants to learn, and whose
 perspective would help. The [study-design skill](../../skills/study-design/SKILL.md)
-teaches the agent to propose tasks and a cohort without asking the person to
-author graph JSON. Get approval of that human-language study design, then
-translate it to the manifest. Validate the manifest, then use `poll_preview`
-before creating the cohort to show the complete generic journey, including all
+teaches the agent to propose a simple direct request without asking the person
+to author graph JSON. For the CLI-only journey format described here, translate
+the agreed design to a manifest and validate it with `sheg check`. The CLI
+`preview --manifest` command shows the complete generic journey, including all
 branches, stimulus reveals, task wording, choices, destinations, and shared
 continuations. Each question includes route-specific prior choice meanings and
 the stimulus IDs in scope; those IDs resolve to stimulus text in the preview.
 A shared question is shown once with a context for each route that reaches it.
 Preview requires neither a cohort nor a provider and makes no inference call.
 It rejects previews above 10,000 route contexts rather than returning partial
-output. After the cohort and exact run configuration exist, use `poll_check` to
-validate them.
+output. The direct MCP does not accept this manifest.
 
 ## Check draft packet fit while authoring
 
-`poll_measure_packets` estimates or measures individual task packets before a
+The CLI `preflight` command estimates or measures individual task packets before a
 complete study exists. Each dimension (`respondents`, `stimuli`, `tasks`, and
 `trajectories`) is an array of `{ "id", "value" }` variants. `providers` uses
-the same provider configuration shape as `poll_preflight`.
+the provider configuration documented by the CLI help.
 
 Use `paired` when each multi-valued dimension is deliberately matched by
 position. For example, three profiles and three task drafts produce three
@@ -69,8 +72,8 @@ expected at that decision. The packet contains the respondent's five profile
 fields, in-scope stimulus, current task and choices, prior choice/exposure
 history, and provider framing. See [packet budgeting](../../skills/study-design/references/packet-budgeting.md)
 for current sequence/graph inclusion rules and provider assumptions. After the
-design and frozen cohort are complete, use `poll_preflight` to walk every
-respondent and every possible path. `poll_check` also reports deterministic
-minimum and maximum decision-call bounds and whether the call limit covers
-the maximum. Sheg does not calculate a spend ceiling. Only `poll_start` begins the respondent run,
-after the human approves it.
+design and frozen cohort are complete, use CLI `preflight` to walk every
+respondent and every possible path. CLI `check` reports deterministic minimum
+and maximum decision-call bounds and whether the call limit covers the
+maximum. Sheg does not calculate a spend ceiling. The v0.3.0 MCP direct-run
+tools use `run_inspect` and `run_start` instead.

@@ -32,4 +32,4 @@ The cohort snapshot makes expansion auditable and independent of later library e
 
 A user may skip archetypes and author a cohort of concrete respondent profiles directly. Follow the [respondent profile](../assets/respondent-profile.schema.json) and [frozen cohort](../assets/respondent-cohort.schema.json) contracts. Leave `archetypeId` and `variation` out of direct profiles and omit the cohort's top-level `archetypes` array when it is not needed. Keep profiles poll-specific, distinct, and frozen before outcomes are viewed.
 
-After authoring either route, validate against the [study manifest schema](../assets/study-manifest.schema.json), then call `poll_check` on the exact manifest, cohort, provider configuration, and budgets. Fix validation errors; do not silently rewrite the user's cohort.
+For the file-backed journey CLI, validate against the [study manifest schema](../assets/study-manifest.schema.json) and run `sheg check` on the exact manifest, cohort, provider configuration, and budgets. For the direct MCP request, include the authored profiles and call `run_inspect`. Fix validation errors; do not silently rewrite the user's cohort.

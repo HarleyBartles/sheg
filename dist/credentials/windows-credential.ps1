@@ -47,13 +47,58 @@ $credentialTypeGeneric = 1
 $credentialPersistLocalMachine = 2
 $missingCredential = 1168
 
+function ConvertFrom-ShegCredentialBlob {
+  param([Parameter(Mandatory = $true)] $Credential)
+
+  $size = [int64]$Credential.CredentialBlobSize
+  if ($size -le 0 -or $size -gt 5120 -or $Credential.CredentialBlob -eq [IntPtr]::Zero) {
+    throw [FormatException]::new('The stored credential format is unsupported.')
+  }
+
+  $bytes = [byte[]]::new([int]$size)
+  try {
+    for ($index = 0; $index -lt $bytes.Length; $index++) {
+      $bytes[$index] = [Runtime.InteropServices.Marshal]::ReadByte($Credential.CredentialBlob, $index)
+    }
+
+    # Credential Manager stores generic blobs as opaque bytes. Accept a safe
+    # UTF-8 token directly (including odd byte lengths) before trying the
+    # UTF-16LE representation written by Sheg's own setup command.
+    try {
+      $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+      $utf8Value = $utf8.GetString($bytes)
+      if ($utf8Value.Length -gt 0 -and $utf8Value -notmatch '[\x00-\x1f\x7f]') { return $utf8Value }
+    }
+    catch { }
+
+    if (($bytes.Length % 2) -eq 0) {
+      try {
+        $utf16 = [System.Text.UnicodeEncoding]::new($false, $false, $true)
+        $utf16Value = $utf16.GetString($bytes)
+        if ($utf16Value.Length -gt 0 -and $utf16Value -notmatch '[\x00-\x1f\x7f]') { return $utf16Value }
+      }
+      catch { }
+    }
+    throw [FormatException]::new('The stored credential format is unsupported.')
+  }
+  finally { [Array]::Clear($bytes, 0, $bytes.Length) }
+}
+
 switch ($Operation) {
   'Status' {
     $nativeCredential = [IntPtr]::Zero
     if ([ShegCredentialApi]::CredRead($TargetName, $credentialTypeGeneric, 0, [ref] $nativeCredential)) {
-      [ShegCredentialApi]::CredFree($nativeCredential)
-      [Console]::Out.WriteLine('AVAILABLE')
-      exit 0
+      try {
+        $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($nativeCredential, [type][ShegCredential])
+        $null = ConvertFrom-ShegCredentialBlob $credential
+        [Console]::Out.WriteLine('AVAILABLE')
+        exit 0
+      }
+      catch [FormatException] {
+        [Console]::Out.WriteLine('MALFORMED')
+        exit 4
+      }
+      finally { [ShegCredentialApi]::CredFree($nativeCredential) }
     }
     if ([Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq $missingCredential) {
       [Console]::Out.WriteLine('MISSING')
@@ -66,18 +111,13 @@ switch ($Operation) {
     if (-not [ShegCredentialApi]::CredRead($TargetName, $credentialTypeGeneric, 0, [ref] $nativeCredential)) { exit 1 }
     try {
       $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($nativeCredential, [type][ShegCredential])
-      if ($credential.CredentialBlobSize -eq 0 -or ($credential.CredentialBlobSize % 2) -ne 0) { exit 1 }
-      $length = [int]($credential.CredentialBlobSize / 2)
-      $characters = [char[]]::new($length)
-      try {
-        for ($index = 0; $index -lt $length; $index++) {
-          $characters[$index] = [char]([Runtime.InteropServices.Marshal]::ReadInt16($credential.CredentialBlob, $index * 2) -band 0xffff)
-        }
-        [Console]::Out.Write([string]::new($characters))
-      }
-      finally {
-        [Array]::Clear($characters, 0, $characters.Length)
-      }
+      $value = ConvertFrom-ShegCredentialBlob $credential
+      [Console]::Out.Write($value)
+      $value = $null
+    }
+    catch [FormatException] {
+      [Console]::Out.WriteLine('MALFORMED')
+      exit 4
     }
     finally {
       [ShegCredentialApi]::CredFree($nativeCredential)

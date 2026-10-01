@@ -5,7 +5,7 @@ import type { DecisionProvider, ProviderContextFit } from '../domain/decision/pr
 import { DecisionError, validateDecision } from '../domain/decision/validate.js';
 import { jevConfigSchema, type JevConfigInput, type JevConfig } from './jev/config.js';
 import { jevMetadata } from './jev/model-metadata.js';
-import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
+import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 
 export { jevConfigInputSchema, jevConfigSchema, type JevConfigInput, type JevConfig, type JevRoute } from './jev/config.js';
 
@@ -16,6 +16,7 @@ export class JevCallError extends Error {
     readonly contextFit?: ProviderContextFit,
     readonly decisionId?: string,
     readonly failureScope: 'evaluation' | 'run' = 'evaluation',
+    readonly failureCode = 'provider_unavailable',
   ) {
     super(message);
     this.name = 'JevCallError';
@@ -99,7 +100,10 @@ export class JevProvider implements DecisionProvider {
     if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     let apiKey: string;
     try { apiKey = await this.credentialStore.readForAuthentication(this.config.route); }
-    catch { throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, undefined, undefined, 'run'); }
+    catch (error) {
+      if (error instanceof CredentialStoreError) throw new JevCallError(error.message, 0, undefined, undefined, 'run', error.code);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, undefined, undefined, 'run', 'credential_unavailable');
+    }
 
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));

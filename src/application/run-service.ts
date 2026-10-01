@@ -5,6 +5,7 @@ import type { InlineRunRequest, PreparedRun } from '../domain/run/request.js';
 import { inlineRunRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
 import type { RunStore } from '../infrastructure/run-store.js';
+import { CredentialStoreError } from '../infrastructure/credentials/windows.js';
 import { fingerprintRunRequest, prepareRun } from './run-inspection.js';
 
 export class RunServiceError extends Error {
@@ -64,6 +65,10 @@ export function createRunService(
     try { await options.assertProviderReady?.(request.provider); }
     catch (error) {
       if (error instanceof RunServiceError) throw error;
+      if (error instanceof CredentialStoreError) {
+        const code = error.code === 'credential_malformed' ? 'provider_credential_malformed' : error.code === 'credential_missing' ? 'provider_credential_missing' : 'provider_credential_unavailable';
+        throw new RunServiceError(code, error.message, { cause: error });
+      }
       throw new RunServiceError('provider_credential_unavailable', 'Provider credential is unavailable.', { cause: error });
     }
     const admission = await prepareRun(request, providerFactory(request.provider));

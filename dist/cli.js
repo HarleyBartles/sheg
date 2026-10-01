@@ -21200,6 +21200,17 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path4 from "node:path";
 import { fileURLToPath } from "node:url";
+var CredentialStoreError = class extends Error {
+  constructor(code, route) {
+    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
+    super(message);
+    this.code = code;
+    this.route = route;
+    this.name = "CredentialStoreError";
+  }
+  code;
+  route;
+};
 var defaultTargets = {
   typesafe: "Sheg/Jev/TypeSafe",
   openrouter: "Sheg/Jev/OpenRouter"
@@ -21218,6 +21229,7 @@ var WindowsCredentialStore = class {
       const result = await this.run(this.arguments("Status", route));
       if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
       if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
+      if (result.code === 4 && result.stdout.trim() === "MALFORMED") return "malformed";
       return "unavailable";
     } catch {
       return "unavailable";
@@ -21228,10 +21240,11 @@ var WindowsCredentialStore = class {
     try {
       result = await this.run(this.arguments("Read", route));
     } catch {
-      throw new Error(`The ${route} secure credential could not be read.`);
+      throw new CredentialStoreError("credential_unavailable", route);
     }
     const key = result.stdout.replace(/\r?\n$/, "");
-    if (result.code !== 0 || !key) throw new Error(`The ${route} secure credential could not be read.`);
+    if (result.code === 4 && result.stdout.trim() === "MALFORMED") throw new CredentialStoreError("credential_malformed", route);
+    if (result.code !== 0 || !key) throw new CredentialStoreError("credential_unavailable", route);
     return key;
   }
   async setup(route) {
@@ -21303,18 +21316,20 @@ async function runPowerShell(helperPath, args, interactive = false) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation") {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable") {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.failureScope = failureScope;
+    this.failureCode = failureCode;
     this.name = "JevCallError";
   }
   attempts;
   contextFit;
   decisionId;
   failureScope;
+  failureCode;
 };
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -21388,8 +21403,9 @@ var JevProvider = class {
     let apiKey;
     try {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
-    } catch {
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run");
+    } catch (error62) {
+      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));

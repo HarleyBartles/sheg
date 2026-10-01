@@ -26,8 +26,10 @@ export async function executeQuestionRun(store: RunStore, runId: string, provide
         store.settle(claim, reservation.attemptId, { kind: 'answered', result });
       } catch (error) {
         const scope = error instanceof JevCallError || error instanceof LayaCallError ? error.failureScope : 'evaluation';
-        const code = scope === 'run' ? 'provider_unavailable' : 'decision_failed';
-        const message = scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
+        const code = scope === 'run' && error instanceof JevCallError ? error.failureCode : scope === 'run' ? 'provider_unavailable' : 'decision_failed';
+        const message = scope === 'run' && error instanceof JevCallError && error.failureCode.startsWith('credential_')
+          ? error.message
+          : scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
         store.settle(claim, reservation.attemptId, { kind: 'failed', code, message, scope });
         if (scope === 'run') break;
       }

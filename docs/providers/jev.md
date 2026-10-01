@@ -28,6 +28,17 @@ setup and use local Laya. Windows Credential Manager is the only secure-store
 backend in this implementation. macOS Keychain and Linux Secret Service
 support are future work.
 
+Credential Manager's generic credential blob is opaque bytes, so existing
+entries may contain a UTF-8 token or the UTF-16LE representation Sheg writes
+during setup. Sheg reads both formats. Earlier Sheg versions treated every
+blob as UTF-16LE: a valid odd-length UTF-8 OpenRouter token could therefore be
+reported as present by the status check but rejected before authentication
+when its byte length was odd. v0.3 validates readability as part of status and
+acceptance. If a stored value is present but neither supported text encoding,
+`run_start` returns the structured error `provider_credential_malformed` and a
+safe message to re-enter the key with Sheg's setup helper. The token and its
+bytes are never included in the error. `run_inspect` remains keyless.
+
 ## Provider evidence
 
 The adapter uses Node `fetch` for both routes. It sends the configured model,

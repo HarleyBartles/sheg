@@ -1,4 +1,4 @@
-import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
+import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import type { ProviderConfigInput } from './config.js';
 import { JevProvider } from './jev.js';
@@ -16,7 +16,9 @@ export function createProvider(config: ProviderConfigInput): DecisionProvider {
 
 export async function assertProviderReady(config: ProviderConfigInput, credentials = new WindowsCredentialStore()): Promise<void> {
   if (config.kind !== 'jev') return;
-  if (await credentials.availability(config.route ?? 'openrouter') !== 'available') {
-    throw new Error('Provider credential is unavailable.');
-  }
+  const route = config.route ?? 'openrouter';
+  const state = await credentials.availability(route);
+  if (state === 'malformed') throw new CredentialStoreError('credential_malformed', route);
+  if (state === 'missing') throw new CredentialStoreError('credential_missing', route);
+  if (state === 'unavailable') throw new CredentialStoreError('credential_unavailable', route);
 }
