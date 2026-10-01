@@ -30,7 +30,7 @@ export type JourneyRespondentState = {
 };
 
 export type JourneyEvaluationRecord = JourneyEvaluation & {
-  status: 'pending' | 'answered' | 'failed';
+  status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
   failure?: { code: string; message: string };
 };
@@ -72,7 +72,7 @@ export type AnswerRow = {
   contextId: string;
   respondentId: string;
   questionId: string;
-  status: 'pending' | 'answered' | 'failed';
+  status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
   failure?: { code: string; message: string };
 };

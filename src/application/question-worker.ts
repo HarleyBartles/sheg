@@ -1,5 +1,9 @@
 import { setInterval, clearInterval } from 'node:timers';
+import { randomUUID } from 'node:crypto';
 import type { RunStore } from '../infrastructure/run-store.js';
+import { hashCanonical } from '../infrastructure/identity.js';
+import { advanceJourney, normalizeResponse } from '../domain/journey/run.js';
+import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import { JevCallError } from '../providers/jev.js';
 import { LayaCallError } from '../providers/laya.js';
 import type { ProviderFactory } from './run-service.js';
@@ -15,24 +19,10 @@ export async function executeQuestionRun(store: RunStore, runId: string, provide
   }, HEARTBEAT_MS);
   heartbeat.unref();
   try {
-    const prepared = store.getRequest(runId);
-    const provider = providerFactory(prepared.request.provider);
-    while (true) {
-      if (!store.heartbeat(claim, Date.now())) return;
-      const reservation = store.reserveNext(claim, Date.now());
-      if (!reservation) break;
-      try {
-        const result = await provider.decide(reservation.evaluation.packet, 1);
-        store.settle(claim, reservation.attemptId, { kind: 'answered', result });
-      } catch (error) {
-        const scope = error instanceof JevCallError || error instanceof LayaCallError ? error.failureScope : 'evaluation';
-        const code = scope === 'run' && error instanceof JevCallError ? error.failureCode : scope === 'run' ? 'provider_unavailable' : 'decision_failed';
-        const message = scope === 'run' && error instanceof JevCallError && error.failureCode.startsWith('credential_')
-          ? error.message
-          : scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
-        store.settle(claim, reservation.attemptId, { kind: 'failed', code, message, scope });
-        if (scope === 'run') break;
-      }
+    if (store.getRequestKind(runId) === 'journey') {
+      await executeJourney(store, runId, claim, providerFactory);
+    } else {
+      await executePoll(store, runId, claim, providerFactory);
     }
     store.finish(claim);
   } catch {
@@ -40,5 +30,95 @@ export async function executeQuestionRun(store: RunStore, runId: string, provide
   } finally {
     clearInterval(heartbeat);
   }
+}
+
+async function executePoll(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
+  const prepared = store.getRequest(runId);
+  const provider = providerFactory(prepared.request.provider);
+  while (true) {
+    if (!store.heartbeat(claim, Date.now())) return;
+    const reservation = store.reserveNext(claim, Date.now());
+    if (!reservation) break;
+    try {
+      const result = await provider.decide(reservation.evaluation.packet, 1);
+      store.settle(claim, reservation.attemptId, { kind: 'answered', result });
+    } catch (error) {
+      const scope = failureScope(error);
+      store.settle(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope });
+      if (scope === 'run') break;
+    }
+  }
+}
+
+async function executeJourney(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
+  const accepted = store.getJourneyRun(runId);
+  const provider = providerFactory(accepted.request.provider);
+  while (true) {
+    if (!store.heartbeat(claim, Date.now())) return;
+    const reservation = store.reserveNext(claim, Date.now());
+    if (!reservation) break;
+    const currentRun = store.getJourneyRun(runId);
+    const currentEvaluation = currentRun.evaluations.find(({ evaluationId }) => evaluationId === reservation.evaluation.evaluationId);
+    const respondentState = currentRun.respondents.find(({ respondentId }) => respondentId === reservation.evaluation.respondentId);
+    const profile = currentRun.request.respondents.find(({ id }) => id === reservation.evaluation.respondentId);
+    if (!currentEvaluation || !respondentState || !profile || respondentState.status !== 'active' || respondentState.currentTurnId !== currentEvaluation.turnId) {
+      throw new Error('Reserved journey turn has no matching active respondent state.');
+    }
+    try {
+      const result = await provider.decide(reservation.evaluation.packet, 1);
+      const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
+      const progress = advanceJourney(currentRun.request.journey, profile, {
+        currentNodeId: currentEvaluation.nodeId, events: respondentState.events, route: respondentState.route,
+      }, value);
+      const nextEvaluation = progress.next ? {
+        evaluationId: randomUUID(), turnId: randomUUID(), contextId: randomUUID(),
+        respondentId: respondentState.respondentId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,
+        pathId: progress.next.pathId,
+        occurrence: currentRun.evaluations.filter(({ respondentId, nodeId }) => respondentId === respondentState.respondentId && nodeId === progress.next!.nodeId).length + 1,
+        ordinal: currentRun.evaluations.length, packet: progress.next.packet,
+        packetFingerprint: hashCanonical({ packet: progress.next.packet, compilerFingerprint: currentRun.compilerFingerprint }),
+      } : undefined;
+      const state: JourneyRespondentState = {
+        ...respondentState,
+        status: progress.status,
+        currentNodeId: nextEvaluation?.nodeId ?? null,
+        currentTurnId: nextEvaluation?.turnId ?? null,
+        currentContextId: nextEvaluation?.contextId ?? null,
+        revision: respondentState.revision + 1,
+        events: progress.events,
+        route: progress.route,
+        ...(progress.outcome === null ? {} : { outcome: progress.outcome }),
+      };
+      store.settleJourney(claim, reservation.attemptId, { kind: 'answered', result }, {
+        respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state, ...(nextEvaluation ? { nextEvaluation } : {}),
+      });
+    } catch (error) {
+      const scope = failureScope(error);
+      const state: JourneyRespondentState = {
+        ...respondentState,
+        status: scope === 'run' ? 'active' : 'failed',
+        currentNodeId: scope === 'run' ? currentEvaluation.nodeId : null,
+        currentTurnId: scope === 'run' ? currentEvaluation.turnId : null,
+        currentContextId: scope === 'run' ? currentEvaluation.contextId : null,
+        revision: respondentState.revision + 1,
+      };
+      store.settleJourney(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope }, {
+        respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state,
+      });
+      if (scope === 'run') break;
+    }
+  }
+}
+
+function failureScope(error: unknown): 'evaluation' | 'run' {
+  return error instanceof JevCallError || error instanceof LayaCallError ? error.failureScope : 'evaluation';
+}
+
+function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: string; message: string } {
+  const code = scope === 'run' && error instanceof JevCallError ? error.failureCode : scope === 'run' ? 'provider_unavailable' : 'decision_failed';
+  const message = scope === 'run' && error instanceof JevCallError && error.failureCode.startsWith('credential_')
+    ? error.message
+    : scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
+  return { code, message };
 }
 

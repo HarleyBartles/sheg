@@ -55,11 +55,11 @@ The single-question request remains supported. It shares the same provider, dura
 
 ### Task 3: Execute and recover journeys in the detached worker
 
-- [ ] **Files:** `src/application/question-worker.ts` or a focused journey-worker module, `src/entrypoints/worker.ts`, `src/infrastructure/worker-launcher.ts` only if required, and worker/store behavior tests. **Produces:** finite sequence/graph execution over the durable store with run-wide physical attempt accounting.
-- [ ] Add tests first for exposure order, exact question context, Choice/Score/Noul routing, reconvergent paths, respondent-local failures, run-wide provider failures, cancellation during a call, crash/restart without replaying answered turns, and explicit resume from saved graph state.
-- [ ] Reuse a stable occurrence identity per reached ask node/respondent; retain route and context evidence needed to distinguish the same authored task at distinct nodes.
-- [ ] Keep calls serial under the current physical attempt contract. Do not introduce parallel-question batching, sibling-answer visibility, automatic retries, or startup recovery.
-- [ ] Verify both the original simple poll and new journey execution use the same ownership, cancellation, credential, attempt and explicit-resume rules.
+- [x] **Files:** `src/application/question-worker.ts`, `src/infrastructure/run-store.ts`, `src/domain/journey/run.ts`, and worker/store behavior tests. **Produces:** finite sequence/graph execution over the durable store with run-wide physical attempt accounting.
+- [x] Add tests first for exposure order, exact question context, Choice/Score/Noul routing, reconvergent paths, respondent-local failures, run-wide provider failures, cancellation during a call, no answer replay after explicit resume, and saved graph-state continuation.
+- [x] Reuse a stable occurrence identity per reached ask node/respondent; retain route and context evidence needed to distinguish the same authored task at distinct nodes.
+- [x] Keep calls serial under the current physical attempt contract. Do not introduce parallel-question batching, sibling-answer visibility, automatic retries, or startup recovery.
+- [x] Verify both the original simple poll and new journey execution use the same ownership, cancellation, credential, attempt and explicit-resume rules. Packaged killed-worker resume remains in Task 4.
 
 ### Task 4: Expose journey requests and durable turn answers through MCP
 

@@ -6,9 +6,29 @@ var __export = (target, all) => {
 
 // src/application/question-worker.ts
 import { setInterval, clearInterval } from "node:timers";
+import { randomUUID } from "node:crypto";
 
-// src/providers/jev.ts
-import { setTimeout as wait } from "node:timers/promises";
+// src/infrastructure/identity.ts
+import { createHash } from "node:crypto";
+function hashCanonical(value) {
+  return createHash("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+}
+function canonicalize(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Fingerprint input contains a nonfinite number.");
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (typeof value === "object") {
+    const object2 = value;
+    return Object.fromEntries(Object.keys(object2).sort().map((key) => {
+      if (object2[key] === void 0) throw new TypeError(`Fingerprint input contains undefined at ${key}.`);
+      return [key, canonicalize(object2[key])];
+    }));
+  }
+  throw new TypeError("Fingerprint input must contain only JSON values.");
+}
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -19752,6 +19772,182 @@ var decisionValueSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("noul"), noul: probability }).strict()
 ]);
 
+// src/domain/decision/prompt.ts
+function questionForTask(task) {
+  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options } };
+  if ("rubric" in task) return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
+  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
+}
+function finishTrajectory(body) {
+  let payloadUtf8Bytes = 0;
+  for (; ; ) {
+    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
+    if (nextSize === payloadUtf8Bytes) break;
+    payloadUtf8Bytes = nextSize;
+  }
+  return { ...body, payloadUtf8Bytes };
+}
+function compactTrajectory(arm, history) {
+  const exposureIds = [];
+  const choices = [];
+  const responses = [];
+  for (const event of history) {
+    if (event.type === "exposure") {
+      exposureIds.push(event.itemId);
+      continue;
+    }
+    const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
+    const result = event.type === "response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
+    if (!task) throw new Error(`Unknown task ${event.taskId} in journey history.`);
+    if (result.type === "choice") {
+      const choiceMeaning = task.type !== "score" && task.type !== "noul" ? task.options[result.choice] : void 0;
+      if (choiceMeaning === void 0) throw new Error(`Unknown choice ${result.choice} for task ${event.taskId} in journey history.`);
+      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+      responses.push(response);
+      choices.push({ taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds] });
+    } else if (result.type === "score") {
+      if (task.type !== "score" || result.legend[String(Math.round(result.score))] === void 0) throw new Error(`Score response does not match task ${event.taskId}.`);
+      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds] });
+    } else {
+      if (task.type !== "noul") throw new Error(`Noul response does not match task ${event.taskId}.`);
+      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds] });
+    }
+  }
+  const body = {
+    version: 1,
+    eventCount: history.length,
+    exposureCount: exposureIds.length,
+    decisionCount: responses.length,
+    eventRange: history.length === 0 ? null : { firstSequence: history[0].sequence, lastSequence: history.at(-1).sequence },
+    choices,
+    responses
+  };
+  return finishTrajectory(body);
+}
+function compileDecisionPacket(arm, profile, taskId, history = []) {
+  const task = arm.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) throw new Error(`Unknown task ${taskId}.`);
+  const itemsById = new Map(arm.items.map((item) => [item.id, item]));
+  let itemIds;
+  if (arm.presentation.kind === "sequence") {
+    itemIds = arm.items.map((item) => item.id);
+  } else {
+    const lastChoiceIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
+    itemIds = history.slice(lastChoiceIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
+  }
+  const encounteredItems = itemIds.map((id) => {
+    const item = itemsById.get(id);
+    if (!item) throw new Error(`Unknown encountered item ${id}.`);
+    return { id: item.id, text: item.text };
+  });
+  return compileDecisionRequest({
+    respondentProfile: {
+      intent: profile.intent,
+      context: profile.context,
+      desired_outcome: profile.desired_outcome,
+      engagement_cues: profile.engagement_cues,
+      friction_cues: profile.friction_cues
+    },
+    encounteredItems,
+    trajectory: compactTrajectory(
+      arm,
+      task.responseHistory === "omit" ? history.filter((event) => event.type === "exposure") : history
+    ),
+    question: questionForTask(task)
+  });
+}
+function compileDecisionRequest(parts) {
+  const state = {
+    respondent: { profile: { ...parts.respondentProfile } },
+    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    trajectory: parts.trajectory
+  };
+  const request = decisionRequestSchema.parse({
+    state,
+    question: parts.question,
+    ...parts.question.type === "choice" ? { optionIds: Object.keys(parts.question.options) } : {}
+  });
+  return {
+    ...request,
+    state
+  };
+}
+
+// src/domain/journey/run.ts
+var JourneyExecutionError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "JourneyExecutionError";
+  }
+};
+function advanceJourney(arm, profile, state, rawResult) {
+  const result = decisionValueSchema.parse(rawResult);
+  const events = [...state.events];
+  const route = [...state.route];
+  const nodeId = state.currentNodeId;
+  let taskId;
+  let routeTarget;
+  if (arm.presentation.kind === "sequence") {
+    const taskIndex = arm.tasks.findIndex((task2) => `sequence-ask-${task2.id}` === nodeId);
+    const task = arm.tasks[taskIndex];
+    if (taskIndex < 0 || !task) throw new JourneyExecutionError(`Unknown sequence ask node ${nodeId}.`);
+    taskId = task.id;
+    routeTarget = arm.tasks[taskIndex + 1] ? `sequence-ask-${arm.tasks[taskIndex + 1].id}` : "sequence-terminal-complete";
+  } else {
+    const askNode = arm.presentation.nodes.find((node2) => node2.id === nodeId);
+    if (askNode?.kind !== "ask") throw new JourneyExecutionError(`Node ${nodeId} is not a journey ask node.`);
+    taskId = askNode.taskId;
+    const task = arm.tasks.find((candidate) => candidate.id === taskId);
+    if (!task) throw new JourneyExecutionError(`Ask node ${nodeId} references unknown task ${taskId}.`);
+    const edge = arm.presentation.transitions.find((candidate) => {
+      if (candidate.fromNodeId !== nodeId) return false;
+      if (result.type === "choice") return candidate.optionId === result.choice;
+      const interval = candidate.when;
+      const value = result.type === "score" ? result.score : result.noul;
+      return interval?.type === result.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
+    });
+    if (!edge) throw new JourneyExecutionError(`Task node ${nodeId} has no transition for ${result.type} response.`);
+    routeTarget = edge.toNodeId;
+  }
+  const answerEvent = { type: "response", sequence: events.length, nodeId, taskId, result };
+  events.push(answerEvent);
+  route.push({ nodeId, response: result, toNodeId: routeTarget });
+  const pathId = route.length === 0 ? "root" : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`}`).join(">");
+  if (arm.presentation.kind === "sequence") {
+    const nextTask = arm.tasks.find((task) => `sequence-ask-${task.id}` === routeTarget);
+    if (!nextTask) return { events, route, status: "completed", outcome: "complete" };
+    return { events, route, status: "active", outcome: null, next: { nodeId: routeTarget, taskId: nextTask.id, pathId, packet: compileDecisionPacket(arm, profile, nextTask.id, events) } };
+  }
+  const nodes = new Map(arm.presentation.nodes.map((node2) => [node2.id, node2]));
+  let current = routeTarget;
+  while (true) {
+    const node2 = nodes.get(current);
+    if (!node2) throw new JourneyExecutionError(`Graph points to unknown node ${current}.`);
+    if (node2.kind === "terminal") return { events, route, status: "completed", outcome: node2.outcome };
+    if (node2.kind === "expose") {
+      events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
+      const edge = arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+      if (!edge) throw new JourneyExecutionError(`Exposure node ${node2.id} has no transition.`);
+      current = edge.toNodeId;
+      continue;
+    }
+    return { events, route, status: "active", outcome: null, next: { nodeId: node2.id, taskId: node2.taskId, pathId, packet: compileDecisionPacket(arm, profile, node2.taskId, events) } };
+  }
+}
+function normalizeResponse(answer, expectedType) {
+  if (typeof answer !== "object" || answer === null) throw new JourneyExecutionError("Task returned a response that is not an object.");
+  const raw = answer;
+  const actualType = raw.type ?? expectedType;
+  if (actualType !== expectedType) throw new JourneyExecutionError(`Task returned ${String(actualType)} for a ${expectedType} question.`);
+  const value = actualType === "choice" ? { type: "choice", choice: raw.choice, ...raw.probabilities === void 0 ? {} : { probabilities: raw.probabilities }, ...raw.confidence === void 0 ? {} : { confidence: raw.confidence } } : actualType === "score" ? { type: "score", score: raw.score, legend: raw.legend, probabilities: raw.probabilities, ...raw.confidence === void 0 ? {} : { confidence: raw.confidence } } : { type: "noul", noul: raw.noul };
+  const parsed = decisionValueSchema.safeParse(value);
+  if (!parsed.success) throw new JourneyExecutionError(`Task returned an invalid ${expectedType} response.`);
+  return parsed.data;
+}
+
+// src/providers/jev.ts
+import { setTimeout as wait } from "node:timers/promises";
+
 // src/domain/decision/validate.ts
 var DecisionError = class extends Error {
   constructor(message, options2) {
@@ -20014,12 +20210,12 @@ async function runPowerShell(helperPath, args, interactive = false) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable") {
+  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable") {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
-    this.failureScope = failureScope;
+    this.failureScope = failureScope2;
     this.failureCode = failureCode;
     this.name = "JevCallError";
   }
@@ -20188,7 +20384,7 @@ function retryDelayMs(attempt) {
 }
 
 // src/providers/laya/context-fit.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path2 from "node:path";
 
@@ -20427,7 +20623,7 @@ async function tokenizerPromise(config2) {
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile(absolutePath);
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const sha256 = createHash2("sha256").update(bytes).digest("hex");
     if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
     let raw;
     try {
@@ -20519,12 +20715,12 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation") {
+  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation") {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
-    this.failureScope = failureScope;
+    this.failureScope = failureScope2;
     this.name = "LayaCallError";
   }
   attempts;
@@ -20670,22 +20866,10 @@ async function executeQuestionRun(store2, runId2, providerFactory) {
   }, HEARTBEAT_MS);
   heartbeat.unref();
   try {
-    const prepared = store2.getRequest(runId2);
-    const provider = providerFactory(prepared.request.provider);
-    while (true) {
-      if (!store2.heartbeat(claim2, Date.now())) return;
-      const reservation = store2.reserveNext(claim2, Date.now());
-      if (!reservation) break;
-      try {
-        const result = await provider.decide(reservation.evaluation.packet, 1);
-        store2.settle(claim2, reservation.attemptId, { kind: "answered", result });
-      } catch (error62) {
-        const scope = error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.failureScope : "evaluation";
-        const code = scope === "run" && error62 instanceof JevCallError ? error62.failureCode : scope === "run" ? "provider_unavailable" : "decision_failed";
-        const message = scope === "run" && error62 instanceof JevCallError && error62.failureCode.startsWith("credential_") ? error62.message : scope === "run" ? "Provider authentication or service access failed." : "The respondent evaluation did not produce a valid answer.";
-        store2.settle(claim2, reservation.attemptId, { kind: "failed", code, message, scope });
-        if (scope === "run") break;
-      }
+    if (store2.getRequestKind(runId2) === "journey") {
+      await executeJourney(store2, runId2, claim2, providerFactory);
+    } else {
+      await executePoll(store2, runId2, claim2, providerFactory);
     }
     store2.finish(claim2);
   } catch {
@@ -20697,113 +20881,108 @@ async function executeQuestionRun(store2, runId2, providerFactory) {
     clearInterval(heartbeat);
   }
 }
+async function executePoll(store2, runId2, claim2, providerFactory) {
+  const prepared = store2.getRequest(runId2);
+  const provider = providerFactory(prepared.request.provider);
+  while (true) {
+    if (!store2.heartbeat(claim2, Date.now())) return;
+    const reservation = store2.reserveNext(claim2, Date.now());
+    if (!reservation) break;
+    try {
+      const result = await provider.decide(reservation.evaluation.packet, 1);
+      store2.settle(claim2, reservation.attemptId, { kind: "answered", result });
+    } catch (error62) {
+      const scope = failureScope(error62);
+      store2.settle(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope });
+      if (scope === "run") break;
+    }
+  }
+}
+async function executeJourney(store2, runId2, claim2, providerFactory) {
+  const accepted = store2.getJourneyRun(runId2);
+  const provider = providerFactory(accepted.request.provider);
+  while (true) {
+    if (!store2.heartbeat(claim2, Date.now())) return;
+    const reservation = store2.reserveNext(claim2, Date.now());
+    if (!reservation) break;
+    const currentRun = store2.getJourneyRun(runId2);
+    const currentEvaluation = currentRun.evaluations.find(({ evaluationId }) => evaluationId === reservation.evaluation.evaluationId);
+    const respondentState = currentRun.respondents.find(({ respondentId }) => respondentId === reservation.evaluation.respondentId);
+    const profile = currentRun.request.respondents.find(({ id }) => id === reservation.evaluation.respondentId);
+    if (!currentEvaluation || !respondentState || !profile || respondentState.status !== "active" || respondentState.currentTurnId !== currentEvaluation.turnId) {
+      throw new Error("Reserved journey turn has no matching active respondent state.");
+    }
+    try {
+      const result = await provider.decide(reservation.evaluation.packet, 1);
+      const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
+      const progress = advanceJourney(currentRun.request.journey, profile, {
+        currentNodeId: currentEvaluation.nodeId,
+        events: respondentState.events,
+        route: respondentState.route
+      }, value);
+      const nextEvaluation = progress.next ? {
+        evaluationId: randomUUID(),
+        turnId: randomUUID(),
+        contextId: randomUUID(),
+        respondentId: respondentState.respondentId,
+        questionId: progress.next.taskId,
+        nodeId: progress.next.nodeId,
+        pathId: progress.next.pathId,
+        occurrence: currentRun.evaluations.filter(({ respondentId, nodeId }) => respondentId === respondentState.respondentId && nodeId === progress.next.nodeId).length + 1,
+        ordinal: currentRun.evaluations.length,
+        packet: progress.next.packet,
+        packetFingerprint: hashCanonical({ packet: progress.next.packet, compilerFingerprint: currentRun.compilerFingerprint })
+      } : void 0;
+      const state = {
+        ...respondentState,
+        status: progress.status,
+        currentNodeId: nextEvaluation?.nodeId ?? null,
+        currentTurnId: nextEvaluation?.turnId ?? null,
+        currentContextId: nextEvaluation?.contextId ?? null,
+        revision: respondentState.revision + 1,
+        events: progress.events,
+        route: progress.route,
+        ...progress.outcome === null ? {} : { outcome: progress.outcome }
+      };
+      store2.settleJourney(claim2, reservation.attemptId, { kind: "answered", result }, {
+        respondentId: respondentState.respondentId,
+        expectedRevision: respondentState.revision,
+        state,
+        ...nextEvaluation ? { nextEvaluation } : {}
+      });
+    } catch (error62) {
+      const scope = failureScope(error62);
+      const state = {
+        ...respondentState,
+        status: scope === "run" ? "active" : "failed",
+        currentNodeId: scope === "run" ? currentEvaluation.nodeId : null,
+        currentTurnId: scope === "run" ? currentEvaluation.turnId : null,
+        currentContextId: scope === "run" ? currentEvaluation.contextId : null,
+        revision: respondentState.revision + 1
+      };
+      store2.settleJourney(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope }, {
+        respondentId: respondentState.respondentId,
+        expectedRevision: respondentState.revision,
+        state
+      });
+      if (scope === "run") break;
+    }
+  }
+}
+function failureScope(error62) {
+  return error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.failureScope : "evaluation";
+}
+function failureDetails(error62, scope) {
+  const code = scope === "run" && error62 instanceof JevCallError ? error62.failureCode : scope === "run" ? "provider_unavailable" : "decision_failed";
+  const message = scope === "run" && error62 instanceof JevCallError && error62.failureCode.startsWith("credential_") ? error62.message : scope === "run" ? "Provider authentication or service access failed." : "The respondent evaluation did not produce a valid answer.";
+  return { code, message };
+}
 
 // src/infrastructure/run-store.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdirSync, statSync } from "node:fs";
 import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
-
-// src/domain/decision/prompt.ts
-function questionForTask(task) {
-  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options } };
-  if ("rubric" in task) return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
-  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
-}
-function finishTrajectory(body) {
-  let payloadUtf8Bytes = 0;
-  for (; ; ) {
-    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
-    if (nextSize === payloadUtf8Bytes) break;
-    payloadUtf8Bytes = nextSize;
-  }
-  return { ...body, payloadUtf8Bytes };
-}
-function compactTrajectory(arm, history) {
-  const exposureIds = [];
-  const choices = [];
-  const responses = [];
-  for (const event of history) {
-    if (event.type === "exposure") {
-      exposureIds.push(event.itemId);
-      continue;
-    }
-    const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
-    const result = event.type === "response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
-    if (!task) throw new Error(`Unknown task ${event.taskId} in journey history.`);
-    if (result.type === "choice") {
-      const choiceMeaning = task.type !== "score" && task.type !== "noul" ? task.options[result.choice] : void 0;
-      if (choiceMeaning === void 0) throw new Error(`Unknown choice ${result.choice} for task ${event.taskId} in journey history.`);
-      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
-      responses.push(response);
-      choices.push({ taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds] });
-    } else if (result.type === "score") {
-      if (task.type !== "score" || result.legend[String(Math.round(result.score))] === void 0) throw new Error(`Score response does not match task ${event.taskId}.`);
-      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds] });
-    } else {
-      if (task.type !== "noul") throw new Error(`Noul response does not match task ${event.taskId}.`);
-      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds] });
-    }
-  }
-  const body = {
-    version: 1,
-    eventCount: history.length,
-    exposureCount: exposureIds.length,
-    decisionCount: responses.length,
-    eventRange: history.length === 0 ? null : { firstSequence: history[0].sequence, lastSequence: history.at(-1).sequence },
-    choices,
-    responses
-  };
-  return finishTrajectory(body);
-}
-function compileDecisionPacket(arm, profile, taskId, history = []) {
-  const task = arm.tasks.find((candidate) => candidate.id === taskId);
-  if (!task) throw new Error(`Unknown task ${taskId}.`);
-  const itemsById = new Map(arm.items.map((item) => [item.id, item]));
-  let itemIds;
-  if (arm.presentation.kind === "sequence") {
-    itemIds = arm.items.map((item) => item.id);
-  } else {
-    const lastChoiceIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
-    itemIds = history.slice(lastChoiceIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
-  }
-  const encounteredItems = itemIds.map((id) => {
-    const item = itemsById.get(id);
-    if (!item) throw new Error(`Unknown encountered item ${id}.`);
-    return { id: item.id, text: item.text };
-  });
-  return compileDecisionRequest({
-    respondentProfile: {
-      intent: profile.intent,
-      context: profile.context,
-      desired_outcome: profile.desired_outcome,
-      engagement_cues: profile.engagement_cues,
-      friction_cues: profile.friction_cues
-    },
-    encounteredItems,
-    trajectory: compactTrajectory(
-      arm,
-      task.responseHistory === "omit" ? history.filter((event) => event.type === "exposure") : history
-    ),
-    question: questionForTask(task)
-  });
-}
-function compileDecisionRequest(parts) {
-  const state = {
-    respondent: { profile: { ...parts.respondentProfile } },
-    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
-    trajectory: parts.trajectory
-  };
-  const request = decisionRequestSchema.parse({
-    state,
-    question: parts.question,
-    ...parts.question.type === "choice" ? { optionIds: Object.keys(parts.question.options) } : {}
-  });
-  return {
-    ...request,
-    state
-  };
-}
 
 // src/domain/respondents/profile.ts
 var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
@@ -21157,28 +21336,6 @@ var inlineJourneyRequestSchema = external_exports.object({
 });
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
 
-// src/infrastructure/identity.ts
-import { createHash as createHash2 } from "node:crypto";
-function hashCanonical(value) {
-  return createHash2("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
-}
-function canonicalize(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("Fingerprint input contains a nonfinite number.");
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (typeof value === "object") {
-    const object2 = value;
-    return Object.fromEntries(Object.keys(object2).sort().map((key) => {
-      if (object2[key] === void 0) throw new TypeError(`Fingerprint input contains undefined at ${key}.`);
-      return [key, canonicalize(object2[key])];
-    }));
-  }
-  throw new TypeError("Fingerprint input must contain only JSON values.");
-}
-
 // src/infrastructure/run-store.ts
 var SCHEMA_VERSION = 2;
 var LEASE_MS = 3e4;
@@ -21326,7 +21483,7 @@ function initialize(database) {
       occurrence INTEGER,
       packet_json TEXT NOT NULL,
       packet_fingerprint TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed')),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed', 'unreached')),
       result_json TEXT,
       failure_code TEXT,
       failure_message TEXT,
@@ -21499,7 +21656,7 @@ var SQLiteRunStore = class {
         this.reconcileInside(runId3, this.now());
         return { created: false, run: this.statusInside(runId3) };
       }
-      const runId2 = randomUUID();
+      const runId2 = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -21546,7 +21703,7 @@ var SQLiteRunStore = class {
         this.reconcileInside(runId3, this.now());
         return { created: false, run: this.statusInside(runId3) };
       }
-      const runId2 = randomUUID();
+      const runId2 = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -21608,6 +21765,18 @@ var SQLiteRunStore = class {
       return this.statusInside(runId2);
     });
   }
+  getRequestKind(runId2) {
+    this.getStatus(runId2);
+    const row = this.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(runId2);
+    if (!row) throw this.notFound();
+    const stored = parseJson(row.request_json, "request");
+    if (typeof stored !== "object" || stored === null || !("request" in stored)) {
+      throw new RunStoreError("data_integrity_error", "Stored run request has an invalid shape.");
+    }
+    const request = runRequestSchema.safeParse(stored.request);
+    if (!request.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+    return request.data.kind;
+  }
   getRequest(runId2) {
     this.getStatus(runId2);
     const row = this.database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId2);
@@ -21660,7 +21829,7 @@ var SQLiteRunStore = class {
         ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
         status: asText(evaluation.status, "evaluation status")
       };
-      if (!["pending", "answered", "failed"].includes(base.status) || base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
+      if (!["pending", "answered", "failed", "unreached"].includes(base.status) || base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
         throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
       }
       if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
@@ -21902,7 +22071,7 @@ var SQLiteRunStore = class {
       if (!row) throw this.notFound();
       const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, "created time") + LEASE_MS : asNumber(row.lease_expires_ms, "launch deadline");
       if (asText(row.status, "run status") !== "prepared" || asNumber(row.cancel_requested, "cancel flag") === 1 || nowMs >= launchDeadline) return null;
-      const ownerToken = randomUUID();
+      const ownerToken = randomUUID2();
       this.database.prepare("UPDATE runs SET status = 'running', owner_token = ?, owner_pid = ?, lease_expires_ms = ? WHERE run_id = ? AND status = 'prepared'").run(ownerToken, workerPid, nowMs + LEASE_MS, runId2);
       return { runId: runId2, ownerToken };
     });
@@ -21924,7 +22093,7 @@ var SQLiteRunStore = class {
       if (asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
       const row = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
       if (!row) return null;
-      const attemptId = randomUUID();
+      const attemptId = randomUUID2();
       const evaluationId = asText(row.evaluation_id, "evaluation ID");
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, evaluation_id, owner_token, status, started_ms) VALUES (?, ?, ?, ?, 'reserved', ?)").run(attemptId, claim2.runId, evaluationId, claim2.ownerToken, nowMs);
       this.database.prepare("UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?").run(claim2.runId);
@@ -22072,15 +22241,25 @@ var SQLiteRunStore = class {
       if (asNumber(run.reserved_calls, "reserved calls") !== 0) {
         throw new RunStoreError("attempt_in_flight", "A run cannot finish while a provider attempt is still reserved.");
       }
+      const atCallCeiling = asNumber(run.used_calls, "used calls") >= asNumber(run.max_calls, "maximum calls");
+      if (atCallCeiling && asNumber(run.cancel_requested, "cancel flag") === 0 && run.failure_scope !== "run") {
+        const hasJourney = this.database.prepare("SELECT 1 FROM journey_respondents WHERE run_id = ? LIMIT 1").get(claim2.runId);
+        if (hasJourney) {
+          this.database.prepare("UPDATE evaluations SET status = 'unreached' WHERE run_id = ? AND status = 'pending'").run(claim2.runId);
+          this.database.prepare(`UPDATE journey_respondents SET status = 'unreached', current_node_id = NULL, current_turn_id = NULL,
+            current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND status = 'active'`).run(claim2.runId);
+        }
+      }
       let status;
       if (run.failure_scope === "run") status = "failed";
       else if (asNumber(run.cancel_requested, "cancel flag") === 1) status = "cancelled";
       else {
         const counts = this.database.prepare(`SELECT
           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+          SUM(CASE WHEN status = 'unreached' THEN 1 ELSE 0 END) AS unreached
           FROM evaluations WHERE run_id = ?`).get(claim2.runId);
-        status = asNumber(counts.pending, "pending count") === 0 && asNumber(counts.failed, "failed count") === 0 ? "completed" : "partial";
+        status = asNumber(counts.pending, "pending count") === 0 && asNumber(counts.failed, "failed count") === 0 && asNumber(counts.unreached, "unreached count") === 0 ? "completed" : "partial";
       }
       this.database.prepare("UPDATE runs SET status = ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL WHERE run_id = ?").run(status, claim2.runId);
       return this.statusInside(claim2.runId);

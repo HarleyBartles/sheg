@@ -35906,7 +35906,7 @@ function initialize(database) {
       occurrence INTEGER,
       packet_json TEXT NOT NULL,
       packet_fingerprint TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed')),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed', 'unreached')),
       result_json TEXT,
       failure_code TEXT,
       failure_message TEXT,
@@ -36188,6 +36188,18 @@ var SQLiteRunStore = class {
       return this.statusInside(runId);
     });
   }
+  getRequestKind(runId) {
+    this.getStatus(runId);
+    const row = this.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(runId);
+    if (!row) throw this.notFound();
+    const stored = parseJson(row.request_json, "request");
+    if (typeof stored !== "object" || stored === null || !("request" in stored)) {
+      throw new RunStoreError("data_integrity_error", "Stored run request has an invalid shape.");
+    }
+    const request = runRequestSchema.safeParse(stored.request);
+    if (!request.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+    return request.data.kind;
+  }
   getRequest(runId) {
     this.getStatus(runId);
     const row = this.database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId);
@@ -36240,7 +36252,7 @@ var SQLiteRunStore = class {
         ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
         status: asText(evaluation.status, "evaluation status")
       };
-      if (!["pending", "answered", "failed"].includes(base.status) || base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
+      if (!["pending", "answered", "failed", "unreached"].includes(base.status) || base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
         throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
       }
       if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
@@ -36652,15 +36664,25 @@ var SQLiteRunStore = class {
       if (asNumber(run.reserved_calls, "reserved calls") !== 0) {
         throw new RunStoreError("attempt_in_flight", "A run cannot finish while a provider attempt is still reserved.");
       }
+      const atCallCeiling = asNumber(run.used_calls, "used calls") >= asNumber(run.max_calls, "maximum calls");
+      if (atCallCeiling && asNumber(run.cancel_requested, "cancel flag") === 0 && run.failure_scope !== "run") {
+        const hasJourney = this.database.prepare("SELECT 1 FROM journey_respondents WHERE run_id = ? LIMIT 1").get(claim2.runId);
+        if (hasJourney) {
+          this.database.prepare("UPDATE evaluations SET status = 'unreached' WHERE run_id = ? AND status = 'pending'").run(claim2.runId);
+          this.database.prepare(`UPDATE journey_respondents SET status = 'unreached', current_node_id = NULL, current_turn_id = NULL,
+            current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND status = 'active'`).run(claim2.runId);
+        }
+      }
       let status;
       if (run.failure_scope === "run") status = "failed";
       else if (asNumber(run.cancel_requested, "cancel flag") === 1) status = "cancelled";
       else {
         const counts = this.database.prepare(`SELECT
           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+          SUM(CASE WHEN status = 'unreached' THEN 1 ELSE 0 END) AS unreached
           FROM evaluations WHERE run_id = ?`).get(claim2.runId);
-        status = asNumber(counts.pending, "pending count") === 0 && asNumber(counts.failed, "failed count") === 0 ? "completed" : "partial";
+        status = asNumber(counts.pending, "pending count") === 0 && asNumber(counts.failed, "failed count") === 0 && asNumber(counts.unreached, "unreached count") === 0 ? "completed" : "partial";
       }
       this.database.prepare("UPDATE runs SET status = ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL WHERE run_id = ?").run(status, claim2.runId);
       return this.statusInside(claim2.runId);
