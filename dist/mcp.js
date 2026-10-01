@@ -36021,16 +36021,18 @@ async function runPowerShell(helperPath, args, interactive = false) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation") {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
+    this.failureScope = failureScope;
     this.name = "JevCallError";
   }
   attempts;
   contextFit;
   decisionId;
+  failureScope;
 };
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -36105,7 +36107,7 @@ var JevProvider = class {
     try {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
     } catch {
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run");
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -36137,7 +36139,7 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts);
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
       }
       let payload;
       try {
@@ -36521,16 +36523,18 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation") {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
+    this.failureScope = failureScope;
     this.name = "LayaCallError";
   }
   attempts;
   contextFit;
   decisionId;
+  failureScope;
 };
 var choiceAnswerSchema2 = external_exports.object({
   type: external_exports.literal("choice"),

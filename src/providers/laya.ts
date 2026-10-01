@@ -22,7 +22,7 @@ export type FitResult = ProviderContextFit;
 const MAX_LAYA_SCORE_LEVELS = 32;
 
 export class LayaCallError extends Error {
-  constructor(message: string, readonly attempts: number, readonly contextFit?: ProviderContextFit, readonly decisionId?: string) {
+  constructor(message: string, readonly attempts: number, readonly contextFit?: ProviderContextFit, readonly decisionId?: string, readonly failureScope: 'evaluation' | 'run' = 'evaluation') {
     super(message);
     this.name = 'LayaCallError';
   }

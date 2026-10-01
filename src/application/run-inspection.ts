@@ -9,6 +9,12 @@ import { hashCanonical } from '../infrastructure/identity.js';
 export type { Inspection } from '../domain/run/lifecycle.js';
 export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/run/request.js';
 
+export function fingerprintRunRequest(input: unknown): string | undefined {
+  const parsed = inlineRunRequestSchema.safeParse(input);
+  if (!parsed.success) return undefined;
+  return hashCanonical({ request: parsed.data, compilerFingerprint: promptContractHash() });
+}
+
 function invalidRequestInspection(input: unknown, message: string): Inspection {
   const respondents = typeof input === 'object' && input !== null && 'respondents' in input && Array.isArray(input.respondents)
     ? input.respondents

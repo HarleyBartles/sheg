@@ -15,6 +15,7 @@ export class JevCallError extends Error {
     readonly attempts: number,
     readonly contextFit?: ProviderContextFit,
     readonly decisionId?: string,
+    readonly failureScope: 'evaluation' | 'run' = 'evaluation',
   ) {
     super(message);
     this.name = 'JevCallError';
@@ -98,7 +99,7 @@ export class JevProvider implements DecisionProvider {
     if (fit.status !== 'fits') throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     let apiKey: string;
     try { apiKey = await this.credentialStore.readForAuthentication(this.config.route); }
-    catch { throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0); }
+    catch { throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, undefined, undefined, 'run'); }
 
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -132,7 +133,7 @@ export class JevProvider implements DecisionProvider {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts);
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation');
       }
 
       let payload: unknown;

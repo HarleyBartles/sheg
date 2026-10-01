@@ -40,6 +40,7 @@ export interface RunStore {
   settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void;
   finish(claim: WorkerClaim): RunStatusView;
   failLaunch(runId: string, code: string): void;
+  failRun(claim: WorkerClaim, code: string, message: string): void;
   reconcile(runId: string, nowMs: number): RunStatusView;
   close(): void;
 }
@@ -461,6 +462,21 @@ class SQLiteRunStore implements RunStore {
       const updated = this.database.prepare("UPDATE runs SET status = 'failed', failure_scope = 'run', failure_code = ?, failure_message = 'Worker could not be launched' WHERE run_id = ? AND status = 'prepared'")
         .run(code, runId);
       if (updated.changes === 0) this.statusInside(runId);
+    });
+  }
+
+  failRun(claim: WorkerClaim, code: string, message: string): void {
+    this.ensureOpen();
+    this.transaction(() => {
+      this.ownedRun(claim, this.now());
+      const reserved = this.database.prepare("SELECT attempt_id FROM attempts WHERE run_id = ? AND owner_token = ? AND status = 'reserved'").get(claim.runId, claim.ownerToken) as DatabaseRow | undefined;
+      if (reserved) {
+        this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, failure_code = 'worker_interrupted', failure_message = 'The provider outcome could not be confirmed' WHERE attempt_id = ?")
+          .run(this.now(), asText(reserved.attempt_id, 'attempt ID'));
+        this.database.prepare('UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0').run(claim.runId);
+      }
+      this.database.prepare("UPDATE runs SET status = 'failed', failure_scope = 'run', failure_code = ?, failure_message = ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL WHERE run_id = ? AND owner_token = ?")
+        .run(code, message, claim.runId, claim.ownerToken);
     });
   }
 

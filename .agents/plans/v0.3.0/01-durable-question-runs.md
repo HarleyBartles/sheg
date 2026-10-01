@@ -272,11 +272,11 @@ COMMIT;
 
 **Interfaces:** Consumes Task 1 preparation and Task 2 store methods. Produces `RunService`, `WorkerLauncher`, `ProviderFactory`, `executeQuestionRun`, and a worker invoked as `node dist/worker.js <absolute-data-root> <run-id>`.
 
-- [ ] Write service tests for admission failure before persistence, exact retry despite later missing credentials, one launch after a two-submission race and visible launch failure retaining its run ID. Inject launcher failure without starting actual processes.
-- [ ] Write worker tests with gated promises: first call cancelled while in flight, its answer retained, second respondent never dispatched; malformed answer followed by another respondent success; structured authentication failure stops remaining work; uncertain provider exception consumes reservation; stale ownership cannot settle. Assert every provider call receives `maxAttempts = 1`.
-- [ ] Test interrupted status/discovery using a reopened store and advanced clock; assert no launcher or provider factory invocation on reads. Test duplicate worker invocation only one dispatches. No unsupported resume action is exposed.
-- [ ] Run `node --import tsx --test test/run-service.test.ts test/question-worker.test.ts`; confirm behavior RED.
-- [ ] Implement durable accept-before-launch, detached process arguments/lifetime, sequential fenced execution and heartbeat cleanup. Preserve Jev fit admission and existing credentials; make no live external calls. Save cancellation/failure counters honestly and close every owned database connection.
+- [x] Write service tests for admission failure before persistence, exact retry despite later missing credentials, one launch after a two-submission race and visible launch failure retaining its run ID. Inject launcher failure without starting actual processes.
+- [x] Write worker tests for in-flight cancellation preserving its answer and stopping the next respondent; malformed answer followed by another respondent success; structured authentication failure stopping remaining work; uncertain provider exception consuming reservation; stale ownership unable to settle. The store stale-owner test covers the fencing invariant. Assert provider calls receive `maxAttempts = 1`.
+- [x] Test interrupted status/discovery after reopening a store and advancing its clock; assert no launcher or provider factory invocation on reads. Test duplicate worker invocation only one dispatches. No unsupported resume action is exposed.
+- [x] Run `node --import tsx --test test/run-service.test.ts test/question-worker.test.ts`; all 11 focused behaviors pass.
+- [x] Implement durable accept-before-launch, detached process arguments/lifetime, sequential fenced execution and heartbeat cleanup. Preserve Jev fit admission and existing credentials; make no live external calls. Save cancellation/failure counters honestly and close every owned database connection.
 
 ```ts
 const reservation = store.reserveNext(claim, Date.now());
@@ -287,7 +287,7 @@ if (reservation) {
 }
 ```
 
-- [ ] Run focused tests, regenerate `npm run build`, and run `npm run typecheck`. Commit `feat: execute accepted runs in an independent local worker` through the hook. Exit: isolated service/worker lifecycle is correct; real packaged lifetime is checked in Task 4.
+- [x] Run focused tests, regenerate `npm run build`, and run `npm run typecheck`. The full verification gate passes 210 tests, lint, typecheck, and generated consistency. Commit `feat: execute accepted runs in an independent local worker` through the hook. Exit: isolated service/worker lifecycle is correct; real packaged lifetime is checked in Task 4.
 
 ## Task 4: Deliver the MCP path and prove packaged cross-chat recall
 

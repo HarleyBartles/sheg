@@ -28,6 +28,7 @@ alongside the code.
 
 | [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
 | [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Accepted |
+| [0019](0019-own-execution-in-detached-workers.md) | Own accepted run execution in detached workers | Accepted |
 
 ## Writing and changing decisions
 
