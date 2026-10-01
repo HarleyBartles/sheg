@@ -40,6 +40,24 @@ async function preparedRun(value: InlineRunRequest = input): Promise<PreparedRun
   return result.prepared;
 }
 
+const savedAnswer: DecisionResult = {
+  type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 },
+  attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {},
+};
+
+async function resumableFixture(value: InlineRunRequest = input) {
+  const root = await temporaryRoot();
+  let nowMs = 10_000;
+  const store = openRunStore(root, { now: () => nowMs });
+  const accepted = store.accept(randomUUID(), await preparedRun(value));
+  return {
+    root, store, runId: accepted.run.runId, request: value,
+    now: () => nowMs,
+    advance: (milliseconds: number) => { nowMs += milliseconds; },
+    close: async () => { store.close(); await rm(root, { recursive: true, force: true }); },
+  };
+}
+
 async function temporaryRoot(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'sheg-run-store-'));
 }
@@ -84,6 +102,164 @@ test('two processes can initialize the same fresh datastore concurrently', async
     store.close();
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('resume preserves the run and saved answer and uses a fresh claim window', async () => {
+  const f = await resumableFixture();
+  try {
+    const claim = f.store.claim(f.runId, f.now(), 1234);
+    assert.ok(claim);
+    const first = f.store.reserveNext(claim, f.now());
+    assert.ok(first);
+    f.store.settle(claim, first.attemptId, { kind: 'answered', result: savedAnswer });
+    f.advance(30_001);
+    assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
+
+    const resumed = f.store.resume(f.runId, f.now());
+    assert.equal(resumed.started, true);
+    assert.equal(resumed.run.runId, f.runId);
+    assert.equal(resumed.run.status, 'prepared');
+    assert.equal(resumed.run.usedCalls, 1);
+    assert.equal(resumed.run.maxCalls, f.request.maxCalls);
+    assert.equal(f.store.answers(f.runId).items[0]?.status, 'answered');
+    assert.deepEqual(f.store.getRequest(f.runId).request, f.request);
+
+    assert.equal(f.store.resume(f.runId, f.now()).started, false, 'a second resume must not claim or launch the prepared run again');
+    const resumedClaim = f.store.claim(f.runId, f.now(), 5678);
+    assert.ok(resumedClaim, 'an old run must use the fresh resume launch window');
+  } finally { await f.close(); }
+});
+
+test('resume consumes an uncertain attempt once and never increases the original call limit', async () => {
+  const f = await resumableFixture();
+  try {
+    const claim = f.store.claim(f.runId, f.now(), 1234);
+    assert.ok(claim);
+    const reservation = f.store.reserveNext(claim, f.now());
+    assert.ok(reservation);
+    f.advance(30_001);
+    const interrupted = f.store.getStatus(f.runId);
+    assert.equal(interrupted.status, 'interrupted');
+    assert.equal(interrupted.usedCalls, 1);
+    assert.equal(interrupted.reservedCalls, 0);
+    const history = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+    try {
+      const attempts = history.prepare('SELECT status FROM attempts WHERE run_id = ?').all(f.runId) as Array<{ status: string }>;
+      assert.deepEqual(attempts.map(({ status }) => status), ['uncertain']);
+    } finally { history.close(); }
+
+    const resumed = f.store.resume(f.runId, f.now());
+    assert.equal(resumed.started, true);
+    assert.equal(resumed.run.usedCalls, 1);
+    assert.equal(resumed.run.maxCalls, f.request.maxCalls);
+    assert.equal(f.store.answers(f.runId).items[0]?.status, 'pending');
+    const resumedClaim = f.store.claim(f.runId, f.now(), 5678);
+    assert.ok(resumedClaim);
+    assert.ok(f.store.reserveNext(resumedClaim, f.now()));
+    assert.equal(f.store.reserveNext(resumedClaim, f.now()), null);
+  } finally { await f.close(); }
+});
+
+test('resume reopens only a run-scoped failed evaluation and retains its failed attempt', async () => {
+  const f = await resumableFixture();
+  try {
+    const claim = f.store.claim(f.runId, f.now(), 1234);
+    assert.ok(claim);
+    const reservation = f.store.reserveNext(claim, f.now());
+    assert.ok(reservation);
+    f.store.settle(claim, reservation.attemptId, { kind: 'failed', code: 'provider_unavailable', message: 'Provider access failed.', scope: 'run' });
+    assert.equal(f.store.finish(claim).status, 'failed');
+
+    const resumed = f.store.resume(f.runId, f.now());
+    assert.equal(resumed.started, true);
+    assert.equal(resumed.run.runId, f.runId);
+    assert.equal(resumed.run.usedCalls, 1);
+    assert.equal(f.store.answers(f.runId).items[0]?.status, 'pending');
+    const history = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+    try {
+      const attempts = history.prepare('SELECT status, failure_scope FROM attempts WHERE run_id = ?').all(f.runId) as Array<{ status: string; failure_scope: string }>;
+      assert.deepEqual(attempts.map(({ status, failure_scope }) => ({ status, failure_scope })), [{ status: 'failed', failure_scope: 'run' }]);
+    } finally { history.close(); }
+  } finally { await f.close(); }
+});
+
+test('resume rejects a run-wide failure after the original call budget is exhausted', async () => {
+  const f = await resumableFixture();
+  try {
+    const claim = f.store.claim(f.runId, f.now(), 1234);
+    assert.ok(claim);
+    const first = f.store.reserveNext(claim, f.now());
+    assert.ok(first);
+    f.store.settle(claim, first.attemptId, { kind: 'answered', result: savedAnswer });
+    const second = f.store.reserveNext(claim, f.now());
+    assert.ok(second);
+    f.store.settle(claim, second.attemptId, { kind: 'failed', code: 'provider_unavailable', message: 'Provider access failed.', scope: 'run' });
+    assert.equal(f.store.finish(claim).status, 'failed');
+    const before = f.store.getStatus(f.runId);
+    assert.equal(before.usedCalls, before.maxCalls);
+    assert.throws(() => f.store.resume(f.runId, f.now()), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_resumable');
+    assert.equal(f.store.getStatus(f.runId).status, 'failed');
+  } finally { await f.close(); }
+});
+
+test('resumed work that misses its launch window becomes interrupted without a read relaunch', async () => {
+  const f = await resumableFixture();
+  try {
+    f.advance(30_001);
+    assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
+    const resumed = f.store.resume(f.runId, f.now());
+    assert.equal(resumed.started, true);
+    f.advance(30_001);
+    assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
+    assert.equal(f.store.resume(f.runId, f.now()).started, true);
+  } finally { await f.close(); }
+});
+
+test('a cancellation request prevents resuming after the worker lease expires', async () => {
+  const f = await resumableFixture();
+  try {
+    assert.ok(f.store.claim(f.runId, f.now(), 1234));
+    f.store.requestCancel(f.runId);
+    f.advance(30_001);
+    assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
+    assert.throws(() => f.store.resume(f.runId, f.now()), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_resumable');
+    assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
+  } finally { await f.close(); }
+});
+
+test('resume rejects live and terminal runs without changing them', async () => {
+  for (const target of ['running', 'cancelled', 'completed', 'partial']) {
+    const f = await resumableFixture(target === 'partial' ? { ...input, maxCalls: 2 } : input);
+    try {
+      if (target === 'running') {
+        assert.ok(f.store.claim(f.runId, f.now(), 1234));
+      } else if (target === 'cancelled') {
+        f.store.requestCancel(f.runId);
+      } else {
+        const claim = f.store.claim(f.runId, f.now(), 1234);
+        assert.ok(claim);
+        const first = f.store.reserveNext(claim, f.now());
+        assert.ok(first);
+        f.store.settle(claim, first.attemptId, target === 'completed'
+          ? { kind: 'answered', result: savedAnswer }
+          : { kind: 'failed', code: 'decision_failed', message: 'Evaluation failed.', scope: 'evaluation' });
+        if (target === 'completed') {
+          const second = f.store.reserveNext(claim, f.now());
+          assert.ok(second);
+          f.store.settle(claim, second.attemptId, { kind: 'answered', result: savedAnswer });
+        } else {
+          const second = f.store.reserveNext(claim, f.now());
+          assert.ok(second);
+          f.store.settle(claim, second.attemptId, { kind: 'answered', result: savedAnswer });
+        }
+        assert.equal(f.store.finish(claim).status, target);
+      }
+      const before = f.store.getStatus(f.runId);
+      assert.throws(() => f.store.resume(f.runId, f.now()), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_resumable');
+      assert.equal(f.store.getStatus(f.runId).status, before.status);
+      assert.equal(f.store.getStatus(f.runId).usedCalls, before.usedCalls);
+    } finally { await f.close(); }
   }
 });
 

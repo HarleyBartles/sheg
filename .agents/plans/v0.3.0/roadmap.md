@@ -21,7 +21,7 @@ predecessor. A Linear issue may span more than one plan.
 | # | Title | Status | Plan File | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 remains open for Plan 2; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean |
-| 2 | Recover, resume, delete and inspect storage through the MCP | ready | [Plan 2](02-resume-delete-storage.md) | - | - | - | SHEG-5; explicit same-run resume, transactional delete with optional dry run, Sheg-managed storage health and optimization |
+| 2 | Recover, resume, delete and inspect storage through the MCP | in progress | [Plan 2](02-resume-delete-storage.md) | - | - | - | SHEG-5; explicit same-run resume, transactional delete with optional dry run, Sheg-managed storage health and optimization |
 | 3 | Execute authored journeys with durable respondent turn contexts | pending | Written after Plan 2 | - | - | - | SHEG-7 foundation; integrate finite journeys with the new run store |
 | 4 | Query recorded evidence and compose reusable follow-ons | pending | Written after Plan 3 | - | - | - | Complete SHEG-7; preserve uncertainty/disagreement evidence |
 | 5 | Ask independent typed question groups at new or recorded contexts | pending | Written after Plan 4 | - | - | - | SHEG-6; provider-aware batching/splitting without sibling leakage |

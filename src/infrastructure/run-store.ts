@@ -34,6 +34,7 @@ export interface RunStore {
   list(query: RunListQuery): Page<RunStatusView>;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   requestCancel(runId: string): RunStatusView;
+  resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null;
   heartbeat(claim: WorkerClaim, nowMs: number): boolean;
   reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null;
@@ -367,13 +368,61 @@ class SQLiteRunStore implements RunStore {
     });
   }
 
+  resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView } {
+    this.ensureOpen();
+    if (!Number.isSafeInteger(nowMs) || nowMs < 0) throw new RunStoreError('invalid_time', 'Resume time must be a nonnegative safe integer.');
+    return this.transaction(() => {
+      this.reconcileInside(runId, nowMs);
+      const run = this.database.prepare('SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
+      if (!run) throw this.notFound();
+      const status = asText(run.status, 'run status');
+      if (status === 'prepared') return { started: false, run: this.statusInside(runId) };
+      if (status !== 'interrupted' && status !== 'failed') {
+        throw new RunStoreError('run_not_resumable', `A run in ${status} state cannot be resumed.`);
+      }
+      if (asNumber(run.cancel_requested, 'cancel flag') === 1) {
+        throw new RunStoreError('run_not_resumable', 'A run with a cancellation request cannot be resumed.');
+      }
+      if (asNumber(run.reserved_calls, 'reserved calls') !== 0) {
+        throw new RunStoreError('data_integrity_error', 'A run with an unresolved provider reservation cannot be resumed.');
+      }
+      if (asNumber(run.used_calls, 'used calls') >= asNumber(run.max_calls, 'maximum calls')) {
+        throw new RunStoreError('run_not_resumable', 'This run has no remaining provider-call allowance.');
+      }
+
+      const pending = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'pending'").get(runId) as DatabaseRow;
+      const runFailure = this.database.prepare("SELECT evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY started_ms DESC, attempt_id DESC LIMIT 1").get(runId) as DatabaseRow | undefined;
+      const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, 'failed evaluation ID') : undefined;
+      const failedEvaluation = failedRunEvaluationId
+        ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId, failedRunEvaluationId) as DatabaseRow | undefined
+        : undefined;
+      const canRetrySharedFailure = status === 'failed' && asText(run.failure_scope, 'failure scope') === 'run' &&
+        failedEvaluation !== undefined && asText(failedEvaluation.status, 'evaluation status') === 'failed';
+      const hasPending = asNumber(pending.count, 'pending count') > 0;
+      const hasUnfinished = hasPending || canRetrySharedFailure;
+      if (!hasUnfinished || (status === 'failed' && asText(run.failure_scope, 'failure scope') !== 'run')) {
+        throw new RunStoreError('run_not_resumable', 'This run has no resumable unfinished work.');
+      }
+      if (canRetrySharedFailure && failedRunEvaluationId) {
+        this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL WHERE run_id = ? AND evaluation_id = ? AND status = 'failed'")
+          .run(runId, failedRunEvaluationId);
+      }
+      this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
+        failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
+        WHERE run_id = ? AND status IN ('interrupted', 'failed')`)
+        .run(nowMs + LEASE_MS, runId);
+      return { started: true, run: this.statusInside(runId) };
+    });
+  }
+
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null {
     this.ensureOpen();
     if (!Number.isSafeInteger(workerPid) || workerPid < 1) throw new RunStoreError('invalid_worker_pid', 'Worker PID must be a positive integer.');
     return this.transaction(() => {
-      const row = this.database.prepare('SELECT status, created_ms, cancel_requested FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
+      const row = this.database.prepare('SELECT status, created_ms, cancel_requested, lease_expires_ms FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
       if (!row) throw this.notFound();
-      if (asText(row.status, 'run status') !== 'prepared' || asNumber(row.cancel_requested, 'cancel flag') === 1 || nowMs - asNumber(row.created_ms, 'created time') >= LEASE_MS) return null;
+      const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, 'created time') + LEASE_MS : asNumber(row.lease_expires_ms, 'launch deadline');
+      if (asText(row.status, 'run status') !== 'prepared' || asNumber(row.cancel_requested, 'cancel flag') === 1 || nowMs >= launchDeadline) return null;
       const ownerToken = randomUUID();
       this.database.prepare("UPDATE runs SET status = 'running', owner_token = ?, owner_pid = ?, lease_expires_ms = ? WHERE run_id = ? AND status = 'prepared'")
         .run(ownerToken, workerPid, nowMs + LEASE_MS, runId);
@@ -564,7 +613,8 @@ class SQLiteRunStore implements RunStore {
     const run = this.database.prepare('SELECT * FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
     if (!run) throw this.notFound();
     const status = asText(run.status, 'run status');
-    if (status === 'prepared' && nowMs - asNumber(run.created_ms, 'created time') >= LEASE_MS) {
+    const launchDeadline = run.lease_expires_ms === null ? asNumber(run.created_ms, 'created time') + LEASE_MS : asNumber(run.lease_expires_ms, 'launch deadline');
+    if (status === 'prepared' && nowMs >= launchDeadline) {
       this.database.prepare("UPDATE runs SET status = 'interrupted', failure_scope = 'run', failure_code = 'worker_not_claimed', failure_message = 'No worker claimed the accepted run before its launch window expired' WHERE run_id = ? AND status = 'prepared'").run(runId);
     } else if (status === 'running' && run.lease_expires_ms !== null && asNumber(run.lease_expires_ms, 'worker lease') <= nowMs) {
       const attempts = this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ? AND status = 'reserved'").get(runId) as DatabaseRow;

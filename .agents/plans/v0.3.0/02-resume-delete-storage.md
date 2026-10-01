@@ -1,6 +1,6 @@
 # Resume, delete and manage durable run storage
 
-Status: ready for execution.
+Status: in progress.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -25,6 +25,7 @@ Status: ready for execution.
 ## Review focus
 
 - A run older than the initial launch grace must still be claimable after explicit resume, while a lost resumed launch becomes interrupted without auto-start. Task 1 covers both.
+- A cancellation request that outlives its worker lease must not be undone by resume. Task 1 covers this.
 - A shared credential/access failure must retry only its own unanswered evaluation, retain its prior failed attempt, and spend from the original budget. Tasks 1 and 2 cover this.
 - A stale preview or active worker must not permit partial or active-run deletion. Task 3 revalidates inside the delete transaction.
 - A corrupt datastore must not be described as healthy or silently optimized. Task 4 tests failed integrity output and safe error reporting.
@@ -81,7 +82,7 @@ Read `docs/decisions/README.md` before implementation. Add one ADR and update it
 ## Task 1: Define and persist safe resume transitions
 
 - [ ] **Files:** `src/infrastructure/run-store.ts`, `test/run-store.test.ts`. **Consumes:** existing status, reconciliation, claim/reservation and `AttemptOutcome` contracts. **Produces:** `resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView }`.
-- [ ] Add store tests first. Verify resumed work keeps its UUID/request/answers/maxCalls; an expired reservation remains `uncertain` and increments `usedCalls`; a run-wide failed attempt remains recorded while only its evaluation resets to pending; used plus reserved never exceeds maxCalls; cancelled/completed/partial/live-running states reject without mutation; an old run resumes with a fresh 30-second claim window; an unclaimed resume becomes interrupted again without launch on read. Tests assert persisted rows and returned states, not method call counts.
+- [ ] Add store tests first. Verify resumed work keeps its UUID/request/answers/maxCalls; an expired reservation remains `uncertain` and increments `usedCalls`; a run-wide failed attempt remains recorded while only its evaluation resets to pending; exhausted budget and a saved cancellation request reject without mutation; cancelled/completed/partial/live-running states reject; an old run resumes with a fresh 30-second claim window; an unclaimed resume becomes interrupted again without launch on read. Tests assert persisted rows and returned states, not method call counts.
 - [ ] Run `node --import tsx --test test/run-store.test.ts`. Expected RED: unsupported resume API or an invariant assertion fails for the specified transition.
 - [ ] In one `BEGIN IMMEDIATE` transaction, reconcile expired ownership, verify eligibility and unfinished work, account for reserved attempts once, reopen only the latest run-scoped failed evaluation (clear its result/failure fields while retaining the attempt row), clear the current run failure, set `status='prepared'`, and set `lease_expires_ms = nowMs + LEASE_MS`. Leave `created_at`, `created_ms`, request/fingerprints and `max_calls` unchanged. Return `started: true` only for the transaction that changes state.
 - [ ] Make `claim` and `reconcileInside` use `lease_expires_ms` for resumed prepared rows and `created_ms + LEASE_MS` for initial prepared rows. Keep all claim, heartbeat, reserve and settle ownership checks fenced by the existing owner token. If new schema state is required, update the current pre-v1 schema version and test the explicit reset/setup error; add no migration code.
