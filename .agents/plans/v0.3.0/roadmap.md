@@ -1,6 +1,6 @@
 # Sheg v0.3.0 release roadmap
 
-Status: approved roadmap; Plans 1-4 are implemented on the v0.3.0 feature branch. Plans 5-7 remain.
+Status: approved roadmap; Plans 1-4 are implemented on the v0.3.0 feature branch. Plan 5 is the active JIT slice; Plans 6-7 remain.
 Authority: [approved epic specification](../../specs/2026-10-01-v0.3.0-epic-spec.md).
 Linear: [release project](https://linear.app/harleys-workspace/project/sheg-v030-richer-studies-and-inspectable-evidence-6d11068a2761).
 
@@ -14,18 +14,18 @@ defined in the spec.
 
 ## Consecutive plans
 
-Plans 1-4 are delivered. The query and follow-on path completes SHEG-7. Later
-rows are capability boundaries, not implementation plans. Write each next
-plan against the delivered code and evidence of its predecessor. A Linear
-issue may span more than one plan.
+Plans 1-4 are delivered and SHEG-7 is Done. Plan 5 is the active SHEG-6 JIT
+slice. Later rows are capability boundaries, not implementation plans. Write
+each next plan against the delivered code and evidence of its predecessor. A
+Linear issue may span more than one plan.
 
 | # | Title | Status | Plan File | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 remains open for Plan 2; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean |
-| 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `3ecb97f` (`ec3e70a..3ecb97f`) | - | - | SHEG-5; cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 remains open for Plans 3-4 |
-| 3 | Execute authored journeys with durable respondent turn contexts | completed-awaiting-retirement | [Plan 3](03-durable-journeys.md) | `ace6e98` (`3f31a02..ace6e98`) | - | - | SHEG-7 journey foundation; journey MCP request/details and copied-package kill/resume verified; malformed Credential Manager encoding diagnosis included; staged gate passed 260 tests, lint, typecheck, and generated consistency; final inline review clean. Plan 4 completes SHEG-7 |
-| 4 | Query recorded evidence and compose reusable follow-ons | completed-awaiting-retirement | [Plan 4](04-query-and-follow-on-reuse.md) | `11495cc`, `9277057` (`11495cc..9277057`) | - | - | SHEG-7 query and follow-on accepted; exact typed criteria/references, four context modes, SQLite snapshot revalidation, retained lineage after source deletion, MCP `run_query`, and packaged section-three acceptance; full staged gate passed 279 tests, lint, typecheck, and generated consistency. User guidance explains relevance and incomplete-source decisions |
-| 5 | Ask independent typed question groups at new or recorded contexts | pending | Written after Plan 4 | - | - | - | SHEG-6; provider-aware batching/splitting without sibling leakage |
+| 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 first deliverable; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean. SHEG-5 closed after Plan 2 |
+| 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `3ecb97f` (`ec3e70a..3ecb97f`) | - | - | SHEG-5 cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 closed after Plans 3-4 |
+| 3 | Execute authored journeys with durable respondent turn contexts | completed-awaiting-retirement | [Plan 3](03-durable-journeys.md) | `ace6e98` (`3f31a02..ace6e98`) | - | - | SHEG-7 journey foundation; journey MCP request/details and copied-package kill/resume verified; malformed Credential Manager encoding diagnosis included; staged gate passed 260 tests, lint, typecheck, and generated consistency; final inline review clean. SHEG-7 closed Done after Plan 4 |
+| 4 | Query recorded evidence and compose reusable follow-ons | completed-awaiting-retirement | [Plan 4](04-query-and-follow-on-reuse.md) | `e6eabe4`, `11495cc`, `9277057`, `1203e93` (`745094e..1203e93`) | - | - | SHEG-7 query and follow-on accepted and closed Done; exact typed criteria/references, four context modes, SQLite snapshot revalidation, retained lineage after source deletion, MCP `run_query`, and packaged section-three acceptance; full staged gate passed 279 tests, lint, typecheck, and generated consistency. User guidance explains relevance and incomplete-source decisions |
+| 5 | Ask independent typed question groups at new or recorded contexts | executing | [Plan 5](05-independent-question-groups.md) | - | - | - | SHEG-6; one shared state per respondent/context, Jev batching with exact fit-based splitting, per-answer outcomes, shared physical-attempt evidence, and recovery without sibling leakage |
 | 6 | Offer source-linked material choices and reuse their exact evidence | pending | Written after Plan 5 | - | - | - | SHEG-8; agent-authored candidate boundaries |
 | 7 | Integrate the release workflow and packaged agent guidance | pending | Written after Plan 6 | - | - | - | Across active issues; release preparation only after acceptance and authorization |
 
