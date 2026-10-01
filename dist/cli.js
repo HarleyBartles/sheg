@@ -6,7 +6,7 @@ var __export = (target, all) => {
 
 // src/entrypoints/cli.ts
 import { readFile as readFile5 } from "node:fs/promises";
-import path7 from "node:path";
+import path8 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // node_modules/zod/v4/classic/external.js
@@ -825,10 +825,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path9) {
+  if (!path9)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path9.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1168,11 +1168,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path9, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path9);
     return iss;
   });
 }
@@ -1622,16 +1622,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path8 = []) => {
+  const processError = (error63, path9 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1670,17 +1670,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path8 = []) => {
+  const processError = (error63, path9 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1719,8 +1719,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path8) {
+  const path9 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path9) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18822,13 +18822,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path8 = ref.slice(1).split("/").filter(Boolean);
-  if (path8.length === 0) {
+  const path9 = ref.slice(1).split("/").filter(Boolean);
+  if (path9.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path8[0] === defsKey) {
-    const key = path8[1] === void 0 ? void 0 : decodeJSONPointerSegment(path8[1]);
+  if (path9[0] === defsKey) {
+    const key = path9[1] === void 0 ? void 0 : decodeJSONPointerSegment(path9[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -19682,6 +19682,10 @@ var identifier = external_exports.string().min(1);
 var prose = external_exports.string().min(1);
 var probability = external_exports.number().finite().min(0).max(1);
 var probabilities = external_exports.record(external_exports.string(), probability);
+var costEvidenceSchema = external_exports.object({
+  amountUsd: external_exports.number().finite().nonnegative(),
+  basis: external_exports.enum(["provider-reported", "published-rate-estimate"])
+}).strict();
 var metadata = external_exports.object({
   attempts: external_exports.number().int().positive(),
   provider: external_exports.enum(["jev", "laya"]),
@@ -19692,8 +19696,7 @@ var metadata = external_exports.object({
     inputTokens: external_exports.number().int().nonnegative().optional(),
     outputTokens: external_exports.number().int().nonnegative().optional()
   }).strict(),
-  chargeStatus: external_exports.enum(["billed", "not_billed", "unknown"]),
-  chargeUsd: external_exports.number().finite().nonnegative().optional()
+  cost: costEvidenceSchema.optional()
 }).strict();
 var choiceQuestionSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -20434,142 +20437,68 @@ async function loadStudy(manifestPath, cohortPath, options2 = {}) {
 // src/application/run-manager.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { mkdir as mkdir3 } from "node:fs/promises";
-import path5 from "node:path";
+import path6 from "node:path";
 
-// src/domain/budget-ledger.ts
+// src/domain/attempt-ledger.ts
 import { randomUUID } from "node:crypto";
-var BudgetError = class extends Error {
+var AttemptLedgerError = class extends Error {
   constructor(message) {
     super(message);
-    this.name = "BudgetError";
+    this.name = "AttemptLedgerError";
   }
 };
-var BudgetLedger = class _BudgetLedger {
-  constructor(limits) {
-    this.limits = limits;
-    if (!Number.isInteger(limits.maxCalls) || limits.maxCalls < 1) {
-      throw new BudgetError("Call limit must be a positive integer.");
-    }
-    if (limits.maxUsd !== void 0 && (!Number.isFinite(limits.maxUsd) || limits.maxUsd < 0)) {
-      throw new BudgetError("Spend limit must be finite and nonnegative.");
-    }
+var AttemptLedger = class _AttemptLedger {
+  constructor(maxCalls) {
+    this.maxCalls = maxCalls;
+    if (!Number.isSafeInteger(maxCalls) || maxCalls < 1) throw new AttemptLedgerError("Call limit must be a positive safe integer.");
   }
-  limits;
+  maxCalls;
   reservations = /* @__PURE__ */ new Map();
   usedCalls = 0;
   reservedCalls = 0;
-  billedUsd = 0;
-  reservedUsd = 0;
-  unpricedReservations = 0;
-  blocked = false;
   queue = Promise.resolve();
   static restore(snapshot) {
-    const ledger = new _BudgetLedger({ maxCalls: snapshot.maxCalls, ...snapshot.maxUsd === void 0 ? {} : { maxUsd: snapshot.maxUsd } });
+    if (!Number.isSafeInteger(snapshot.maxCalls) || snapshot.maxCalls < 1 || !Number.isSafeInteger(snapshot.usedCalls) || snapshot.usedCalls < 0 || !Number.isSafeInteger(snapshot.reservedCalls) || snapshot.reservedCalls < 0 || !Number.isSafeInteger(snapshot.remainingCalls) || snapshot.remainingCalls < 0 || snapshot.usedCalls + snapshot.reservedCalls > snapshot.maxCalls || snapshot.remainingCalls !== snapshot.maxCalls - snapshot.usedCalls - snapshot.reservedCalls) {
+      throw new AttemptLedgerError("Attempt snapshot is inconsistent or exceeds maxCalls.");
+    }
+    const ledger = new _AttemptLedger(snapshot.maxCalls);
     ledger.usedCalls = snapshot.usedCalls;
     ledger.reservedCalls = snapshot.reservedCalls;
-    ledger.billedUsd = snapshot.billedUsd;
-    ledger.reservedUsd = snapshot.reservedUsd;
-    ledger.unpricedReservations = snapshot.unpricedReservations;
-    ledger.blocked = snapshot.blocked;
     return ledger;
   }
-  markInterruptedReservationsUnpriced() {
-    if (this.reservedCalls === 0) return;
-    this.usedCalls += this.reservedCalls;
-    this.reservedCalls = 0;
-    this.unpricedReservations += 1;
-    this.blocked = true;
-  }
-  reserve(maxAttempts, maxPerCallUsd) {
+  reserve(maxAttempts) {
     return this.serialized(() => {
-      if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new BudgetError("Reservation attempts must be a positive integer.");
-      if (maxPerCallUsd !== void 0 && (!Number.isFinite(maxPerCallUsd) || maxPerCallUsd < 0)) {
-        throw new BudgetError("Per-call allowance must be finite and nonnegative.");
-      }
-      if (this.blocked) throw new BudgetError("New calls are blocked until unpriced charges are reconciled.");
-      if (this.usedCalls + this.reservedCalls + maxAttempts > this.limits.maxCalls) {
-        throw new BudgetError("Reservation exceeds the call cap.");
-      }
-      if (this.limits.maxUsd !== void 0 && maxPerCallUsd === void 0) {
-        throw new BudgetError("A hosted spend cap requires a per-call allowance.");
-      }
-      if (this.limits.maxUsd !== void 0 && maxPerCallUsd === 0) {
-        throw new BudgetError("Per-call allowance must be positive when a hosted spend cap is enabled.");
-      }
-      const perCallUsd = maxPerCallUsd ?? 0;
-      const reservation = {
-        id: randomUUID(),
-        maxAttempts,
-        ...maxPerCallUsd === void 0 ? {} : { maxPerCallUsd }
-      };
-      const reservedUsd = perCallUsd * maxAttempts;
-      if (!Number.isFinite(reservedUsd) || this.limits.maxUsd !== void 0 && this.billedUsd + this.reservedUsd + reservedUsd > this.limits.maxUsd) {
-        throw new BudgetError("Reservation exceeds the spend cap.");
-      }
-      this.reservations.set(reservation.id, { reservation, reservedUsd, perCallUsd, state: "pending" });
+      if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new AttemptLedgerError("Reservation attempts must be a positive safe integer.");
+      if (this.usedCalls + this.reservedCalls + maxAttempts > this.maxCalls) throw new AttemptLedgerError("Reservation exceeds maxCalls.");
+      const reservation = { id: randomUUID(), maxAttempts };
+      this.reservations.set(reservation.id, reservation);
       this.reservedCalls += maxAttempts;
-      this.reservedUsd += reservedUsd;
       return reservation;
     });
   }
   settle(reservation, evidence) {
     return this.serialized(() => {
       const stored = this.reservations.get(reservation.id);
-      if (!stored || stored.state !== "pending" || !sameReservation(stored.reservation, reservation)) {
-        throw new BudgetError("Reservation is unknown, modified, or already settled.");
+      if (!stored || !sameReservation(stored, reservation)) throw new AttemptLedgerError("Reservation is unknown, modified, or already settled.");
+      if (!Number.isSafeInteger(evidence.attempts) || evidence.attempts < 0 || evidence.attempts > stored.maxAttempts) {
+        throw new AttemptLedgerError("Settlement attempts exceed the reservation.");
       }
-      if (!Number.isInteger(evidence.attempts) || evidence.attempts < 0 || evidence.attempts > reservation.maxAttempts) {
-        throw new BudgetError("Settlement attempts exceed the reservation.");
-      }
-      if (evidence.chargeStatus !== "not_billed" && evidence.attempts < 1) {
-        throw new BudgetError("Billed or unpriced settlement requires at least one attempted call.");
-      }
-      if (evidence.chargeStatus === "billed") {
-        if (evidence.chargeUsd === void 0 || !Number.isFinite(evidence.chargeUsd) || evidence.chargeUsd < 0) {
-          throw new BudgetError("Billed settlement requires a finite nonnegative charge.");
-        }
-      } else if (evidence.chargeUsd !== void 0) {
-        throw new BudgetError("Charge evidence requires billed status.");
-      }
-      this.reservedCalls -= reservation.maxAttempts;
+      this.reservations.delete(stored.id);
+      this.reservedCalls -= stored.maxAttempts;
       this.usedCalls += evidence.attempts;
-      this.reservedUsd -= stored.reservedUsd;
-      if (evidence.chargeStatus === "billed") {
-        this.billedUsd += evidence.chargeUsd;
-      } else if (evidence.chargeStatus === "unknown") {
-        const uncertainUsd = stored.perCallUsd * evidence.attempts;
-        this.reservations.delete(reservation.id);
-        this.reservedUsd += uncertainUsd;
-        this.unpricedReservations += 1;
-        this.blocked = true;
-        return;
-      }
-      this.reservations.delete(reservation.id);
     });
   }
-  reconcile(unpricedUsd) {
-    return this.serialized(() => {
-      if (!Number.isFinite(unpricedUsd) || unpricedUsd < 0) throw new BudgetError("Reconciled charges must be finite and nonnegative.");
-      if (this.unpricedReservations === 0) throw new BudgetError("There are no unpriced reservations to reconcile.");
-      if (this.reservedCalls > 0) throw new BudgetError("Cannot reconcile while calls are in flight.");
-      this.reservedUsd = 0;
-      this.billedUsd += unpricedUsd;
-      this.unpricedReservations = 0;
-      this.blocked = false;
-    });
+  consumeInterruptedReservations() {
+    this.usedCalls += this.reservedCalls;
+    this.reservedCalls = 0;
+    this.reservations.clear();
   }
   snapshot() {
     return {
-      maxCalls: this.limits.maxCalls,
-      ...this.limits.maxUsd === void 0 ? {} : { maxUsd: this.limits.maxUsd },
+      maxCalls: this.maxCalls,
       usedCalls: this.usedCalls,
       reservedCalls: this.reservedCalls,
-      remainingCalls: this.limits.maxCalls - this.usedCalls - this.reservedCalls,
-      billedUsd: this.billedUsd,
-      reservedUsd: this.reservedUsd,
-      unpricedReservations: this.unpricedReservations,
-      overspendUsd: this.limits.maxUsd === void 0 ? 0 : Math.max(0, this.billedUsd - this.limits.maxUsd),
-      blocked: this.blocked
+      remainingCalls: this.maxCalls - this.usedCalls - this.reservedCalls
     };
   }
   serialized(operation) {
@@ -20579,17 +20508,18 @@ var BudgetLedger = class _BudgetLedger {
   }
 };
 function sameReservation(left, right) {
-  return left.id === right.id && left.maxAttempts === right.maxAttempts && left.maxPerCallUsd === right.maxPerCallUsd;
+  return left.id === right.id && left.maxAttempts === right.maxAttempts;
 }
 
 // src/infrastructure/checkpoint-store.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir, rename as rename2, rm as rm2 } from "node:fs/promises";
+import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir as readdir2, rename as rename2, rm as rm2 } from "node:fs/promises";
 import path3 from "node:path";
+import { setTimeout as delay2 } from "node:timers/promises";
 
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir, open as open2, readFile as readFile2, rename, rm } from "node:fs/promises";
+import { link, mkdir, open as open2, readFile as readFile2, readdir, rename, rm } from "node:fs/promises";
 import path2 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 var ProcessLockError = class extends Error {
@@ -20605,7 +20535,7 @@ var ProcessLock = class _ProcessLock {
   }
   lockPath;
   record;
-  static async acquire(directory, name) {
+  static async acquire(directory, name, operations = {}) {
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
     const lockPath = path2.join(directory, `${name}.lock`);
     const record2 = { pid: process.pid, token: randomUUID2() };
@@ -20621,9 +20551,23 @@ var ProcessLock = class _ProcessLock {
         } finally {
           await handle.close();
         }
+        const claims = await staleClaims(lockPath);
+        const activeClaims = [];
+        for (const file2 of claims) {
+          const claimed = await readLock(file2);
+          if (!claimed) continue;
+          if (processExists(claimed.pid)) activeClaims.push({ file: file2, record: claimed });
+          else await rm(file2, { force: true });
+        }
+        if (activeClaims.length > 0) {
+          await removeIfOwned(lockPath, record2);
+          for (const claim2 of activeClaims) await restoreClaim(lockPath, claim2.file, claim2.record);
+          throw new ProcessLockError(`Run is already owned by process ${activeClaims[0].record.pid}.`);
+        }
         return new _ProcessLock(lockPath, record2);
       } catch (error62) {
-        if (error62.code !== "EEXIST") throw error62;
+        const code = error62.code;
+        if (code !== "EEXIST" && code !== "EPERM") throw error62;
       }
       const existing = await readLock(lockPath);
       if (!existing) {
@@ -20633,9 +20577,16 @@ var ProcessLock = class _ProcessLock {
       if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
       const stalePath = `${lockPath}.${process.pid}.${randomUUID2()}.stale`;
       try {
-        await rename(lockPath, stalePath);
+        await (operations.rename ?? rename)(lockPath, stalePath);
+        await operations.afterStaleRename?.();
+        const claimed = await readLock(stalePath);
+        if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
+          if (claimed && processExists(claimed.pid)) await restoreClaim(lockPath, stalePath, claimed);
+          throw new ProcessLockError("Lock ownership changed during stale recovery.");
+        }
         await rm(stalePath, { force: true });
       } catch (error62) {
+        if (error62 instanceof ProcessLockError) throw error62;
         if (error62.code === "ENOENT") continue;
         throw error62;
       }
@@ -20643,10 +20594,47 @@ var ProcessLock = class _ProcessLock {
     throw new ProcessLockError("Could not acquire process lock after retrying incomplete or stale ownership.");
   }
   async release() {
-    const current = await readLock(this.lockPath);
-    if (current?.token === this.record.token) await rm(this.lockPath, { force: true });
+    await removeIfOwned(this.lockPath, this.record);
+    for (const file2 of await staleClaims(this.lockPath)) {
+      const current = await readLock(file2);
+      if (current?.token === this.record.token) await rm(file2, { force: true });
+    }
   }
 };
+async function staleClaims(lockPath) {
+  const directory = path2.dirname(lockPath);
+  const prefix = `${path2.basename(lockPath)}.`;
+  try {
+    const entries = await readdir(directory);
+    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path2.join(directory, entry));
+  } catch (error62) {
+    if (error62.code === "ENOENT") return [];
+    throw error62;
+  }
+}
+async function removeIfOwned(lockPath, record2) {
+  const current = await readLock(lockPath);
+  if (current?.token === record2.token) await rm(lockPath, { force: true });
+}
+async function restoreClaim(lockPath, claimPath, record2) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const claimed = await readLock(claimPath);
+    if (claimed?.token !== record2.token || !processExists(record2.pid)) return;
+    try {
+      await link(claimPath, lockPath);
+      await rm(claimPath, { force: true });
+      return;
+    } catch (error62) {
+      if (error62.code !== "EEXIST") throw error62;
+      const current = await readLock(lockPath);
+      if (current?.token === record2.token) {
+        await rm(claimPath, { force: true });
+        return;
+      }
+      await delay(Math.min(2 + attempt, 20));
+    }
+  }
+}
 async function readLock(filePath) {
   try {
     const value = JSON.parse(await readFile2(filePath, "utf8"));
@@ -20664,9 +20652,124 @@ function processExists(pid) {
   }
 }
 
+// src/providers/jev/config.ts
+var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
+var routeDefaults = {
+  openrouter: {
+    model: "typesafe/jev-1.13",
+    endpoint: "https://openrouter.ai/api/alpha/decisions"
+  },
+  typesafe: {
+    model: "jev-latest",
+    endpoint: "https://api.typesafe.ai/v1/systemone"
+  }
+};
+var jevConfigInputSchema = external_exports.object({
+  kind: external_exports.literal("jev"),
+  route: jevRouteSchema.optional(),
+  model: external_exports.string().min(1).optional(),
+  endpoint: external_exports.string().url().optional(),
+  timeoutMs: external_exports.number().int().positive().optional()
+}).strict().superRefine((input2, context) => {
+  if (input2.endpoint === void 0) return;
+  let endpoint;
+  try {
+    endpoint = new URL(input2.endpoint);
+  } catch {
+    return;
+  }
+  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
+  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
+    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
+  }
+});
+var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
+  const route = input2.route ?? "openrouter";
+  const defaults = routeDefaults[route];
+  return {
+    kind: "jev",
+    route,
+    model: input2.model ?? defaults.model,
+    endpoint: input2.endpoint ?? defaults.endpoint,
+    timeoutMs: input2.timeoutMs ?? 3e4
+  };
+});
+
+// src/infrastructure/identity.ts
+import { createHash as createHash3 } from "node:crypto";
+function stimulusFingerprint(study, cohort, promptContractHash2) {
+  if (!promptContractHash2) throw new TypeError("Prompt contract hash is required.");
+  return hashCanonical({ version: 1, study, cohort, promptContractHash: promptContractHash2 });
+}
+function legacyChoiceStimulusFingerprint(study, cohort, promptHash) {
+  const legacyStudy = { ...study, arms: study.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task) => {
+    const legacyTask = { ...task };
+    delete legacyTask.type;
+    return legacyTask;
+  }) })) };
+  return hashCanonical({ version: 1, study: legacyStudy, cohort, promptContractHash: promptHash });
+}
+function executionFingerprint(stimulus, provider) {
+  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
+  let decisionSettings;
+  if (provider.kind === "jev") {
+    decisionSettings = {
+      kind: provider.kind,
+      route: provider.route ?? "openrouter",
+      model: requireText(provider.model, "Jev model"),
+      ...provider.endpoint === void 0 ? {} : { endpoint: provider.endpoint }
+    };
+  } else {
+    decisionSettings = {
+      kind: provider.kind,
+      checkpoint: requireText(provider.checkpoint, "Laya checkpoint"),
+      contextLimit: requirePositiveInteger(provider.contextLimit, "Laya context limit"),
+      headLimit: requirePositiveInteger(provider.headLimit, "Laya head limit"),
+      tokenizerSha256: requireText(provider.tokenizerSha256, "Laya tokenizer SHA-256"),
+      ...provider.precision === void 0 ? {} : { precision: provider.precision }
+    };
+  }
+  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
+}
+function legacyExecutionFingerprint(stimulus, provider) {
+  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
+  const decisionSettings = provider.kind === "jev" ? { kind: provider.kind, model: requireText(provider.model, "Jev model"), ...provider.endpoint === void 0 ? {} : { endpoint: provider.endpoint } } : { kind: provider.kind, checkpoint: requireText(provider.checkpoint, "Laya checkpoint"), contextLimit: requirePositiveInteger(provider.contextLimit, "Laya context limit"), headLimit: requirePositiveInteger(provider.headLimit, "Laya head limit"), tokenizerSha256: requireText(provider.tokenizerSha256, "Laya tokenizer SHA-256"), ...provider.precision === void 0 ? {} : { precision: provider.precision } };
+  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
+}
+function respondentCohortFingerprint(cohort) {
+  return hashCanonical({ version: 2, archetypes: cohort.archetypes, respondents: cohort.respondents });
+}
+function hashCanonical(value) {
+  return createHash3("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+}
+function canonicalize(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Fingerprint input contains a nonfinite number.");
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (typeof value === "object") {
+    const object2 = value;
+    return Object.fromEntries(Object.keys(object2).sort().map((key) => {
+      if (object2[key] === void 0) throw new TypeError(`Fingerprint input contains undefined at ${key}.`);
+      return [key, canonicalize(object2[key])];
+    }));
+  }
+  throw new TypeError("Fingerprint input must contain only JSON values.");
+}
+function requireText(value, label) {
+  if (!value.trim()) throw new TypeError(`${label} is required.`);
+  return value;
+}
+function requirePositiveInteger(value, label) {
+  if (!Number.isInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer.`);
+  return value;
+}
+
 // src/infrastructure/checkpoint-store.ts
-var providerConfigSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict(),
+var providerConfigSchema = external_exports.union([
+  jevConfigInputSchema.transform((config2) => jevConfigSchema.parse(config2)),
   external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
 ]);
 var journeyResultSchema = external_exports.object({
@@ -20679,18 +20782,16 @@ var journeyResultSchema = external_exports.object({
   status: external_exports.enum(["completed", "decision-limit"]),
   decisionCount: external_exports.number().int().nonnegative()
 }).strict();
-var budgetSnapshotSchema = external_exports.object({
+var attemptSnapshotSchema = external_exports.object({
   maxCalls: external_exports.number().int().positive(),
-  maxUsd: external_exports.number().finite().nonnegative().optional(),
   usedCalls: external_exports.number().int().nonnegative(),
   reservedCalls: external_exports.number().int().nonnegative(),
-  remainingCalls: external_exports.number().int().nonnegative(),
-  billedUsd: external_exports.number().finite().nonnegative(),
-  reservedUsd: external_exports.number().finite().nonnegative(),
-  unpricedReservations: external_exports.number().int().nonnegative(),
-  overspendUsd: external_exports.number().finite().nonnegative(),
-  blocked: external_exports.boolean()
-}).strict();
+  remainingCalls: external_exports.number().int().nonnegative()
+}).strict().superRefine((snapshot, context) => {
+  if (snapshot.usedCalls + snapshot.reservedCalls > snapshot.maxCalls || snapshot.remainingCalls !== snapshot.maxCalls - snapshot.usedCalls - snapshot.reservedCalls) {
+    context.addIssue({ code: "custom", message: "Attempt allowance counters must exactly account for maxCalls." });
+  }
+});
 var contextFailureSchema = external_exports.object({
   decisionId: external_exports.string().min(1),
   nodeId: external_exports.string().min(1),
@@ -20699,8 +20800,14 @@ var contextFailureSchema = external_exports.object({
   effectiveLimit: external_exports.number().int().nonnegative(),
   measurementMethod: external_exports.string().min(1)
 }).strict();
+var interruptionEvidenceSchema = external_exports.object({
+  attempts: external_exports.number().int().positive(),
+  candidateCellIds: external_exports.array(external_exports.string().min(1)),
+  recoveredAt: external_exports.string().datetime()
+}).strict();
 var runCheckpointSchema = external_exports.object({
-  formatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]),
+  formatVersion: external_exports.literal(4),
+  migratedFromFormatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]).optional(),
   runId: external_exports.string().uuid(),
   status: external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled"]),
   createdAt: external_exports.string().datetime(),
@@ -20710,8 +20817,6 @@ var runCheckpointSchema = external_exports.object({
   outputDirectory: external_exports.string().min(1),
   provider: providerConfigSchema,
   maxCalls: external_exports.number().int().positive(),
-  maxUsd: external_exports.number().finite().nonnegative().optional(),
-  maxPerCallUsd: external_exports.number().finite().positive().optional(),
   concurrency: external_exports.number().int().positive(),
   stimulusFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
   executionFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
@@ -20726,11 +20831,13 @@ var runCheckpointSchema = external_exports.object({
     attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
     presentedTaskIds: external_exports.array(external_exports.string().min(1)),
     failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional(),
+    failedAttempts: external_exports.number().int().nonnegative().optional(),
     failureEvidence: contextFailureSchema.optional()
   }).strict()),
+  interruptions: external_exports.array(interruptionEvidenceSchema).optional(),
   activeCellIds: external_exports.array(external_exports.string().min(1)),
   cancellationRequested: external_exports.boolean(),
-  budget: budgetSnapshotSchema
+  budget: attemptSnapshotSchema
 }).strict().superRefine((checkpoint, context) => {
   if (checkpoint.sourceHashes.some((hash2) => hash2.length !== 64)) {
     context.addIssue({ code: "custom", path: ["sourceHashes"], message: "Source hashes must be SHA-256 values." });
@@ -20740,13 +20847,104 @@ var runCheckpointSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["respondentIds"], message: "Checkpoint respondent IDs and arm/respondent cells must be unique." });
   }
 });
+var legacyBudgetSchema = external_exports.object({
+  maxCalls: external_exports.number().int().positive(),
+  maxUsd: external_exports.number().finite().nonnegative().optional(),
+  usedCalls: external_exports.number().int().nonnegative(),
+  reservedCalls: external_exports.number().int().nonnegative(),
+  remainingCalls: external_exports.number().int().nonnegative(),
+  billedUsd: external_exports.number().finite().nonnegative(),
+  reservedUsd: external_exports.number().finite().nonnegative(),
+  unpricedReservations: external_exports.number().int().nonnegative(),
+  overspendUsd: external_exports.number().finite().nonnegative(),
+  blocked: external_exports.boolean()
+}).strict();
+function normalizeLegacyShape(value) {
+  if (!isRecord(value) || value.formatVersion !== 2 && value.formatVersion !== 3) return null;
+  const legacyVersion = value.formatVersion;
+  const budget = legacyBudgetSchema.parse(value.budget);
+  if (budget.maxCalls !== value.maxCalls || budget.usedCalls + budget.reservedCalls + budget.remainingCalls !== budget.maxCalls || budget.usedCalls + budget.reservedCalls > budget.maxCalls) throw new Error("Legacy call counters do not account for maxCalls.");
+  if (value.maxUsd !== void 0 && (!Number.isFinite(value.maxUsd) || Number(value.maxUsd) < 0)) throw new Error("Legacy run spend limit is invalid.");
+  if (value.maxPerCallUsd !== void 0 && (!Number.isFinite(value.maxPerCallUsd) || Number(value.maxPerCallUsd) <= 0)) throw new Error("Legacy per-call spend limit is invalid.");
+  const migrated = structuredClone(value);
+  migrated.formatVersion = 4;
+  migrated.migratedFromFormatVersion = legacyVersion;
+  delete migrated.maxUsd;
+  delete migrated.maxPerCallUsd;
+  migrated.provider = normalizeLegacyProvider(migrated.provider);
+  if (budget.reservedCalls > 0) migrated.interruptions = [{
+    attempts: budget.reservedCalls,
+    candidateCellIds: Array.isArray(migrated.activeCellIds) ? migrated.activeCellIds : [],
+    recoveredAt: (/* @__PURE__ */ new Date()).toISOString()
+  }];
+  migrated.budget = {
+    maxCalls: budget.maxCalls,
+    usedCalls: budget.usedCalls + budget.reservedCalls,
+    reservedCalls: 0,
+    remainingCalls: budget.maxCalls - budget.usedCalls - budget.reservedCalls
+  };
+  if (!Array.isArray(migrated.journeys)) throw new Error("Legacy checkpoint journeys are invalid.");
+  migrated.journeys = migrated.journeys.map((rawJourney) => {
+    if (!isRecord(rawJourney)) return rawJourney;
+    const journey = { ...rawJourney };
+    for (const key of ["decisions", "attemptHistory"]) {
+      if (!Array.isArray(journey[key])) continue;
+      journey[key] = journey[key].map((rawDecision) => {
+        if (!isRecord(rawDecision) || !isRecord(rawDecision.result)) return rawDecision;
+        return { ...rawDecision, result: normalizeLegacyDecision(rawDecision.result) };
+      });
+    }
+    if (legacyVersion === 2 && isRecord(journey.result) && Array.isArray(journey.result.events)) {
+      journey.result = { ...journey.result, events: journey.result.events.map((event) => isRecord(event) && event.type === "choice" ? { type: "response", sequence: event.sequence, nodeId: event.nodeId, taskId: event.taskId, result: { type: "choice", choice: event.choice } } : event) };
+    }
+    return journey;
+  });
+  return migrated;
+}
+function normalizeLegacyProvider(value) {
+  if (!isRecord(value) || value.kind !== "jev") return value;
+  if (value.keyEnv !== void 0 && typeof value.keyEnv !== "string") throw new Error("Legacy Jev credential metadata is invalid.");
+  const config2 = { ...value };
+  delete config2.keyEnv;
+  return jevConfigSchema.parse({ ...config2, route: config2.route ?? "openrouter" });
+}
+function normalizeLegacyDecision(value) {
+  const { chargeStatus, chargeUsd, ...result } = value;
+  if (chargeStatus !== void 0 && !["billed", "not_billed", "unknown"].includes(String(chargeStatus))) throw new Error("Legacy charge status is invalid.");
+  if (chargeUsd !== void 0 && (typeof chargeUsd !== "number" || !Number.isFinite(chargeUsd) || chargeUsd < 0)) throw new Error("Legacy charge amount is invalid.");
+  if (chargeStatus === "billed" && chargeUsd !== void 0) result.cost = { amountUsd: chargeUsd, basis: "provider-reported" };
+  return result;
+}
+async function migrateLegacyCheckpoint(checkpoint) {
+  const legacyVersion = checkpoint.migratedFromFormatVersion;
+  if (!legacyVersion) return checkpoint;
+  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
+  if (study.sources.length !== checkpoint.sourceHashes.length || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) {
+    throw new Error("Study source hashes changed since the legacy run was prepared.");
+  }
+  const oldStimulus = legacyVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const providerIdentity = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
+  if (oldStimulus !== checkpoint.stimulusFingerprint || legacyExecutionFingerprint(oldStimulus, providerIdentity) !== checkpoint.executionFingerprint) {
+    throw new Error("Legacy study or provider identity changed since the run was prepared.");
+  }
+  const nextStimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  return runCheckpointSchema.parse({
+    ...checkpoint,
+    stimulusFingerprint: nextStimulus,
+    executionFingerprint: executionFingerprint(nextStimulus, providerIdentity),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 var CheckpointStore = class {
   constructor(directory) {
     this.directory = directory;
   }
   directory;
   async create(input2) {
-    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 3, runId: input2.runId ?? randomUUID3() });
+    const checkpoint = runCheckpointSchema.parse({ ...input2, formatVersion: 4, runId: input2.runId ?? randomUUID3() });
     await mkdir2(this.directory, { recursive: true });
     const filePath = this.filePath(checkpoint.runId);
     try {
@@ -20760,39 +20958,20 @@ var CheckpointStore = class {
     return checkpoint;
   }
   async read(runId) {
-    let raw;
+    const initial = await this.readValue(runId);
+    const current = runCheckpointSchema.safeParse(initial);
+    if (current.success) return current.data;
+    const runLock = await ProcessLock.acquire(this.directory, `run-${runId}`);
     try {
-      raw = await readFile3(this.filePath(runId), "utf8");
-    } catch (error62) {
+      const checkpointLock = await acquireCheckpointLock(this.directory, runId);
       try {
-        raw = await readFile3(`${this.filePath(runId)}.bak`, "utf8");
-      } catch {
-        throw new Error(`Run checkpoint ${runId} is unavailable.`, { cause: error62 });
+        return await this.readCurrentOrMigrate(runId);
+      } finally {
+        await checkpointLock.release();
       }
+    } finally {
+      await runLock.release();
     }
-    let value;
-    try {
-      value = JSON.parse(raw);
-    } catch (error62) {
-      throw new Error(`Run checkpoint ${runId} is not valid JSON.`, { cause: error62 });
-    }
-    const checkpoint = runCheckpointSchema.safeParse(value);
-    if (!checkpoint.success) throw new Error(`Run checkpoint ${runId} failed validation.`, { cause: checkpoint.error });
-    if (checkpoint.data.formatVersion === 2) {
-      return {
-        ...checkpoint.data,
-        journeys: checkpoint.data.journeys.map((journey) => ({
-          ...journey,
-          ...journey.result === void 0 ? {} : {
-            result: {
-              ...journey.result,
-              events: journey.result.events.map((event) => event.type === "choice" ? { type: "response", sequence: event.sequence, nodeId: event.nodeId, taskId: event.taskId, result: { type: "choice", choice: event.choice } } : event)
-            }
-          }
-        }))
-      };
-    }
-    return checkpoint.data;
   }
   async save(checkpoint) {
     const parsed = runCheckpointSchema.parse(checkpoint);
@@ -20801,9 +20980,10 @@ var CheckpointStore = class {
     await this.writeAtomic(parsed);
   }
   async update(runId, mutate) {
-    const lock = await ProcessLock.acquire(this.directory, `${runId}-checkpoint`);
+    await this.read(runId);
+    const lock = await acquireCheckpointLock(this.directory, runId);
     try {
-      const current = await this.read(runId);
+      const current = await this.readCurrentOrMigrate(runId);
       const updated = runCheckpointSchema.parse(mutate(current));
       if (updated.runId !== current.runId) throw new Error("Checkpoint identity cannot be changed.");
       await this.writeAtomic(updated);
@@ -20815,7 +20995,7 @@ var CheckpointStore = class {
   async list() {
     let names;
     try {
-      names = await readdir(this.directory);
+      names = await readdir2(this.directory);
     } catch (error62) {
       if (error62.code === "ENOENT") return [];
       throw error62;
@@ -20828,6 +21008,38 @@ var CheckpointStore = class {
   filePath(runId) {
     if (!external_exports.string().uuid().safeParse(runId).success) throw new TypeError("Run ID must be a UUID.");
     return path3.join(this.directory, `run-${runId}.json`);
+  }
+  async readCurrentOrMigrate(runId) {
+    const value = await this.readValue(runId);
+    const current = runCheckpointSchema.safeParse(value);
+    if (current.success) return current.data;
+    const legacyShape = normalizeLegacyShape(value);
+    if (!legacyShape) throw new Error(`Run checkpoint ${runId} failed validation.`, { cause: current.error });
+    let migrated;
+    try {
+      migrated = await migrateLegacyCheckpoint(runCheckpointSchema.parse(legacyShape));
+    } catch (error62) {
+      throw new Error(`Legacy run checkpoint ${runId} failed migration validation.`, { cause: error62 });
+    }
+    await this.writeAtomic(migrated);
+    return migrated;
+  }
+  async readValue(runId) {
+    let raw;
+    try {
+      raw = await readFile3(this.filePath(runId), "utf8");
+    } catch (error62) {
+      try {
+        raw = await readFile3(`${this.filePath(runId)}.bak`, "utf8");
+      } catch {
+        throw new Error(`Run checkpoint ${runId} is unavailable.`, { cause: error62 });
+      }
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (error62) {
+      throw new Error(`Run checkpoint ${runId} is not valid JSON.`, { cause: error62 });
+    }
   }
   async writeAtomic(checkpoint) {
     await mkdir2(this.directory, { recursive: true });
@@ -20863,81 +21075,19 @@ var CheckpointStore = class {
     }
   }
 };
-function emptyBudgetSnapshot(maxCalls, maxUsd) {
-  return {
-    maxCalls,
-    ...maxUsd === void 0 ? {} : { maxUsd },
-    usedCalls: 0,
-    reservedCalls: 0,
-    remainingCalls: maxCalls,
-    billedUsd: 0,
-    reservedUsd: 0,
-    unpricedReservations: 0,
-    overspendUsd: 0,
-    blocked: false
-  };
+function emptyAttemptSnapshot(maxCalls) {
+  return { maxCalls, usedCalls: 0, reservedCalls: 0, remainingCalls: maxCalls };
 }
-
-// src/infrastructure/identity.ts
-import { createHash as createHash3 } from "node:crypto";
-function stimulusFingerprint(study, cohort, promptContractHash2) {
-  if (!promptContractHash2) throw new TypeError("Prompt contract hash is required.");
-  return hashCanonical({ version: 1, study, cohort, promptContractHash: promptContractHash2 });
-}
-function legacyChoiceStimulusFingerprint(study, cohort, promptHash) {
-  const legacyStudy = { ...study, arms: study.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task) => {
-    const legacyTask = { ...task };
-    delete legacyTask.type;
-    return legacyTask;
-  }) })) };
-  return hashCanonical({ version: 1, study: legacyStudy, cohort, promptContractHash: promptHash });
-}
-function executionFingerprint(stimulus, provider) {
-  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
-  let decisionSettings;
-  if (provider.kind === "jev") {
-    decisionSettings = { kind: provider.kind, model: requireText(provider.model, "Jev model") };
-  } else {
-    decisionSettings = {
-      kind: provider.kind,
-      checkpoint: requireText(provider.checkpoint, "Laya checkpoint"),
-      contextLimit: requirePositiveInteger(provider.contextLimit, "Laya context limit"),
-      headLimit: requirePositiveInteger(provider.headLimit, "Laya head limit"),
-      tokenizerSha256: requireText(provider.tokenizerSha256, "Laya tokenizer SHA-256"),
-      ...provider.precision === void 0 ? {} : { precision: provider.precision }
-    };
+async function acquireCheckpointLock(directory, runId) {
+  const deadline = Date.now() + 1e4;
+  for (; ; ) {
+    try {
+      return await ProcessLock.acquire(directory, `${runId}-checkpoint`);
+    } catch (error62) {
+      if (!(error62 instanceof ProcessLockError) || Date.now() >= deadline) throw error62;
+      await delay2(10);
+    }
   }
-  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
-}
-function respondentCohortFingerprint(cohort) {
-  return hashCanonical({ version: 2, archetypes: cohort.archetypes, respondents: cohort.respondents });
-}
-function hashCanonical(value) {
-  return createHash3("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
-}
-function canonicalize(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("Fingerprint input contains a nonfinite number.");
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (typeof value === "object") {
-    const object2 = value;
-    return Object.fromEntries(Object.keys(object2).sort().map((key) => {
-      if (object2[key] === void 0) throw new TypeError(`Fingerprint input contains undefined at ${key}.`);
-      return [key, canonicalize(object2[key])];
-    }));
-  }
-  throw new TypeError("Fingerprint input must contain only JSON values.");
-}
-function requireText(value, label) {
-  if (!value.trim()) throw new TypeError(`${label} is required.`);
-  return value;
-}
-function requirePositiveInteger(value, label) {
-  if (!Number.isInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer.`);
-  return value;
 }
 
 // src/providers/jev.ts
@@ -20995,12 +21145,6 @@ function validateDecision(request, result, options2 = {}) {
       throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
     }
   }
-  if (decision.chargeStatus === "billed" && decision.chargeUsd === void 0) {
-    throw new DecisionError("Billed decision is missing cost evidence.");
-  }
-  if (decision.chargeStatus !== "billed" && decision.chargeUsd !== void 0) {
-    throw new DecisionError("Charge amount is present without billed status evidence.");
-  }
   return decision;
 }
 function validateDistribution(distribution, expectedIds, label) {
@@ -21014,20 +21158,155 @@ function validateDistribution(distribution, expectedIds, label) {
   }
 }
 
+// src/providers/jev/model-metadata.ts
+var jevModelMetadata = {
+  openrouter: {
+    "typesafe/jev-1.13": {
+      contextLimit: 32768,
+      contextEvidence: {
+        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
+        checkedOn: "2026-09-30"
+      },
+      inputUsdPerMillion: 0.042,
+      outputUsdPerMillion: 0,
+      priceEvidence: {
+        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
+        checkedOn: "2026-09-30"
+      }
+    }
+  },
+  typesafe: {
+    "jev-latest": {
+      contextLimit: null,
+      inputUsdPerMillion: 0.042,
+      outputUsdPerMillion: 0,
+      priceEvidence: {
+        sourceUrl: "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
+        checkedOn: "2026-09-30"
+      }
+    }
+  }
+};
+function jevMetadata(route, model) {
+  return jevModelMetadata[route][model];
+}
+
+// src/infrastructure/credentials/windows.ts
+import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path4 from "node:path";
+import { fileURLToPath } from "node:url";
+var defaultTargets = {
+  typesafe: "Sheg/Jev/TypeSafe",
+  openrouter: "Sheg/Jev/OpenRouter"
+};
+var WindowsCredentialStore = class {
+  targets;
+  helperPath;
+  run;
+  constructor(options2 = {}) {
+    this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    this.helperPath = options2.helperPath ?? locateHelper();
+    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
+  }
+  async availability(route) {
+    try {
+      const result = await this.run(this.arguments("Status", route));
+      if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
+      if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
+      return "unavailable";
+    } catch {
+      return "unavailable";
+    }
+  }
+  async readForAuthentication(route) {
+    let result;
+    try {
+      result = await this.run(this.arguments("Read", route));
+    } catch {
+      throw new Error(`The ${route} secure credential could not be read.`);
+    }
+    const key = result.stdout.replace(/\r?\n$/, "");
+    if (result.code !== 0 || !key) throw new Error(`The ${route} secure credential could not be read.`);
+    return key;
+  }
+  async setup(route) {
+    const result = await this.run(this.arguments("Setup", route), true);
+    if (result.code !== 0) throw new Error(`The ${route} secure credential could not be saved.`);
+  }
+  async remove(route) {
+    const result = await this.run(this.arguments("Remove", route));
+    if (result.code !== 0 && result.code !== 3) throw new Error(`The ${route} secure credential could not be removed.`);
+  }
+  arguments(operation, route) {
+    return ["-Operation", operation, "-TargetName", this.targets[route]];
+  }
+};
+function locateHelper() {
+  const moduleDirectory = path4.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path4.join(moduleDirectory, "windows-credential.ps1"),
+    path4.join(moduleDirectory, "credentials", "windows-credential.ps1")
+  ];
+  const helper = candidates.find(existsSync);
+  if (!helper) throw new Error("The Windows credential helper is unavailable.");
+  return helper;
+}
+async function runPowerShell(helperPath, args, interactive = false) {
+  if (process.platform !== "win32") throw new Error("Windows secure credentials are unavailable on this platform.");
+  const childArgs = [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File"
+  ];
+  if (interactive) childArgs.splice(2, 1);
+  childArgs.push(helperPath, ...args);
+  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name) => process.env[name] === void 0 ? [] : [[name, process.env[name]]]));
+  return new Promise((resolve, reject) => {
+    const child = nodeSpawn("powershell.exe", childArgs, {
+      windowsHide: !interactive,
+      shell: false,
+      stdio: interactive ? ["inherit", "inherit", "ignore"] : ["ignore", "pipe", "ignore"],
+      env
+    });
+    let stdout = "";
+    let settled = false;
+    const finish = (error62, code = 1) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error62) reject(error62);
+      else resolve({ code, stdout, stderr: "" });
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(new Error("Credential helper timed out."));
+    }, interactive ? 3e5 : 1e4);
+    if (!interactive) child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > 16384) {
+        child.kill();
+        finish(new Error("Credential helper output exceeded its limit."));
+      }
+    });
+    child.once("error", () => finish(new Error("Credential helper could not start.")));
+    child.once("close", (code) => finish(void 0, code ?? 1));
+  });
+}
+
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, chargeStatus, chargeUsd, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId) {
     super(message);
     this.attempts = attempts;
-    this.chargeStatus = chargeStatus;
-    this.chargeUsd = chargeUsd;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.name = "JevCallError";
   }
   attempts;
-  chargeStatus;
-  chargeUsd;
   contextFit;
   decisionId;
 };
@@ -21050,58 +21329,61 @@ var wireResponseSchema = external_exports.object({
   }).passthrough()
 }).passthrough();
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
-var JEV_MODEL = "typesafe/jev-1.13";
-var JEV_CONTEXT_LIMIT = 32768;
-var JEV_HEADROOM = Math.ceil(JEV_CONTEXT_LIMIT * 0.2);
-var JEV_EFFECTIVE_LIMIT = JEV_CONTEXT_LIMIT - JEV_HEADROOM;
+var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
 function requestBody(request, model) {
   const { question } = request;
   const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
   return { model, state: request.state, questions: { [question.id]: { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } } } };
 }
-function measureJevContext(request, model) {
+function measureJevContext(request, model, route = "openrouter") {
   const serialized = JSON.stringify(requestBody(request, model));
   const bytes = Buffer.byteLength(serialized, "utf8");
   const tokens = Math.ceil(bytes / 3);
-  const knownModel = model === JEV_MODEL;
+  const contextLimit = jevMetadata(route, model)?.contextLimit ?? null;
+  const headroomTokens = contextLimit === null ? null : Math.ceil(contextLimit * 0.2);
+  const effectiveLimit = contextLimit === null ? null : contextLimit - Math.ceil(contextLimit * 0.2);
+  const status = effectiveLimit === null ? "unavailable" : tokens > effectiveLimit ? "overflow" : "fits";
   return {
     provider: "jev",
-    status: !knownModel ? "unavailable" : tokens > JEV_EFFECTIVE_LIMIT ? "overflow" : "fits",
+    status,
     method: JEV_MEASUREMENT_METHOD,
     modelIdentity: model,
     tokenCount: "estimated",
     tokens,
-    contextLimit: JEV_CONTEXT_LIMIT,
-    headroomTokens: JEV_HEADROOM,
-    effectiveLimit: JEV_EFFECTIVE_LIMIT,
-    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20 },
-    ...!knownModel ? { reason: "model-context-unknown" } : tokens > JEV_EFFECTIVE_LIMIT ? { reason: "estimated-context-over-limit" } : {}
+    contextLimit,
+    headroomTokens,
+    effectiveLimit,
+    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20, ...contextLimit === null ? {} : { contextEvidenceDate: jevMetadata(route, model)?.contextEvidence?.checkedOn ?? "unrecorded" } },
+    ...status === "unavailable" ? { reason: route === "typesafe" ? TYPESAFE_CONTEXT_UNVERIFIED : "model-context-unknown" } : status === "overflow" ? { reason: "estimated-context-over-limit" } : {}
   };
 }
 var JevProvider = class {
-  constructor(config2, fetchRequest = fetch) {
-    this.config = config2;
+  constructor(config2, fetchRequest = fetch, options2 = {}) {
     this.fetchRequest = fetchRequest;
-    if (config2.kind !== "jev" || !config2.model || !config2.keyEnv || !config2.endpoint || !Number.isInteger(config2.timeoutMs) || config2.timeoutMs < 1) {
-      throw new TypeError("Jev configuration requires a model, key environment name, endpoint, and positive timeout.");
-    }
+    this.config = jevConfigSchema.parse(config2);
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
+    this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
   }
-  config;
   fetchRequest;
+  config;
+  credentialStore;
+  measureContext;
   async decide(request, maxAttempts) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new JevCallError("Jev call limit must be a positive integer.", 0, "not_billed");
+      throw new JevCallError("Jev call limit must be a positive integer.", 0);
     }
     const parsedRequest = decisionRequestSchema.safeParse(request);
     if (!parsedRequest.success) {
-      throw new JevCallError("Jev decision request is invalid.", 0, "not_billed");
+      throw new JevCallError("Jev decision request is invalid.", 0);
     }
     const fit = this.measure(parsedRequest.data);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed", void 0, fit, parsedRequest.data.question.id);
-    const apiKey = process.env[this.config.keyEnv];
-    if (!apiKey) {
-      throw new JevCallError(`Jev API key environment variable ${this.config.keyEnv} is not set.`, 0, "not_billed");
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
+    let apiKey;
+    try {
+      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+    } catch {
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0);
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -21113,6 +21395,7 @@ var JevProvider = class {
       try {
         response = await this.fetchRequest(this.config.endpoint, {
           method: "POST",
+          redirect: "error",
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json"
@@ -21125,33 +21408,34 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary; billing is unknown.", attempts, "unknown");
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
       }
       if (!response.ok) {
         if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}; billing is unknown.`, attempts, "unknown");
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts);
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response; billing is unknown.", attempts, "unknown");
+        throw new JevCallError("Jev returned an unreadable response.", attempts);
       }
       const parsedResponse = wireResponseSchema.safeParse(payload);
       if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields; billing is unknown.", attempts, "unknown");
+        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}; billing is unknown.`, attempts, "unknown");
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts);
       }
       const cost = parsedResponse.data.usage.cost;
-      if (cost === void 0) {
-        throw new JevCallError("Jev response did not report usage cost; billing is unknown.", attempts, "unknown");
-      }
+      const inputTokens = parsedResponse.data.usage.input_tokens;
+      const outputTokens = parsedResponse.data.usage.output_tokens;
+      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
+      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const result = {
         ...answer.data,
         attempts,
@@ -21159,25 +21443,24 @@ var JevProvider = class {
         model: parsedResponse.data.model,
         latencyMs: performance.now() - startedAt,
         usage: {
-          ...parsedResponse.data.usage.input_tokens === void 0 ? {} : { inputTokens: parsedResponse.data.usage.input_tokens },
-          ...parsedResponse.data.usage.output_tokens === void 0 ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }
+          ...inputTokens === void 0 ? {} : { inputTokens },
+          ...outputTokens === void 0 ? {} : { outputTokens }
         },
-        chargeStatus: "billed",
-        chargeUsd: cost
+        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
       };
       try {
         return validateDecision(request, result, { maxAttempts, provider: "jev" });
       } catch (error62) {
         if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation; the reported charge is retained.", attempts, "billed", cost);
+          throw new JevCallError("Jev response failed decision validation.", attempts);
         }
         throw error62;
       }
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts, "unknown");
+    throw new JevCallError("Jev call limit reached without a response.", attempts);
   }
   measure(request) {
-    return measureJevContext(request, this.config.model);
+    return this.measureContext(request, this.config);
   }
 };
 function retryDelayMs(attempt) {
@@ -21187,7 +21470,7 @@ function retryDelayMs(attempt) {
 // src/providers/laya/context-fit.ts
 import { createHash as createHash4 } from "node:crypto";
 import { readFile as readFile4, stat } from "node:fs/promises";
-import path4 from "node:path";
+import path5 from "node:path";
 
 // src/providers/laya/vendor/sequence.ts
 function pyJson(v) {
@@ -21416,7 +21699,7 @@ var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
 var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
 var tokenizerCache = /* @__PURE__ */ new Map();
 async function tokenizerPromise(config2) {
-  const absolutePath = path4.resolve(config2.tokenizerJsonPath);
+  const absolutePath = path5.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
   const metadata2 = await stat(absolutePath, { bigint: true });
   const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
@@ -21516,16 +21799,14 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, chargeStatus, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId) {
     super(message);
     this.attempts = attempts;
-    this.chargeStatus = chargeStatus;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.name = "LayaCallError";
   }
   attempts;
-  chargeStatus;
   contextFit;
   decisionId;
 };
@@ -21583,13 +21864,13 @@ var LayaProvider = class {
   }
   async decide(request, maxAttempts) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new LayaCallError("Laya call limit must be a positive integer.", 0, "not_billed");
+      throw new LayaCallError("Laya call limit must be a positive integer.", 0);
     }
     const parsedRequest = decisionRequestSchema.safeParse(request);
-    if (!parsedRequest.success) throw new LayaCallError("Laya decision request is invalid.", 0, "not_billed");
+    if (!parsedRequest.success) throw new LayaCallError("Laya decision request is invalid.", 0);
     const fit = await this.measure(parsedRequest.data);
     if (fit.status !== "fits") {
-      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, "not_billed", fit, parsedRequest.data.question.id);
+      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     }
     const { question } = parsedRequest.data;
     const endpoint = new URL("/v1/systemone", ensureTrailingSlash(this.config.baseUrl)).toString();
@@ -21609,24 +21890,24 @@ var LayaProvider = class {
         signal: AbortSignal.timeout(this.config.timeoutMs)
       });
     } catch {
-      throw new LayaCallError("Laya local service request failed.", 1, "unknown");
+      throw new LayaCallError("Laya local service request failed.", 1);
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, "not_billed");
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1);
     let payload;
     try {
       payload = await response.json();
     } catch {
-      throw new LayaCallError("Laya local service returned unreadable JSON.", 1, "not_billed");
+      throw new LayaCallError("Laya local service returned unreadable JSON.", 1);
     }
     const parsedResponse = responseSchema.safeParse(payload);
     if (!parsedResponse.success) {
-      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1, "not_billed");
+      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1);
     }
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
-      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, "not_billed");
+      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
     }
     const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, "not_billed");
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
     const result = {
       ...answer.data,
       attempts: 1,
@@ -21637,14 +21918,13 @@ var LayaProvider = class {
       usage: {
         ...parsedResponse.data.usage.input_tokens === void 0 ? {} : { inputTokens: parsedResponse.data.usage.input_tokens },
         ...parsedResponse.data.usage.output_tokens === void 0 ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }
-      },
-      chargeStatus: "not_billed"
+      }
     };
     try {
       return validateDecision(request, result, { maxAttempts, provider: "laya", checkpoint: this.config.checkpoint });
     } catch (error62) {
       if (error62 instanceof DecisionError) {
-        throw new LayaCallError("Laya response failed decision validation.", 1, "not_billed");
+        throw new LayaCallError("Laya response failed decision validation.", 1);
       }
       throw error62;
     }
@@ -21664,32 +21944,34 @@ var RunCancelled = class extends Error {
 };
 async function runWorker(store, checkpoint, provider, restoredBudget) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint) throw new Error("Study or provider settings changed since this run was prepared.");
-  const { maxUsd, ...budgetRest } = checkpoint.budget;
-  const ledger = restoredBudget ?? BudgetLedger.restore({ ...budgetRest, ...maxUsd === void 0 ? {} : { maxUsd } });
+  const ledger = restoredBudget ?? AttemptLedger.restore(checkpoint.budget);
   const respondents = new Map(study.respondents.map((respondent) => [respondent.id, respondent]));
   const cells = study.manifest.arms.flatMap((arm) => study.respondents.map((respondent) => ({ arm, respondent, id: cellId(arm.id, respondent.id) })));
   const cursor = { next: 0 };
+  let stopWorkers = false;
   const runCell = async (arm, respondentId, id) => {
     const profile = respondents.get(respondentId);
     if (!profile) throw new Error(`Frozen respondent ${respondentId} is no longer present.`);
     let decisions = [];
     const previous = (await store.read(checkpoint.runId)).journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
+    let failedAttempts = previous?.failedAttempts ?? 0;
     const attemptHistory = [...previous?.attemptHistory ?? []];
     const replayDecisions = previous?.decisions ?? [];
     const presentedTaskIds = [...previous?.presentedTaskIds ?? []];
     let replayCursor = 0;
     let failedNodeId = null;
-    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
+    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions: replayDecisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
-        const providerRequest = checkpoint.formatVersion === 2 ? legacyChoiceRequest(request) : request;
+        const legacyChoiceReplay = checkpoint.migratedFromFormatVersion === 2;
+        const providerRequest = legacyChoiceReplay ? legacyChoiceRequest(request) : request;
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error("Task sequence changed while recovering the run.");
-          if (replay.requestFingerprint !== requestFingerprint(request) && !(checkpoint.formatVersion === 2 && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error("Rendered task request changed while recovering the run.");
+          if (replay.requestFingerprint !== requestFingerprint(request) && !(legacyChoiceReplay && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error("Rendered task request changed while recovering the run.");
           replayCursor += 1;
           decisions.push(replay);
           return replay.result;
@@ -21697,12 +21979,12 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         const presentedCount = presentedTaskIds.filter((id2) => id2 === request.question.id).length;
         const completedCount = decisions.filter((decision2) => decision2.decisionId === request.question.id).length;
         if (presentedCount <= completedCount) presentedTaskIds.push(request.question.id);
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         if (await cancellationRequested(store, checkpoint.runId)) throw new RunCancelled();
-        const reservation = await ledger.reserve(1, checkpoint.provider.kind === "jev" ? checkpoint.maxPerCallUsd : void 0);
+        const reservation = await ledger.reserve(1);
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), activeCellIds: addUnique(current.activeCellIds, id) }));
         if (await cancellationRequested(store, checkpoint.runId)) {
-          await ledger.settle(reservation, { attempts: 0, chargeStatus: "not_billed" });
+          await ledger.settle(reservation, { attempts: 0 });
           throw new RunCancelled();
         }
         failedNodeId = nodeId;
@@ -21710,16 +21992,18 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         try {
           decision = await provider.decide(providerRequest, 1);
         } catch (error62) {
-          await ledger.settle(reservation, errorEvidence(error62));
-          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+          const evidence = errorEvidence(error62);
+          await ledger.settle(reservation, evidence);
+          failedAttempts += evidence.attempts;
+          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
           throw error62;
         }
-        await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...decision.chargeUsd === void 0 ? {} : { chargeUsd: decision.chargeUsd } });
-        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: checkpoint.formatVersion === 2 ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, presentedTaskIds }) }));
+        await ledger.settle(reservation, { attempts: decision.attempts });
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: legacyChoiceReplay ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "partial", decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         return decision;
       } });
-      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "completed", result, decisions, attemptHistory, presentedTaskIds }) }));
+      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: "completed", result, decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     } catch (error62) {
       const cancelled = error62 instanceof RunCancelled || await cancellationRequested(store, checkpoint.runId);
       const current = await store.read(checkpoint.runId);
@@ -21732,6 +22016,7 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
         status: cancelled ? "partial" : "failed",
         decisions,
         attemptHistory,
+        failedAttempts,
         presentedTaskIds,
         ...!cancelled ? { failureKind: isUnsupported(error62) ? "unsupported-input" : error62 instanceof JourneyExecutionError ? "journey" : "provider" } : {},
         ...failureEvidence === null ? {} : { failureEvidence }
@@ -21741,16 +22026,28 @@ async function runWorker(store, checkpoint, provider, restoredBudget) {
     }
   };
   const worker = async () => {
-    while (cursor.next < cells.length) {
+    while (!stopWorkers && cursor.next < cells.length) {
       if (await cancellationRequested(store, checkpoint.runId)) return;
+      if (stopWorkers) return;
       const cell = cells[cursor.next++];
       if (!cell) return;
       const current = await store.read(checkpoint.runId);
+      if (stopWorkers) return;
       if (current.journeys.some((journey) => journey.armId === cell.arm.id && journey.respondentId === cell.respondent.id && journey.status === "completed")) continue;
       await runCell(cell.arm, cell.respondent.id, cell.id);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(checkpoint.concurrency, cells.length) }, () => worker()));
+  const workers = Array.from({ length: Math.min(checkpoint.concurrency, cells.length) }, async () => {
+    try {
+      await worker();
+    } catch (error62) {
+      stopWorkers = true;
+      throw error62;
+    }
+  });
+  const workerResults = await Promise.allSettled(workers);
+  const workerFailure = workerResults.find((result) => result.status === "rejected");
+  if (workerFailure?.status === "rejected") throw workerFailure.reason;
   return updateCheckpoint(store, checkpoint.runId, (current) => {
     const completed = new Set(current.journeys.filter((journey) => journey.status === "completed").map((journey) => cellId(journey.armId, journey.respondentId)));
     const failed = current.journeys.some((journey) => journey.status === "failed");
@@ -21806,11 +22103,10 @@ function addUnique(values, value) {
   return values.includes(value) ? values : [...values, value];
 }
 function errorEvidence(error62) {
-  if (typeof error62 === "object" && error62 !== null && "attempts" in error62 && typeof error62.attempts === "number" && "chargeStatus" in error62 && ["not_billed", "unknown", "billed"].includes(String(error62.chargeStatus))) {
-    const evidence = error62;
-    return { attempts: evidence.attempts, chargeStatus: evidence.chargeStatus, ...evidence.chargeUsd === void 0 ? {} : { chargeUsd: evidence.chargeUsd } };
+  if (typeof error62 === "object" && error62 !== null && "attempts" in error62 && typeof error62.attempts === "number" && Number.isSafeInteger(error62.attempts) && error62.attempts >= 0) {
+    return { attempts: error62.attempts };
   }
-  return { attempts: 0, chargeStatus: "not_billed" };
+  return { attempts: 1 };
 }
 function isUnsupported(error62) {
   return typeof error62 === "object" && error62 !== null && "message" in error62 && String(error62.message).includes("unsupported-input");
@@ -21878,41 +22174,29 @@ function graphDecisionRange(arm) {
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
   cohortPath: external_exports.string().min(1),
-  provider: external_exports.discriminatedUnion("kind", [
-    external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict(),
+  provider: external_exports.union([
+    jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
     external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
   ]),
   outputDirectory: external_exports.string().min(1),
   maxCalls: external_exports.number().int().positive(),
-  maxUsd: external_exports.number().finite().positive().optional(),
-  maxPerCallUsd: external_exports.number().finite().positive().optional(),
   concurrency: external_exports.number().int().min(1).max(64).default(1)
-}).strict().superRefine((value, context) => {
-  if (value.provider.kind === "jev" && (value.maxUsd === void 0 || value.maxPerCallUsd === void 0)) {
-    context.addIssue({ code: "custom", path: ["maxUsd"], message: "Jev runs require maxUsd and maxPerCallUsd." });
-  }
-  if (value.provider.kind === "laya" && (value.maxUsd !== void 0 || value.maxPerCallUsd !== void 0)) {
-    context.addIssue({ code: "custom", path: ["maxUsd"], message: "Local Laya runs do not accept hosted spend caps." });
-  }
-});
+}).strict();
 async function checkStudy(config2) {
   const parsed = configSchema.parse(config2);
   const normalized = {
     ...parsed,
-    manifestPath: path5.resolve(parsed.manifestPath),
-    cohortPath: path5.resolve(parsed.cohortPath),
-    outputDirectory: path5.resolve(parsed.outputDirectory),
-    provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path5.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
+    manifestPath: path6.resolve(parsed.manifestPath),
+    cohortPath: path6.resolve(parsed.cohortPath),
+    outputDirectory: path6.resolve(parsed.outputDirectory),
+    provider: parsed.provider.kind === "laya" ? { ...parsed.provider, tokenizerJsonPath: path6.resolve(parsed.provider.tokenizerJsonPath) } : parsed.provider
   };
   const study = await loadStudy(normalized.manifestPath, normalized.cohortPath);
   const routeBounds = estimateRunDecisionCalls(study.manifest.arms, study.respondents);
   const runBounds = {
     ...routeBounds,
     maximumCallsConfigured: normalized.maxCalls,
-    maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls,
-    ...normalized.provider.kind === "jev" ? {
-      spendCeilingUsd: Math.min(normalized.maxUsd, normalized.maxPerCallUsd * Math.min(routeBounds.maximumDecisionCalls, normalized.maxCalls))
-    } : {}
+    maximumCallsSufficient: routeBounds.maximumDecisionCalls <= normalized.maxCalls
   };
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = normalized.provider.kind === "laya" ? { kind: "laya", checkpoint: normalized.provider.checkpoint, contextLimit: normalized.provider.contextLimit, headLimit: normalized.provider.headLimit, tokenizerSha256: normalized.provider.tokenizerSha256, baseUrl: normalized.provider.baseUrl, timeoutMs: normalized.provider.timeoutMs, ...normalized.provider.precision === void 0 ? {} : { precision: normalized.provider.precision } } : normalized.provider;
@@ -21921,13 +22205,15 @@ async function checkStudy(config2) {
 var RunManager = class {
   constructor(options2 = {}) {
     this.options = options2;
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
   }
   options;
   active = /* @__PURE__ */ new Map();
+  credentialStore;
   async startRun(config2) {
     const checked = await checkStudy(config2);
     const { config: c, study } = checked;
-    requireJevKey(c.provider);
+    await requireJevCredential(c.provider, this.credentialStore);
     await mkdir3(c.outputDirectory, { recursive: true });
     const runId = randomUUID4();
     const store = new CheckpointStore(c.outputDirectory);
@@ -21944,8 +22230,6 @@ var RunManager = class {
         outputDirectory: c.outputDirectory,
         provider: c.provider,
         maxCalls: c.maxCalls,
-        ...c.maxUsd === void 0 ? {} : { maxUsd: c.maxUsd },
-        ...c.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: c.maxPerCallUsd },
         concurrency: c.concurrency,
         stimulusFingerprint: checked.stimulusFingerprint,
         executionFingerprint: checked.executionFingerprint,
@@ -21954,7 +22238,7 @@ var RunManager = class {
         journeys: [],
         activeCellIds: [],
         cancellationRequested: false,
-        budget: emptyBudgetSnapshot(c.maxCalls, c.maxUsd)
+        budget: emptyAttemptSnapshot(c.maxCalls)
       });
       checkpoint = await store.update(runId, (current) => ({ ...current, status: "running", updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
       this.launch(store, checkpoint, lock);
@@ -21965,16 +22249,13 @@ var RunManager = class {
     }
   }
   async runStatus(outputDirectory, runId) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory));
+    const store = new CheckpointStore(path6.resolve(outputDirectory));
     const checkpoint = await store.read(runId);
     if (checkpoint.status === "running" && !this.active.has(runId)) {
       try {
         const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
         try {
-          const current = await store.read(runId);
-          const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-          ledger.markInterruptedReservationsUnpriced();
-          return await store.update(runId, (latest) => ({ ...latest, status: "partial", activeCellIds: [], budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+          return await store.update(runId, (latest) => ({ ...recoverInterruptedAttempts(latest), status: "partial", updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
         } finally {
           await lock.release();
         }
@@ -21985,39 +22266,21 @@ var RunManager = class {
     return checkpoint;
   }
   async cancelRun(outputDirectory, runId) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory));
+    const store = new CheckpointStore(path6.resolve(outputDirectory));
     await store.update(runId, (current) => ({ ...current, cancellationRequested: true, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
     await this.active.get(runId);
     return store.read(runId);
   }
-  async reconcileRun(outputDirectory, runId, unpricedUsd) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory));
-    await store.read(runId);
-    const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
-    try {
-      const current = await store.read(runId);
-      if (current.status !== "partial" && current.status !== "failed" && current.status !== "cancelled") {
-        throw new Error("Only a stopped partial, failed, or cancelled run can be reconciled. Check run status first.");
-      }
-      const ledger = BudgetLedger.restore(cleanBudget(current.budget));
-      await ledger.reconcile(unpricedUsd);
-      return await store.update(runId, (latest) => ({ ...latest, budget: ledger.snapshot(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
-    } finally {
-      await lock.release();
-    }
-  }
   async resumeRun(outputDirectory, runId) {
-    const store = new CheckpointStore(path5.resolve(outputDirectory));
+    const store = new CheckpointStore(path6.resolve(outputDirectory));
     let checkpoint = await store.read(runId);
     if (checkpoint.status === "completed" || checkpoint.status === "cancelled") throw new Error(`Cannot resume a ${checkpoint.status} run.`);
-    const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, ...checkpoint.maxUsd === void 0 ? {} : { maxUsd: checkpoint.maxUsd }, ...checkpoint.maxPerCallUsd === void 0 ? {} : { maxPerCallUsd: checkpoint.maxPerCallUsd }, concurrency: checkpoint.concurrency });
-    const compatibleExecutionFingerprint = checkpoint.formatVersion === 2 ? executionFingerprint(legacyChoiceStimulusFingerprint(checked.study.manifest, checked.study.cohort, legacyPromptContractHash), checked.config.provider.kind === "laya" ? { kind: "laya", checkpoint: checked.config.provider.checkpoint, contextLimit: checked.config.provider.contextLimit, headLimit: checked.config.provider.headLimit, tokenizerSha256: checked.config.provider.tokenizerSha256, ...checked.config.provider.precision === void 0 ? {} : { precision: checked.config.provider.precision } } : checked.config.provider) : checked.executionFingerprint;
-    if (compatibleExecutionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
-    requireJevKey(checkpoint.provider);
+    const checked = await checkStudy({ manifestPath: checkpoint.manifestPath, cohortPath: checkpoint.cohortPath, provider: checkpoint.provider, outputDirectory: checkpoint.outputDirectory, maxCalls: checkpoint.maxCalls, concurrency: checkpoint.concurrency });
+    if (checked.executionFingerprint !== checkpoint.executionFingerprint || checked.study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) throw new Error("Study or execution settings changed since this run was prepared.");
+    await requireJevCredential(checkpoint.provider, this.credentialStore);
     const lock = await ProcessLock.acquire(store.directory, `run-${runId}`);
     try {
-      if (checkpoint.budget.blocked) throw new Error("Unpriced calls must be reconciled before resume.");
-      checkpoint = await store.update(runId, (current) => ({ ...current, status: "running", cancellationRequested: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+      checkpoint = await store.update(runId, (current) => ({ ...recoverInterruptedAttempts(current), status: "running", cancellationRequested: false, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
       this.launch(store, checkpoint, lock);
       return checkpoint;
     } catch (error62) {
@@ -22026,10 +22289,10 @@ var RunManager = class {
     }
   }
   async readCheckpoint(outputDirectory, runId) {
-    return new CheckpointStore(path5.resolve(outputDirectory)).read(runId);
+    return new CheckpointStore(path6.resolve(outputDirectory)).read(runId);
   }
   launch(store, checkpoint, lock) {
-    const provider = this.options.providerFactory?.(checkpoint.provider) ?? (checkpoint.provider.kind === "jev" ? new JevProvider(checkpoint.provider) : new LayaProvider(checkpoint.provider, { ...this.options.measureLayaFit === void 0 ? {} : { measureFit: this.options.measureLayaFit } }));
+    const provider = this.options.providerFactory?.(checkpoint.provider) ?? (checkpoint.provider.kind === "jev" ? new JevProvider(checkpoint.provider, fetch, { credentialStore: this.credentialStore }) : new LayaProvider(checkpoint.provider, { ...this.options.measureLayaFit === void 0 ? {} : { measureFit: this.options.measureLayaFit } }));
     const task = runWorker(store, checkpoint, provider).then(() => void 0).catch(async () => {
       await store.update(checkpoint.runId, (current) => ({ ...current, status: "failed", activeCellIds: [], updatedAt: (/* @__PURE__ */ new Date()).toISOString() }));
     }).finally(async () => {
@@ -22039,28 +22302,33 @@ var RunManager = class {
     this.active.set(checkpoint.runId, task);
   }
 };
-function cleanBudget(snapshot) {
-  const { maxUsd, ...rest } = snapshot;
-  return { ...rest, ...maxUsd === void 0 ? {} : { maxUsd } };
+async function requireJevCredential(provider, credentialStore) {
+  if (provider.kind !== "jev") return;
+  const availability = await credentialStore.availability(provider.route);
+  if (availability !== "available") throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
 }
-function requireJevKey(provider) {
-  if (provider.kind === "jev" && !process.env[provider.keyEnv]?.trim()) {
-    throw new Error(`Jev API key environment variable ${provider.keyEnv} is not set. Set it in the process environment before starting or resuming a run.`);
-  }
+function recoverInterruptedAttempts(checkpoint) {
+  const ledger = AttemptLedger.restore(checkpoint.budget);
+  ledger.consumeInterruptedReservations();
+  const interruptions = checkpoint.budget.reservedCalls === 0 ? checkpoint.interruptions : [
+    ...checkpoint.interruptions ?? [],
+    { attempts: checkpoint.budget.reservedCalls, candidateCellIds: checkpoint.activeCellIds, recoveredAt: (/* @__PURE__ */ new Date()).toISOString() }
+  ];
+  return { ...checkpoint, activeCellIds: [], budget: ledger.snapshot(), ...interruptions === void 0 ? {} : { interruptions } };
 }
 
 // src/application/reports.ts
 import { createHash as createHash6 } from "node:crypto";
-import path6 from "node:path";
-var responseSchema2 = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), presentationOccurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), answer: decisionValueSchema, optionIds: external_exports.array(external_exports.string()), choice: external_exports.string().optional(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), chargeUsd: external_exports.number().nonnegative().nullable() }).strict();
+import path7 from "node:path";
+var responseSchema2 = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), presentationOccurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), answer: decisionValueSchema, optionIds: external_exports.array(external_exports.string()), choice: external_exports.string().optional(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), cost: external_exports.object({ amountUsd: external_exports.number().nonnegative(), basis: external_exports.enum(["provider-reported", "published-rate-estimate"]) }).strict().nullable() }).strict();
 var pollingReportSchema = external_exports.object({
-  formatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]),
+  formatVersion: external_exports.literal(4),
   runId: external_exports.string().uuid(),
   status: external_exports.string(),
   stimulusFingerprint: external_exports.string(),
   executionFingerprint: external_exports.string(),
   cohortFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  provider: external_exports.object({ kind: external_exports.enum(["jev", "laya"]), model: external_exports.string().nullable(), checkpoint: external_exports.string().nullable() }).strict(),
+  provider: external_exports.object({ kind: external_exports.enum(["jev", "laya"]), model: external_exports.string().nullable(), checkpoint: external_exports.string().nullable(), route: external_exports.enum(["openrouter", "typesafe"]).nullable(), endpoint: external_exports.string().url().nullable() }).strict(),
   cohortSize: external_exports.number().int().nonnegative(),
   arms: external_exports.array(external_exports.object({
     id: external_exports.string(),
@@ -22072,9 +22340,9 @@ var pollingReportSchema = external_exports.object({
     stimulusItems: external_exports.array(external_exports.object({ id: external_exports.string(), text: external_exports.string() }).strict()),
     tasks: external_exports.array(external_exports.object({ id: external_exports.string(), type: external_exports.enum(["choice", "score", "noul"]).optional(), comparisonKey: external_exports.string().nullable(), instructions: external_exports.string(), options: external_exports.record(external_exports.string(), external_exports.string()).optional(), rubric: external_exports.array(external_exports.string()).optional(), criteria: external_exports.object({ true: external_exports.string().optional(), false: external_exports.string().optional() }).nullable().optional(), responseHistory: external_exports.enum(["include", "omit"]).optional() }).strict()),
     taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), type: external_exports.enum(["choice", "score", "noul"]).optional(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()), meanScore: external_exports.number().finite().optional(), rubricProbabilities: external_exports.record(external_exports.string(), external_exports.number().min(0).max(1)).optional(), meanProbabilityTrue: external_exports.number().min(0).max(1).optional() }).strict()) }).strict()),
-    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), variation: external_exports.record(external_exports.string(), external_exports.string()).optional(), status: external_exports.string(), outcome: external_exports.string().nullable(), presentedTaskIds: external_exports.array(external_exports.string()), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failureEvidence: contextFailureSchema.optional() }).strict())
+    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), variation: external_exports.record(external_exports.string(), external_exports.string()).optional(), status: external_exports.string(), outcome: external_exports.string().nullable(), presentedTaskIds: external_exports.array(external_exports.string()), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema2), failedAttempts: external_exports.number().int().nonnegative(), failureEvidence: contextFailureSchema.optional() }).strict())
   }).strict()),
-  providerEvidence: external_exports.object({ attempts: external_exports.number().int(), billedUsd: external_exports.number().nonnegative(), unknownCharges: external_exports.number().int(), failedCells: external_exports.number().int() }).strict()
+  providerEvidence: external_exports.object({ interruptions: external_exports.array(interruptionEvidenceSchema), attempts: external_exports.number().int(), maxCalls: external_exports.number().int().positive(), reservedCalls: external_exports.number().int().nonnegative(), remainingCalls: external_exports.number().int().nonnegative(), failedCells: external_exports.number().int() }).strict()
 }).strict();
 function reconstructPartialEvents(arm, stored) {
   const events = [];
@@ -22158,7 +22426,7 @@ function reconstructPartialEvents(arm, stored) {
 async function buildReport(checkpoint) {
   checkpoint = runCheckpointSchema.parse(checkpoint);
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = checkpoint.formatVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index]) || study.sources.length !== checkpoint.sourceHashes.length) {
     throw new Error("Study inputs or provider settings changed since this run was prepared; the report cannot be reproduced.");
@@ -22195,11 +22463,12 @@ async function buildReport(checkpoint) {
           attempts: result.attempts,
           latencyMs: result.latencyMs,
           confidence: "confidence" in result ? result.confidence ?? null : null,
-          chargeUsd: result.chargeUsd ?? null
+          cost: result.cost ?? null
         };
       });
       return {
         respondentId: respondent.id,
+        failedAttempts: stored?.failedAttempts ?? 0,
         archetypeId: respondent.archetypeId ?? null,
         ...respondent.variation === void 0 ? {} : { variation: respondent.variation },
         status: stored?.status ?? "not-started",
@@ -22269,25 +22538,27 @@ async function buildReport(checkpoint) {
   });
   const rawProvider = checkpoint.provider;
   return pollingReportSchema.parse({
-    formatVersion: 3,
+    formatVersion: 4,
     runId: checkpoint.runId,
     status: checkpoint.status,
     stimulusFingerprint: checkpoint.stimulusFingerprint,
     executionFingerprint: checkpoint.executionFingerprint,
     cohortFingerprint: respondentCohortFingerprint(cohort),
-    provider: { kind: rawProvider.kind, model: rawProvider.kind === "jev" ? rawProvider.model : null, checkpoint: rawProvider.kind === "laya" ? rawProvider.checkpoint : null },
+    provider: { kind: rawProvider.kind, model: rawProvider.kind === "jev" ? rawProvider.model : null, checkpoint: rawProvider.kind === "laya" ? rawProvider.checkpoint : null, route: rawProvider.kind === "jev" ? rawProvider.route : null, endpoint: rawProvider.kind === "jev" ? rawProvider.endpoint : null },
     cohortSize: profiles.size,
     arms,
     providerEvidence: {
+      interruptions: checkpoint.interruptions ?? [],
       attempts: checkpoint.budget.usedCalls,
-      billedUsd: checkpoint.budget.billedUsd,
-      unknownCharges: checkpoint.budget.unpricedReservations,
+      maxCalls: checkpoint.budget.maxCalls,
+      reservedCalls: checkpoint.budget.reservedCalls,
+      remainingCalls: checkpoint.budget.remainingCalls,
       failedCells: checkpoint.journeys.filter((journey) => journey.status === "failed").length
     }
   });
 }
 async function getReport(outputDirectory, runId) {
-  return buildReport(await new CheckpointStore(path6.resolve(outputDirectory)).read(runId));
+  return buildReport(await new CheckpointStore(path7.resolve(outputDirectory)).read(runId));
 }
 function compareReports(report, leftArmId, rightArmId) {
   if (leftArmId === rightArmId) throw new Error("Choose two distinct arms from the same run.");
@@ -22755,14 +23026,14 @@ var preflightInputSchema = external_exports.object({
   cohortPath: external_exports.string().min(1).optional(),
   mode: external_exports.enum(["frozen-cohort", "maximum-profile"]).default("frozen-cohort"),
   providers: external_exports.array(external_exports.discriminatedUnion("kind", [
-    external_exports.object({ kind: external_exports.literal("jev"), model: external_exports.string().min(1), keyEnv: external_exports.string().min(1), endpoint: external_exports.string().url(), timeoutMs: external_exports.number().int().positive() }).strict(),
+    jevConfigInputSchema,
     external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
   ])).min(1),
   maxPackets: external_exports.number().int().nonnegative().optional()
 }).strict().superRefine((input2, context) => {
   if (input2.mode === "frozen-cohort" && !input2.cohortPath) context.addIssue({ code: "custom", path: ["cohortPath"], message: "Frozen-cohort preflight requires a cohort path." });
 });
-async function preflightStudy(input2) {
+async function preflightStudy(input2, dependencies = {}) {
   const config2 = preflightInputSchema.parse(input2);
   const study = await loadStudy(config2.manifestPath, config2.cohortPath, { allowMissingCohort: config2.mode === "maximum-profile" });
   const respondents = config2.mode === "maximum-profile" ? [maximumProfile()] : study.respondents;
@@ -22773,8 +23044,10 @@ async function preflightStudy(input2) {
     packets.push(packet);
   }, config2.maxPackets === void 0 ? {} : { maxPackets: config2.maxPackets });
   const results = [];
-  for (const providerConfig of config2.providers) {
-    const provider = providerConfig.kind === "jev" ? new JevProvider(providerConfig) : new LayaProvider(providerConfig);
+  const credentialStore = dependencies.credentialStore ?? new WindowsCredentialStore();
+  for (const providerInput of config2.providers) {
+    const providerConfig = providerInput.kind === "jev" ? jevConfigSchema.parse(providerInput) : providerInput;
+    const provider = providerConfig.kind === "jev" ? new JevProvider(providerConfig, fetch, { credentialStore }) : new LayaProvider(providerConfig);
     const overflows = [];
     const unavailable2 = [];
     let maximumTokens = null;
@@ -22796,7 +23069,7 @@ async function preflightStudy(input2) {
       measurementMethod ??= fit.method;
       effectiveLimit ??= fit.effectiveLimit;
       if (fit.status === "unavailable") unavailable2.push({ ...packetRef(packet), reason: fit.reason ?? "measurement-unavailable" });
-      else if (fit.status === "overflow") overflows.push({ ...packetRef(packet), tokens: fit.tokens, effectiveLimit: fit.effectiveLimit, ...fit.reason === void 0 ? {} : { reason: fit.reason } });
+      else if (fit.status === "overflow" && fit.effectiveLimit !== null) overflows.push({ ...packetRef(packet), tokens: fit.tokens, effectiveLimit: fit.effectiveLimit, ...fit.reason === void 0 ? {} : { reason: fit.reason } });
       if (fit.status !== "unavailable" && (maximumTokens === null || fit.tokens > maximumTokens)) {
         maximumTokens = fit.tokens;
         maximumPacket = packetRef(packet);
@@ -22804,13 +23077,17 @@ async function preflightStudy(input2) {
     }
     const complete = traversal.status === "complete";
     const fitUnverified = traversal.unverifiedReason !== void 0;
+    const credentialAvailability = providerConfig.kind === "jev" ? await credentialStore.availability(providerConfig.route) : null;
     results.push({
+      route: providerConfig.kind === "jev" ? providerConfig.route : null,
+      endpoint: providerConfig.kind === "jev" ? providerConfig.endpoint : null,
+      credentialAvailability,
       provider: providerConfig.kind === "jev" ? providerConfig.model : providerConfig.checkpoint,
-      executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === "jev" ? { kind: "jev", model: providerConfig.model } : { kind: "laya", checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...providerConfig.precision === void 0 ? {} : { precision: providerConfig.precision } }),
+      executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === "jev" ? { kind: "jev", route: providerConfig.route, model: providerConfig.model, endpoint: providerConfig.endpoint } : { kind: "laya", checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...providerConfig.precision === void 0 ? {} : { precision: providerConfig.precision } }),
       tokenizerSha256: providerConfig.kind === "laya" ? providerConfig.tokenizerSha256 : null,
       status: overflows.length ? "does-not-fit" : !complete || fitUnverified || unavailable2.length ? "unverified" : "fit",
       basis: config2.mode === "maximum-profile" ? "synthetic-profile" : "frozen-cohort",
-      configuration: providerConfig.kind === "jev" ? process.env[providerConfig.keyEnv]?.trim() ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
+      configuration: providerConfig.kind === "jev" ? credentialAvailability === "available" ? "configured" : "incomplete" : unavailable2.length ? "incomplete" : "configured",
       availability: "unverified",
       complete,
       packetCount: traversal.packetCount,
@@ -22838,7 +23115,7 @@ function packetRef(packet) {
 var manager = new RunManager();
 async function runCli(args, io = { out: (value) => process.stdout.write(`${value}
 `), error: (value) => process.stderr.write(`${value}
-`) }) {
+`) }, runManager = manager) {
   try {
     const [command, ...rest] = args;
     const options2 = parseArgs(rest);
@@ -22853,13 +23130,13 @@ async function runCli(args, io = { out: (value) => process.stdout.write(`${value
       }
       const providers = JSON.parse(await readFile5(required2(options2, "providers"), "utf8"));
       const mode = options2.mode === "maximum-profile" ? "maximum-profile" : "frozen-cohort";
-      result = await preflightStudy({ manifestPath: path7.resolve(required2(options2, "manifest")), ...options2.cohort === void 0 ? {} : { cohortPath: path7.resolve(options2.cohort) }, mode, providers });
+      result = await preflightStudy({ manifestPath: path8.resolve(required2(options2, "manifest")), ...options2.cohort === void 0 ? {} : { cohortPath: path8.resolve(options2.cohort) }, mode, providers });
     } else if (command === "check" || command === "start") {
       const config2 = JSON.parse(await readFile5(required2(options2, "config"), "utf8"));
-      result = command === "check" ? await checkStudy(config2).then(({ study, stimulusFingerprint: stimulusFingerprint2, executionFingerprint: executionFingerprint2 }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint: stimulusFingerprint2, executionFingerprint: executionFingerprint2 })) : await manager.startRun(config2);
+      result = command === "check" ? await checkStudy(config2).then(({ study, stimulusFingerprint: stimulusFingerprint2, executionFingerprint: executionFingerprint2, runBounds }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint: stimulusFingerprint2, executionFingerprint: executionFingerprint2, runBounds })) : await runManager.startRun(config2);
     } else if (command === "trace") {
-      const manifestPath = path7.resolve(required2(options2, "manifest"));
-      const cohortPath = path7.resolve(required2(options2, "cohort"));
+      const manifestPath = path8.resolve(required2(options2, "manifest"));
+      const cohortPath = path8.resolve(required2(options2, "cohort"));
       const study = await loadStudy(manifestPath, cohortPath);
       const profile = study.respondents.find((respondent) => respondent.id === required2(options2, "respondent"));
       if (!profile) throw new Error("Respondent ID is not in the frozen cohort.");
@@ -22870,10 +23147,9 @@ async function runCli(args, io = { out: (value) => process.stdout.write(`${value
       const arm = study.manifest.arms.find((candidate) => candidate.id === required2(options2, "arm"));
       if (!arm) throw new Error("Arm ID is not in the study.");
       result = await traceStudy(arm, profile, scripted);
-    } else if (command === "status") result = await manager.runStatus(required2(options2, "output"), required2(options2, "run-id"));
-    else if (command === "cancel") result = await manager.cancelRun(required2(options2, "output"), required2(options2, "run-id"));
-    else if (command === "reconcile") result = await manager.reconcileRun(required2(options2, "output"), required2(options2, "run-id"), Number(required2(options2, "unpriced-usd")));
-    else if (command === "resume") result = await manager.resumeRun(required2(options2, "output"), required2(options2, "run-id"));
+    } else if (command === "status") result = await runManager.runStatus(required2(options2, "output"), required2(options2, "run-id"));
+    else if (command === "cancel") result = await runManager.cancelRun(required2(options2, "output"), required2(options2, "run-id"));
+    else if (command === "resume") result = await runManager.resumeRun(required2(options2, "output"), required2(options2, "run-id"));
     else if (command === "report") result = await getReport(required2(options2, "output"), required2(options2, "run-id"));
     else if (command === "compare") {
       const report = await getReport(required2(options2, "output"), required2(options2, "run-id"));
@@ -22897,7 +23173,6 @@ Commands:
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b,...> | --responses <json-array>)
   start --config <json>                         Start a durable run
   status|cancel|resume --output <dir> --run-id <id>
-  reconcile --output <dir> --run-id <id> --unpriced-usd <amount>
   report --output <dir> --run-id <id>
   compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>
   compare-runs --left-output <dir> --left-run-id <id> --left-arm <id> --right-output <dir> --right-run-id <id> --right-arm <id>`;
@@ -22931,7 +23206,7 @@ function parseResponses(value) {
     return result.data;
   });
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(path7.resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(path8.resolve(process.argv[1])).href) {
   process.exitCode = await runCli(process.argv.slice(2));
 }
 export {

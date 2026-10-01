@@ -3,7 +3,7 @@ import type { StudyManifest } from '../domain/study/study.js';
 import type { FrozenCohort } from '../domain/respondents/cohort.js';
 
 export type ExecutionProvider =
-  | { kind: 'jev'; model: string; keyEnv?: string; endpoint?: string; timeoutMs?: number }
+  | { kind: 'jev'; route?: 'openrouter' | 'typesafe'; model: string; endpoint?: string; timeoutMs?: number }
   | { kind: 'laya'; checkpoint: string; contextLimit: number; headLimit: number; tokenizerSha256: string; precision?: string; baseUrl?: string; timeoutMs?: number };
 
 export function stimulusFingerprint(
@@ -28,7 +28,12 @@ export function executionFingerprint(stimulus: string, provider: ExecutionProvid
   if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError('Stimulus fingerprint must be a SHA-256 hex digest.');
   let decisionSettings: Record<string, string | number | undefined>;
   if (provider.kind === 'jev') {
-    decisionSettings = { kind: provider.kind, model: requireText(provider.model, 'Jev model') };
+    decisionSettings = {
+      kind: provider.kind,
+      route: provider.route ?? 'openrouter',
+      model: requireText(provider.model, 'Jev model'),
+      ...(provider.endpoint === undefined ? {} : { endpoint: provider.endpoint }),
+    };
   } else {
     decisionSettings = {
       kind: provider.kind,
@@ -39,6 +44,14 @@ export function executionFingerprint(stimulus: string, provider: ExecutionProvid
       ...(provider.precision === undefined ? {} : { precision: provider.precision }),
     };
   }
+  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
+}
+
+export function legacyExecutionFingerprint(stimulus: string, provider: ExecutionProvider): string {
+  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError('Stimulus fingerprint must be a SHA-256 hex digest.');
+  const decisionSettings = provider.kind === 'jev'
+    ? { kind: provider.kind, model: requireText(provider.model, 'Jev model'), ...(provider.endpoint === undefined ? {} : { endpoint: provider.endpoint }) }
+    : { kind: provider.kind, checkpoint: requireText(provider.checkpoint, 'Laya checkpoint'), contextLimit: requirePositiveInteger(provider.contextLimit, 'Laya context limit'), headLimit: requirePositiveInteger(provider.headLimit, 'Laya head limit'), tokenizerSha256: requireText(provider.tokenizerSha256, 'Laya tokenizer SHA-256'), ...(provider.precision === undefined ? {} : { precision: provider.precision }) };
   return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
 }
 

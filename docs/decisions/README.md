@@ -19,9 +19,14 @@ alongside the code.
 | [0008](0008-model-stimulus-task-respondent-and-matched-arms.md) | Model stimulus, task, respondent, and matched arms | Archetype taxonomy superseded by 0009 |
 | [0009](0009-generalize-and-group-respondent-archetypes.md) | Generalize and group respondent archetypes | Accepted |
 | [0010](0010-preflight-study-context-for-configured-providers.md) | Preflight study context for configured providers | Proposed |
-| [0011](0011-deterministic-study-preview-and-packet-sizing.md) | Share packet assembly and expose deterministic study preview and sizing | Proposed |
+| [0011](0011-deterministic-study-preview-and-packet-sizing.md) | Share packet assembly and expose deterministic study preview and sizing | Partially superseded by 0016 |
 | [0012](0012-system-one-typed-responses-and-routing.md) | Preserve typed System One responses and route explicitly | Accepted |
 | [0013](0013-gitflow-and-tagged-plugin-releases.md) | Use Gitflow and tagged plugin releases | Accepted |
+| [0014](0014-route-jev-execution-explicitly.md) | Select Jev routes explicitly and include route identity | Accepted |
+| [0015](0015-store-jev-credentials-in-windows-vault.md) | Store Jev credentials in Windows Credential Manager | Accepted |
+| [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
+
+| [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
 
 ## Writing and changing decisions
 

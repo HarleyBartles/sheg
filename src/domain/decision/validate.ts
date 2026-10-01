@@ -65,12 +65,6 @@ export function validateDecision(
       throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
     }
   }
-  if (decision.chargeStatus === 'billed' && decision.chargeUsd === undefined) {
-    throw new DecisionError('Billed decision is missing cost evidence.');
-  }
-  if (decision.chargeStatus !== 'billed' && decision.chargeUsd !== undefined) {
-    throw new DecisionError('Charge amount is present without billed status evidence.');
-  }
   return decision;
 }
 

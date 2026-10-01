@@ -6,12 +6,12 @@ import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import type { RunCheckpoint } from '../src/infrastructure/checkpoint-store.js';
 import { buildReport, compareReports, compareRunReports, getReport } from '../src/application/reports.js';
-import { CheckpointStore, emptyBudgetSnapshot } from '../src/infrastructure/checkpoint-store.js';
+import { CheckpointStore, emptyAttemptSnapshot } from '../src/infrastructure/checkpoint-store.js';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { legacyPromptContractHash, promptContractHash } from '../src/domain/decision/prompt.js';
-import { executionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
+import { promptContractHash } from '../src/domain/decision/prompt.js';
+import { executionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
 
-const decision = (choice: string) => ({ type: 'choice' as const, choice, probabilities: { continue: choice === 'continue' ? 1 : 0, leave: choice === 'leave' ? 1 : 0, unanswerable: choice === 'unanswerable' ? 1 : 0 }, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 12, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 });
+const decision = (choice: string) => ({ type: 'choice' as const, choice, probabilities: { continue: choice === 'continue' ? 1 : 0, leave: choice === 'leave' ? 1 : 0, unanswerable: choice === 'unanswerable' ? 1 : 0 }, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 12, usage: {}, cost: { amountUsd: 0.001, basis: 'provider-reported' as const } });
 async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'poll-report-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -26,26 +26,26 @@ async function setup(t: TestContext) {
   delete revised.tasks[0].options.unanswerable;
   await writeFile(path.join(directory, 'study.json'), JSON.stringify({ ...original, arms: [original.arms[0], revised] }));
   const checkpoint: RunCheckpoint = {
-    formatVersion: 3, runId: '53a0c895-695b-4bb5-a5e5-b9304fc8b2aa', status: 'completed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    formatVersion: 4, runId: '53a0c895-695b-4bb5-a5e5-b9304fc8b2aa', status: 'completed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     manifestPath: path.join(directory, 'study.json'), cohortPath: path.join(directory, 'cohort.json'), outputDirectory: directory,
-    provider: { kind: 'jev', model: 'jev-latest', keyEnv: 'JEV_API_KEY', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
-    maxCalls: 10, maxUsd: 1, maxPerCallUsd: 0.1, concurrency: 2, stimulusFingerprint: '', executionFingerprint: '', sourceHashes: [],
+    provider: { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions', timeoutMs: 5000 },
+    maxCalls: 10, concurrency: 2, stimulusFingerprint: '', executionFingerprint: '', sourceHashes: [],
     respondentIds: ['curious-outside-reader', 'craft-reader'], journeys: [
       { armId: 'original', respondentId: 'curious-outside-reader', status: 'completed', result: { events: [{ type: 'exposure', sequence: 0, nodeId: 'sequence-expose-symptom', itemId: 'symptom' }, { type: 'choice', sequence: 1, nodeId: 'sequence-ask-entry-response', taskId: 'entry-response', choice: 'unanswerable' }], outcome: 'completed', status: 'completed', decisionCount: 1 }, decisions: [{ decisionId: 'entry-response', requestFingerprint: 'd'.repeat(64), result: decision('unanswerable') }], attemptHistory: [], presentedTaskIds: ['entry-response'] },
       { armId: 'revised', respondentId: 'curious-outside-reader', status: 'completed', result: { events: [{ type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' }, { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: 'entry-response', choice: 'leave' }], outcome: 'left-early', status: 'completed', decisionCount: 1 }, decisions: [{ decisionId: 'entry-response', requestFingerprint: 'd'.repeat(64), result: decision('leave') }], attemptHistory: [], presentedTaskIds: ['entry-response'] },
       { armId: 'original', respondentId: 'craft-reader', status: 'partial', decisions: [{ decisionId: 'investigation-response', requestFingerprint: 'e'.repeat(64), result: decision('continue') }], attemptHistory: [], presentedTaskIds: ['entry-response', 'investigation-response'], failureKind: 'provider' },
-    ], activeCellIds: [], cancellationRequested: false, budget: { ...emptyBudgetSnapshot(10, 1), usedCalls: 2, remainingCalls: 8, billedUsd: 0.002 },
+    ], activeCellIds: [], cancellationRequested: false, budget: { ...emptyAttemptSnapshot(10), usedCalls: 2, remainingCalls: 8 },
   };
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions' });
   checkpoint.sourceHashes = study.sources.map((source) => source.sha256);
   return { directory, checkpoint };
 }
 async function refreshStudyIdentity(checkpoint: RunCheckpoint): Promise<void> {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions' });
 }
 
 test('report keeps a per-arm matched denominator and answer-key scoring distinct', async (t) => {
@@ -64,17 +64,13 @@ test('report keeps a per-arm matched denominator and answer-key scoring distinct
   assert.equal(report.arms[1]?.taskResponses['entry-response']?.occurrences[0]?.options.leave?.proportion, 1);
   assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.notReached, 1);
   assert.equal(report.arms[0]?.taskResponses['investigation-response']?.occurrences[0]?.unscored, 1);
-  assert.equal(report.providerEvidence.billedUsd, 0.002);
-});
-
-test('reports legacy version-2 Choice checkpoints with their original prompt and stimulus identity', async (t) => {
-  const { checkpoint } = await setup(t);
-  checkpoint.formatVersion = 2;
-  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  checkpoint.stimulusFingerprint = legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash);
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
-  const report = await buildReport(checkpoint);
-  assert.equal(report.arms[0]?.taskResponses['entry-response']?.occurrences[0]?.completed, 1);
+  assert.equal(report.providerEvidence.attempts, 2);
+  assert.equal(report.providerEvidence.maxCalls, 10);
+  assert.equal(report.providerEvidence.remainingCalls, 8);
+  assert.equal(report.providerEvidence.reservedCalls, 0);
+  assert.equal(report.provider.route, 'typesafe');
+  assert.equal(report.provider.endpoint, checkpoint.provider.kind === 'jev' ? checkpoint.provider.endpoint : null);
+  assert.equal(Object.hasOwn(report.providerEvidence, 'billedUsd'), false);
 });
 
 test('reports Score and Noul evidence with typed cohort summaries', async (t) => {
@@ -96,8 +92,8 @@ test('reports Score and Noul evidence with typed cohort summaries', async (t) =>
     if (low === high) probabilities[String(low) as keyof typeof probabilities] = 1;
     else { probabilities[String(low) as keyof typeof probabilities] = high - score; probabilities[String(high) as keyof typeof probabilities] = score - low; }
     const scoreResult = { type: 'score' as const, score, legend: { '0': 'casual', '1': 'balanced', '2': 'professional' }, probabilities,
-      attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 10, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 };
-    const noulResult = { type: 'noul' as const, noul: noulResults[index]!, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 10, usage: {}, chargeStatus: 'billed' as const, chargeUsd: 0.001 };
+      attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 10, usage: {}, cost: { amountUsd: 0.001, basis: 'provider-reported' as const } };
+    const noulResult = { type: 'noul' as const, noul: noulResults[index]!, attempts: 1, provider: 'jev' as const, model: 'jev-latest', latencyMs: 10, usage: {}, cost: { amountUsd: 0.001, basis: 'provider-reported' as const } };
     return { armId: 'original', respondentId, status: 'completed' as const,
       result: { events: [
         { type: 'response' as const, sequence: 0, nodeId: 'tone', taskId: 'tone', result: { type: 'score' as const, score, legend: scoreResult.legend, probabilities } },
@@ -110,7 +106,7 @@ test('reports Score and Noul evidence with typed cohort summaries', async (t) =>
   });
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   checkpoint.stimulusFingerprint = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', model: 'jev-latest' });
+  checkpoint.executionFingerprint = executionFingerprint(checkpoint.stimulusFingerprint, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://api.typesafe.ai/v1/alpha/decisions' });
   checkpoint.sourceHashes = study.sources.map((source) => source.sha256);
 
   const report = await buildReport(checkpoint);

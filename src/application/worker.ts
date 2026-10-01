@@ -1,51 +1,51 @@
 import { createHash } from 'node:crypto';
-import { BudgetLedger } from '../domain/budget-ledger.js';
+import { AttemptLedger } from '../domain/attempt-ledger.js';
 import { CheckpointStore, type ContextFailure, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import type { DecisionRequest, DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import { JourneyExecutionError, runJourney } from '../domain/journey/run.js';
 import { loadStudy } from '../infrastructure/study-loader.js';
-import { legacyPromptContractHash, promptContractHash } from '../domain/decision/prompt.js';
-import { executionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
+import { promptContractHash } from '../domain/decision/prompt.js';
+import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 
 export class RunCancelled extends Error {
   constructor() { super('Run cancellation was requested.'); this.name = 'RunCancelled'; }
 }
 
-export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoint, provider: DecisionProvider, restoredBudget?: BudgetLedger): Promise<RunCheckpoint> {
+export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoint, provider: DecisionProvider, restoredBudget?: AttemptLedger): Promise<RunCheckpoint> {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = checkpoint.formatVersion === 2
-    ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash)
-    : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
+  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === 'laya'
     ? { kind: 'laya' as const, checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, baseUrl: checkpoint.provider.baseUrl, timeoutMs: checkpoint.provider.timeoutMs, ...(checkpoint.provider.precision === undefined ? {} : { precision: checkpoint.provider.precision }) }
     : checkpoint.provider;
   if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint) throw new Error('Study or provider settings changed since this run was prepared.');
 
-  const { maxUsd, ...budgetRest } = checkpoint.budget;
-  const ledger = restoredBudget ?? BudgetLedger.restore({ ...budgetRest, ...(maxUsd === undefined ? {} : { maxUsd }) });
+  const ledger = restoredBudget ?? AttemptLedger.restore(checkpoint.budget);
   const respondents = new Map(study.respondents.map((respondent) => [respondent.id, respondent]));
   const cells = study.manifest.arms.flatMap((arm) => study.respondents.map((respondent) => ({ arm, respondent, id: cellId(arm.id, respondent.id) })));
   const cursor = { next: 0 };
+  let stopWorkers = false;
 
   const runCell = async (arm: typeof study.manifest.arms[number], respondentId: string, id: string): Promise<void> => {
     const profile = respondents.get(respondentId);
     if (!profile) throw new Error(`Frozen respondent ${respondentId} is no longer present.`);
     let decisions: RunCheckpoint['journeys'][number]['decisions'] = [];
     const previous = (await store.read(checkpoint.runId)).journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondentId);
+    let failedAttempts = previous?.failedAttempts ?? 0;
     const attemptHistory = [...(previous?.attemptHistory ?? [])];
     const replayDecisions = previous?.decisions ?? [];
     const presentedTaskIds = [...(previous?.presentedTaskIds ?? [])];
     let replayCursor = 0;
     let failedNodeId: string | null = null;
-    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions: replayDecisions, attemptHistory, presentedTaskIds }) }));
+    await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions: replayDecisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     try {
       const result = await runJourney({ arm, profile, ask: async (request, nodeId) => {
-        const providerRequest = checkpoint.formatVersion === 2 ? legacyChoiceRequest(request) : request;
+        const legacyChoiceReplay = checkpoint.migratedFromFormatVersion === 2;
+        const providerRequest = legacyChoiceReplay ? legacyChoiceRequest(request) : request;
         const replay = replayDecisions[replayCursor];
         if (replay) {
           if (replay.decisionId !== request.question.id) throw new Error('Task sequence changed while recovering the run.');
-          if (replay.requestFingerprint !== requestFingerprint(request) && !(checkpoint.formatVersion === 2 && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error('Rendered task request changed while recovering the run.');
+          if (replay.requestFingerprint !== requestFingerprint(request) && !(legacyChoiceReplay && replay.requestFingerprint === legacyChoiceRequestFingerprint(request))) throw new Error('Rendered task request changed while recovering the run.');
           replayCursor += 1;
           decisions.push(replay);
           return replay.result;
@@ -53,28 +53,30 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
         const presentedCount = presentedTaskIds.filter((id) => id === request.question.id).length;
         const completedCount = decisions.filter((decision) => decision.decisionId === request.question.id).length;
         if (presentedCount <= completedCount) presentedTaskIds.push(request.question.id);
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         if (await cancellationRequested(store, checkpoint.runId)) throw new RunCancelled();
-        const reservation = await ledger.reserve(1, checkpoint.provider.kind === 'jev' ? checkpoint.maxPerCallUsd : undefined);
+        const reservation = await ledger.reserve(1);
         await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), activeCellIds: addUnique(current.activeCellIds, id) }));
         if (await cancellationRequested(store, checkpoint.runId)) {
-          await ledger.settle(reservation, { attempts: 0, chargeStatus: 'not_billed' });
+          await ledger.settle(reservation, { attempts: 0 });
           throw new RunCancelled();
         }
         failedNodeId = nodeId;
         let decision: DecisionResult;
         try { decision = await provider.decide(providerRequest, 1); }
         catch (error) {
-          await ledger.settle(reservation, errorEvidence(error));
-          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
+          const evidence = errorEvidence(error);
+          await ledger.settle(reservation, evidence);
+          failedAttempts += evidence.attempts;
+          await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
           throw error;
         }
-        await ledger.settle(reservation, { attempts: decision.attempts, chargeStatus: decision.chargeStatus, ...(decision.chargeUsd === undefined ? {} : { chargeUsd: decision.chargeUsd }) });
-        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: checkpoint.formatVersion === 2 ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
-        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, presentedTaskIds }) }));
+        await ledger.settle(reservation, { attempts: decision.attempts });
+        decisions = [...decisions, { decisionId: request.question.id, requestFingerprint: legacyChoiceReplay ? legacyChoiceRequestFingerprint(request) : requestFingerprint(request), result: decision }];
+        await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'partial', decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
         return decision;
       } });
-      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'completed', result, decisions, attemptHistory, presentedTaskIds }) }));
+      await updateCheckpoint(store, checkpoint.runId, (current) => ({ ...current, budget: ledger.snapshot(), journeys: replaceJourney(current.journeys, { armId: arm.id, respondentId, status: 'completed', result, decisions, attemptHistory, failedAttempts, presentedTaskIds }) }));
     } catch (error) {
       const cancelled = error instanceof RunCancelled || await cancellationRequested(store, checkpoint.runId);
       const current = await store.read(checkpoint.runId);
@@ -82,7 +84,7 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
       decisions = decisions.length > 0 ? decisions : previousJourney?.decisions ?? [];
       const failureEvidence = cancelled ? null : admissionFailure(error, failedNodeId);
       await updateCheckpoint(store, checkpoint.runId, (latest) => ({ ...latest, budget: ledger.snapshot(), journeys: replaceJourney(latest.journeys, {
-        armId: arm.id, respondentId, status: cancelled ? 'partial' : 'failed', decisions, attemptHistory, presentedTaskIds,
+        armId: arm.id, respondentId, status: cancelled ? 'partial' : 'failed', decisions, attemptHistory, failedAttempts, presentedTaskIds,
         ...(!cancelled ? { failureKind: isUnsupported(error) ? 'unsupported-input' as const : error instanceof JourneyExecutionError ? 'journey' as const : 'provider' as const } : {}),
         ...(failureEvidence === null ? {} : { failureEvidence }),
       }) }));
@@ -92,16 +94,24 @@ export async function runWorker(store: CheckpointStore, checkpoint: RunCheckpoin
   };
 
   const worker = async (): Promise<void> => {
-    while (cursor.next < cells.length) {
+    while (!stopWorkers && cursor.next < cells.length) {
       if (await cancellationRequested(store, checkpoint.runId)) return;
+      if (stopWorkers) return;
       const cell = cells[cursor.next++];
       if (!cell) return;
       const current = await store.read(checkpoint.runId);
+      if (stopWorkers) return;
       if (current.journeys.some((journey) => journey.armId === cell.arm.id && journey.respondentId === cell.respondent.id && journey.status === 'completed')) continue;
       await runCell(cell.arm, cell.respondent.id, cell.id);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(checkpoint.concurrency, cells.length) }, () => worker()));
+  const workers = Array.from({ length: Math.min(checkpoint.concurrency, cells.length) }, async () => {
+    try { await worker(); }
+    catch (error) { stopWorkers = true; throw error; }
+  });
+  const workerResults = await Promise.allSettled(workers);
+  const workerFailure = workerResults.find((result) => result.status === 'rejected');
+  if (workerFailure?.status === 'rejected') throw workerFailure.reason;
   return updateCheckpoint(store, checkpoint.runId, (current) => {
     const completed = new Set(current.journeys.filter((journey) => journey.status === 'completed').map((journey) => cellId(journey.armId, journey.respondentId)));
     const failed = current.journeys.some((journey) => journey.status === 'failed');
@@ -145,12 +155,11 @@ async function updateCheckpoint(store: CheckpointStore, runId: string, mutate: (
   return store.update(runId, (current) => ({ ...mutate(current), updatedAt: new Date().toISOString() }));
 }
 function addUnique(values: string[], value: string): string[] { return values.includes(value) ? values : [...values, value]; }
-function errorEvidence(error: unknown): { attempts: number; chargeStatus: 'not_billed' | 'unknown' | 'billed'; chargeUsd?: number } {
-  if (typeof error === 'object' && error !== null && 'attempts' in error && typeof error.attempts === 'number' && 'chargeStatus' in error && ['not_billed', 'unknown', 'billed'].includes(String(error.chargeStatus))) {
-    const evidence = error as { attempts: number; chargeStatus: 'not_billed' | 'unknown' | 'billed'; chargeUsd?: number };
-    return { attempts: evidence.attempts, chargeStatus: evidence.chargeStatus, ...(evidence.chargeUsd === undefined ? {} : { chargeUsd: evidence.chargeUsd }) };
+function errorEvidence(error: unknown): { attempts: number } {
+  if (typeof error === 'object' && error !== null && 'attempts' in error && typeof error.attempts === 'number' && Number.isSafeInteger(error.attempts) && error.attempts >= 0) {
+    return { attempts: error.attempts };
   }
-  return { attempts: 0, chargeStatus: 'not_billed' };
+  return { attempts: 1 };
 }
 function isUnsupported(error: unknown): boolean { return typeof error === 'object' && error !== null && 'message' in error && String(error.message).includes('unsupported-input'); }
 function admissionFailure(error: unknown, nodeId: string | null): ContextFailure | null {

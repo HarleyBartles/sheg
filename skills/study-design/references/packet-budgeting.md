@@ -88,10 +88,8 @@ arbitrarily filling the allowance.
    where a provider stops fitting, including the packet and route, or whether
    a provider measurement is unavailable.
 5. Use `poll_check` for deterministic minimum/maximum reachable decision-call
-   bounds and whether the configured `maxCalls` covers the maximum. For Jev,
-   the spend figure is a configured ceiling, not an expected charge; the
-   ceiling is limited by both `maxUsd` and `maxPerCallUsd` across capped calls.
-   Actual Jev charges come from provider-reported usage.
+   bounds and whether the configured `maxCalls` covers the maximum. The call
+   limit bounds physical provider attempts, including retries.
 
 Authoring, schema validation, journey preview, packet measurement, and
 preflight do not require an inference provider call. `poll_start` and
