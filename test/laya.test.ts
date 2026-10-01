@@ -112,6 +112,35 @@ test('encodes Score and Noul criteria and preserves their typed evidence', async
   });
 });
 
+test('local question groups are split into singleton calls with the same state and exact question', async () => {
+  const measured: DecisionRequest[] = [];
+  const bodies: Record<string, unknown>[] = [];
+  const questions: DecisionRequest['question'][] = [
+    { type: 'choice', id: 'interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } },
+    { type: 'noul', id: 'trust', instructions: 'Is it credible?' },
+  ];
+  const provider = new LayaProvider(config, {
+    measureFit: async (packet) => { measured.push(packet); return fit(20); },
+    fetchRequest: async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      const id = Object.keys(body.questions as Record<string, unknown>)[0]!;
+      const answer = id === 'interest'
+        ? { type: 'choice', choice: 'yes', probabilities: { yes: 0.8, no: 0.2 } }
+        : { type: 'noul', noul: 0.7 };
+      return Response.json({ model: 'laya-rl-agent', answers: { [id]: answer }, usage: {}, routing: { model: config.checkpoint } });
+    },
+  });
+
+  for (const question of questions) {
+    const packet = { state: request.state, question, ...(question.type === 'choice' ? { optionIds: Object.keys(question.options) } : {}) } as DecisionRequest;
+    await provider.decide(packet, 1);
+  }
+  assert.deepEqual(measured.map(({ question }) => question.id), ['interest', 'trust']);
+  assert.deepEqual(bodies.map(({ questions: requested }) => Object.keys(requested as object)), [['interest'], ['trust']]);
+  assert.ok(bodies.every(({ state }) => JSON.stringify(state) === JSON.stringify(request.state)));
+});
+
 test('reports over-limit Score rubrics during measurement and rejects before inference', async () => {
   let measured = 0; let requested = 0;
   const provider = new LayaProvider(config, {

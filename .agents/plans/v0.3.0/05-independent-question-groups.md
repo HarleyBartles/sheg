@@ -109,17 +109,18 @@ derived group. Sibling answers are never sent into another question's state.
 **Files:**
 - Modify: `src/providers/jev.ts`, `src/providers/laya.ts`, `docs/providers/jev.md`
 - Test: `test/jev.test.ts`, `test/laya.test.ts`, `test/jev-config.test.ts`
+- Regenerate: `dist/` through `npm run build`
 
 **Interfaces:**
 - Consumes: Task 2 batch contracts and Task 3 exact batch measurement.
 - Produces: Jev's configured route posts one `questions` map containing all IDs in the admitted batch and parses mixed typed answers plus one shared usage/model/cost record. The pinned OpenRouter `typesafe/jev-1.13` route may batch under its existing measured context limit. The native TypeSafe route uses the same published request shape but remains blocked when context fit is unverified. Laya advertises singleton execution unless its local request contract independently proves batch support; this plan does not broaden it.
 
-- [ ] Add an injected-fetch test for one OpenRouter Jev request containing mixed Choice, Score, and Noul questions over one state. Assert one request, exact question IDs/types, exact shared state, one physical attempt, typed answer separation, and shared usage/cost captured once.
-- [ ] Add provider tests where one requested answer is absent or malformed while siblings are valid; verify only that answer returns a question-scoped failure. Test malformed shared envelope, route-wide authorization failure, and no key leakage as whole-batch failures.
-- [ ] Add a Laya test showing a group is split into singleton requests without changing question or state. Preserve tokenizer/context fit on each actual singleton packet.
-- [ ] Implement Jev group wire serialization, exact multi-answer validation, execution evidence parsing, and per-route batch support. Dispatch with `maxAttempts: 1` so each worker reservation bounds one physical request; use explicit resume for another call. Do not add SDK dependencies or change route inference rules.
-- [ ] Document the published Jev parallel-question request shape and the local singleton boundary. Preserve the native context-limit admission restriction and existing OpenRouter fit evidence.
-- [ ] Run `node --import tsx --test test/jev.test.ts test/laya.test.ts test/jev-config.test.ts`; commit as `feat: batch independent Jev questions`.
+- [x] Add an injected-fetch test for one OpenRouter Jev request containing mixed Choice, Score, and Noul questions over one state. Assert one request, exact question IDs/types, exact shared state, one physical attempt, typed answer separation, and shared usage/cost captured once.
+- [x] Add provider tests where one requested answer is absent or malformed while siblings are valid; verify only that answer returns a question-scoped failure. Test malformed shared envelope, route-wide authorization failure, and no key leakage as whole-batch failures.
+- [x] Add a Laya test showing a group is split into singleton requests without changing question or state. Preserve tokenizer/context fit on each actual singleton packet.
+- [x] Implement Jev group wire serialization, exact multi-answer validation, execution evidence parsing, and per-route batch support. Dispatch with `maxAttempts: 1` so each worker reservation bounds one physical request; use explicit resume for another call. Do not add SDK dependencies or change route inference rules.
+- [x] Document the published Jev parallel-question request shape and the local singleton boundary. Preserve the native context-limit admission restriction and existing OpenRouter fit evidence.
+- [ ] Run `node --import tsx --test test/jev.test.ts test/laya.test.ts test/jev-config.test.ts` and `npm run build`; commit as `feat: batch independent Jev questions`.
 
 ## Task 5: Persist shared call evidence and settle per-question evaluations
 

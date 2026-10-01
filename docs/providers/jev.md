@@ -42,7 +42,7 @@ bytes are never included in the error. `run_inspect` remains keyless.
 ## Provider evidence
 
 The adapter uses Node `fetch` for both routes. It sends the configured model,
-state, and typed question to the selected endpoint with bearer authentication.
+state, and typed question set to the selected endpoint with bearer authentication.
 Endpoint overrides must stay on the selected provider's HTTPS origin:
 `https://openrouter.ai` or `https://api.typesafe.ai`. Saved paths on that origin
 remain supported. URL credentials, other origins, and redirects are rejected
@@ -52,10 +52,19 @@ Choice, Score, and Noul answers are validated at the adapter boundary and
 normalized into the same domain result. Missing cost evidence does not make a
 valid answer invalid.
 
-The TypeSafe System One request is `POST /v1/systemone` with bearer
-authentication. Its response reports `model`, `answers`, and token usage. The
+The Jev wire request is `{ model, state, questions }`; `questions` maps each
+stable question ID to its typed instructions and criteria. Each answer is
+validated against its matching question. Invalid, missing, or duplicate answers
+are scoped to that question; malformed shared response data and authorization
+failures apply to the whole provider request. Provider model, usage, latency,
+and cost are stored once for the physical request, not copied onto each answer.
+
+TypeSafe documents parallel independent questions in one System One request.
+Sheg uses that published request shape through the configured Jev route. Its
 JavaScript SDK has its own retries, so Sheg does not add the SDK and keeps
-physical request counting in the fetch adapter.
+physical request counting in the fetch adapter. The local Laya route remains
+singleton: Sheg measures and sends one question at a time against the same
+frozen respondent state.
 
 OpenRouter's Decisions endpoint is an alpha API. Its response may include
 `usage.cost`; when present, Sheg records that as provider-reported evidence.
@@ -92,6 +101,7 @@ Credential rotation does not change execution identity.
 ## References
 
 - [TypeSafe API introduction](https://docs.typesafe.ai/introduction)
+- [TypeSafe parallel questions cookbook](https://docs.typesafe.ai/cookbooks/parallel_questions)
 - [TypeSafe JavaScript SDK guide](https://docs.typesafe.ai/sdk/javascript)
 - [TypeSafe JavaScript SDK v0.6.0 client](https://github.com/typesafe-ai/typesafe-sdk-js/blob/v0.6.0/src/client.ts)
 - [TypeSafe OpenAPI](https://api.typesafe.ai/openapi.json)

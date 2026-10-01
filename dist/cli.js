@@ -21184,6 +21184,61 @@ function validateDecision(request, result, options2 = {}) {
   }
   return decision;
 }
+function validateDecisionBatch(request, result, options2 = {}) {
+  const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision batch request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
+  }
+  const envelope = batchEnvelopeSchema.safeParse(result);
+  if (!envelope.success) {
+    throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: envelope.error });
+  }
+  const execution = providerExecutionEvidenceSchema.parse(envelope.data.execution);
+  for (const answer of envelope.data.answers) {
+    if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
+      throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);
+    }
+  }
+  const answers = parsedRequest.data.questions.map((question) => {
+    const matches = envelope.data.answers.filter(({ questionId }) => questionId === question.id);
+    if (matches.length > 1) return { questionId: question.id, failure: { code: "duplicate_answer", message: "The provider returned this question more than once." } };
+    const answer = matches[0];
+    if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
+    if (answer.failure) return { questionId: question.id, failure: answer.failure };
+    const value = decisionValueSchema.safeParse(answer.value);
+    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider returned an invalid typed answer." } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The provider answer type does not match the question." } };
+    if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
+      return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider selected an option that was not offered." } };
+    }
+    try {
+      const enriched = { ...value.data, ...execution };
+      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
+      return { questionId: question.id, value: toDecisionValue(checked) };
+    } catch (error62) {
+      if (!(error62 instanceof DecisionError)) throw error62;
+      const typeMismatch = error62.message.includes("does not match task type");
+      return { questionId: question.id, failure: { code: typeMismatch ? "answer_type_mismatch" : "invalid_answer", message: typeMismatch ? "The provider answer type does not match the question." : "The provider returned an invalid answer for this question." } };
+    }
+  });
+  return decisionBatchResultSchema.parse({ answers, execution });
+}
+function toDecisionValue(result) {
+  if (result.type === "choice") return {
+    type: "choice",
+    choice: result.choice,
+    probabilities: result.probabilities,
+    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
+  };
+  if (result.type === "score") return {
+    type: "score",
+    score: result.score,
+    legend: result.legend,
+    probabilities: result.probabilities,
+    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
+  };
+  return { type: "noul", noul: result.noul };
+}
 var batchEnvelopeSchema = external_exports.object({
   answers: external_exports.array(external_exports.object({
     questionId: external_exports.string().min(1),
@@ -21395,13 +21450,17 @@ var wireResponseSchema = external_exports.object({
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
-function requestBody(request, model) {
-  const { question } = request;
+function wireQuestion(question) {
   const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { model, state: request.state, questions: { [question.id]: { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } } } };
+  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
 }
-function measureJevContext(request, model, route = "openrouter") {
-  const serialized = JSON.stringify(requestBody(request, model));
+function requestBody(request, model) {
+  return { model, state: request.state, questions: { [request.question.id]: wireQuestion(request.question) } };
+}
+function batchRequestBody(request, model) {
+  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, wireQuestion(question)])) };
+}
+function measureRequestBody(serialized, model, route) {
   const bytes = Buffer.byteLength(serialized, "utf8");
   const tokens = Math.ceil(bytes / 3);
   const contextLimit = jevMetadata(route, model)?.contextLimit ?? null;
@@ -21422,17 +21481,25 @@ function measureJevContext(request, model, route = "openrouter") {
     ...status === "unavailable" ? { reason: route === "typesafe" ? TYPESAFE_CONTEXT_UNVERIFIED : "model-context-unknown" } : status === "overflow" ? { reason: "estimated-context-over-limit" } : {}
   };
 }
+function measureJevContext(request, model, route = "openrouter") {
+  return measureRequestBody(JSON.stringify(requestBody(request, model)), model, route);
+}
+function measureJevBatchContext(request, model, route = "openrouter") {
+  return measureRequestBody(JSON.stringify(batchRequestBody(request, model)), model, route);
+}
 var JevProvider = class {
   constructor(config2, fetchRequest = fetch, options2 = {}) {
     this.fetchRequest = fetchRequest;
     this.config = jevConfigSchema.parse(config2);
     this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
     this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
+    this.measureBatchContext = options2.measureBatchContext;
   }
   fetchRequest;
   config;
   credentialStore;
   measureContext;
+  measureBatchContext;
   async decide(request, maxAttempts) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       throw new JevCallError("Jev call limit must be a positive integer.", 0);
@@ -21524,10 +21591,99 @@ var JevProvider = class {
     }
     throw new JevCallError("Jev call limit reached without a response.", attempts);
   }
+  measureBatch(request) {
+    const parsed = decisionBatchRequestSchema.safeParse(request);
+    if (!parsed.success) return { ...missingMeasureFit(this.config, "invalid-batch-request"), reason: "invalid-batch-request" };
+    return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
+  }
+  async decideBatch(request, maxAttempts) {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", 0);
+    const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", 0);
+    const normalizedRequest = parsedRequest.data;
+    const fit = this.measureBatch(normalizedRequest);
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit);
+    let apiKey;
+    try {
+      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+    } catch (error62) {
+      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
+    }
+    const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
+    const startedAt = performance.now();
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      attempts += 1;
+      let response;
+      try {
+        response = await this.fetchRequest(this.config.endpoint, {
+          method: "POST",
+          redirect: "error",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body,
+          signal: AbortSignal.timeout(this.config.timeoutMs)
+        });
+      } catch {
+        if (attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
+      }
+      if (!response.ok) {
+        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+      }
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new JevCallError("Jev returned an unreadable response.", attempts);
+      }
+      const parsedResponse = wireResponseSchema.safeParse(payload);
+      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
+      const cost = parsedResponse.data.usage.cost;
+      const inputTokens = parsedResponse.data.usage.input_tokens;
+      const outputTokens = parsedResponse.data.usage.output_tokens;
+      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
+      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
+      const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
+        const answer = answerSchema.safeParse(rawValue);
+        return { questionId, value: answer.success ? toDecisionValue2(answer.data) : rawValue };
+      });
+      const execution = {
+        attempts,
+        provider: "jev",
+        model: parsedResponse.data.model,
+        latencyMs: performance.now() - startedAt,
+        usage: { ...inputTokens === void 0 ? {} : { inputTokens }, ...outputTokens === void 0 ? {} : { outputTokens } },
+        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
+      };
+      try {
+        return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
+      } catch (error62) {
+        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts);
+        throw error62;
+      }
+    }
+    throw new JevCallError("Jev call limit reached without a response.", attempts);
+  }
   measure(request) {
     return this.measureContext(request, this.config);
   }
 };
+function toDecisionValue2(answer) {
+  if (answer.type === "choice") return { type: "choice", choice: answer.choice, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
+  if (answer.type === "score") return { type: "score", score: answer.score, legend: answer.legend, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
+  return { type: "noul", noul: answer.noul };
+}
+function missingMeasureFit(config2, reason) {
+  return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
+}
 function retryDelayMs(attempt) {
   return Math.min(50 * 2 ** (attempt - 1), 1e3);
 }
@@ -21886,7 +22042,7 @@ var choiceAnswerSchema2 = external_exports.object({
 var scoreAnswerSchema2 = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
 var noulAnswerSchema2 = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
 var answerSchema2 = external_exports.discriminatedUnion("type", [choiceAnswerSchema2, scoreAnswerSchema2, noulAnswerSchema2]);
-function wireQuestion(question) {
+function wireQuestion2(question) {
   const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
   return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
 }
@@ -21951,7 +22107,7 @@ var LayaProvider = class {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: wireQuestion(question)
+            [question.id]: wireQuestion2(question)
           }
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs)
