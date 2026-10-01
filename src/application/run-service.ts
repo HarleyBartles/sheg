@@ -22,6 +22,7 @@ export type RunServiceOptions = { assertProviderReady?: (config: ProviderConfigI
 export interface RunService {
   inspect(input: unknown): Promise<Awaited<ReturnType<typeof prepareRun>>['inspection']>;
   start(submissionId: string, input: InlineRunRequest): Promise<RunStatusView>;
+  resume(runId: string): Promise<RunStatusView>;
   list(query: import('../infrastructure/run-store.js').RunListQuery): Page<RunStatusView>;
   getStatus(runId: string): RunStatusView;
   getRequest(runId: string): PreparedRun;
@@ -45,6 +46,18 @@ export function createRunService(
   launcher: WorkerLauncher,
   options: RunServiceOptions = {},
 ): RunService {
+  async function assertReady(provider: ProviderConfigInput): Promise<void> {
+    try { await options.assertProviderReady?.(provider); }
+    catch (error) {
+      if (error instanceof RunServiceError) throw error;
+      if (error instanceof CredentialStoreError) {
+        const code = error.code === 'credential_malformed' ? 'provider_credential_malformed' : error.code === 'credential_missing' ? 'provider_credential_missing' : 'provider_credential_unavailable';
+        throw new RunServiceError(code, error.message, { cause: error });
+      }
+      throw new RunServiceError('provider_credential_unavailable', 'Provider credential is unavailable.', { cause: error });
+    }
+  }
+
   async function inspect(input: unknown) {
     let request: InlineRunRequest;
     try { request = normalizeRequest(input); }
@@ -62,15 +75,7 @@ export function createRunService(
     const prior = store.findSubmission(submissionId, requestFingerprint);
     if (prior) return prior;
 
-    try { await options.assertProviderReady?.(request.provider); }
-    catch (error) {
-      if (error instanceof RunServiceError) throw error;
-      if (error instanceof CredentialStoreError) {
-        const code = error.code === 'credential_malformed' ? 'provider_credential_malformed' : error.code === 'credential_missing' ? 'provider_credential_missing' : 'provider_credential_unavailable';
-        throw new RunServiceError(code, error.message, { cause: error });
-      }
-      throw new RunServiceError('provider_credential_unavailable', 'Provider credential is unavailable.', { cause: error });
-    }
+    await assertReady(request.provider);
     const admission = await prepareRun(request, providerFactory(request.provider));
     if (!admission.prepared || !admission.inspection.valid) {
       throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
@@ -82,9 +87,28 @@ export function createRunService(
     return store.getStatus(accepted.run.runId);
   }
 
+  async function resume(runId: string): Promise<RunStatusView> {
+    const current = store.getStatus(runId);
+    if (current.status === 'prepared') return current;
+    if (current.status !== 'interrupted' && current.status !== 'failed') {
+      throw new RunServiceError('run_not_resumable', `A run in ${current.status} state cannot be resumed.`);
+    }
+    if (current.cancelRequested) throw new RunServiceError('run_not_resumable', 'A run with a cancellation request cannot be resumed.');
+    if (current.usedCalls + current.reservedCalls >= current.maxCalls) throw new RunServiceError('run_not_resumable', 'This run has no remaining provider-call allowance.');
+    const frozen = store.getRequest(runId);
+    await assertReady(frozen.request.provider);
+    const resumed = store.resume(runId, Date.now());
+    if (resumed.started) {
+      try { await launcher.launch(dataRoot, runId); }
+      catch { store.failLaunch(runId, 'worker_launch_failed'); }
+    }
+    return store.getStatus(runId);
+  }
+
   return {
     inspect,
     start,
+    resume,
     list: (query) => store.list(query),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequest(runId),

@@ -31,6 +31,7 @@ export function createPollingServer(service: RunService = createDefaultRunServic
     return service.answers(input.runId, input.cursor, input.limit);
   }));
   server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched respondent call is allowed to settle and its answer is retained.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
+  server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work under the same run ID, saved request, and remaining provider-call allowance. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
   return server;
 }
 

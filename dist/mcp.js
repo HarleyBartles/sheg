@@ -34909,6 +34909,18 @@ function normalizeRequest(input2) {
   return parsed.data;
 }
 function createRunService(store, dataRoot, providerFactory, launcher, options = {}) {
+  async function assertReady(provider) {
+    try {
+      await options.assertProviderReady?.(provider);
+    } catch (error62) {
+      if (error62 instanceof RunServiceError) throw error62;
+      if (error62 instanceof CredentialStoreError) {
+        const code = error62.code === "credential_malformed" ? "provider_credential_malformed" : error62.code === "credential_missing" ? "provider_credential_missing" : "provider_credential_unavailable";
+        throw new RunServiceError(code, error62.message, { cause: error62 });
+      }
+      throw new RunServiceError("provider_credential_unavailable", "Provider credential is unavailable.", { cause: error62 });
+    }
+  }
   async function inspect(input2) {
     let request;
     try {
@@ -34925,16 +34937,7 @@ function createRunService(store, dataRoot, providerFactory, launcher, options = 
     if (!requestFingerprint) throw new RunServiceError("invalid_request", "Request is invalid.");
     const prior = store.findSubmission(submissionId, requestFingerprint);
     if (prior) return prior;
-    try {
-      await options.assertProviderReady?.(request.provider);
-    } catch (error62) {
-      if (error62 instanceof RunServiceError) throw error62;
-      if (error62 instanceof CredentialStoreError) {
-        const code = error62.code === "credential_malformed" ? "provider_credential_malformed" : error62.code === "credential_missing" ? "provider_credential_missing" : "provider_credential_unavailable";
-        throw new RunServiceError(code, error62.message, { cause: error62 });
-      }
-      throw new RunServiceError("provider_credential_unavailable", "Provider credential is unavailable.", { cause: error62 });
-    }
+    await assertReady(request.provider);
     const admission = await prepareRun(request, providerFactory(request.provider));
     if (!admission.prepared || !admission.inspection.valid) {
       throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
@@ -34948,9 +34951,30 @@ function createRunService(store, dataRoot, providerFactory, launcher, options = 
     }
     return store.getStatus(accepted.run.runId);
   }
+  async function resume(runId) {
+    const current = store.getStatus(runId);
+    if (current.status === "prepared") return current;
+    if (current.status !== "interrupted" && current.status !== "failed") {
+      throw new RunServiceError("run_not_resumable", `A run in ${current.status} state cannot be resumed.`);
+    }
+    if (current.cancelRequested) throw new RunServiceError("run_not_resumable", "A run with a cancellation request cannot be resumed.");
+    if (current.usedCalls + current.reservedCalls >= current.maxCalls) throw new RunServiceError("run_not_resumable", "This run has no remaining provider-call allowance.");
+    const frozen = store.getRequest(runId);
+    await assertReady(frozen.request.provider);
+    const resumed = store.resume(runId, Date.now());
+    if (resumed.started) {
+      try {
+        await launcher.launch(dataRoot, runId);
+      } catch {
+        store.failLaunch(runId, "worker_launch_failed");
+      }
+    }
+    return store.getStatus(runId);
+  }
   return {
     inspect,
     start,
+    resume,
     list: (query) => store.list(query),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequest(runId),
@@ -36382,6 +36406,7 @@ function createPollingServer(service = createDefaultRunService()) {
     return service.answers(input2.runId, input2.cursor, input2.limit);
   }));
   server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched respondent call is allowed to settle and its answer is retained.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
+  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work under the same run ID, saved request, and remaining provider-call allowance. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
   return server;
 }
 function createDefaultRunService() {

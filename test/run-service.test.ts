@@ -38,6 +38,16 @@ async function setup() {
   return { root, store, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
+async function interruptedRun(fixture: Awaited<ReturnType<typeof setup>>) {
+  const prepared = await prepareRun(request(), provider());
+  assert.ok(prepared.prepared);
+  const accepted = fixture.store.accept(randomUUID(), prepared.prepared);
+  const now = Date.now();
+  assert.ok(fixture.store.claim(accepted.run.runId, now, 1234));
+  fixture.store.reconcile(accepted.run.runId, now + 31_000);
+  return accepted.run;
+}
+
 test('context admission failure is reported before any durable run or worker launch', async () => {
   const fixture = await setup();
   const calls = { measures: 0, decisions: 0 };
@@ -149,4 +159,76 @@ test('run reads reconcile interruption without launching or constructing a provi
     first.close(); second.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('explicit resume returns the same run and launches it once', async () => {
+  const fixture = await setup();
+  const run = await interruptedRun(fixture);
+  let launches = 0;
+  let readinessChecks = 0;
+  const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch(_root, runId) { assert.equal(runId, run.runId); launches += 1; } }, { assertProviderReady: async () => { readinessChecks += 1; } });
+  try {
+    const resumed = await service.resume(run.runId);
+    assert.equal(resumed.runId, run.runId);
+    assert.equal(resumed.status, 'prepared');
+    assert.equal(launches, 1);
+    assert.equal(readinessChecks, 1);
+  } finally { await fixture.close(); }
+});
+
+test('simultaneous resume calls launch at most one worker', async () => {
+  const fixture = await setup();
+  const run = await interruptedRun(fixture);
+  let launches = 0;
+  const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() { launches += 1; } }, { assertProviderReady: async () => undefined });
+  try {
+    const [first, second] = await Promise.all([service.resume(run.runId), service.resume(run.runId)]);
+    assert.equal(first.runId, run.runId);
+    assert.equal(second.runId, run.runId);
+    assert.equal(launches, 1);
+  } finally { await fixture.close(); }
+});
+
+test('resume readiness failure leaves the interrupted run unchanged', async () => {
+  const fixture = await setup();
+  const run = await interruptedRun(fixture);
+  let launches = 0;
+  const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() { launches += 1; } }, { assertProviderReady: async () => { throw new CredentialStoreError('credential_malformed', 'openrouter'); } });
+  try {
+    await assert.rejects(service.resume(run.runId), (error: unknown) => error instanceof RunServiceError && error.code === 'provider_credential_malformed');
+    assert.equal(fixture.store.getStatus(run.runId).status, 'interrupted');
+    assert.equal(launches, 0);
+  } finally { await fixture.close(); }
+});
+
+test('resume does not relaunch prepared or running work and rejects terminal runs', async () => {
+  const fixture = await setup();
+  const prepared = await prepareRun(request(), provider());
+  assert.ok(prepared.prepared);
+  const accepted = fixture.store.accept(randomUUID(), prepared.prepared);
+  let launches = 0;
+  const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() { launches += 1; } }, { assertProviderReady: async () => undefined });
+  try {
+    assert.equal((await service.resume(accepted.run.runId)).status, 'prepared');
+    assert.equal(launches, 0);
+    assert.ok(fixture.store.claim(accepted.run.runId, Date.now(), 1234));
+    await assert.rejects(service.resume(accepted.run.runId), (error: unknown) => error instanceof RunServiceError && error.code === 'run_not_resumable');
+    assert.equal(launches, 0);
+    fixture.store.requestCancel(accepted.run.runId);
+    await assert.rejects(service.resume(accepted.run.runId), (error: unknown) => error instanceof RunServiceError && error.code === 'run_not_resumable');
+    assert.equal(launches, 0);
+  } finally { await fixture.close(); }
+});
+
+test('resume launch failure stays visible under the original run identity', async () => {
+  const fixture = await setup();
+  const run = await interruptedRun(fixture);
+  const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() { throw new Error('host path detail'); } }, { assertProviderReady: async () => undefined });
+  try {
+    const resumed = await service.resume(run.runId);
+    assert.equal(resumed.runId, run.runId);
+    assert.equal(resumed.status, 'failed');
+    assert.equal(resumed.failure?.code, 'worker_launch_failed');
+    assert.equal(resumed.failure?.message.includes('host path detail'), false);
+  } finally { await fixture.close(); }
 });

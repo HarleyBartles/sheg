@@ -32,7 +32,7 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
   const f = await connectedFixture();
   try {
     const tools = await f.client.listTools();
-    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_get', 'run_inspect', 'run_list', 'run_start']);
+    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_get', 'run_inspect', 'run_list', 'run_resume', 'run_start']);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
@@ -59,6 +59,22 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
     assert.equal((unknown.structuredContent as { error: { code: string } }).error.code, 'run_not_found');
     const extra = await f.client.callTool({ name: 'run_get', arguments: { runId: run.runId, view: 'status', cursor: 'ignored' } });
     assert.equal(extra.isError, true);
+  } finally { await f.close(); }
+});
+
+test('MCP exposes explicit run_resume with a strict run identity input', async () => {
+  const f = await connectedFixture();
+  try {
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: request() } });
+    const runId = (started.structuredContent as { runId: string }).runId;
+    const now = Date.now();
+    assert.ok(f.store.claim(runId, now, 1234));
+    f.store.reconcile(runId, now + 31_000);
+    const resumed = await f.client.callTool({ name: 'run_resume', arguments: { runId } });
+    assert.equal(resumed.isError ?? false, false);
+    assert.equal((resumed.structuredContent as { runId: string }).runId, runId);
+    const invalid = await f.client.callTool({ name: 'run_resume', arguments: { runId, maxCalls: 100 } });
+    assert.equal(invalid.isError, true);
   } finally { await f.close(); }
 });
 

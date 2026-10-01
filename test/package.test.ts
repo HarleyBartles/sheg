@@ -160,8 +160,10 @@ test('a dead packaged worker is discovered as interrupted and reads never relaun
   const arrived = new Promise<void>((resolve) => { requestArrived = resolve; });
   const inference = createServer(async (_request, response) => {
     calls += 1;
-    requestArrived?.();
-    await new Promise<void>((resolve) => { releaseResponse = resolve; });
+    if (calls === 1) {
+      requestArrived?.();
+      await new Promise<void>((resolve) => { releaseResponse = resolve; });
+    }
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
       model: 'fixture-checkpoint', routing: { model: 'fixture-checkpoint' }, usage: {},
       answers: { interest: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } },
@@ -176,7 +178,7 @@ test('a dead packaged worker is discovered as interrupted and reads never relaun
     respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }],
     material: [{ id: 'opening', text: 'A short passage.' }],
     questions: [{ type: 'choice', id: 'interest', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } }],
-    maxCalls: 1,
+    maxCalls: 2,
     provider: { kind: 'laya', baseUrl: `http://127.0.0.1:${address.port}`, checkpoint: 'fixture-checkpoint', contextLimit: 4096, headLimit: 512, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 },
   };
   const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: dataRoot };
@@ -215,6 +217,16 @@ test('a dead packaged worker is discovered as interrupted and reads never relaun
       assert.equal(view.reservedCalls, 0);
       await new Promise((resolve) => setTimeout(resolve, 250));
       assert.equal(calls, 1, 'A status read must not launch a replacement worker.');
+      const resumed = await clientB.callTool({ name: 'run_resume', arguments: { runId } });
+      assert.equal(resumed.isError ?? false, false);
+      assert.equal((resumed.structuredContent as { runId: string }).runId, runId);
+      await waitForCompleted(dataRoot, runId);
+      assert.equal(calls, 2, 'Resume may spend only the one call left in the original ceiling.');
+      const answers = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'answers' } });
+      const answerItems = (answers.structuredContent as { items: Array<{ status: string; result?: { choice?: string } }> }).items;
+      assert.equal(answerItems.length, 1);
+      assert.equal(answerItems[0]?.status, 'answered');
+      assert.equal(answerItems[0]?.result?.choice, 'continue');
     } finally { await killMcpConnection(clientB, transportB); }
   } finally {
     releaseResponse?.();
