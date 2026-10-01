@@ -21,7 +21,7 @@ evidence of its predecessor. A Linear issue may span more than one plan.
 | # | Title | Status | Plan File | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 remains open for Plan 2; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean |
-| 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `ae7742c` (`ec3e70a..ae7742c`) | - | - | SHEG-5; cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 remains open for Plans 3-4 |
+| 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `3ecb97f` (`ec3e70a..3ecb97f`) | - | - | SHEG-5; cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 remains open for Plans 3-4 |
 | 3 | Execute authored journeys with durable respondent turn contexts | pending | Written after Plan 2 | - | - | - | SHEG-7 foundation; integrate finite journeys with the new run store |
 | 4 | Query recorded evidence and compose reusable follow-ons | pending | Written after Plan 3 | - | - | - | Complete SHEG-7; preserve uncertainty/disagreement evidence |
 | 5 | Ask independent typed question groups at new or recorded contexts | pending | Written after Plan 4 | - | - | - | SHEG-6; provider-aware batching/splitting without sibling leakage |
@@ -50,8 +50,8 @@ distributable survived termination of its originating MCP; another MCP
 connection retrieved the answer and an identical submission retry reused its
 run ID. A killed worker was discovered as interrupted without relaunch. The
 credential integration fix identifies malformed encodings and tells the agent
-how to repair them without exposing or rewriting the credential. Full resume,
-deletion and storage maintenance remain Plan 2 obligations under SHEG-5.
+how to repair them without exposing or rewriting the credential. Plan 2 adds
+explicit same-run recovery, controlled deletion, and Sheg-owned storage tools.
 
 Next plan uses the actual database schema, worker ownership, failure states,
 attempt records and cross-process evidence delivered here.
@@ -65,7 +65,7 @@ active work first. `run_storage` reports SQLite and foreign-key integrity, byte
 size, and row counts without exposing paths or SQL; Sheg runs optimization only
 after integrity checks. No migration layer or automatic startup recovery job.
 
-Plan 2 is delivered at `ae7742c`. The copied distributable test killed a worker
+Plan 2 is delivered at `3ecb97f`. The copied distributable test killed a worker
 during an in-flight call, discovered the interrupted run from a second MCP,
 resumed the same run, retained its uncertain attempt, and completed within the
 original call ceiling. Transaction tests cover active blockers, stale previews,

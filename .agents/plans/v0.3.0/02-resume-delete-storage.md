@@ -126,4 +126,4 @@ Read `docs/decisions/README.md` before implementation. Add one ADR and update it
 
 ## Handoff
 
-The implementation branch is `codex/v0.3.0-release-spec`, based on `origin/develop` at `3c5b2f00037634e24b5a4766d37004a699c43d2c`. It already contains Plan 1 through `3d683e4` and its completed plan record. Continue inline on that same authorized v0.3.0 feature branch. The feature PR target is `develop`; no release version, tag, publication, or merge is authorized by this plan. Do not access the user's live provider keys or make paid calls for behavior tests.
+The implementation branch is `codex/v0.3.0-release-spec`, based on `origin/develop` at `3c5b2f00037634e24b5a4766d37004a699c43d2c`. Plan 2 is delivered through `3ecb97f`; the branch also contains Plan 1 through `3d683e4` and its completed plan record. Continue inline on that same authorized v0.3.0 feature branch. The feature PR target is `develop`; no release version, tag, publication, or merge is authorized by this plan. Do not access the user's live provider keys or make paid calls for behavior tests.
