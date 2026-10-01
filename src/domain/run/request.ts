@@ -3,6 +3,7 @@ import { decisionQuestionSchema } from '../decision/decision.js';
 import { respondentProfileSchema } from '../respondents/profile.js';
 import { providerConfigSchema } from '../../providers/config.js';
 import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js';
+import type { JourneyEvaluation, JourneyRespondentState } from './lifecycle.js';
 
 const materialItemSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
@@ -71,4 +72,12 @@ export type PreparedRun = {
   requestFingerprint: string;
   compilerFingerprint: string;
   evaluations: FrozenEvaluation[];
+};
+
+export type PreparedJourneyRun = {
+  request: ParsedInlineJourneyRequest;
+  requestFingerprint: string;
+  compilerFingerprint: string;
+  evaluations: JourneyEvaluation[];
+  respondents: JourneyRespondentState[];
 };

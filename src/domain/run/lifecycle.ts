@@ -1,10 +1,47 @@
-import type { DecisionResult } from '../decision/decision.js';
+import type { DecisionResult, DecisionValue } from '../decision/decision.js';
 import type { ProviderContextFit } from '../decision/provider.js';
 import type { FrozenEvaluation } from './request.js';
+import type { PromptHistoryEvent } from '../decision/prompt.js';
+import type { PromptState } from '../decision/prompt.js';
+import type { DecisionRequest } from '../decision/decision.js';
 
 export type RunStatus = 'prepared' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted';
 
 export type RunProblem = { code: string; respondentId?: string; nodeId?: string; pathId?: string; message: string };
+
+export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: DecisionRequest & { state: PromptState } } & {
+  turnId: string;
+  nodeId: string;
+  pathId: string;
+  occurrence: number;
+  ordinal: number;
+};
+
+export type JourneyRespondentState = {
+  respondentId: string;
+  status: 'active' | 'completed' | 'failed' | 'unreached';
+  currentNodeId: string | null;
+  currentTurnId: string | null;
+  currentContextId: string | null;
+  revision: number;
+  events: PromptHistoryEvent[];
+  route: Array<{ nodeId: string; response: DecisionValue; toNodeId: string }>;
+  outcome?: string;
+};
+
+export type JourneyEvaluationRecord = JourneyEvaluation & {
+  status: 'pending' | 'answered' | 'failed';
+  result?: DecisionResult;
+  failure?: { code: string; message: string };
+};
+
+export type JourneyRunRecord = {
+  request: import('./request.js').ParsedInlineJourneyRequest;
+  requestFingerprint: string;
+  compilerFingerprint: string;
+  evaluations: JourneyEvaluationRecord[];
+  respondents: JourneyRespondentState[];
+};
 
 export type Inspection = {
   valid: boolean;

@@ -46,8 +46,9 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(mcp.mcpServers['sheg']?.cwd, '${PLUGIN_ROOT}');
   const inputs = path.join(sandbox, 'user-study');
   await mkdir(inputs);
+  const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: path.join(sandbox, 'data') };
   const client = new Client({ name: 'copied-plugin-smoke', version: '1.0.0' });
-  const transport = new StdioClientTransport({ command: 'node', args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin });
+  const transport = new StdioClientTransport({ command: 'node', args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
   cleanup.closeTransport = async () => {
     try {
       await client.close();

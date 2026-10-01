@@ -47,11 +47,11 @@ The single-question request remains supported. It shares the same provider, dura
 
 ### Task 2: Persist reached turn state and stable references
 
-- [ ] **Files:** `src/domain/run/lifecycle.ts`, `src/infrastructure/run-store.ts`, `test/run-store.test.ts`. **Produces:** durable respondent journey state, ordered exposure/response evidence, per-turn context references, and dynamically reached evaluation rows.
-- [ ] Add tests first for exact frozen packet/context contents, stable turn/context IDs, occurrence identity at separate ask nodes, route state surviving reopen, per-respondent isolation, explicit terminal/unreached states, and rollback of an answer/transition update on storage failure.
-- [ ] Persist only reached turns and retain exact original typed answers, distributions, available confidence, attempt rows, material identity, and route outcome. Keep different respondents' histories separate.
-- [ ] Ensure provider execution remains outside transactions. Add one atomic store transition that records a settled answer and makes its next journey state visible exactly once.
-- [ ] Bump the current pre-v1 schema version as necessary. Test a clear unsupported-schema/reset response; add no migration path.
+- [x] **Files:** `src/domain/run/lifecycle.ts`, `src/infrastructure/run-store.ts`, `test/run-store.test.ts`. **Produces:** durable respondent journey state, ordered exposure/response evidence, per-turn context references, and dynamically reached evaluation rows.
+- [x] Add tests first for exact frozen packet/context contents, stable turn/context IDs, repeated task identity at separate ask nodes, route state surviving reopen, per-respondent isolation, explicit terminal/unreached states, and rollback of an answer/transition update on storage failure.
+- [x] Persist reached turns and retain exact original typed answers, distributions, available confidence, attempt rows, material identity, and route outcome. Keep different respondents' histories separate.
+- [x] Keep provider calls outside storage transactions. The atomic journey settlement records its answer, typed route, revision, next reached evaluation, and attempt accounting exactly once.
+- [x] Bump the pre-v1 schema to version 2. Unsupported older datastores return export/reset guidance; no migration path is added.
 
 ### Task 3: Execute and recover journeys in the detached worker
 

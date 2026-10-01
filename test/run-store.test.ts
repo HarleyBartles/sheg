@@ -9,7 +9,10 @@ import test from 'node:test';
 import { prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import type { DecisionResult } from '../src/domain/decision/decision.js';
-import type { InlineRunRequest, PreparedRun } from '../src/domain/run/request.js';
+import { runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun } from '../src/domain/run/request.js';
+import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
+import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
+import { hashCanonical } from '../src/infrastructure/identity.js';
 import { openRunStore, RunStoreError } from '../src/infrastructure/run-store.js';
 
 const input: InlineRunRequest = {
@@ -44,6 +47,64 @@ const savedAnswer: DecisionResult = {
   type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 },
   attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {},
 };
+
+const journeyRequest: InlineJourneyRequest = {
+  kind: 'journey',
+  respondents: input.respondents,
+  journey: {
+    id: 'article', label: 'Article journey',
+    items: [{ id: 'section-one', text: 'Opening section.' }, { id: 'section-three', text: 'Later section.' }],
+    tasks: [{ id: 'interest', type: 'choice', instructions: 'Would you keep reading?', options: { continue: 'Continue', leave: 'Stop' } }],
+    presentation: { kind: 'graph', entryNodeId: 'opening', maxDecisions: 2, nodes: [
+      { id: 'opening', kind: 'expose', itemId: 'section-one' },
+      { id: 'ask-interest', kind: 'ask', taskId: 'interest' },
+      { id: 'expose-section-three', kind: 'expose', itemId: 'section-three' },
+      { id: 'ask-interest-followup', kind: 'ask', taskId: 'interest' },
+      { id: 'complete', kind: 'terminal', outcome: 'complete' },
+      { id: 'left', kind: 'terminal', outcome: 'left' },
+    ], transitions: [
+      { fromNodeId: 'opening', toNodeId: 'ask-interest' },
+      { fromNodeId: 'ask-interest', optionId: 'continue', toNodeId: 'expose-section-three' },
+      { fromNodeId: 'ask-interest', optionId: 'leave', toNodeId: 'left' },
+      { fromNodeId: 'expose-section-three', toNodeId: 'ask-interest-followup' },
+      { fromNodeId: 'ask-interest-followup', optionId: 'continue', toNodeId: 'complete' },
+      { fromNodeId: 'ask-interest-followup', optionId: 'leave', toNodeId: 'complete' },
+    ] },
+  },
+  provider: input.provider,
+  maxCalls: 4,
+};
+
+function preparedJourneyRun(): PreparedJourneyRun {
+  const parsed = runRequestSchema.parse(journeyRequest);
+  if (parsed.kind !== 'journey') throw new Error('Journey test fixture was not parsed as a journey request.');
+  const request: ParsedInlineJourneyRequest = parsed;
+  const compilerFingerprint = promptContractHash();
+  const requestFingerprint = hashCanonical({ request, compilerFingerprint });
+  const initialEvents: PromptHistoryEvent[] = [{ type: 'exposure', sequence: 0, nodeId: 'opening', itemId: 'section-one' }];
+  const evaluations = request.respondents.map((respondent, index) => {
+    const turnId = `turn-${respondent.id}-opening`;
+    const contextId = `context-${respondent.id}-opening`;
+    const nodeId = 'ask-interest';
+    const packet = compileDecisionPacket(journeyRequest.journey, respondent, 'interest', initialEvents);
+    return {
+      evaluationId: `evaluation-${respondent.id}-opening`, contextId, respondentId: respondent.id,
+      questionId: 'interest', packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
+      turnId, nodeId, pathId: 'root', occurrence: 1, ordinal: index,
+    };
+  });
+  const respondents: JourneyRespondentState[] = evaluations.map((evaluation) => ({
+    respondentId: evaluation.respondentId,
+    status: 'active',
+    currentNodeId: evaluation.nodeId,
+    currentTurnId: evaluation.turnId,
+    currentContextId: evaluation.contextId,
+    revision: 0,
+    events: initialEvents,
+    route: [],
+  }));
+  return { request, requestFingerprint, compilerFingerprint, evaluations, respondents };
+}
 
 async function resumableFixture(value: InlineRunRequest = input) {
   const root = await temporaryRoot();
@@ -82,6 +143,173 @@ test('acceptance survives a second connection and matching submission retries sh
   }
 });
 
+test('journey acceptance freezes exact reached packets and respondent state across reopen', async () => {
+  const root = await temporaryRoot();
+  const first = openRunStore(root);
+  try {
+    const accepted = first.acceptJourney(randomUUID(), preparedJourneyRun());
+    const run = first.getJourneyRun(accepted.run.runId);
+    assert.equal(run.request.journey.id, 'article');
+    assert.deepEqual(run.evaluations.map(({ turnId, contextId, nodeId }) => ({ turnId, contextId, nodeId })), [
+      { turnId: 'turn-reader-a-opening', contextId: 'context-reader-a-opening', nodeId: 'ask-interest' },
+      { turnId: 'turn-reader-b-opening', contextId: 'context-reader-b-opening', nodeId: 'ask-interest' },
+    ]);
+    assert.deepEqual(run.evaluations[0]!.packet.state.encounteredItems, [{ id: 'section-one', text: 'Opening section.' }]);
+    assert.equal(run.respondents[0]!.events[0]?.type, 'exposure');
+    assert.equal(run.respondents[0]!.currentTurnId, run.evaluations[0]!.turnId);
+  } finally {
+    first.close();
+  }
+  const reopened = openRunStore(root);
+  try {
+    const run = reopened.getJourneyRun(reopened.list({ limit: 1 }).items[0]!.runId);
+    assert.equal(run.evaluations[0]!.packet.state.encounteredItems[0]!.text, 'Opening section.');
+    assert.deepEqual(run.respondents[0]!.route, []);
+    assert.equal(run.respondents[1]!.respondentId, 'reader-b');
+  } finally {
+    reopened.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('answer, route transition and next reached turn commit atomically', async () => {
+  const root = await temporaryRoot();
+  let store = openRunStore(root, { now: () => 10_000 });
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+    const claim = store.claim(accepted.run.runId, 10_000, 1234);
+    assert.ok(claim);
+    const current = store.reserveNext(claim, 10_000);
+    assert.ok(current);
+    const response: DecisionResult = { ...savedAnswer, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 }, confidence: 0.73 };
+    const events = [...store.getJourneyRun(accepted.run.runId).respondents[0]!.events,
+      { type: 'response' as const, sequence: 1, nodeId: 'ask-interest', taskId: 'interest', result: { type: 'choice' as const, choice: response.choice, probabilities: response.probabilities, confidence: response.confidence } },
+      { type: 'exposure' as const, sequence: 2, nodeId: 'expose-section-three', itemId: 'section-three' }];
+    const prepared = preparedJourneyRun();
+    const nextPacket = compileDecisionPacket(prepared.request.journey, prepared.request.respondents[0]!, 'interest', events);
+    const nextEvaluation = {
+      evaluationId: 'evaluation-reader-a-followup', turnId: 'turn-reader-a-followup', contextId: 'context-reader-a-followup',
+      respondentId: 'reader-a', questionId: 'interest', nodeId: 'ask-interest-followup', pathId: 'ask-interest=continue', occurrence: 1, ordinal: 2,
+      packet: nextPacket, packetFingerprint: hashCanonical({ packet: nextPacket, compilerFingerprint: promptContractHash() }),
+    };
+    const nextState: JourneyRespondentState = {
+      respondentId: 'reader-a', status: 'active', currentNodeId: 'ask-interest-followup', currentTurnId: nextEvaluation.turnId,
+      currentContextId: nextEvaluation.contextId, revision: 1, events,
+      route: [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 'continue', probabilities: response.probabilities, confidence: response.confidence }, toNodeId: 'expose-section-three' }],
+    };
+    store.settleJourney(claim, current.attemptId, { kind: 'answered', result: response }, {
+      respondentId: 'reader-a', expectedRevision: 0, state: nextState, nextEvaluation,
+    });
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.equal(run.evaluations[0]!.result?.type, 'choice');
+    assert.equal(run.evaluations.length, 3);
+    assert.equal(run.evaluations[2]!.turnId, 'turn-reader-a-followup');
+    assert.deepEqual(run.respondents[0]!.route, [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 'continue', probabilities: response.probabilities, confidence: response.confidence }, toNodeId: 'expose-section-three' }]);
+    assert.equal(run.respondents[0]!.currentTurnId, 'turn-reader-a-followup');
+    assert.equal(run.respondents[1]!.revision, 0);
+    assert.deepEqual(run.evaluations[0]!.result, response);
+    store.close();
+    store = openRunStore(root, { now: () => 10_000 });
+    const reopened = store.getJourneyRun(accepted.run.runId);
+    assert.deepEqual(reopened.respondents[0]!.route, run.respondents[0]!.route);
+    assert.equal(reopened.respondents[0]!.currentContextId, 'context-reader-a-followup');
+    assert.equal(reopened.evaluations[0]!.result?.type === 'choice' ? reopened.evaluations[0]!.result.confidence : undefined, 0.73);
+    assert.equal(reopened.evaluations[2]!.packet.state.trajectory.responses[0]?.type, 'choice');
+    assert.notEqual(reopened.evaluations[0]!.turnId, reopened.evaluations[2]!.turnId);
+    assert.equal(reopened.evaluations[0]!.questionId, reopened.evaluations[2]!.questionId);
+    assert.notEqual(reopened.evaluations[0]!.nodeId, reopened.evaluations[2]!.nodeId);
+    assert.deepEqual(reopened.evaluations[2]!.packet.state.encounteredItems, [{ id: 'section-three', text: 'Later section.' }]);
+    const history = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try {
+      const attempts = history.prepare('SELECT status, result_json FROM attempts WHERE run_id = ? ORDER BY started_ms').all(accepted.run.runId) as Array<{ status: string; result_json: string }>;
+      assert.equal(attempts.length, 1);
+      assert.equal(attempts[0]!.status, 'answered');
+      assert.equal(JSON.parse(attempts[0]!.result_json).confidence, 0.73);
+    } finally { history.close(); }
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('journey storage preserves terminal and unreached respondents without fabricating turns', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root, { now: () => 10_000 });
+  try {
+    const prepared = preparedJourneyRun();
+    prepared.respondents[1] = {
+      respondentId: 'reader-b', status: 'unreached', currentNodeId: null, currentTurnId: null, currentContextId: null,
+      revision: 0, events: [], route: [],
+    };
+    prepared.evaluations.pop();
+    const accepted = store.acceptJourney(randomUUID(), prepared);
+    const claim = store.claim(accepted.run.runId, 10_000, 1234);
+    assert.ok(claim);
+    const current = store.reserveNext(claim, 10_000);
+    assert.ok(current);
+    const result: DecisionResult = { ...savedAnswer, choice: 'leave', probabilities: { continue: 0.1, leave: 0.9 } };
+    const old = store.getJourneyRun(accepted.run.runId).respondents[0]!;
+    const events = [...old.events, { type: 'response' as const, sequence: 1, nodeId: 'ask-interest', taskId: 'interest', result: { type: 'choice' as const, choice: 'leave', probabilities: result.probabilities } }];
+    store.settleJourney(claim, current.attemptId, { kind: 'answered', result }, {
+      respondentId: 'reader-a', expectedRevision: 0,
+    state: { ...old, status: 'completed', currentNodeId: null, currentTurnId: null, currentContextId: null, revision: 1, events,
+        route: [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 'leave', probabilities: result.probabilities }, toNodeId: 'left' }], outcome: 'left' },
+    });
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.equal(run.evaluations.length, 1);
+    assert.equal(run.respondents[0]!.status, 'completed');
+    assert.equal(run.respondents[0]!.outcome, 'left');
+    assert.deepEqual(run.respondents[1], prepared.respondents[1]);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('journey answer and route transition roll back together when next-turn persistence fails', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root, { now: () => 10_000 });
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+    const claim = store.claim(accepted.run.runId, 10_000, 1234);
+    assert.ok(claim);
+    const current = store.reserveNext(claim, 10_000);
+    assert.ok(current);
+    database.exec("CREATE TRIGGER fail_next_turn BEFORE INSERT ON evaluations WHEN NEW.turn_id = 'turn-reader-a-followup' BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END;");
+    const response: DecisionResult = { ...savedAnswer, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } };
+    const old = store.getJourneyRun(accepted.run.runId).respondents[0]!;
+    const events = [...old.events,
+      { type: 'response' as const, sequence: 1, nodeId: 'ask-interest', taskId: 'interest', result: { type: 'choice' as const, choice: response.choice, probabilities: response.probabilities } },
+      { type: 'exposure' as const, sequence: 2, nodeId: 'expose-section-three', itemId: 'section-three' }];
+    const prepared = preparedJourneyRun();
+    const packet = compileDecisionPacket(prepared.request.journey, prepared.request.respondents[0]!, 'interest', events);
+    const nextEvaluation = {
+      evaluationId: 'evaluation-reader-a-followup', turnId: 'turn-reader-a-followup', contextId: 'context-reader-a-followup',
+      respondentId: 'reader-a', questionId: 'interest', nodeId: 'ask-interest-followup', pathId: 'ask-interest=continue', occurrence: 1, ordinal: 2,
+      packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint: promptContractHash() }),
+    };
+    const state: JourneyRespondentState = {
+      ...old, currentNodeId: 'ask-interest-followup', currentTurnId: nextEvaluation.turnId, currentContextId: nextEvaluation.contextId,
+      revision: 1, events, route: [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 'continue' }, toNodeId: 'expose-section-three' }],
+    };
+    assert.throws(() => store.settleJourney(claim, current.attemptId, { kind: 'answered', result: response }, {
+      respondentId: 'reader-a', expectedRevision: 0, state, nextEvaluation,
+    }));
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.equal(run.evaluations[0]!.status, 'pending');
+    assert.equal(run.respondents[0]!.revision, 0);
+    assert.equal(run.respondents[0]!.currentTurnId, 'turn-reader-a-opening');
+    assert.equal(store.getStatus(accepted.run.runId).usedCalls, 0);
+    const attempts = database.prepare('SELECT status FROM attempts WHERE run_id = ?').all(accepted.run.runId) as Array<{ status: string }>;
+    assert.deepEqual(attempts.map(({ status }) => status), ['reserved']);
+  } finally {
+    database.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('two processes can initialize the same fresh datastore concurrently', async () => {
   const root = await temporaryRoot();
   const moduleUrl = new URL('../src/infrastructure/run-store.ts', import.meta.url).href;
@@ -103,6 +331,18 @@ test('two processes can initialize the same fresh datastore concurrently', async
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('unsupported pre-v1 datastore versions return explicit export or reset guidance', async () => {
+  const root = await temporaryRoot();
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    database.exec('PRAGMA user_version = 1');
+  } finally { database.close(); }
+  try {
+    assert.throws(() => openRunStore(root), (error: unknown) => error instanceof RunStoreError &&
+      error.code === 'unsupported_schema_version' && /Export or reset this pre-v1 datastore/.test(error.message));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('resume preserves the run and saved answer and uses a fresh claim window', async () => {

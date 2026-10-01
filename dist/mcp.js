@@ -35760,7 +35760,7 @@ function validateDistribution(distribution, expectedIds, label) {
 }
 
 // src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 1;
+var SCHEMA_VERSION = 2;
 var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
@@ -35772,9 +35772,50 @@ var RunStoreError = class extends Error {
   }
   code;
 };
+function sameDecisionValue(left, right) {
+  if (left.type !== right.type) return false;
+  if (left.type === "choice" && right.type === "choice") {
+    return left.choice === right.choice && hashCanonical(left.probabilities ?? null) === hashCanonical(right.probabilities ?? null) && left.confidence === right.confidence;
+  }
+  if (left.type === "score" && right.type === "score") {
+    return left.score === right.score && hashCanonical(left.probabilities) === hashCanonical(right.probabilities) && hashCanonical(left.legend) === hashCanonical(right.legend) && left.confidence === right.confidence;
+  }
+  return left.type === "noul" && right.type === "noul" && left.noul === right.noul;
+}
+function isJourneyAskNode(journey, nodeId, questionId) {
+  if (journey.presentation.kind === "graph") {
+    const node2 = journey.presentation.nodes.find((candidate) => candidate.id === nodeId);
+    return node2?.kind === "ask" && node2.taskId === questionId;
+  }
+  return nodeId === `sequence-ask-${questionId}` && journey.tasks.some((task) => task.id === questionId);
+}
+function journeyRouteTarget(journey, nodeId, response) {
+  if (journey.presentation.kind === "sequence") {
+    const taskIndex = journey.tasks.findIndex((task2) => `sequence-ask-${task2.id}` === nodeId);
+    if (taskIndex < 0) return void 0;
+    const next = journey.tasks[taskIndex + 1];
+    return next ? `sequence-ask-${next.id}` : "sequence-terminal-complete";
+  }
+  const node2 = journey.presentation.nodes.find((candidate) => candidate.id === nodeId);
+  if (node2?.kind !== "ask") return void 0;
+  const task = journey.tasks.find((candidate) => candidate.id === node2.taskId);
+  if (!task) return void 0;
+  const edge = journey.presentation.transitions.find((candidate) => {
+    if (candidate.fromNodeId !== nodeId) return false;
+    if (response.type === "choice") return candidate.optionId === response.choice;
+    const interval = candidate.when;
+    const value = response.type === "score" ? response.score : response.noul;
+    return interval?.type === response.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
+  });
+  return edge?.toNodeId;
+}
 function asText(value, label) {
   if (typeof value !== "string") throw new RunStoreError("data_integrity_error", `Stored ${label} is not text.`);
   return value;
+}
+function asNullableText(value, label) {
+  if (value === null) return null;
+  return asText(value, label);
 }
 function asNumber(value, label) {
   if (typeof value !== "number" && typeof value !== "bigint") throw new RunStoreError("data_integrity_error", `Stored ${label} is not numeric.`);
@@ -35859,6 +35900,10 @@ function initialize(database) {
       context_id TEXT NOT NULL,
       respondent_id TEXT NOT NULL,
       question_id TEXT NOT NULL,
+      turn_id TEXT,
+      node_id TEXT,
+      path_id TEXT,
+      occurrence INTEGER,
       packet_json TEXT NOT NULL,
       packet_fingerprint TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed')),
@@ -35866,7 +35911,26 @@ function initialize(database) {
       failure_code TEXT,
       failure_message TEXT,
       UNIQUE (run_id, ordinal),
-      UNIQUE (run_id, evaluation_id)
+      UNIQUE (run_id, evaluation_id),
+      UNIQUE (run_id, turn_id),
+      UNIQUE (run_id, respondent_id, node_id, occurrence),
+      CHECK ((turn_id IS NULL AND node_id IS NULL AND path_id IS NULL AND occurrence IS NULL) OR
+             (turn_id IS NOT NULL AND node_id IS NOT NULL AND path_id IS NOT NULL AND occurrence IS NOT NULL AND occurrence >= 1))
+    );
+    CREATE TABLE journey_respondents (
+      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+      respondent_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed', 'unreached')),
+      current_node_id TEXT,
+      current_turn_id TEXT,
+      current_context_id TEXT,
+      revision INTEGER NOT NULL CHECK (revision >= 0),
+      events_json TEXT NOT NULL,
+      route_json TEXT NOT NULL,
+      outcome TEXT,
+      PRIMARY KEY (run_id, respondent_id),
+      CHECK ((status = 'active' AND current_node_id IS NOT NULL AND current_turn_id IS NOT NULL AND current_context_id IS NOT NULL) OR
+             (status <> 'active' AND current_node_id IS NULL AND current_turn_id IS NULL AND current_context_id IS NULL))
     );
     CREATE TABLE attempts (
       attempt_id TEXT PRIMARY KEY,
@@ -35917,6 +35981,58 @@ function validatePrepared(prepared) {
     seenRespondents.add(evaluation.respondentId);
   }
   if (seenRespondents.size !== respondentIds.size) throw new RunStoreError("invalid_prepared_run", "Every respondent must have exactly one prepared evaluation.");
+  return { ...prepared, request: parsedRequest.data };
+}
+function validatePreparedJourney(prepared) {
+  const parsedRequest = runRequestSchema.safeParse(prepared.request);
+  if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared journey request or fingerprint is invalid.");
+  }
+  const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
+  const respondentIdSet = new Set(respondentIds);
+  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length !== respondentIds.length || prepared.evaluations.length === 0) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared journey requires unique respondent state and at least one reached turn.");
+  }
+  const stateById = /* @__PURE__ */ new Map();
+  const allowedStatuses = /* @__PURE__ */ new Set(["active", "completed", "failed", "unreached"]);
+  for (const state of prepared.respondents) {
+    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || stateById.has(state.respondentId) || !Number.isSafeInteger(state.revision) || state.revision < 0 || !Array.isArray(state.events) || !Array.isArray(state.route) || (state.status === "active" ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) : state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null)) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared journey respondent state is inconsistent.");
+    }
+    stateById.set(state.respondentId, state);
+  }
+  if (stateById.size !== respondentIdSet.size) throw new RunStoreError("invalid_prepared_run", "Every journey respondent requires durable state.");
+  const evaluationIds = /* @__PURE__ */ new Set();
+  const turnIds = /* @__PURE__ */ new Set();
+  const contextIds = /* @__PURE__ */ new Set();
+  const nodeOccurrences = /* @__PURE__ */ new Set();
+  const activeTurnIds = /* @__PURE__ */ new Set();
+  for (const evaluation of prepared.evaluations) {
+    const packet = decisionRequestSchema.safeParse(evaluation.packet);
+    const state = stateById.get(evaluation.respondentId);
+    const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
+    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
+    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacket(parsedRequest.data.journey, respondent, evaluation.questionId, state.events)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared journey turn or context reference is invalid.");
+    }
+    evaluationIds.add(evaluation.evaluationId);
+    turnIds.add(evaluation.turnId);
+    contextIds.add(evaluation.contextId);
+    nodeOccurrences.add(nodeOccurrence);
+    activeTurnIds.add(evaluation.turnId);
+  }
+  for (const state of prepared.respondents) {
+    if (state.status === "active" && !activeTurnIds.has(state.currentTurnId)) {
+      throw new RunStoreError("invalid_prepared_run", "Every active journey respondent requires one pending turn.");
+    }
+    if (state.status !== "active" && prepared.evaluations.some(({ respondentId }) => respondentId === state.respondentId)) {
+      throw new RunStoreError("invalid_prepared_run", "A terminal or unreached respondent cannot have a pending turn.");
+    }
+  }
+  const ordered = prepared.evaluations.toSorted((left, right) => left.ordinal - right.ordinal);
+  if (ordered.some((evaluation, index) => evaluation.ordinal !== index)) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared journey turn ordinals must be contiguous from zero.");
+  }
   return { ...prepared, request: parsedRequest.data };
 }
 function openRunStore(dataRoot, options2 = {}) {
@@ -35997,6 +36113,74 @@ var SQLiteRunStore = class {
       return { created: true, run: this.statusInside(runId) };
     });
   }
+  acceptJourney(submissionId, preparedInput) {
+    this.ensureOpen();
+    if (!submissionId.trim()) throw new RunStoreError("invalid_submission_id", "A submission ID is required.");
+    const prepared = validatePreparedJourney(preparedInput);
+    return this.transaction(() => {
+      const prior = this.database.prepare("SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?").get(submissionId);
+      if (prior) {
+        const priorFingerprint = asText(prior.request_fingerprint, "request fingerprint");
+        if (priorFingerprint !== prepared.requestFingerprint) throw new RunStoreError("submission_conflict", "This submission ID has already been used with different request contents.");
+        const runId2 = asText(prior.run_id, "run ID");
+        this.reconcileInside(runId2, this.now());
+        return { created: false, run: this.statusInside(runId2) };
+      }
+      const runId = randomUUID2();
+      const nowMs = this.now();
+      const createdAt = new Date(nowMs).toISOString();
+      this.database.prepare(`INSERT INTO runs
+        (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls)
+        VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?)`).run(
+        runId,
+        submissionId,
+        prepared.requestFingerprint,
+        createdAt,
+        nowMs,
+        prepared.request.label ?? null,
+        JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint }),
+        prepared.evaluations.length,
+        prepared.request.maxCalls
+      );
+      const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
+        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
+      for (const evaluation of prepared.evaluations) {
+        insertEvaluation.run(
+          evaluation.evaluationId,
+          runId,
+          evaluation.ordinal,
+          evaluation.contextId,
+          evaluation.respondentId,
+          evaluation.questionId,
+          evaluation.turnId,
+          evaluation.nodeId,
+          evaluation.pathId,
+          evaluation.occurrence,
+          JSON.stringify(evaluation.packet),
+          evaluation.packetFingerprint
+        );
+      }
+      const insertState = this.database.prepare(`INSERT INTO journey_respondents
+        (run_id, respondent_id, status, current_node_id, current_turn_id, current_context_id, revision, events_json, route_json, outcome)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      for (const state of prepared.respondents) {
+        insertState.run(
+          runId,
+          state.respondentId,
+          state.status,
+          state.currentNodeId,
+          state.currentTurnId,
+          state.currentContextId,
+          state.revision,
+          JSON.stringify(state.events),
+          JSON.stringify(state.route),
+          state.outcome ?? null
+        );
+      }
+      return { created: true, run: this.statusInside(runId) };
+    });
+  }
   getStatus(runId) {
     this.ensureOpen();
     return this.transaction(() => {
@@ -36026,6 +36210,71 @@ var SQLiteRunStore = class {
       throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
     }
     return parsed;
+  }
+  getJourneyRun(runId) {
+    this.getStatus(runId);
+    const row = this.database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId);
+    if (!row) throw this.notFound();
+    const stored = parseJson(row.request_json, "request");
+    if (typeof stored !== "object" || stored === null || !("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) {
+      throw new RunStoreError("data_integrity_error", "Stored journey request has an invalid shape.");
+    }
+    const parsedRequest = runRequestSchema.safeParse(stored.request);
+    if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || typeof stored.compilerFingerprint !== "string" || typeof stored.requestFingerprint !== "string" || stored.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint") || hashCanonical({ request: parsedRequest.data, compilerFingerprint: stored.compilerFingerprint }) !== stored.requestFingerprint) {
+      throw new RunStoreError("data_integrity_error", "Stored journey request or fingerprint is invalid.");
+    }
+    const evaluationRows = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? ORDER BY ordinal").all(runId);
+    const evaluations = evaluationRows.map((evaluation) => {
+      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
+      const base = {
+        evaluationId: asText(evaluation.evaluation_id, "evaluation ID"),
+        contextId: asText(evaluation.context_id, "context ID"),
+        respondentId: asText(evaluation.respondent_id, "respondent ID"),
+        questionId: asText(evaluation.question_id, "question ID"),
+        packet,
+        packetFingerprint: asText(evaluation.packet_fingerprint, "packet fingerprint"),
+        turnId: asText(evaluation.turn_id, "turn ID"),
+        nodeId: asText(evaluation.node_id, "node ID"),
+        pathId: asText(evaluation.path_id, "path ID"),
+        occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
+        ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
+        status: asText(evaluation.status, "evaluation status")
+      };
+      if (!["pending", "answered", "failed"].includes(base.status) || base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
+        throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
+      }
+      if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
+        throw new RunStoreError("data_integrity_error", "Stored journey packet does not match its context identity.");
+      }
+      if (evaluation.result_json !== null) base.result = validateDecision(packet, parseJson(evaluation.result_json, "decision result"), { maxAttempts: 1 });
+      if (evaluation.failure_code !== null) base.failure = { code: asText(evaluation.failure_code, "failure code"), message: asText(evaluation.failure_message, "failure message") };
+      return base;
+    });
+    const stateRows = this.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id").all(runId);
+    const respondents = stateRows.map((state) => {
+      const status = asText(state.status, "journey respondent status");
+      const events = parseJson(state.events_json, "journey history");
+      const route = parseJson(state.route_json, "journey route");
+      if (!["active", "completed", "failed", "unreached"].includes(status) || !Array.isArray(events) || !Array.isArray(route)) {
+        throw new RunStoreError("data_integrity_error", "Stored journey respondent state has an invalid shape.");
+      }
+      return {
+        respondentId: asText(state.respondent_id, "respondent ID"),
+        status,
+        currentNodeId: asNullableText(state.current_node_id, "current node ID"),
+        currentTurnId: asNullableText(state.current_turn_id, "current turn ID"),
+        currentContextId: asNullableText(state.current_context_id, "current context ID"),
+        revision: asNumber(state.revision, "journey state revision"),
+        events,
+        route,
+        ...state.outcome === null ? {} : { outcome: asText(state.outcome, "journey outcome") }
+      };
+    });
+    const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
+    if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some((state) => !respondentIds.has(state.respondentId)) || respondents.some((state) => state.status === "active" && evaluations.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) || respondents.some((state) => state.status !== "active" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
+      throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
+    }
+    return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations, respondents };
   }
   list(query) {
     this.ensureOpen();
@@ -36284,6 +36533,115 @@ var SQLiteRunStore = class {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
         }
       }
+      this.database.prepare("UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(claim2.runId);
+    });
+  }
+  settleJourney(claim2, attemptId, outcome, transition) {
+    this.ensureOpen();
+    this.transaction(() => {
+      const nowMs = this.now();
+      this.ownedRun(claim2, nowMs);
+      const attempt = this.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
+      if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
+      const evaluationId = asText(attempt.evaluation_id, "evaluation ID");
+      const evaluation = this.database.prepare("SELECT packet_json, turn_id, node_id, respondent_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
+      if (!evaluation) throw new RunStoreError("data_integrity_error", "The reserved journey turn is missing.");
+      const turnId = asText(evaluation.turn_id, "turn ID");
+      const nodeId = asText(evaluation.node_id, "node ID");
+      const respondentId = asText(evaluation.respondent_id, "respondent ID");
+      if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId || !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 || transition.state.revision !== transition.expectedRevision + 1) {
+        throw new RunStoreError("journey_transition_conflict", "Journey transition does not match the reserved respondent turn.");
+      }
+      const stateRow = this.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ?").get(claim2.runId, respondentId);
+      if (!stateRow || asNumber(stateRow.revision, "journey state revision") !== transition.expectedRevision || asText(stateRow.current_turn_id, "current turn ID") !== turnId || asText(stateRow.current_node_id, "current node ID") !== nodeId) {
+        throw new RunStoreError("journey_transition_conflict", "Journey respondent state has moved since this turn was reserved.");
+      }
+      const priorEvents = parseJson(stateRow.events_json, "journey history");
+      const priorRoute = parseJson(stateRow.route_json, "journey route");
+      if (transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) || transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
+        throw new RunStoreError("journey_transition_conflict", "Journey transitions must preserve ordered prior evidence.");
+      }
+      const runRow = this.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(claim2.runId);
+      const storedRun = parseJson(runRow?.request_json, "run request");
+      const parsedRunRequest = runRequestSchema.safeParse(storedRun.request);
+      if (!parsedRunRequest.success || parsedRunRequest.data.kind !== "journey" || typeof storedRun.compilerFingerprint !== "string") {
+        throw new RunStoreError("data_integrity_error", "Stored journey request is invalid.");
+      }
+      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
+      if (outcome.kind === "answered") {
+        const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
+        const answerEvent = transition.state.events.slice(priorEvents.length).findLast(
+          (event) => event.type === "response" && event.nodeId === nodeId
+        );
+        if (!answerEvent || answerEvent.taskId !== packet.question.id || !sameDecisionValue(answerEvent.result, result)) {
+          throw new RunStoreError("journey_transition_conflict", "Journey transition must append the exact typed answer for this turn.");
+        }
+        const routeAddition = transition.state.route.slice(priorRoute.length);
+        const expectedTarget = journeyRouteTarget(parsedRunRequest.data.journey, nodeId, result);
+        if (routeAddition.length !== 1 || routeAddition[0].nodeId !== nodeId || routeAddition[0].toNodeId !== expectedTarget || !sameDecisionValue(routeAddition[0].response, result) || transition.state.status === "failed") {
+          throw new RunStoreError("journey_transition_conflict", "Journey transition must record the exact typed response and matching route outcome.");
+        }
+        if (transition.state.status === "active") {
+          if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId || transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId || transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
+            throw new RunStoreError("journey_transition_conflict", "An active respondent must point to exactly one next reached turn.");
+          }
+        } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
+          throw new RunStoreError("journey_transition_conflict", "A terminal respondent state cannot have a next reached turn.");
+        }
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), attemptId);
+        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
+      } else {
+        const sharedFailure = outcome.scope === "run";
+        if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
+          throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
+        }
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, evaluationId);
+        if (outcome.scope === "run") {
+          this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
+        }
+      }
+      if (transition.nextEvaluation) {
+        const next = transition.nextEvaluation;
+        const nextPacket = decisionRequestSchema.safeParse(next.packet);
+        const respondent = parsedRunRequest.data.respondents.find(({ id }) => id === respondentId);
+        const current = this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS ordinal FROM evaluations WHERE run_id = ?").get(claim2.runId);
+        if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacket(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
+          throw new RunStoreError("invalid_journey_turn", "Next journey turn is invalid or does not follow the persisted evaluation order.");
+        }
+        this.database.prepare(`INSERT INTO evaluations
+          (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`).run(
+          next.evaluationId,
+          claim2.runId,
+          next.ordinal,
+          next.contextId,
+          next.respondentId,
+          next.questionId,
+          next.turnId,
+          next.nodeId,
+          next.pathId,
+          next.occurrence,
+          JSON.stringify(next.packet),
+          next.packetFingerprint
+        );
+        this.database.prepare("UPDATE runs SET evaluation_count = evaluation_count + 1 WHERE run_id = ?").run(claim2.runId);
+      }
+      const updatedState = this.database.prepare(`UPDATE journey_respondents SET status = ?, current_node_id = ?, current_turn_id = ?, current_context_id = ?,
+        revision = ?, events_json = ?, route_json = ?, outcome = ? WHERE run_id = ? AND respondent_id = ? AND revision = ?`).run(
+        transition.state.status,
+        transition.state.currentNodeId,
+        transition.state.currentTurnId,
+        transition.state.currentContextId,
+        transition.state.revision,
+        JSON.stringify(transition.state.events),
+        JSON.stringify(transition.state.route),
+        transition.state.outcome ?? null,
+        claim2.runId,
+        respondentId,
+        transition.expectedRevision
+      );
+      if (updatedState.changes !== 1) throw new RunStoreError("journey_transition_conflict", "Journey respondent state changed before its transition committed.");
       this.database.prepare("UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(claim2.runId);
     });
   }
