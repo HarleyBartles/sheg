@@ -1,6 +1,6 @@
 # Durable authored journeys
 
-Status: in progress.
+Status: complete on the feature branch; awaiting release-branch integration.
 
 > **For agentic workers:** Use `executing-plans` to implement this plan inline, task by task.
 
@@ -71,11 +71,15 @@ The single-question request remains supported. It shares the same provider, dura
 
 ### Task 5: Review and close out this slice
 
-- [ ] Review the complete diff against SHEG-7, this plan, ADR-0018/0019, and the epic. Fix substantiated Critical/Important findings inline; no delegation under the issue contract.
-- [ ] Run focused domain/store/worker/MCP/package behavior tests, then the tracked staged-snapshot `npm run verify` hook. Confirm generated consistency and intended staged changes.
-- [ ] Update the roadmap with the committed head, copied-package evidence, verification, review outcome, and remaining SHEG-7 query/follow-on obligations.
-- [ ] Keep SHEG-7 open; its query, reusable reference selection, and following-plan scope remains for Plan 4.
+- [x] Review the complete slice against SHEG-7, this plan, ADR-0018/0019, and the epic. Inline review found no outstanding Critical or Important issue; no delegation was used.
+- [x] Run focused worker/MCP/package behavior tests, then the tracked staged-snapshot `npm run verify` hook. Generated checks passed and only intended tracked artifacts were staged.
+- [x] Update the roadmap with committed heads, copied-package evidence, verification, review outcome, and remaining SHEG-7 query/follow-on obligations.
+- [x] Keep SHEG-7 open; query, reusable reference selection, and following-plan scope remain for Plan 4.
 
 ## Handoff and review request
 
 The issue itself authorized planning only until this plan was reviewed. The user has now approved the roadmap execution and this plan through the active goal. Implement inline on `codex/v0.3.0-release-spec`; feature PRs target `develop`. Do not change the release version, tag, publish, merge, or make paid calls under this plan.
+
+## Completion evidence
+
+Plan 3 is implemented at `ace6e98` (`3f31a02..ace6e98`), including the preceding worker commit `70785e3` and credential-diagnosis completion `18f009d`. The copied-package test closes MCP A, lets a sequence advance, kills the worker during the second turn, then uses MCP B to inspect and resume the same run. The first answer is not replayed; the pending second turn retains its turn/context IDs and completes under the original three-call limit. MCP, package, and worker focused tests passed. The full staged-snapshot `npm run verify` hook passed with 260 tests, lint, typecheck, and generated consistency. SHEG-7 remains open for selector queries and follow-on request composition in Plan 4.

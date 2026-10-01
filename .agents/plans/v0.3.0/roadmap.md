@@ -24,7 +24,7 @@ more than one plan.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 remains open for Plan 2; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean |
 | 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `3ecb97f` (`ec3e70a..3ecb97f`) | - | - | SHEG-5; cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 remains open for Plans 3-4 |
-| 3 | Execute authored journeys with durable respondent turn contexts | in progress | [Plan 3](03-durable-journeys.md) | - | - | - | SHEG-7 foundation; durable reached turns and route evidence; MCP journey request/details, explicit resume, and copied-package process evidence complete; final review pending |
+| 3 | Execute authored journeys with durable respondent turn contexts | completed-awaiting-retirement | [Plan 3](03-durable-journeys.md) | `ace6e98` (`3f31a02..ace6e98`) | - | - | SHEG-7 journey foundation; journey MCP request/details and copied-package kill/resume verified; malformed Credential Manager encoding diagnosis included; staged gate passed 260 tests, lint, typecheck, and generated consistency; final inline review clean. SHEG-7 remains open for Plan 4 |
 | 4 | Query recorded evidence and compose reusable follow-ons | pending | Written after Plan 3 | - | - | - | Complete SHEG-7; preserve uncertainty/disagreement evidence |
 | 5 | Ask independent typed question groups at new or recorded contexts | pending | Written after Plan 4 | - | - | - | SHEG-6; provider-aware batching/splitting without sibling leakage |
 | 6 | Offer source-linked material choices and reuse their exact evidence | pending | Written after Plan 5 | - | - | - | SHEG-8; agent-authored candidate boundaries |
@@ -88,8 +88,16 @@ Ordinary agents do not handcraft manifests. Consolidated inspection exposes
 authored branches and history choices. Account for matched-arm capabilities and
 the CLI, and retire redundant file-run execution code where superseded.
 
-This is necessary substrate for the section-three query, not an unrelated graph
-rewrite. Old formats and tool names carry no compatibility obligation below v1.
+This necessary substrate for the section-three query is delivered at `ace6e98`.
+The MCP accepts inline sequence/graph journeys and returns respondent-local
+turn, context, exposure, response, route, failure and unreached evidence. A
+copied distributable survived MCP closure, then a killed worker was resumed
+through a second MCP without replaying a completed answer; the pending turn kept
+its identifiers and call ceiling. The staged gate passed 260 tests, lint,
+typecheck and generated consistency. Inline review found no outstanding
+Critical or Important finding. SHEG-7 remains open for query selectors and
+follow-on composition in Plan 4. Old formats and tool names carry no
+compatibility obligation below v1.
 
 ### 4. Query, interpret and compose follow-ons
 
