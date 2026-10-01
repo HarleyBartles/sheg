@@ -98,13 +98,15 @@ sidecars directly.
 
 ## Inspect and optimize storage
 
-Call `run_storage` with `operation: "inspect"` for SQLite integrity status,
+Call `run_storage` with `operation: "inspect"` for SQLite and foreign-key
+integrity status,
 database byte size, and run, evaluation, attempt, and active-run counts. The
 report contains no host path or SQL. Call `run_storage` with
 `operation: "optimize"` to ask Sheg to run SQLite optimization. Sheg refuses
-to optimize when its integrity check fails. Successful deletion also triggers
-Sheg-managed optimization. Do not run maintenance at harness startup or
-manually alter datastore files.
+to optimize when its integrity check fails. Inspection reconciles expired
+worker leases before counting active runs, but never launches or resumes work.
+Successful deletion also triggers Sheg-managed optimization. Do not run
+maintenance at harness startup or manually alter datastore files.
 
 Provider-reported cost or a published-rate estimate may appear per decision
 when available. Cost evidence is optional and may differ by the user's API

@@ -550,3 +550,18 @@ test('storage inspection reports failed integrity without calling corrupt data h
     assert.throws(() => store.optimizeStorage(), (error: unknown) => error instanceof RunStoreError && error.code === 'storage_integrity_failed');
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test('storage inspection reconciles expired workers without restarting them', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const runId = store.accept(randomUUID(), await preparedRun()).run.runId;
+    assert.ok(store.claim(runId, Date.now(), 4567));
+    const db = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try { db.prepare('UPDATE runs SET lease_expires_ms = 0 WHERE run_id = ?').run(runId); }
+    finally { db.close(); }
+    const info = store.storageInfo();
+    assert.equal(info.activeRunCount, 0);
+    assert.equal(store.getStatus(runId).status, 'interrupted');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

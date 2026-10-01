@@ -1,6 +1,6 @@
 # Resume, delete and manage durable run storage
 
-Status: in progress.
+Status: completed-awaiting-retirement.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -115,14 +115,14 @@ Read `docs/decisions/README.md` before implementation. Add one ADR and update it
 - [x] Implement `storageInfo` with SQLite integrity check and counts plus the resolved database file size. Report `ok` only if integrity result is exactly `ok`; otherwise report `failed`. Return only the defined `StorageInfo` values.
 - [x] Implement `optimizeStorage` with `PRAGMA optimize`, expose strict `run_storage` inspection/optimization operations, and call optimize only after successful deletion commits. Do not invoke VACUUM, run maintenance at server startup, or start a maintenance process.
 - [x] Update README and shipped skill/reference with examples and instructions for same-ID resume, remaining attempt budget, retained uncertain/failed attempt history, nonresumable terminal states, optional deletion preview, cancel-and-wait before active deletion, storage health, and the rule that startup/read never resume. Keep output machine-readable and the agent's decisions with the agent.
-- [x] Build `dist/` and contracts if changed; run focused store/MCP/package tests. The final staged commit hook runs `npm run verify` and checks generated consistency. Expected GREEN: the agent can recover/remove/inspect runs without direct SQLite or filesystem access. Commit `feat: manage durable run recovery and storage` through the tracked hook. Focused store/service/MCP/package suite 42/42; build, lint, and typecheck passed.
+- [x] Build `dist/` and contracts if changed; run focused store/MCP/package tests. The final staged commit hook runs `npm run verify` and checks generated consistency. Expected GREEN: the agent can recover/remove/inspect runs without direct SQLite or filesystem access. Commit `feat: manage durable run recovery and storage` through the tracked hook. Focused store/service/MCP/package suite 43/43; build, lint, and typecheck passed.
 
 ## Task 5: Review and close out this slice
 
-- [ ] Review the complete Plan 2 diff against SHEG-5, the epic, and the release roadmap in this inline execution. Fix substantiated Critical/Important findings and rerun affected checks; do not delegate because SHEG-5's delivery contract explicitly says no subagent delegation.
-- [ ] Run the tracked staged-snapshot hook and confirm full verification, generated consistency, and a clean intended index. Commit each completed task through the hook.
-- [ ] Update the roadmap with final commit/head, package/process evidence, gate result, review outcome, and remaining Plan 3 obligations. Keep SHEG-5 open until the run journey/query slices deliver its remaining accepted scope.
-- [ ] Mark this plan `completed-awaiting-retirement` when preparing its completing PR; keep it tracked through that PR and retire it in the first commit of the next substantive slice after it is present on main.
+- [x] Review the complete Plan 2 diff against SHEG-5, the epic, and the release roadmap in this inline execution. Fix substantiated Critical/Important findings and rerun affected checks; do not delegate because SHEG-5's delivery contract explicitly says no subagent delegation.
+- [x] Run the tracked staged-snapshot hook and confirm full verification, generated consistency, and a clean intended index. Commit each completed task through the hook.
+- [x] Update the roadmap with final commit/head, package/process evidence, gate result, review outcome, and remaining Plan 3 obligations. Keep SHEG-5 open until the run journey/query slices deliver its remaining accepted scope. Plan 2 whole-diff review found no outstanding Critical or Important issues; the copied-package interruption/resume path passed; tracked gate passed 240 tests, lint, typecheck, and generated consistency.
+- [x] Mark this plan `completed-awaiting-retirement` when preparing its completing PR; keep it tracked through that PR and retire it in the first commit of the next substantive slice after it is present on main.
 
 ## Handoff
 

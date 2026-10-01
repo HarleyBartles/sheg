@@ -476,17 +476,24 @@ class SQLiteRunStore implements RunStore {
   storageInfo(): StorageInfo {
     this.ensureOpen();
     try {
-      const integrityRows = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
-      const integrity = integrityRows.length === 1 && integrityRows[0]?.integrity_check === 'ok' ? 'ok' : 'failed';
-      const count = (table: 'runs' | 'evaluations' | 'attempts', where = '') => asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get() as DatabaseRow).count, `${table} count`);
-      return {
-        integrity,
-        databaseBytes: statSync(this.databasePath).size,
-        runCount: count('runs'),
-        evaluationCount: count('evaluations'),
-        attemptCount: count('attempts'),
-        activeRunCount: count('runs', "WHERE status IN ('prepared', 'running')"),
-      };
+      return this.transaction(() => {
+        const integrityRows = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
+        const foreignKeyViolations = this.database.prepare('PRAGMA foreign_key_check').all() as DatabaseRow[];
+        const integrity = integrityRows.length === 1 && integrityRows[0]?.integrity_check === 'ok' && foreignKeyViolations.length === 0 ? 'ok' : 'failed';
+        if (integrity === 'ok') {
+          const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all() as DatabaseRow[];
+          for (const row of active) this.reconcileInside(asText(row.run_id, 'run ID'), this.now());
+        }
+        const count = (table: 'runs' | 'evaluations' | 'attempts', where = '') => asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get() as DatabaseRow).count, `${table} count`);
+        return {
+          integrity,
+          databaseBytes: statSync(this.databasePath).size,
+          runCount: count('runs'),
+          evaluationCount: count('evaluations'),
+          attemptCount: count('attempts'),
+          activeRunCount: count('runs', "WHERE status IN ('prepared', 'running')"),
+        };
+      });
     } catch (error) {
       if (error instanceof RunStoreError) throw error;
       throw new RunStoreError('storage_operation_failed', 'Sheg could not inspect datastore health.', { cause: error });

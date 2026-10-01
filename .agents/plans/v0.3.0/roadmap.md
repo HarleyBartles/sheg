@@ -14,14 +14,14 @@ defined in the spec.
 
 ## Consecutive plans
 
-Only Plan 1 is written. Later rows are capability boundaries, not implementation
-plans. Write each next plan against the delivered code and evidence of its
-predecessor. A Linear issue may span more than one plan.
+Plans 1 and 2 are written and delivered. Later rows are capability boundaries,
+not implementation plans. Write each next plan against the delivered code and
+evidence of its predecessor. A Linear issue may span more than one plan.
 
 | # | Title | Status | Plan File | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 remains open for Plan 2; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean |
-| 2 | Recover, resume, delete and inspect storage through the MCP | in progress | [Plan 2](02-resume-delete-storage.md) | - | - | - | SHEG-5; explicit same-run resume, transactional delete with optional dry run, Sheg-managed storage health and optimization |
+| 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `ae7742c` (`ec3e70a..ae7742c`) | - | - | SHEG-5; cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 remains open for Plans 3-4 |
 | 3 | Execute authored journeys with durable respondent turn contexts | pending | Written after Plan 2 | - | - | - | SHEG-7 foundation; integrate finite journeys with the new run store |
 | 4 | Query recorded evidence and compose reusable follow-ons | pending | Written after Plan 3 | - | - | - | Complete SHEG-7; preserve uncertainty/disagreement evidence |
 | 5 | Ask independent typed question groups at new or recorded contexts | pending | Written after Plan 4 | - | - | - | SHEG-6; provider-aware batching/splitting without sibling leakage |
@@ -61,8 +61,17 @@ attempt records and cross-process evidence delivered here.
 Explicit resume processes only unfinished work under the remaining original
 budget. Cancelled/completed work stays stopped. Unknown provider completion is
 accounted conservatively. Deletion offers dry run, revalidates scope and settles
-active work first. Queries expose partial evidence and storage usage. Sheg owns
-integrity and optimisation. No migration layer or automatic startup recovery job.
+active work first. `run_storage` reports SQLite and foreign-key integrity, byte
+size, and row counts without exposing paths or SQL; Sheg runs optimization only
+after integrity checks. No migration layer or automatic startup recovery job.
+
+Plan 2 is delivered at `ae7742c`. The copied distributable test killed a worker
+during an in-flight call, discovered the interrupted run from a second MCP,
+resumed the same run, retained its uncertain attempt, and completed within the
+original call ceiling. Transaction tests cover active blockers, stale previews,
+all-or-none behavior, and foreign-key cascades. Full staged verification passed
+239 tests, lint, typecheck, and generated consistency. Direct review against
+SHEG-5 and the epic found no outstanding Critical or Important issues.
 
 Next plan uses these lifecycle rules and the actual persistence boundary rather
 than introducing a second execution manager for journeys.
