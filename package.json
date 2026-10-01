@@ -1,6 +1,6 @@
 {
   "name": "sheg",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   "scripts": {
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
