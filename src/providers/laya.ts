@@ -128,7 +128,7 @@ export class LayaProvider implements DecisionProvider {
     } catch {
       throw new LayaCallError('Laya local service request failed.', 1);
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1);
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation');
 
     let payload: unknown;
     try {

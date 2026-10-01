@@ -20614,7 +20614,7 @@ var LayaProvider = class {
     } catch {
       throw new LayaCallError("Laya local service request failed.", 1);
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1);
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
     let payload;
     try {
       payload = await response.json();

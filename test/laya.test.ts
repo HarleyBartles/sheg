@@ -142,3 +142,14 @@ test('provider reports an unavailable local service without fallback', async () 
   const provider = new LayaProvider(config, { measureFit: measure, fetchRequest: async () => { throw new Error('offline'); } });
   await assert.rejects(provider.decide(request, 1), /local service/);
 });
+
+test('provider classifies authorization responses as run-wide failures', async () => {
+  const measure: FitMeasurer = async () => fit(20);
+  for (const status of [401, 403]) {
+    const provider = new LayaProvider(config, { measureFit: measure, fetchRequest: async () => new Response(null, { status }) });
+    await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+      assert.equal((error as { failureScope?: string }).failureScope, 'run');
+      return true;
+    });
+  }
+});

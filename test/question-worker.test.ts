@@ -10,6 +10,7 @@ import type { InlineRunRequest } from '../src/domain/run/request.js';
 import { prepareRun } from '../src/application/run-inspection.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import { JevCallError } from '../src/providers/jev.js';
+import { LayaCallError } from '../src/providers/laya.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 
 function request(respondents = 2): InlineRunRequest {
@@ -91,6 +92,22 @@ test('provider authentication failure ends the run without dispatching sibling r
     assert.equal(calls, 1);
     assert.equal(f.store.answers(f.runId).items[1]?.status, 'pending');
     assert.equal(status.failure?.message.includes('secret detail'), false);
+  } finally { await f.close(); }
+});
+
+test('a run-wide Laya authorization failure stops before the next respondent', async () => {
+  const f = await fixture();
+  let calls = 0;
+  try {
+    const provider: DecisionProvider = {
+      async decide() { calls += 1; throw new LayaCallError('Laya local service returned HTTP 401.', 1, undefined, undefined, 'run'); },
+    };
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    const status = f.store.getStatus(f.runId);
+    assert.equal(status.status, 'failed');
+    assert.equal(calls, 1);
+    assert.equal(f.store.answers(f.runId).items[0]?.failure?.code, 'provider_unavailable');
+    assert.equal(f.store.answers(f.runId).items[1]?.status, 'pending');
   } finally { await f.close(); }
 });
 
