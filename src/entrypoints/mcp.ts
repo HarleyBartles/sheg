@@ -9,7 +9,7 @@ import { resolveDataRoot } from '../infrastructure/data-root.js';
 import { openRunStore, RunStoreError } from '../infrastructure/run-store.js';
 import { DetachedWorkerLauncher } from '../infrastructure/worker-launcher.js';
 import { assertProviderReady, createProvider } from '../providers/factory.js';
-import { inlineRunRequestSchema } from '../domain/run/request.js';
+import { runRequestSchema } from '../domain/run/request.js';
 import type { RunStatus } from '../domain/run/lifecycle.js';
 
 const statusSchema = z.enum(['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted']);
@@ -18,17 +18,19 @@ const runDeleteSchema = z.object({ runIds: z.array(z.string().uuid()).min(1).max
 const runGetSchema = z.discriminatedUnion('view', [
   z.object({ runId: z.string().uuid(), view: z.literal('status') }).strict(),
   z.object({ runId: z.string().uuid(), view: z.literal('request') }).strict(),
+  z.object({ runId: z.string().uuid(), view: z.literal('journey') }).strict(),
   z.object({ runId: z.string().uuid(), view: z.literal('answers'), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
 ]);
 
 export function createPollingServer(service: RunService = createDefaultRunService()): McpServer {
-  const server = new McpServer({ name: 'sheg', version: '0.3.0' }, { instructions: 'Submit typed respondent requests, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work.' });
-  server.registerTool('run_inspect', { description: 'Validate a direct typed respondent request and measure context fit without inference, persistence, or worker launch.', inputSchema: z.object({ request: inlineRunRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
-  server.registerTool('run_start', { description: 'Accept a direct respondent request as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: inlineRunRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
+  const server = new McpServer({ name: 'sheg', version: '0.3.0' }, { instructions: 'Submit a direct typed request or finite journey, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work.' });
+  server.registerTool('run_inspect', { description: 'Validate a direct typed request or finite respondent journey and measure context fit without inference, persistence, or worker launch.', inputSchema: z.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
+  server.registerTool('run_start', { description: 'Accept a direct respondent request or finite journey as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
   server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query as { status?: RunStatus; label?: string; cursor?: string; limit?: number })));
-  server.registerTool('run_get', { description: 'Retrieve exactly one view of a run: status, the frozen request, or paginated respondent answers. Discovery never launches or resumes work.', inputSchema: runGetSchema }, async (input) => safeResult(() => {
+  server.registerTool('run_get', { description: 'Retrieve one view of a run: status, frozen request, paginated answers, or reached journey contexts and routes. Discovery never launches or resumes work.', inputSchema: runGetSchema }, async (input) => safeResult(() => {
     if (input.view === 'status') return service.getStatus(input.runId);
     if (input.view === 'request') return service.getRequest(input.runId);
+    if (input.view === 'journey') return service.getJourneyRun(input.runId);
     return service.answers(input.runId, input.cursor, input.limit);
   }));
   server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched respondent call is allowed to settle and its answer is retained.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));

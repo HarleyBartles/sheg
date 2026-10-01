@@ -33,12 +33,12 @@ from a missing key or an unavailable credential store.
 
 ## Start and inspect a run
 
-Build the simplest direct request that matches the user's goal: exact inline
-material, one or more distinct respondent profiles, one typed Choice, Score, or
-Noul question, one provider, and a `maxCalls` limit at least as large as the
-respondent count. Choose the unit of material and any Choice options from the
-user's question. Do not invent a deeper journey or add questions that do not
-help answer the requested question.
+Build the simplest request that matches the user's goal: exact inline material,
+one or more distinct respondent profiles, one typed Choice, Score, or Noul
+question (or a finite sequence/response-routed graph when multiple stages are
+needed), one provider, and an adequate `maxCalls` limit. Choose material units,
+questions and response options from the user's question. Do not invent stages
+or add questions that do not help answer the requested question.
 
 Call `run_inspect` with the exact request. It validates the shape and measures
 fit without inference or persistence. Resolve invalid input, context overflow,
@@ -62,10 +62,12 @@ second worker. A changed request needs a new submission ID.
 ## Discover and interpret results
 
 Use `run_get` with `view: "status"` to inspect progress, `view: "request"` to
-recall frozen inputs and respondent packets, or `view: "answers"` to retrieve
-typed answers and failures. Answer pagination uses the returned cursor and a
-limit from 1 to 200. `run_list` supports status and label filters when the run
-ID is not at hand. These reads never start or resume work.
+recall frozen inputs and respondent packets, `view: "answers"` to retrieve
+typed answers and failures, or `view: "journey"` to retrieve respondent-local
+turns, exposures, response history, routes, and terminal states. Answer
+pagination uses the returned cursor and a limit from 1 to 200. `run_list`
+supports status and label filters when the run ID is not at hand. These reads
+never start or resume work.
 
 Report completed, failed, pending, and total evaluation counts together with
 the run status. A completed run has an answer for each respondent; a partial

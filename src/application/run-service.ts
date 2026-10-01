@@ -1,12 +1,12 @@
 import path from 'node:path';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import type { AnswerRow, Page, RunStatusView } from '../domain/run/lifecycle.js';
-import type { InlineRunRequest, PreparedRun } from '../domain/run/request.js';
-import { inlineRunRequestSchema } from '../domain/run/request.js';
+import type { PreparedRun, RunRequest } from '../domain/run/request.js';
+import { runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
 import type { DeletePreview, DeleteResult, RunStore, StorageInfo } from '../infrastructure/run-store.js';
 import { CredentialStoreError } from '../infrastructure/credentials/windows.js';
-import { fingerprintRunRequest, prepareRun } from './run-inspection.js';
+import { fingerprintRunRequest, materializeJourneyRun, prepareRun } from './run-inspection.js';
 
 export class RunServiceError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -21,7 +21,7 @@ export type RunServiceOptions = { assertProviderReady?: (config: ProviderConfigI
 
 export interface RunService {
   inspect(input: unknown): Promise<Awaited<ReturnType<typeof prepareRun>>['inspection']>;
-  start(submissionId: string, input: InlineRunRequest): Promise<RunStatusView>;
+  start(submissionId: string, input: RunRequest): Promise<RunStatusView>;
   resume(runId: string): Promise<RunStatusView>;
   previewDelete(runIds: string[]): DeletePreview;
   deleteRuns(runIds: string[]): DeleteResult;
@@ -29,13 +29,14 @@ export interface RunService {
   optimizeStorage(): void;
   list(query: import('../infrastructure/run-store.js').RunListQuery): Page<RunStatusView>;
   getStatus(runId: string): RunStatusView;
-  getRequest(runId: string): PreparedRun;
+  getRequest(runId: string): PreparedRun | ReturnType<RunStore['getJourneyRun']>;
+  getJourneyRun(runId: string): ReturnType<RunStore['getJourneyRun']>;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   cancel(runId: string): RunStatusView;
 }
 
-function normalizeRequest(input: unknown): InlineRunRequest {
-  const parsed = inlineRunRequestSchema.safeParse(input);
+function normalizeRequest(input: unknown): RunRequest {
+  const parsed = runRequestSchema.safeParse(input);
   if (!parsed.success) throw new RunServiceError('invalid_request', parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   if (parsed.data.provider.kind === 'laya') {
     return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path.resolve(parsed.data.provider.tokenizerJsonPath) } };
@@ -63,7 +64,7 @@ export function createRunService(
   }
 
   async function inspect(input: unknown) {
-    let request: InlineRunRequest;
+    let request: RunRequest;
     try { request = normalizeRequest(input); }
     catch (error) {
       return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: 'invalid_request', message: error instanceof Error ? error.message : 'Request is invalid.' }], fits: [] };
@@ -71,7 +72,7 @@ export function createRunService(
     return (await prepareRun(request, providerFactory(request.provider))).inspection;
   }
 
-  async function start(submissionId: string, input: InlineRunRequest): Promise<RunStatusView> {
+  async function start(submissionId: string, input: RunRequest): Promise<RunStatusView> {
     if (typeof submissionId !== 'string' || !submissionId.trim()) throw new RunServiceError('invalid_submission_id', 'A submission ID is required.');
     const request = normalizeRequest(input);
     const requestFingerprint = fingerprintRunRequest(request);
@@ -81,10 +82,12 @@ export function createRunService(
 
     await assertReady(request.provider);
     const admission = await prepareRun(request, providerFactory(request.provider));
-    if (!admission.prepared || !admission.inspection.valid) {
+    if ((!admission.prepared && !admission.journey) || !admission.inspection.valid) {
       throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
     }
-    const accepted = store.accept(submissionId, admission.prepared);
+    const accepted = admission.prepared
+      ? store.accept(submissionId, admission.prepared)
+      : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey!));
     if (!accepted.created) return accepted.run;
     try { await launcher.launch(dataRoot, accepted.run.runId); }
     catch { store.failLaunch(accepted.run.runId, 'worker_launch_failed'); }
@@ -99,8 +102,10 @@ export function createRunService(
     }
     if (current.cancelRequested) throw new RunServiceError('run_not_resumable', 'A run with a cancellation request cannot be resumed.');
     if (current.usedCalls + current.reservedCalls >= current.maxCalls) throw new RunServiceError('run_not_resumable', 'This run has no remaining provider-call allowance.');
-    const frozen = store.getRequest(runId);
-    await assertReady(frozen.request.provider);
+    const frozenProvider = store.getRequestKind(runId) === 'journey'
+      ? store.getJourneyRun(runId).request.provider
+      : store.getRequest(runId).request.provider;
+    await assertReady(frozenProvider);
     const resumed = store.resume(runId, Date.now());
     if (resumed.started) {
       try { await launcher.launch(dataRoot, runId); }
@@ -119,7 +124,8 @@ export function createRunService(
     optimizeStorage: () => store.optimizeStorage(),
     list: (query) => store.list(query),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
-    getRequest: (runId) => store.getRequest(runId),
+    getRequest: (runId) => store.getRequestKind(runId) === 'journey' ? store.getJourneyRun(runId) : store.getRequest(runId),
+    getJourneyRun: (runId) => store.getJourneyRun(runId),
     answers: (runId, cursor, limit) => { store.reconcile(runId, Date.now()); return store.answers(runId, cursor, limit); },
     cancel: (runId) => store.requestCancel(runId),
   };

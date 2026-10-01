@@ -63,11 +63,11 @@ The single-question request remains supported. It shares the same provider, dura
 
 ### Task 4: Expose journey requests and durable turn answers through MCP
 
-- [ ] **Files:** `src/application/run-service.ts`, `src/entrypoints/mcp.ts`, MCP/service tests, copied-package tests, README, and the shipped polling/run-recovery skill. **Produces:** strict request inspection/start for journeys and machine-readable turn/route answer details with reusable identifiers.
-- [ ] Add MCP tests for invalid request errors, accepted durable identity, answer pagination, explicit resume, status/answer recall across connections, and the absence of automatic replay.
-- [ ] Extend a copied-distributable test to execute a branching journey against a local fixture endpoint, close the requesting MCP, and retrieve the reached path and turn IDs from a second MCP. Include a killed-worker resume path without paid provider calls.
-- [ ] Teach agents how to distinguish departure, lost interest, unanswered/failed, and unreached stages. Explain that a turn/context reference can be used by a later request only when a later query/composition tool exposes it; do not claim that selector queries are delivered here.
-- [ ] Build packaged `dist/`; update contracts if affected. Keep source canonical.
+- [x] **Files:** `src/application/run-service.ts`, `src/entrypoints/mcp.ts`, MCP/service tests, copied-package tests, README, and shipped skills. **Produces:** strict request inspection/start for journeys and machine-readable turn/route evidence with reusable identifiers.
+- [x] Add MCP tests for invalid request errors, accepted durable identity, explicit resume, status/answer recall across connections, and no automatic replay. Existing pagination behavior remains covered.
+- [x] Extend a copied-distributable test to execute a journey against a local fixture endpoint, close the requesting MCP, kill its worker during a later turn, and retrieve/resume the reached path and stable turn IDs from a second MCP without paid provider calls.
+- [x] Teach agents to distinguish terminal departure, explicit lost-interest answers, failed, pending, and unreached stages. Explain that turn/context details inform an agent-authored request; selectors are still future work.
+- [x] Build packaged `dist/` and regenerate the inline request contract. Source remains canonical.
 
 ### Task 5: Review and close out this slice
 

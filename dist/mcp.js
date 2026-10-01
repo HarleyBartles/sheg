@@ -35393,6 +35393,64 @@ function graphDecisionRange(arm) {
 }
 
 // src/application/run-inspection.ts
+function materializeJourneyRun(admission) {
+  const { request, requestFingerprint, compilerFingerprint, packets } = admission;
+  const evaluations = [];
+  const respondents = [];
+  let ordinal = 0;
+  for (const profile of request.respondents) {
+    const firstPacket = packets.find((packet) => packet.respondentId === profile.id && packet.decisionIndex === 1 && packet.pathId === "root");
+    if (!firstPacket) throw new Error(`Journey has no initial ask packet for respondent ${profile.id}.`);
+    const evaluationId = randomUUID();
+    const contextId = randomUUID();
+    const turnId = randomUUID();
+    const evaluation = {
+      evaluationId,
+      contextId,
+      respondentId: profile.id,
+      questionId: firstPacket.request.question.id,
+      packet: firstPacket.request,
+      packetFingerprint: hashCanonical({ packet: firstPacket.request, compilerFingerprint }),
+      turnId,
+      nodeId: firstPacket.nodeId,
+      pathId: firstPacket.pathId,
+      occurrence: 1,
+      ordinal: ordinal++
+    };
+    evaluations.push(evaluation);
+    const events = initialJourneyEvents(request.journey);
+    respondents.push({
+      respondentId: profile.id,
+      status: "active",
+      currentNodeId: firstPacket.nodeId,
+      currentTurnId: turnId,
+      currentContextId: contextId,
+      revision: 0,
+      events,
+      route: []
+    });
+  }
+  return { request, requestFingerprint, compilerFingerprint, evaluations, respondents };
+}
+function initialJourneyEvents(arm) {
+  const events = [];
+  if (arm.presentation.kind === "sequence") {
+    for (const item of arm.items) events.push({ type: "exposure", sequence: events.length, nodeId: `sequence-expose-${item.id}`, itemId: item.id });
+    return events;
+  }
+  const nodes = new Map(arm.presentation.nodes.map((node2) => [node2.id, node2]));
+  let current = arm.presentation.entryNodeId;
+  while (true) {
+    const node2 = nodes.get(current);
+    if (!node2) throw new Error(`Journey points to unknown node ${current}.`);
+    if (node2.kind === "ask") return events;
+    if (node2.kind === "terminal") throw new Error("Journey must reach an ask node before a terminal node.");
+    events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
+    const edge = arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+    if (!edge) throw new Error(`Exposure node ${node2.id} has no transition.`);
+    current = edge.toNodeId;
+  }
+}
 function fingerprintRunRequest(input2) {
   const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) return void 0;
@@ -35570,7 +35628,7 @@ var RunServiceError = class extends Error {
   code;
 };
 function normalizeRequest(input2) {
-  const parsed = inlineRunRequestSchema.safeParse(input2);
+  const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) throw new RunServiceError("invalid_request", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
   if (parsed.data.provider.kind === "laya") {
     return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path2.resolve(parsed.data.provider.tokenizerJsonPath) } };
@@ -35608,10 +35666,10 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     if (prior) return prior;
     await assertReady(request.provider);
     const admission = await prepareRun(request, providerFactory(request.provider));
-    if (!admission.prepared || !admission.inspection.valid) {
+    if (!admission.prepared && !admission.journey || !admission.inspection.valid) {
       throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
     }
-    const accepted = store.accept(submissionId, admission.prepared);
+    const accepted = admission.prepared ? store.accept(submissionId, admission.prepared) : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey));
     if (!accepted.created) return accepted.run;
     try {
       await launcher.launch(dataRoot, accepted.run.runId);
@@ -35628,8 +35686,8 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     }
     if (current.cancelRequested) throw new RunServiceError("run_not_resumable", "A run with a cancellation request cannot be resumed.");
     if (current.usedCalls + current.reservedCalls >= current.maxCalls) throw new RunServiceError("run_not_resumable", "This run has no remaining provider-call allowance.");
-    const frozen = store.getRequest(runId);
-    await assertReady(frozen.request.provider);
+    const frozenProvider = store.getRequestKind(runId) === "journey" ? store.getJourneyRun(runId).request.provider : store.getRequest(runId).request.provider;
+    await assertReady(frozenProvider);
     const resumed = store.resume(runId, Date.now());
     if (resumed.started) {
       try {
@@ -35650,7 +35708,8 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     optimizeStorage: () => store.optimizeStorage(),
     list: (query) => store.list(query),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
-    getRequest: (runId) => store.getRequest(runId),
+    getRequest: (runId) => store.getRequestKind(runId) === "journey" ? store.getJourneyRun(runId) : store.getRequest(runId),
+    getJourneyRun: (runId) => store.getJourneyRun(runId),
     answers: (runId, cursor, limit) => {
       store.reconcile(runId, Date.now());
       return store.answers(runId, cursor, limit);
@@ -37532,16 +37591,18 @@ var runDeleteSchema = external_exports.object({ runIds: external_exports.array(e
 var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("journey") }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
 ]);
 function createPollingServer(service = createDefaultRunService()) {
-  const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit typed respondent requests, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work." });
-  server.registerTool("run_inspect", { description: "Validate a direct typed respondent request and measure context fit without inference, persistence, or worker launch.", inputSchema: external_exports.object({ request: inlineRunRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
-  server.registerTool("run_start", { description: "Accept a direct respondent request as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: inlineRunRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
+  const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit a direct typed request or finite journey, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work." });
+  server.registerTool("run_inspect", { description: "Validate a direct typed request or finite respondent journey and measure context fit without inference, persistence, or worker launch.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
+  server.registerTool("run_start", { description: "Accept a direct respondent request or finite journey as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
-  server.registerTool("run_get", { description: "Retrieve exactly one view of a run: status, the frozen request, or paginated respondent answers. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
+  server.registerTool("run_get", { description: "Retrieve one view of a run: status, frozen request, paginated answers, or reached journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
     if (input2.view === "status") return service.getStatus(input2.runId);
     if (input2.view === "request") return service.getRequest(input2.runId);
+    if (input2.view === "journey") return service.getJourneyRun(input2.runId);
     return service.answers(input2.runId, input2.cursor, input2.limit);
   }));
   server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched respondent call is allowed to settle and its answer is retained.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));

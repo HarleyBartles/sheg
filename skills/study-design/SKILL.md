@@ -11,10 +11,12 @@ translate their goal into the smallest useful respondent request, then explain
 what its results can and cannot tell them.
 
 Read the [current primitives and tool contracts](references/primitives-and-tools.md)
-before suggesting a design. The current direct-run tool accepts one typed
-question over inline material and distinct respondent profiles. Do not promise
-multi-stage journeys, saved-cohort queries, replay of prior history, or study
-cloning as available MCP capabilities.
+before suggesting a design. The MCP accepts either one typed question or a
+finite authored sequence/graph over inline material and distinct respondent
+profiles. It records only the turns each respondent actually reaches.
+Saved-cohort selectors and constructing a follow-on request directly from prior
+turn references are separate capabilities; journey recall does not compose a
+new run automatically.
 
 ## Design conversation
 
@@ -29,7 +31,10 @@ cloning as available MCP capabilities.
 3. Choose a typed question that returns useful evidence: Choice for a
    selection among authored meanings, Score for an ordered rubric, or Noul for
    a probability. The agent chooses options and meanings from the user's goal.
-   Include `unanswerable` when respondents may lack enough information.
+   Include `unanswerable` when respondents may lack enough information. Use a
+   direct poll when one question answers the need; use a finite sequence or
+   response-routed graph when the user needs several stages or conditional
+   follow-up questions.
 4. Propose distinct respondent perspectives that could answer the user's
    question. Explain why each perspective matters. Profiles are modeled
    perspectives, not real participants or independent human samples. Keep the
@@ -38,10 +43,10 @@ cloning as available MCP capabilities.
    typed response semantics, provider, and maximum calls in ordinary language.
    Revise with the person until they agree this is the simplest design that
    meets their expectation.
-6. Build the strict direct request and call `run_inspect`. Resolve invalid
-   input or fit issues without silently changing the text or question. For a
-   hosted Jev run, obtain the person's authorization for inference and its call
-   bound before calling `run_start`.
+6. Build the strict direct request or finite journey and call `run_inspect`.
+   Resolve invalid input or fit issues without silently changing the text or
+   question. For a hosted Jev run, obtain the person's authorization for
+   inference and its call bound before calling `run_start`.
 7. Start with a fresh UUID submission ID and keep the returned run ID. Explain
    the machine-readable answers, status, and counts using the user's original
    question as the frame. Report pending and failed evaluations alongside
@@ -49,18 +54,19 @@ cloning as available MCP capabilities.
 
 ## Follow-on questions
 
-After any run, the agent can use `run_get` to retrieve frozen inputs and
-answer rows with respondent, evaluation, context, and question IDs. Use those
-details to decide what respondents or results are relevant to a possible
-follow-up. The current request shape is flat: it cannot select a prior cohort
-by result criteria or automatically reconstruct a previous respondent's
-turn-choice history. If a follow-up requires either, say that directly and
-offer a supported single-question request only when it preserves the user's
-intent. Do not claim that omitting earlier material is equivalent to replaying
-the same earlier journey while hiding history.
+After any run, the agent can use `run_get` to retrieve frozen inputs, answer
+rows, and journey details with respondent, evaluation, turn, context, question,
+exposure, response-history, and route identifiers. Use those details to decide
+what evidence is relevant to a possible follow-up. Journey history is the exact
+recorded context, but the current MCP does not yet accept a selector that
+builds a new request from prior respondents or turns. If a follow-up requires
+that, say so directly and offer a new direct request only when it preserves the
+user's intent. Omitting earlier material is not equivalent to replaying the
+same journey with its earlier history hidden.
 
-An interrupted run is discoverable but cannot yet be resumed. A read never
-starts work. If the user asks to stop an active run, call `run_cancel`; a
+An interrupted run can be resumed explicitly with `run_resume`; the original
+run ID, request, and physical-call ceiling remain in effect. A read never starts
+or resumes work. If the user asks to stop an active run, call `run_cancel`; a
 provider call already in flight may settle and its answer will be retained.
 
 The agent should interpret Sheg's results for the person. Report modeled

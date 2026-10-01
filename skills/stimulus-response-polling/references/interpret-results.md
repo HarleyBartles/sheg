@@ -1,9 +1,11 @@
 # Interpret run results
 
 Use `run_get` with `view: "status"` and `view: "answers"` to inspect lifecycle
-state and typed respondent outcomes. Report completed, failed, pending, and
-total evaluations alongside the run status. A run is not complete merely
-because some respondents answered.
+state and typed respondent outcomes. For a journey, use `view: "journey"` to
+inspect each respondent's exact reached turns, exposures, typed response
+history, route, and terminal or failure state. Report completed, failed,
+pending, unreached, and total evaluations alongside the run status. A run is
+not complete merely because some respondents answered.
 
 Use the exact Choice, Score, or Noul semantics from the frozen request to
 interpret answers. Describe what the supplied profiles, material, and question
@@ -13,10 +15,18 @@ about human behavior or population prevalence.
 
 `run_get` with `view: "request"` returns the accepted request and frozen
 per-respondent packets. Answer rows carry evaluation, context, respondent, and
-question IDs that can help an agent reason about a follow-on request. The
-current MCP does not query prior answers to select a cohort or automatically
-carry turn-choice history into another request. State that limitation when it
-matters to the user's next question.
+question IDs. Journey details also carry turn IDs, node and path IDs, route
+responses, and packet state that can help an agent author a follow-on request.
+Sheg does not yet query prior answers to select a cohort or accept prior turn
+references as selectors in a new request. The agent must inspect the evidence
+and author the next request explicitly.
+
+A terminal outcome such as `left` records how the authored journey ended. It
+does not establish that the respondent lost interest. Treat lost interest as
+evidence only when an explicit typed question asked for and recorded it. Failed
+means an attempted evaluation did not produce a valid answer; pending means it
+has not settled; unreached means the run stopped before that authored turn was
+asked. None of these states is a negative answer.
 
 When reporting to the user, connect evidence to the decision they wanted to
 make about the artifact. Explain uncertainty, failed coverage, provider

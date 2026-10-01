@@ -1,9 +1,10 @@
 # Current primitives and tool contracts
 
 The current MCP run shape is deliberately small. An agent supplies one or more
-distinct respondent profiles, one or more exact inline text items, one typed
-Choice, Score, or Noul question, one provider configuration, and a physical
-call limit at least as large as the respondent count.
+distinct respondent profiles, a finite authored sequence or graph of exact
+inline text and typed Choice, Score, or Noul questions, one provider
+configuration, and a bounded physical-call limit. A direct poll is the
+one-question form of the same run contract.
 
 | Tool | Purpose | Side effect |
 | --- | --- | --- |
@@ -12,6 +13,7 @@ call limit at least as large as the respondent count.
 | `run_list` | Find durable runs by status or label and paginate. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: status` | Read lifecycle state and counts. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: request` | Recall the frozen request, compiled packets, and their stable evaluation/context IDs. | Read only. |
+| `run_get` with `view: journey` | Recall reached turns, exact respondent packets, exposures, typed response history, route and terminal/failure state. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: answers` | Recall typed answers, failures, and pending evaluations with stable identifiers. | Reconcile expired ownership; never launch work. |
 | `run_cancel` | Request that the worker stop before dispatching another respondent. | An in-flight call is allowed to settle. |
 
@@ -37,16 +39,18 @@ uses a new submission ID.
 ## Current follow-on boundary
 
 Run recall exposes the frozen input, per-respondent packet context, answers,
-and identifiers that an agent can inspect to design a later request. The direct
-request can be submitted again with selected respondent profiles and chosen
-material, but Sheg does not yet offer query predicates over prior answers,
-automatic respondent selection from a previous run, or explicit carry-forward
-of prior turn-choice history. Those are later capabilities, not implicit
-behavior of `run_get`.
+and identifiers that an agent can inspect to design a later request. The agent
+can use those records to choose exact prior contexts and author a new request,
+but Sheg does not yet offer query predicates over prior answers, automatic
+respondent selection from a previous run, or a request selector that carries
+forward prior turn-choice history. Those are separate follow-on capabilities,
+not implicit behavior of `run_get`.
 
 Likewise, run recall is not recovery. Reads discover expired workers as
-interrupted and do not resume them. Cancellation prevents the next dispatch,
-but does not discard an answer for a provider call that was already in flight.
+interrupted and do not resume them. Use `run_resume` explicitly to continue an
+eligible run under its original attempt allowance. Cancellation prevents the
+next dispatch, but does not discard an answer for a provider call that was
+already in flight.
 
 ## Interpreting evidence
 

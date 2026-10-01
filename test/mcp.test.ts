@@ -16,6 +16,20 @@ function request(): InlineRunRequest {
   return { kind: 'poll', respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }], material: [{ id: 'opening', text: 'A short passage.' }], questions: [{ type: 'choice', id: 'interest', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } }], provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1 };
 }
 
+function journeyRequest() {
+  return {
+    kind: 'journey' as const,
+    respondents: request().respondents,
+    journey: {
+      id: 'article', label: 'Article journey', items: [{ id: 'opening', text: 'The opening.' }],
+      tasks: [{ id: 'interest', type: 'choice' as const, instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } }],
+      presentation: { kind: 'sequence' as const },
+    },
+    provider: { kind: 'jev' as const, route: 'openrouter' as const, model: 'typesafe/jev-1.13' },
+    maxCalls: 2,
+  };
+}
+
 async function connectedFixture(assertProviderReady: () => Promise<void> = async () => undefined) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-'));
   const store = openRunStore(root);
@@ -59,6 +73,38 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
     assert.equal((unknown.structuredContent as { error: { code: string } }).error.code, 'run_not_found');
     const extra = await f.client.callTool({ name: 'run_get', arguments: { runId: run.runId, view: 'status', cursor: 'ignored' } });
     assert.equal(extra.isError, true);
+  } finally { await f.close(); }
+});
+
+test('MCP inspects and accepts an inline journey, then exposes its initial durable turn handles', async () => {
+  const f = await connectedFixture();
+  try {
+    const request = journeyRequest();
+    const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request } });
+    assert.equal(inspected.isError ?? false, false);
+    assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
+
+    const submissionId = randomUUID();
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId, request } });
+    assert.equal(started.isError ?? false, false);
+    const run = started.structuredContent as { runId: string; status: string };
+    assert.equal(run.status, 'prepared');
+
+    const frozen = await f.client.callTool({ name: 'run_get', arguments: { runId: run.runId, view: 'request' } });
+    assert.equal((frozen.structuredContent as { request: { kind: string } }).request.kind, 'journey');
+
+    const details = await f.client.callTool({ name: 'run_get', arguments: { runId: run.runId, view: 'journey' } });
+    assert.equal(details.isError ?? false, false);
+    const data = details.structuredContent as { request: { kind: string }; respondents: Array<{ status: string; currentTurnId: string | null; currentContextId: string | null; events: unknown[] }>; evaluations: Array<{ status: string; turnId: string; contextId: string; nodeId: string }> };
+    assert.equal(data.request.kind, 'journey');
+    assert.equal(data.respondents.length, 1);
+    assert.ok(data.respondents.every((respondent) => respondent.status === 'active' && respondent.currentTurnId && respondent.currentContextId));
+    assert.equal(data.evaluations.length, 1);
+    assert.ok(data.evaluations.every((evaluation) => evaluation.status === 'pending' && evaluation.turnId && evaluation.contextId && evaluation.nodeId === 'sequence-ask-interest'));
+    const retry = await f.client.callTool({ name: 'run_start', arguments: { submissionId, request } });
+    assert.equal((retry.structuredContent as { runId: string }).runId, run.runId);
+    assert.equal(retry.isError ?? false, false);
+    assert.equal(f.store.list({}).items.length, 1);
   } finally { await f.close(); }
 });
 

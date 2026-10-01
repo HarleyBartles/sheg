@@ -4,6 +4,8 @@ import type { DecisionProvider, ProviderContextFit } from '../domain/decision/pr
 import type { ProviderKind } from '../domain/decision/provider.js';
 import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
+import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
+import type { PreparedJourneyRun } from '../domain/run/request.js';
 import { hashCanonical } from '../infrastructure/identity.js';
 import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
 import { estimateRunDecisionCalls } from '../domain/journey/route-bounds.js';
@@ -11,6 +13,52 @@ import { estimateRunDecisionCalls } from '../domain/journey/route-bounds.js';
 export type { Inspection } from '../domain/run/lifecycle.js';
 export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/run/request.js';
 export type PreparedJourneyAdmission = { request: ParsedInlineJourneyRequest; requestFingerprint: string; compilerFingerprint: string; minimumCalls: number; maximumCalls: number; packets: PreflightPacket[] };
+
+export function materializeJourneyRun(admission: PreparedJourneyAdmission): PreparedJourneyRun {
+  const { request, requestFingerprint, compilerFingerprint, packets } = admission;
+  const evaluations: PreparedJourneyRun['evaluations'] = [];
+  const respondents: JourneyRespondentState[] = [];
+  let ordinal = 0;
+  for (const profile of request.respondents) {
+    const firstPacket = packets.find((packet) => packet.respondentId === profile.id && packet.decisionIndex === 1 && packet.pathId === 'root');
+    if (!firstPacket) throw new Error(`Journey has no initial ask packet for respondent ${profile.id}.`);
+    const evaluationId = randomUUID();
+    const contextId = randomUUID();
+    const turnId = randomUUID();
+    const evaluation = {
+      evaluationId, contextId, respondentId: profile.id, questionId: firstPacket.request.question.id,
+      packet: firstPacket.request, packetFingerprint: hashCanonical({ packet: firstPacket.request, compilerFingerprint }),
+      turnId, nodeId: firstPacket.nodeId, pathId: firstPacket.pathId, occurrence: 1, ordinal: ordinal++,
+    };
+    evaluations.push(evaluation);
+    const events = initialJourneyEvents(request.journey);
+    respondents.push({
+      respondentId: profile.id, status: 'active', currentNodeId: firstPacket.nodeId, currentTurnId: turnId,
+      currentContextId: contextId, revision: 0, events, route: [],
+    });
+  }
+  return { request, requestFingerprint, compilerFingerprint, evaluations, respondents };
+}
+
+function initialJourneyEvents(arm: ParsedInlineJourneyRequest['journey']): JourneyRespondentState['events'] {
+  const events: JourneyRespondentState['events'] = [];
+  if (arm.presentation.kind === 'sequence') {
+    for (const item of arm.items) events.push({ type: 'exposure', sequence: events.length, nodeId: `sequence-expose-${item.id}`, itemId: item.id });
+    return events;
+  }
+  const nodes = new Map(arm.presentation.nodes.map((node) => [node.id, node]));
+  let current = arm.presentation.entryNodeId;
+  while (true) {
+    const node = nodes.get(current);
+    if (!node) throw new Error(`Journey points to unknown node ${current}.`);
+    if (node.kind === 'ask') return events;
+    if (node.kind === 'terminal') throw new Error('Journey must reach an ask node before a terminal node.');
+    events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
+    const edge = arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node.id);
+    if (!edge) throw new Error(`Exposure node ${node.id} has no transition.`);
+    current = edge.toNodeId;
+  }
+}
 
 export function fingerprintRunRequest(input: unknown): string | undefined {
   const parsed = runRequestSchema.safeParse(input);

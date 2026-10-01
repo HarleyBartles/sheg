@@ -11,6 +11,8 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 
+type JourneyDetailTestShape = { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId: string }> } } } }> };
+
 test('a copied plugin launches its shipped MCP without checkout or node_modules', async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), 'polling-plugin-copy-'));
   const cleanup: { closeTransport?: () => Promise<void> } = {};
@@ -219,7 +221,7 @@ test('a dead packaged worker is discovered as interrupted and reads never relaun
       await new Promise((resolve) => setTimeout(resolve, 250));
       assert.equal(calls, 1, 'A status read must not launch a replacement worker.');
       const resumed = await clientB.callTool({ name: 'run_resume', arguments: { runId } });
-      assert.equal(resumed.isError ?? false, false);
+      assert.equal(resumed.isError ?? false, false, JSON.stringify(resumed.structuredContent));
       assert.equal((resumed.structuredContent as { runId: string }).runId, runId);
       await waitForCompleted(dataRoot, runId);
       assert.equal(calls, 2, 'Resume may spend only the one call left in the original ceiling.');
@@ -232,6 +234,127 @@ test('a dead packaged worker is discovered as interrupted and reads never relaun
   } finally {
     releaseResponse?.();
     if (workerPid) killPid(workerPid);
+  }
+});
+
+test('a copied MCP runs a journey across connections and resumes its saved turn without replay', async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-journey-cross-mcp-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const dataRoot = path.join(sandbox, 'data');
+  const plugin = path.join(sandbox, 'plugin');
+  await mkdir(plugin, { recursive: true });
+  await cp(path.resolve('dist'), path.join(plugin, 'dist'), { recursive: true });
+  const tokenizerPath = path.resolve('test/fixtures/laya-tokenizer.json');
+  const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerPath)).digest('hex');
+  const questions: string[] = [];
+  let releaseFirst: (() => void) | undefined;
+  let releaseSecond: (() => void) | undefined;
+  let firstArrived: (() => void) | undefined;
+  let secondArrived: (() => void) | undefined;
+  const firstCall = new Promise<void>((resolve) => { firstArrived = resolve; });
+  const secondCall = new Promise<void>((resolve) => { secondArrived = resolve; });
+  const inference = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { questions: Record<string, unknown> };
+    const questionId = Object.keys(body.questions)[0] ?? '';
+    questions.push(questionId);
+    if (questions.length === 1) {
+      firstArrived?.();
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    }
+    if (questions.length === 2) {
+      secondArrived?.();
+      await new Promise<void>((resolve) => { releaseSecond = resolve; });
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+      model: 'fixture-checkpoint', routing: { model: 'fixture-checkpoint' }, usage: {},
+      answers: { [questionId]: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } },
+    }));
+  });
+  await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
+  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  const address = inference.address();
+  assert.ok(address && typeof address === 'object');
+  const runRequest = {
+    kind: 'journey',
+    respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }],
+    journey: {
+      id: 'article', label: 'Two section journey', items: [{ id: 'opening', text: 'The opening section.' }],
+      tasks: [
+        { id: 'first', type: 'choice', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } },
+        { id: 'second', type: 'choice', instructions: 'Did section two hold your interest?', options: { continue: 'Yes', leave: 'No' } },
+      ],
+      presentation: { kind: 'sequence' },
+    },
+    maxCalls: 3,
+    provider: { kind: 'laya', baseUrl: `http://127.0.0.1:${address.port}`, checkpoint: 'fixture-checkpoint', contextLimit: 4096, headLimit: 512, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 },
+  };
+  const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: dataRoot };
+  const clientA = new Client({ name: 'journey-package-a', version: '1.0.0' });
+  const transportA = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+  await clientA.connect(transportA);
+  let workerPid = 0;
+  try {
+    const inspected = await clientA.callTool({ name: 'run_inspect', arguments: { request: runRequest } });
+    assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
+    const started = await clientA.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: runRequest } });
+    const runId = (started.structuredContent as { runId: string }).runId;
+    await firstCall;
+    await killMcpConnection(clientA, transportA);
+    releaseFirst?.();
+    await secondCall;
+
+    const db = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
+    try {
+      const owner = db.prepare('SELECT owner_pid, owner_token FROM runs WHERE run_id = ?').get(runId) as { owner_pid?: number; owner_token?: string } | undefined;
+      assert.ok(owner?.owner_token, 'Journey must have a fenced worker while its second turn is in flight.');
+      workerPid = Number(owner.owner_pid);
+      assert.ok(Number.isInteger(workerPid) && workerPid > 0 && isPidAlive(workerPid));
+    } finally { db.close(); }
+    killPid(workerPid);
+    await waitForPidExit(workerPid);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const expire = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
+    try { expire.prepare('UPDATE runs SET lease_expires_ms = 0 WHERE run_id = ?').run(runId); }
+    finally { expire.close(); }
+    releaseSecond?.();
+
+    const clientB = new Client({ name: 'journey-package-b', version: '1.0.0' });
+    const transportB = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+    try {
+      await clientB.connect(transportB);
+      const status = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+      assert.equal((status.structuredContent as { status: string }).status, 'interrupted');
+      const beforeResume = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+      const saved = beforeResume.structuredContent as JourneyDetailTestShape;
+      assert.equal(saved.evaluations.length, 2);
+      assert.equal(saved.evaluations[0]?.status, 'answered');
+      assert.equal(saved.evaluations[1]?.status, 'pending');
+      assert.equal(saved.evaluations[1]?.questionId, 'second');
+      assert.deepEqual(saved.evaluations[1]?.packet.state.trajectory.responses.map(({ taskId }) => taskId), ['first']);
+      const savedSecondTurn = saved.evaluations[1]?.turnId;
+      const savedSecondContext = saved.evaluations[1]?.contextId;
+      const resumed = await clientB.callTool({ name: 'run_resume', arguments: { runId } });
+      assert.equal(resumed.isError ?? false, false, JSON.stringify(resumed.structuredContent));
+      await waitForCompleted(dataRoot, runId);
+      assert.deepEqual(questions, ['first', 'second', 'second']);
+
+      const afterResume = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+      const completed = afterResume.structuredContent as { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string }>; respondents: Array<{ status: string; outcome?: string; route: Array<{ nodeId: string }> }> };
+      assert.equal(completed.evaluations.length, 2);
+      assert.deepEqual(completed.evaluations.map(({ status }) => status), ['answered', 'answered']);
+      assert.equal(completed.evaluations[1]?.turnId, savedSecondTurn);
+      assert.equal(completed.evaluations[1]?.contextId, savedSecondContext);
+      assert.equal(completed.respondents[0]?.status, 'completed');
+      assert.equal(completed.respondents[0]?.outcome, 'complete');
+      assert.equal(completed.respondents[0]?.route.length, 2);
+    } finally { await killMcpConnection(clientB, transportB); }
+  } catch (error) {
+    releaseFirst?.();
+    releaseSecond?.();
+    if (workerPid) killPid(workerPid);
+    throw error;
   }
 });
 

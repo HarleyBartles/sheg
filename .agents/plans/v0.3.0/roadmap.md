@@ -14,7 +14,8 @@ defined in the spec.
 
 ## Consecutive plans
 
-Plans 1 and 2 are delivered. Plan 3 is drafted for review; later rows are
+Plans 1 and 2 are delivered. Plan 3's durable worker and MCP journey surfaces
+are implemented; the plan's final review and closeout remain. Later rows are
 capability boundaries, not implementation plans. Write each next plan against
 the delivered code and evidence of its predecessor. A Linear issue may span
 more than one plan.
@@ -23,7 +24,7 @@ more than one plan.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 remains open for Plan 2; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean |
 | 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `3ecb97f` (`ec3e70a..3ecb97f`) | - | - | SHEG-5; cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 remains open for Plans 3-4 |
-| 3 | Execute authored journeys with durable respondent turn contexts | draft for review | [Plan 3](03-durable-journeys.md) | - | - | - | SHEG-7 foundation; inline journey request, dynamically persisted reached turns, exact respondent contexts and durable routes; awaiting review before implementation |
+| 3 | Execute authored journeys with durable respondent turn contexts | in progress | [Plan 3](03-durable-journeys.md) | - | - | - | SHEG-7 foundation; durable reached turns and route evidence; MCP journey request/details, explicit resume, and copied-package process evidence complete; final review pending |
 | 4 | Query recorded evidence and compose reusable follow-ons | pending | Written after Plan 3 | - | - | - | Complete SHEG-7; preserve uncertainty/disagreement evidence |
 | 5 | Ask independent typed question groups at new or recorded contexts | pending | Written after Plan 4 | - | - | - | SHEG-6; provider-aware batching/splitting without sibling leakage |
 | 6 | Offer source-linked material choices and reuse their exact evidence | pending | Written after Plan 5 | - | - | - | SHEG-8; agent-authored candidate boundaries |
