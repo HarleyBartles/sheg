@@ -681,18 +681,145 @@ test('run discovery reconciles stale workers before applying status filters', as
   }
 });
 
-async function completedRun(store: ReturnType<typeof openRunStore>): Promise<string> {
-  const accepted = store.accept(randomUUID(), await preparedRun());
-  const claim = store.claim(accepted.run.runId, Date.now(), 1234);
+async function completedRun(store: ReturnType<typeof openRunStore>, value: InlineRunRequest = input, answer: (index: number) => DecisionResult = () => savedAnswer, operationNow = Date.now()): Promise<string> {
+  const accepted = store.accept(randomUUID(), await preparedRun(value));
+  const claim = store.claim(accepted.run.runId, operationNow, 1234);
   assert.ok(claim);
+  let index = 0;
   for (;;) {
-    const reservation = store.reserveNext(claim, Date.now());
+    const reservation = store.reserveNext(claim, operationNow);
     if (!reservation) break;
-    store.settle(claim, reservation.attemptId, { kind: 'answered', result: savedAnswer });
+    store.settle(claim, reservation.attemptId, { kind: 'answered', result: answer(index++) });
   }
   assert.equal(store.finish(claim).status, 'completed');
   return accepted.run.runId;
 }
+
+test('evidence query matches typed answers and material while preserving distributions and denominators', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const runId = await completedRun(store, input, (index) => index === 0
+      ? savedAnswer
+      : { ...savedAnswer, choice: 'leave', probabilities: { continue: 0.2, leave: 0.8 }, confidence: 0.81 });
+    const query = store.queryEvidence({ sourceRunId: runId, criteria: { materialId: 'section-three', answer: { type: 'choice', choiceId: 'leave' } }, limit: 10 });
+    assert.equal(query.totalMatches, 1);
+    assert.equal(query.sourceComplete, true);
+    assert.deepEqual(query.coverage, { totalEvaluations: 2, completedEvaluations: 2, failedEvaluations: 0,
+      respondents: { total: 2, active: 0, completed: 2, failed: 0, unreached: 0 } });
+    assert.equal(query.items[0]!.respondentId, 'reader-b');
+    assert.equal(query.items[0]!.result?.type, 'choice');
+    assert.equal(query.items[0]!.result?.type === 'choice' ? query.items[0]!.result.confidence : undefined, 0.81);
+    assert.equal(query.items[0]!.provenance.contextFingerprint.length > 0, true);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('evidence query paginates deterministically and invalidates a cursor when its source changes', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const three = { ...input, respondents: [...input.respondents, { ...input.respondents[0]!, id: 'reader-c' }], maxCalls: 3 };
+    const runId = await completedRun(store, three);
+    const first = store.queryEvidence({ sourceRunId: runId, criteria: {}, limit: 1 });
+    assert.equal(first.totalMatches, 3);
+    assert.ok(first.nextCursor);
+    const second = store.queryEvidence({ sourceRunId: runId, criteria: {}, cursor: first.nextCursor, limit: 1 });
+    assert.notEqual(second.items[0]!.evaluationId, first.items[0]!.evaluationId);
+    assert.throws(() => store.queryEvidence({ sourceRunId: runId, criteria: { status: 'answered' }, cursor: first.nextCursor, limit: 1 }), /cursor/i);
+    const active = store.accept(randomUUID(), await preparedRun());
+    const livePage = store.queryEvidence({ sourceRunId: active.run.runId, criteria: {}, limit: 1 });
+    assert.ok(livePage.nextCursor);
+    const claim = store.claim(active.run.runId, Date.now(), 4321);
+    assert.ok(claim);
+    const reservation = store.reserveNext(claim, Date.now());
+    assert.ok(reservation);
+    store.settle(claim, reservation.attemptId, { kind: 'answered', result: savedAnswer });
+    assert.throws(() => store.queryEvidence({ sourceRunId: active.run.runId, criteria: {}, cursor: livePage.nextCursor, limit: 1 }),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'stale_cursor');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('in-progress evidence reports matches so far and a later query can find new answers', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const accepted = store.accept(randomUUID(), await preparedRun());
+    const initial = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { status: 'pending' } });
+    assert.equal(initial.totalMatches, 2);
+    assert.equal(initial.sourceStatus, 'prepared');
+    assert.equal(initial.sourceComplete, false);
+    assert.equal(initial.items.length, 2);
+    const claim = store.claim(accepted.run.runId, Date.now(), 1234);
+    assert.ok(claim);
+    const reservation = store.reserveNext(claim, Date.now());
+    assert.ok(reservation);
+    store.settle(claim, reservation.attemptId, { kind: 'answered', result: savedAnswer });
+    const updated = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { status: 'answered' } });
+    assert.equal(updated.totalMatches, 1);
+    assert.equal(updated.sourceComplete, false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('stopped but incomplete run states never claim complete evidence', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const fixture = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const accepted = store.accept(randomUUID(), await preparedRun());
+    for (const status of ['interrupted', 'failed', 'cancelled', 'partial'] as const) {
+      fixture.prepare('UPDATE runs SET status = ? WHERE run_id = ?').run(status, accepted.run.runId);
+      const page = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: {} });
+      assert.equal(page.sourceStatus, status);
+      assert.equal(page.sourceComplete, false);
+    }
+  } finally { fixture.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('evidence query applies numeric Score and Noul criteria without converting their meanings', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const scoreRequest: InlineRunRequest = { ...input, questions: [{ type: 'score', id: 'clarity', instructions: 'How clear is this?', rubric: ['unclear', 'mixed', 'clear'] }] };
+    const scoreResult: DecisionResult = { type: 'score', score: 1.5, legend: { '0': 'unclear', '1': 'mixed', '2': 'clear' }, probabilities: { '0': 0.1, '1': 0.8, '2': 0.1 }, attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} };
+    const scoreRun = await completedRun(store, scoreRequest, () => scoreResult);
+    assert.equal(store.queryEvidence({ sourceRunId: scoreRun, criteria: { answer: { type: 'score', operator: 'gte', value: 1.5 } } }).totalMatches, 2);
+    assert.equal(store.queryEvidence({ sourceRunId: scoreRun, criteria: { answer: { type: 'score', operator: 'lt', value: 1.5 } } }).totalMatches, 0);
+
+    const noulRequest: InlineRunRequest = { ...input, questions: [{ type: 'noul', id: 'holds-attention', instructions: 'Does this hold attention?' }] };
+    const noulResult: DecisionResult = { type: 'noul', noul: 0.74, attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} };
+    const noulRun = await completedRun(store, noulRequest, () => noulResult);
+    assert.equal(store.queryEvidence({ sourceRunId: noulRun, criteria: { answer: { type: 'noul', operator: 'gte', value: 0.7 } } }).totalMatches, 2);
+    assert.equal(store.queryEvidence({ sourceRunId: noulRun, criteria: { answer: { type: 'noul', operator: 'lt', value: 0.7 } } }).totalMatches, 0);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('a journey departure outcome does not satisfy a typed lost-interest answer selector', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+    const departure = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { outcome: 'left-lost-interest' } });
+    const typedReason = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { answer: { type: 'choice', choiceId: 'yes' } } });
+    assert.equal(departure.totalMatches, 0);
+    assert.equal(typedReason.totalMatches, 0);
+    assert.equal(departure.sourceComplete, false);
+    assert.equal(departure.coverage.respondents.active, 2);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('run discovery combines date and material criteria with existing status and label filters', async () => {
+  const root = await temporaryRoot();
+  let now = Date.now();
+  const store = openRunStore(root, { now: () => now });
+  try {
+    const first = await completedRun(store, { ...input, label: 'first' }, () => savedAnswer, now);
+    now += 1000;
+    const second = await completedRun(store, { ...input, label: 'pilot', material: [{ id: 'chapter-one', text: 'Different exact material.' }] }, () => savedAnswer, now);
+    const page = store.list({ status: 'completed', label: 'pilot', createdAfter: new Date(now).toISOString(), createdBefore: new Date(now + 1000).toISOString(), materialId: 'chapter-one' });
+    assert.deepEqual(page.items.map(({ runId }) => runId), [second]);
+    assert.notEqual(first, second);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test('delete preview reports exact selected run counts without deleting evidence', async () => {
   const root = await temporaryRoot();

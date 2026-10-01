@@ -137,7 +137,12 @@ export const runEvidencePageSchema = z.object({
   sourceRunId: z.string().uuid(),
   sourceStatus: z.enum(runStatuses),
   sourceComplete: z.boolean(),
-  coverage: z.object({ totalEvaluations: z.number().int().nonnegative(), completedEvaluations: z.number().int().nonnegative(), failedEvaluations: z.number().int().nonnegative() }).strict(),
+  coverage: z.object({
+    totalEvaluations: z.number().int().nonnegative(),
+    completedEvaluations: z.number().int().nonnegative(),
+    failedEvaluations: z.number().int().nonnegative(),
+    respondents: z.object({ total: z.number().int().nonnegative(), active: z.number().int().nonnegative(), completed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), unreached: z.number().int().nonnegative() }).strict(),
+  }).strict(),
   nextCursor: z.string().min(1).optional(),
 }).strict();
 

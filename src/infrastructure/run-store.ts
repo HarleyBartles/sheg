@@ -6,8 +6,8 @@ import { decisionRequestSchema } from '../domain/decision/decision.js';
 import { validateDecision } from '../domain/decision/validate.js';
 import { compileDecisionPacket } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
-import { inlineRunRequestSchema, runRequestSchema, type FrozenEvaluation, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
+import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
+import { inlineRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FrozenEvaluation, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 
 const SCHEMA_VERSION = 2;
@@ -19,7 +19,7 @@ export type AttemptOutcome =
   | { kind: 'answered'; result: import('../domain/decision/decision.js').DecisionResult }
   | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run' };
 
-export type RunListQuery = { status?: RunStatus; label?: string; cursor?: string; limit?: number };
+export type RunListQuery = RunListQueryInput;
 export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean }>; blockedByActiveWork: boolean };
 export type DeleteResult = { deletedRunIds: string[]; removed: { runs: number; evaluations: number; attempts: number } };
 export type StorageInfo = { integrity: 'ok' | 'failed'; databaseBytes: number; runCount: number; evaluationCount: number; attemptCount: number; activeRunCount: number };
@@ -84,6 +84,7 @@ export interface RunStore {
   getRequest(runId: string): PreparedRun;
   getJourneyRun(runId: string): JourneyRunRecord;
   list(query: RunListQuery): Page<RunStatusView>;
+  queryEvidence(query: RunEvidenceQuery): RunEvidencePage;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   requestCancel(runId: string): RunStatusView;
   resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
@@ -104,8 +105,13 @@ export interface RunStore {
 }
 
 type DatabaseRow = Record<string, SQLOutputValue>;
-type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; status?: RunStatus; label?: string };
+type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; filtersFingerprint: string };
 type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
+type EvidenceCursorPayload = {
+  kind: 'evidence'; sourceRunId: string; criteriaFingerprint: string; maxOrdinal: number; lastOrdinal: number;
+  sourceStatus: RunStatus; sourceComplete: boolean; totalMatches: number;
+  coverage: RunEvidencePage['coverage']; usedCalls: number; reservedCalls: number;
+};
 
 function asText(value: SQLOutputValue | undefined, label: string): string {
   if (typeof value !== 'string') throw new RunStoreError('data_integrity_error', `Stored ${label} is not text.`);
@@ -580,12 +586,12 @@ class SQLiteRunStore implements RunStore {
       const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all() as DatabaseRow[];
       for (const row of active) this.reconcileInside(asText(row.run_id, 'run ID'), nowMs);
     });
-    const filterKey = JSON.stringify({ ...(query.status === undefined ? {} : { status: query.status }), ...(query.label === undefined ? {} : { label: query.label }) });
+    const filtersFingerprint = hashCanonical({ status: query.status ?? null, label: query.label ?? null, createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null, materialId: query.materialId ?? null });
     let cursor: CursorPayload | undefined;
     if (query.cursor) {
       cursor = decodeCursor<CursorPayload>(query.cursor, 'run list');
       if (cursor.kind !== 'runs' || !Number.isSafeInteger(cursor.createdMs) || cursor.createdMs < 0 || typeof cursor.runId !== 'string' || cursor.runId.length === 0 ||
-          JSON.stringify({ ...(cursor.status === undefined ? {} : { status: cursor.status }), ...(cursor.label === undefined ? {} : { label: cursor.label }) }) !== filterKey) {
+          cursor.filtersFingerprint !== filtersFingerprint) {
         throw new RunStoreError('invalid_cursor', 'The run list cursor does not match the requested filters.');
       }
     }
@@ -593,6 +599,14 @@ class SQLiteRunStore implements RunStore {
     const params: Array<string | number> = [];
     if (query.status !== undefined) { clauses.push('status = ?'); params.push(query.status); }
     if (query.label !== undefined) { clauses.push('label = ?'); params.push(query.label); }
+    if (query.createdAfter !== undefined) { clauses.push('created_ms >= ?'); params.push(Date.parse(query.createdAfter)); }
+    if (query.createdBefore !== undefined) { clauses.push('created_ms <= ?'); params.push(Date.parse(query.createdBefore)); }
+    if (query.materialId !== undefined) {
+      clauses.push(`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
+        THEN json_extract(runs.request_json, '$.request.material') ELSE json_extract(runs.request_json, '$.request.journey.items') END) AS source_material
+        WHERE json_extract(source_material.value, '$.id') = ?)`);
+      params.push(query.materialId);
+    }
     if (cursor) {
       clauses.push('(created_ms > ? OR (created_ms = ? AND run_id > ?))');
       params.push(cursor.createdMs, cursor.createdMs, cursor.runId);
@@ -605,8 +619,143 @@ class SQLiteRunStore implements RunStore {
     const last = pageRows.at(-1);
     return {
       items,
-      ...(hasMore && last ? { nextCursor: encodeCursor({ kind: 'runs', createdMs: asNumber(last.created_ms, 'created time'), runId: asText(last.run_id, 'run ID'), ...(query.status === undefined ? {} : { status: query.status }), ...(query.label === undefined ? {} : { label: query.label }) } satisfies CursorPayload) } : {}),
+      ...(hasMore && last ? { nextCursor: encodeCursor({ kind: 'runs', createdMs: asNumber(last.created_ms, 'created time'), runId: asText(last.run_id, 'run ID'), filtersFingerprint } satisfies CursorPayload) } : {}),
     };
+  }
+
+  queryEvidence(input: RunEvidenceQuery): RunEvidencePage {
+    this.ensureOpen();
+    const parsed = runEvidenceQuerySchema.safeParse(input);
+    if (!parsed.success) throw new RunStoreError('invalid_query', parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
+    const query = parsed.data;
+    const limit = pageSize(query.limit);
+    const criteriaFingerprint = hashCanonical(query.criteria);
+    return this.transaction(() => {
+      const nowMs = this.now();
+      this.reconcileInside(query.sourceRunId, nowMs);
+      const run = this.database.prepare('SELECT * FROM runs WHERE run_id = ?').get(query.sourceRunId) as DatabaseRow | undefined;
+      if (!run) throw this.notFound();
+      const sourceStatus = asText(run.status, 'run status') as RunStatus;
+      const usedCalls = asNumber(run.used_calls, 'used calls');
+      const reservedCalls = asNumber(run.reserved_calls, 'reserved calls');
+      const runRecord = parseJson<{ request?: unknown; compilerFingerprint?: unknown }>(run.request_json, 'run request');
+      const parsedRequest = runRequestSchema.safeParse(runRecord.request);
+      if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== 'string') {
+        throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
+      }
+      const compilerFingerprint = runRecord.compilerFingerprint;
+
+      let cursor: EvidenceCursorPayload | undefined;
+      if (query.cursor) {
+        cursor = decodeCursor<EvidenceCursorPayload>(query.cursor, 'evidence');
+        const coverage = cursor.coverage as unknown as Record<string, unknown> | undefined;
+        const respondents = coverage?.respondents as Record<string, unknown> | undefined;
+        const validCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+        if (cursor.kind !== 'evidence' || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint ||
+            !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) ||
+            cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.totalMatches) || cursor.totalMatches < 0 ||
+            !Number.isSafeInteger(cursor.usedCalls) || !Number.isSafeInteger(cursor.reservedCalls) ||
+            !['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'].includes(cursor.sourceStatus) ||
+            typeof cursor.sourceComplete !== 'boolean' || !validCount(coverage?.totalEvaluations) || !validCount(coverage?.completedEvaluations) ||
+            !validCount(coverage?.failedEvaluations) || !validCount(respondents?.total) || !validCount(respondents?.active) ||
+            !validCount(respondents?.completed) || !validCount(respondents?.failed) || !validCount(respondents?.unreached)) {
+          throw new RunStoreError('invalid_cursor', 'The evidence cursor does not match this source run and criteria.');
+        }
+      }
+
+      const maximumOrdinal = asNumber((this.database.prepare('SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?').get(query.sourceRunId) as DatabaseRow).maximum, 'maximum evaluation ordinal');
+      if (cursor && (cursor.maxOrdinal !== maximumOrdinal || cursor.sourceStatus !== sourceStatus || cursor.usedCalls !== usedCalls || cursor.reservedCalls !== reservedCalls)) {
+        throw new RunStoreError('stale_cursor', 'The source run changed while paging this query. Start a fresh query to see its current evidence.');
+      }
+      const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
+      const where: string[] = ['e.run_id = ?', 'e.ordinal <= ?'];
+      const parameters: Array<string | number> = [query.sourceRunId, maxOrdinal];
+      const criteria = query.criteria;
+      if (criteria.respondentId !== undefined) { where.push('e.respondent_id = ?'); parameters.push(criteria.respondentId); }
+      if (criteria.status !== undefined) { where.push('e.status = ?'); parameters.push(criteria.status); }
+      if (criteria.questionId !== undefined) { where.push('e.question_id = ?'); parameters.push(criteria.questionId); }
+      if (criteria.materialId !== undefined) {
+        where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
+        parameters.push(criteria.materialId);
+      }
+      if (criteria.answer?.type === 'choice') {
+        where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
+        parameters.push(criteria.answer.choiceId);
+      } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
+        const field = criteria.answer.type === 'score' ? 'score' : 'noul';
+        const valueExpression = criteria.answer.type === 'score' ? "json_extract(e.result_json, '$.score')" : "json_extract(e.result_json, '$.noul')";
+        where.push(`json_extract(e.result_json, '$.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>='} ?`);
+        parameters.push(criteria.answer.value);
+      }
+      if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
+      const whereSql = where.join(' AND ');
+      const join = 'LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id';
+      const snapshotCount = cursor?.totalMatches ?? asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters) as DatabaseRow).count, 'query match count');
+      const evaluationCoverage = cursor?.coverage ?? {
+        totalEvaluations: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'evaluation denominator'),
+        completedEvaluations: asNumber((this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'completed evaluation denominator'),
+        failedEvaluations: asNumber((this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'failed evaluation denominator'),
+      };
+      let respondentCoverage = cursor?.coverage.respondents;
+      if (!respondentCoverage) {
+        const total = parsedRequest.data.respondents.length;
+        const statusCounts = parsedRequest.data.kind === 'journey'
+          ? this.database.prepare('SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status').all(query.sourceRunId) as DatabaseRow[]
+          : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal) as DatabaseRow[];
+        const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, 'respondent status'), asNumber(row.count, 'respondent count')]));
+        const completed = countByStatus.get(parsedRequest.data.kind === 'journey' ? 'completed' : 'answered') ?? 0;
+        const failed = countByStatus.get('failed') ?? 0;
+        const unreached = countByStatus.get('unreached') ?? 0;
+        respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
+      }
+      const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
+      const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome FROM evaluations AS e ${join}
+        WHERE ${whereSql} ${cursor ? 'AND e.ordinal > ?' : ''} ORDER BY e.ordinal LIMIT ?`)
+        .all(...parameters, ...(cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1])) as DatabaseRow[];
+      const hasMore = rows.length > limit;
+      const pageRows = rows.slice(0, limit);
+      const endpoint = parsedRequest.data.provider.kind === 'jev'
+        ? parsedRequest.data.provider.endpoint
+        : parsedRequest.data.provider.baseUrl;
+      const model = parsedRequest.data.provider.kind === 'jev'
+        ? parsedRequest.data.provider.model
+        : parsedRequest.data.provider.checkpoint;
+      const items: RunEvidencePage['items'] = pageRows.map((row) => ({
+        sourceRunId: query.sourceRunId,
+        evaluationId: asText(row.evaluation_id, 'evaluation ID'),
+        contextId: asText(row.context_id, 'context ID'),
+        respondentId: asText(row.respondent_id, 'respondent ID'),
+        questionId: asText(row.question_id, 'question ID'),
+        status: asText(row.status, 'evaluation status') as RunEvidencePage['items'][number]['status'],
+        ...(row.result_json === null ? {} : { result: parseJson(row.result_json, 'decision result') }),
+        ...(row.turn_id === null ? {} : { turnId: asText(row.turn_id, 'turn ID') }),
+        ...(row.node_id === null ? {} : { nodeId: asText(row.node_id, 'node ID') }),
+        ...(row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, 'turn occurrence') }),
+        ...(row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, 'route outcome') }),
+        provenance: {
+          provider: parsedRequest.data.provider.kind,
+          model,
+          endpoint,
+          compilerFingerprint,
+          contextFingerprint: asText(row.packet_fingerprint, 'context fingerprint'),
+        },
+      }));
+      const last = pageRows.at(-1);
+      const sourceComplete = cursor?.sourceComplete ?? sourceStatus === 'completed';
+      return {
+        items,
+        totalMatches: snapshotCount,
+        sourceRunId: query.sourceRunId,
+        sourceStatus: cursor?.sourceStatus ?? sourceStatus,
+        sourceComplete,
+        coverage,
+        ...(hasMore && last ? { nextCursor: encodeCursor({
+          kind: 'evidence', sourceRunId: query.sourceRunId, criteriaFingerprint, maxOrdinal,
+          lastOrdinal: asNumber(last.ordinal, 'evaluation ordinal'), sourceStatus: cursor?.sourceStatus ?? sourceStatus,
+          sourceComplete, totalMatches: snapshotCount, coverage, usedCalls, reservedCalls,
+        } satisfies EvidenceCursorPayload) } : {}),
+      };
+    });
   }
 
   answers(runId: string, cursorText?: string, requestedLimit?: number): Page<AnswerRow> {

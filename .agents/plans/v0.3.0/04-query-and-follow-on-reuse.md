@@ -37,7 +37,7 @@
 **Files:**
 - Modify: `src/domain/run/request.ts`
 - Modify: `src/domain/run/lifecycle.ts`
-- Test: `test/run-request.test.ts` (or the current domain request test owner)
+- Test: `test/run-request.test.ts`
 - Regenerate: `dist/` through `npm run build` because the shared request module is bundled into MCP and worker entrypoints
 
 **Interfaces:**
@@ -50,26 +50,28 @@
 - [x] Implement strict schemas and types. Keep selectors finite and explicit; no SQL fragments, arbitrary expressions, free-form relevance scoring, or automatic respondent selection.
 - [x] Run `node --import tsx --test test/run-request.test.ts`; expect all schema behavior tests to pass.
 - [x] Run `npm run build` and stage its owned bundle outputs before the commit.
-- [ ] Commit the domain contract, tests, and generated bundles as `feat: define recorded evidence selectors`.
+- [x] Commit the domain contract, tests, and generated bundles as `feat: define recorded evidence selectors`.
 
 ## Task 2: Add bounded evidence query and honest source completeness
 
 **Files:**
 - Modify: `src/infrastructure/run-store.ts`
-- Modify: `src/domain/run/lifecycle.ts`
-- Test: `test/run-store.test.ts`
+- Modify: `src/domain/run/request.ts`, `src/domain/run/lifecycle.ts`
+- Test: `test/run-request.test.ts`, `test/run-store.test.ts`
 
 **Interfaces:**
 - Consumes: Task 1 selector and projection types, current evaluation/attempt/journey tables.
 - Produces: `RunStore.queryEvidence(input)` returning `{items, totalMatches, sourceRunId, sourceStatus, sourceComplete, coverage, nextCursor?}`. `coverage` reports total/completed/failed evaluations at the query snapshot. Each item includes source run, respondent/evaluation/context IDs, optional turn/node/occurrence, question/status, typed result with full available distributions/confidence when present, route outcome when available, and provider/model/compiler/context fingerprint provenance. Cursor binds `sourceRunId`, canonical criteria fingerprint, maximum source evaluation ordinal present at the first page, and last returned ordinal.
 
-- [ ] Test query across poll and journey runs, all typed result shapes and comparisons, terminal outcome matching, deterministic ordering, page boundaries, invalid/stale/mismatched cursors, and filters pinned to their cursor.
-- [ ] Test incompleteness honestly: running/prepared, interrupted, failed, cancelled, and partial sources remain incomplete; only a completed source is complete. An incomplete query returns its current count and says more may match if queried after further execution.
-- [ ] Implement filtering through parameterized bounded SQL plus validated frozen request/result evidence. Use a cursor watermark so later source progress does not duplicate or skip rows within a page sequence; a fresh query sees newer evidence.
-- [ ] Extend `RunListQuery` with created-after/created-before and referenced-material criteria; test combined filters and cursor binding in `test/run-store.test.ts`.
-- [ ] Keep pagination capped at 200. Do not return whole reports, infer a lost-interest reason from departure, or expose a direct SQL/query language.
-- [ ] Run `node --import tsx --test test/run-store.test.ts`; expect query, pagination, completeness, and cursor behavior tests to pass.
-- [ ] Commit the read-only query path as `feat: query paginated run evidence`.
+- [x] Test query across poll and journey runs, all typed result shapes and comparisons, terminal outcome matching, deterministic ordering, page boundaries, invalid/stale/mismatched cursors, and filters pinned to their cursor.
+- [x] Test incompleteness honestly: running/prepared, interrupted, failed, cancelled, and partial sources remain incomplete; only a completed source is complete. An incomplete query returns its current count and says more may match if queried after further execution.
+- [x] Implement filtering through parameterized bounded SQL plus validated frozen request/result evidence. Use a cursor watermark so later source progress does not duplicate or skip rows within a page sequence; a fresh query sees newer evidence.
+- [x] Extend `RunListQuery` with created-after/created-before and referenced-material criteria; test combined filters and cursor binding in `test/run-store.test.ts`.
+- [x] Keep pagination capped at 200. Do not return whole reports, infer a lost-interest reason from departure, or expose a direct SQL/query language.
+- [x] Run `node --import tsx --test test/run-request.test.ts test/run-store.test.ts`; expect query, pagination, completeness, and cursor behavior tests to pass.
+- [x] Run `npm run typecheck`; expect no TypeScript errors.
+- [x] Run `npm run build` and stage its owned bundle outputs before the commit.
+- [x] Commit the read-only query path as `feat: query paginated run evidence`.
 
 ## Task 3: Resolve follow-on requests into exact frozen contexts
 
