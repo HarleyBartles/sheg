@@ -41,6 +41,8 @@ const noulQuestionSchema = z.object({
   criteria: z.object({ true: prose.optional(), false: prose.optional() }).strict().optional(),
 }).strict();
 
+export const decisionQuestionSchema = z.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
+
 const requestStateSchema = z.object({ state: z.record(z.string(), z.unknown()) }).strict();
 const choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
@@ -82,5 +84,6 @@ export const decisionValueSchema = z.discriminatedUnion('type', [
 ]);
 
 export type DecisionValue = z.infer<typeof decisionValueSchema>;
+export type DecisionQuestion = z.infer<typeof decisionQuestionSchema>;
 export type DecisionRequest = z.infer<typeof decisionRequestSchema>;
 export type DecisionResult = z.infer<typeof decisionResultSchema>;

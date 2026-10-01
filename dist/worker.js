@@ -20200,6 +20200,7 @@ var noulQuestionSchema = external_exports.object({
   instructions: prose5,
   criteria: external_exports.object({ true: prose5.optional(), false: prose5.optional() }).strict().optional()
 }).strict();
+var decisionQuestionSchema = external_exports.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
 var requestStateSchema = external_exports.object({ state: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict();
 var choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
@@ -20256,6 +20257,15 @@ var promptContract = {
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
 var legacyPromptContractHash = "c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044";
+function finishTrajectory(body) {
+  let payloadUtf8Bytes = 0;
+  for (; ; ) {
+    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
+    if (nextSize === payloadUtf8Bytes) break;
+    payloadUtf8Bytes = nextSize;
+  }
+  return { ...body, payloadUtf8Bytes };
+}
 function compactTrajectory(arm, history) {
   const exposureIds = [];
   const choices = [];
@@ -20291,13 +20301,7 @@ function compactTrajectory(arm, history) {
     choices,
     responses
   };
-  let payloadUtf8Bytes = 0;
-  for (; ; ) {
-    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
-    if (nextSize === payloadUtf8Bytes) break;
-    payloadUtf8Bytes = nextSize;
-  }
-  return { ...body, payloadUtf8Bytes };
+  return finishTrajectory(body);
 }
 function compileDecisionPacket(arm, profile, taskId, history = []) {
   const task = arm.tasks.find((candidate) => candidate.id === taskId);
@@ -21843,6 +21847,23 @@ function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+// src/providers/config.ts
+var layaConfigSchema = external_exports.object({
+  kind: external_exports.literal("laya"),
+  baseUrl: external_exports.string().url(),
+  checkpoint: external_exports.string().min(1),
+  contextLimit: external_exports.number().int().positive(),
+  headLimit: external_exports.number().int().positive(),
+  tokenizerJsonPath: external_exports.string().min(1),
+  tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  precision: external_exports.string().optional(),
+  timeoutMs: external_exports.number().int().positive()
+}).strict();
+var providerConfigSchema2 = external_exports.union([
+  jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
+  layaConfigSchema
+]);
+
 // src/application/worker.ts
 import { createHash as createHash5 } from "node:crypto";
 
@@ -22150,10 +22171,7 @@ function graphDecisionRange(arm) {
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
   cohortPath: external_exports.string().min(1),
-  provider: external_exports.union([
-    jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
-    external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
-  ]),
+  provider: providerConfigSchema2,
   outputDirectory: external_exports.string().min(1),
   maxCalls: external_exports.number().int().positive(),
   concurrency: external_exports.number().int().min(1).max(64).default(1)

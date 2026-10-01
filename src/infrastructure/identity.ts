@@ -59,7 +59,7 @@ export function respondentCohortFingerprint(cohort: FrozenCohort): string {
   return hashCanonical({ version: 2, archetypes: cohort.archetypes, respondents: cohort.respondents });
 }
 
-function hashCanonical(value: unknown): string {
+export function hashCanonical(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(canonicalize(value))).digest('hex');
 }
 

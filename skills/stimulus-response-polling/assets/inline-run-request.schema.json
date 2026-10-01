@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "poll"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "respondents": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "archetypeId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "variation": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            }
+          },
+          "intent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "context": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "desired_outcome": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "engagement_cues": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "friction_cues": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id",
+          "intent",
+          "context",
+          "desired_outcome",
+          "engagement_cues",
+          "friction_cues"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "material": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "questions": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "choice"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "instructions": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "options": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "instructions",
+                "options"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "score"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "instructions": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rubric": {
+                  "minItems": 2,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "instructions",
+                "rubric"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "noul"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "instructions": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "criteria": {
+                  "type": "object",
+                  "properties": {
+                    "true": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "false": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "instructions"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      ],
+      "items": false,
+      "minItems": 1,
+      "maxItems": 1
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "jev"
+            },
+            "route": {
+              "type": "string",
+              "enum": [
+                "openrouter",
+                "typesafe"
+              ]
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "laya"
+            },
+            "baseUrl": {
+              "type": "string",
+              "format": "uri"
+            },
+            "checkpoint": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contextLimit": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "headLimit": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tokenizerJsonPath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tokenizerSha256": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{64}$"
+            },
+            "precision": {
+              "type": "string"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind",
+            "baseUrl",
+            "checkpoint",
+            "contextLimit",
+            "headLimit",
+            "tokenizerJsonPath",
+            "tokenizerSha256",
+            "timeoutMs"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "maxCalls": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "kind",
+    "respondents",
+    "material",
+    "questions",
+    "provider",
+    "maxCalls"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:sheg:schema:inline-run-request.schema.json",
+  "title": "Inline run request",
+  "x-validation-rules": [
+    "Supply exactly one Choice, Score, or Noul question.",
+    "Respondent and material IDs must be unique within the request.",
+    "maxCalls must allow at least one physical decision call for each respondent.",
+    "Material text is preserved exactly as authored."
+  ]
+}

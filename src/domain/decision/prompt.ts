@@ -68,6 +68,28 @@ const promptContract = {
 
 export const legacyPromptContractHash = 'c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044';
 
+function finishTrajectory(body: Omit<TrajectorySummary, 'payloadUtf8Bytes'>): TrajectorySummary {
+  let payloadUtf8Bytes = 0;
+  for (;;) {
+    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
+    if (nextSize === payloadUtf8Bytes) break;
+    payloadUtf8Bytes = nextSize;
+  }
+  return { ...body, payloadUtf8Bytes };
+}
+
+export function emptyTrajectory(): TrajectorySummary {
+  return finishTrajectory({
+    version: 1,
+    eventCount: 0,
+    exposureCount: 0,
+    decisionCount: 0,
+    eventRange: null,
+    choices: [],
+    responses: [],
+  });
+}
+
 function compactTrajectory(arm: StudyArm, history: readonly PromptHistoryEvent[]): TrajectorySummary {
   const exposureIds: string[] = [];
   const choices: TrajectoryChoice[] = [];
@@ -106,13 +128,7 @@ function compactTrajectory(arm: StudyArm, history: readonly PromptHistoryEvent[]
     choices,
     responses,
   };
-  let payloadUtf8Bytes = 0;
-  for (;;) {
-    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
-    if (nextSize === payloadUtf8Bytes) break;
-    payloadUtf8Bytes = nextSize;
-  }
-  return { ...body, payloadUtf8Bytes };
+  return finishTrajectory(body);
 }
 
 export function compileDecisionPacket(

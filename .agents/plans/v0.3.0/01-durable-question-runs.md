@@ -214,7 +214,7 @@ The worker opens only the named store/run, claims once, starts heartbeat, reserv
 
 **Interfaces:** Consumes existing `DecisionProvider`, `compileDecisionRequest`, respondent perspective schema and provider schemas. Produces `InlineRunRequest`, `FrozenEvaluation`, `PreparedRun`, `Inspection`, `prepareRun`, `emptyTrajectory` and shared `ProviderConfig` exactly as defined above.
 
-- [ ] Write tests for exact text preservation, metadata exclusion, different respondent perspectives, Choice/Score/Noul compilation, duplicate IDs and a question list of zero/two items. Use an injected provider whose `decide` increments a counter and throws, with controlled measurement results. Assert overflow/unavailable/invalid budget rejects with zero decide calls.
+- [x] Write tests for exact text preservation, metadata exclusion, different respondent perspectives, Choice/Score/Noul compilation, duplicate IDs and a question list of zero/two items. Use an injected provider whose `decide` increments a counter and throws, with controlled measurement results. Assert overflow/unavailable/invalid budget rejects with zero decide calls.
 
 ```ts
 assert.equal(inspection.valid, false);
@@ -222,8 +222,8 @@ assert.equal(decideCalls, 0);
 assert.equal(prepared, undefined);
 ```
 
-- [ ] Run `node --import tsx --test test/run-request.test.ts test/run-inspection.test.ts`; observe meaningful RED on missing direct acceptance/inspection behavior.
-- [ ] Implement shared parsing and compilation without duplicating the decision union or creating a synthetic journey. Export empty trajectory through the existing payload-byte calculation. Generate IDs outside packets, measure every real compiled packet and return structured problems.
+- [x] Run `node --import tsx --test test/run-request.test.ts test/run-inspection.test.ts`; initial RED reported `ERR_MODULE_NOT_FOUND` for the two planned source modules before tests could execute. Record this new-module TDD limitation in the execution ledger; behavior assertions passed after implementation.
+- [x] Implement shared parsing and compilation without duplicating the decision union or creating a synthetic journey. Export empty trajectory through the existing payload-byte calculation. Generate IDs outside packets, measure every real compiled packet and return structured problems.
 
 ```ts
 const packet = compileDecisionRequest({
@@ -234,8 +234,8 @@ const packet = compileDecisionRequest({
 });
 ```
 
-- [ ] Run the focused tests plus `npm run typecheck`. Regenerate with `npm run contracts:build` and `npm run build`; inspect generated diffs and stage only source-owned consequences.
-- [ ] Commit `feat: compile and inspect direct question requests` through the tracked hook. Exit: direct input admits only supported, fitting frozen packets and causes no inference.
+- [x] Run the focused tests plus `npm run typecheck`. Regenerate with `npm run contracts:build` and `npm run build`; inspect generated diffs and stage only source-owned consequences. Focused behavior tests (9) and typecheck pass; generated request schema and bundled entrypoints match their owners.
+- [x] Commit `feat: compile and inspect direct question requests` through the tracked hook. Exit: direct input admits only supported, fitting frozen packets and causes no inference.
 
 ## Task 2: Persist and recall accepted runs transactionally
 
