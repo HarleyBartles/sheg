@@ -20058,14 +20058,19 @@ var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema
 // src/domain/study/arm.ts
 var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 var prose4 = external_exports.string().trim().min(1);
-var studyArmSchema = external_exports.object({
+var journeyDefinitionFields = {
   id: identifier5,
   label: prose4,
-  sources: external_exports.array(sourceReferenceSchema).min(1),
   items: external_exports.array(stimulusItemSchema).min(1),
   tasks: external_exports.array(taskSchema).min(1),
   presentation: presentationSchema
-}).strict().superRefine((arm, context) => {
+};
+var journeyDefinitionSchema = external_exports.object(journeyDefinitionFields).strict().superRefine(validateJourneyDefinition);
+var studyArmSchema = external_exports.object({
+  ...journeyDefinitionFields,
+  sources: external_exports.array(sourceReferenceSchema).min(1)
+}).strict().superRefine(validateJourneyDefinition);
+function validateJourneyDefinition(arm, context) {
   const presentation = arm.presentation;
   const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
   const nodeIds = new Set(nodeValues.map((node2) => node2.id));
@@ -20192,7 +20197,7 @@ var studyArmSchema = external_exports.object({
       });
     }
   }
-});
+}
 function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
   const issues = context;
   const ranges = edges.map((edge, index) => ({ edge, index, range: edge.when }));
@@ -22166,7 +22171,7 @@ function estimateRunDecisionCalls(arms, respondents) {
   let minimumDecisionCalls = 0;
   let maximumDecisionCalls = 0;
   for (const rawArm of arms) {
-    const arm = studyArmSchema.parse(rawArm);
+    const arm = ("sources" in rawArm ? studyArmSchema : journeyDefinitionSchema).parse(rawArm);
     const range = arm.presentation.kind === "sequence" ? { minimum: arm.tasks.length, maximum: arm.tasks.length } : graphDecisionRange(arm);
     minimumDecisionCalls += range.minimum * respondents.length;
     maximumDecisionCalls += range.maximum * respondents.length;
@@ -22920,7 +22925,7 @@ function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
   };
   for (const arm of arms) {
     if (stopped) break;
-    const validation = studyArmSchema.safeParse(arm);
+    const validation = ("sources" in arm ? studyArmSchema : journeyDefinitionSchema).safeParse(arm);
     if (!validation.success) {
       markIncomplete(`Study arm ${arm.id} is invalid: ${validation.error.issues.map((issue2) => issue2.message).join(" ")}`);
       break;

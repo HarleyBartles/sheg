@@ -4,16 +4,16 @@ import { z } from 'zod';
 import { respondentArchetypeLibrarySchema, respondentArchetypeSchema } from '../src/domain/respondents/archetype.js';
 import { respondentCohortSchema } from '../src/domain/respondents/cohort.js';
 import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
-import { inlineRunRequestSchema } from '../src/domain/run/request.js';
+import { runRequestSchema } from '../src/domain/run/request.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const schemaBaseUri = 'urn:sheg:schema:';
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
-  { filename: 'inline-run-request.schema.json', title: 'Inline run request', schema: inlineRunRequestSchema, validationRules: [
-    'Supply exactly one Choice, Score, or Noul question.',
-    'Respondent and material IDs must be unique within the request.',
-    'maxCalls must allow at least one physical decision call for each respondent.',
+  { filename: 'inline-run-request.schema.json', title: 'Inline run request', schema: runRequestSchema, validationRules: [
+    'Use kind poll for exactly one Choice, Score, or Noul question, or kind journey for a finite sequence or terminating graph of typed asks.',
+    'Respondent, material, item, task, and graph node IDs must be unique within their request scope.',
+    'maxCalls must cover the minimum reachable journey path; a lower cap than the maximum can leave a run partial.',
     'Material text is preserved exactly as authored.',
   ] },
   { filename: 'respondent-archetype.schema.json', title: 'Respondent archetype', schema: respondentArchetypeSchema },

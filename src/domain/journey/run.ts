@@ -1,13 +1,13 @@
 import { decisionValueSchema, type DecisionRequest, type DecisionResult, type DecisionValue } from '../decision/decision.js';
 import { compileDecisionPacket, type PromptHistoryEvent } from '../decision/prompt.js';
 import type { RespondentProfile } from '../respondents/profile.js';
-import type { StudyArm } from '../study/arm.js';
+import type { JourneyDefinition } from '../study/arm.js';
 
 export type ExposureEvent = Extract<PromptHistoryEvent, { type: 'exposure' }>;
 export type ChoiceEvent = Extract<PromptHistoryEvent, { type: 'choice' }>;
 export type JourneyEvent = PromptHistoryEvent;
 export type JourneyResult = { events: JourneyEvent[]; outcome: string | null; status: 'completed' | 'decision-limit'; decisionCount: number };
-export type JourneyOptions = { arm: StudyArm; profile: RespondentProfile; ask: (request: DecisionRequest, nodeId: string) => Promise<DecisionResult | DecisionValue | { choice: string }> };
+export type JourneyOptions = { arm: JourneyDefinition; profile: RespondentProfile; ask: (request: DecisionRequest, nodeId: string) => Promise<DecisionResult | DecisionValue | { choice: string }> };
 
 export class JourneyExecutionError extends Error {
   constructor(message: string) { super(message); this.name = 'JourneyExecutionError'; }

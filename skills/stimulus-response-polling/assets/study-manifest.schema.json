@@ -38,28 +38,6 @@
             "type": "string",
             "minLength": 1
           },
-          "sources": {
-            "minItems": 1,
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "path": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "sha256": {
-                  "type": "string",
-                  "pattern": "^[a-f\\d]{64}$"
-                }
-              },
-              "required": [
-                "path",
-                "sha256"
-              ],
-              "additionalProperties": false
-            }
-          },
           "items": {
             "minItems": 1,
             "type": "array",
@@ -458,15 +436,37 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "sources": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f\\d]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
           "id",
           "label",
-          "sources",
           "items",
           "tasks",
-          "presentation"
+          "presentation",
+          "sources"
         ],
         "additionalProperties": false
       }

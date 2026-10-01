@@ -4,14 +4,16 @@ import type { FrozenEvaluation } from './request.js';
 
 export type RunStatus = 'prepared' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted';
 
-export type RunProblem = { code: string; respondentId?: string; message: string };
+export type RunProblem = { code: string; respondentId?: string; nodeId?: string; pathId?: string; message: string };
 
 export type Inspection = {
   valid: boolean;
   respondentCount: number;
   minimumCalls: number;
+  maximumCalls?: number;
   problems: RunProblem[];
-  fits: Array<{ respondentId: string; fit: ProviderContextFit }>;
+  warnings?: RunProblem[];
+  fits: Array<{ respondentId: string; nodeId?: string; pathId?: string; packetId?: string; fit: ProviderContextFit }>;
 };
 
 export type RunStatusView = {

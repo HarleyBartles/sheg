@@ -12985,14 +12985,14 @@ function compileValidator(schema, parser) {
     return parser;
   }
 }
-function compile(schema, options) {
+function compile(schema, options2) {
   try {
     const parser = compileFn(schema);
     const clone2 = withParser(schema, parser);
     clone2._zod.bag.validator = compileValidator(schema, parser);
     return clone2;
   } catch (err) {
-    if (options?.strict)
+    if (options2?.strict)
       throw err;
     return schema;
   }
@@ -13052,7 +13052,7 @@ function installCompiledUserMethods(target, source, parser) {
     };
   }
 }
-function compileFn(schema, options) {
+function compileFn(schema, options2) {
   let recursive2 = true;
   try {
     recursive2 = isRecursiveSchema(schema);
@@ -13068,12 +13068,12 @@ function compileFn(schema, options) {
     definite: true
   };
   const doc = new Doc(["input"]);
-  const outputAccessor = generateCheck(doc, ctx, schema, "input", !options?.assertOnly);
+  const outputAccessor = generateCheck(doc, ctx, schema, "input", !options2?.assertOnly);
   doc.write(outputAccessor === null ? `return true;` : `return ${outputAccessor};`);
   const constantNames = ["INVALID", ...ctx.constants.keys()];
   const constantValues = [INVALID, ...ctx.constants.values()];
   const code = doc.content.join("\n");
-  const fullCode = options?.debug ? constantNames.length > 0 ? `// Constants: ${constantNames.join(", ")}
+  const fullCode = options2?.debug ? constantNames.length > 0 ? `// Constants: ${constantNames.join(", ")}
 ${code}` : code : "";
   const F = Function;
   const factoryCode = `return (input) => {
@@ -13086,7 +13086,7 @@ ${code}
   } catch (err) {
     throw new ZodCompileUnsupportedError(`this schema (generated code failed to evaluate: ${err.message})`);
   }
-  if (options?.debug) {
+  if (options2?.debug) {
     fn.code = fullCode;
   }
   fn.definite = ctx.definite;
@@ -14187,31 +14187,31 @@ function getTupleOptStart2(items, key) {
 }
 function generateUnionCheck(doc, ctx, schema, accessor) {
   const def = schema._zod.def;
-  const options = def.options;
+  const options2 = def.options;
   if (def.discriminator) {
     return generateDiscriminatedUnionCheck(doc, ctx, def, accessor);
   }
   if (def.inclusive === false) {
     throw new ZodCompileUnsupportedError("exclusive unions (z.xor)");
   }
-  if (options.length === 0) {
+  if (options2.length === 0) {
     doc.write("return INVALID;");
     return accessor;
   }
-  if (options.length === 1) {
-    return generateCheck(doc, ctx, options[0], accessor);
+  if (options2.length === 1) {
+    return generateCheck(doc, ctx, options2[0], accessor);
   }
-  const allLiterals = options.every((opt) => opt._zod.def.type === "literal" && !opt._zod.def.checks?.length);
+  const allLiterals = options2.every((opt) => opt._zod.def.type === "literal" && !opt._zod.def.checks?.length);
   if (allLiterals) {
-    const values = new Set(options.flatMap((opt) => opt._zod.def.values));
+    const values = new Set(options2.flatMap((opt) => opt._zod.def.values));
     const valuesConst = addConstant(ctx, values);
     doc.write(`if (!${valuesConst}.has(${accessor})) return INVALID;`);
     return accessor;
   }
   const outputVar = newVar(ctx);
   doc.write(`let ${outputVar};`);
-  for (let i = 0; i < options.length; i++) {
-    const opt = options[i];
+  for (let i = 0; i < options2.length; i++) {
+    const opt = options2[i];
     if (i === 0) {
       doc.write(`${outputVar} = (() => {`);
     } else {
@@ -15280,26 +15280,26 @@ function _array(Class2, element, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _union(Class2, options, params) {
+function _union(Class2, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     ...normalizeParams(params)
   });
 }
-function _xor(Class2, options, params) {
+function _xor(Class2, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     inclusive: false,
     ...normalizeParams(params)
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _discriminatedUnion(Class2, discriminator, options, params) {
+function _discriminatedUnion(Class2, discriminator, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     discriminator,
     ...normalizeParams(params)
   });
@@ -15821,11 +15821,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     ctx.sharedDefsExtractedFor = ctx.external;
 }
 function compactTypeUnion(schema) {
-  const options = schema.anyOf;
-  if (!Array.isArray(options) || options.length === 0 || schema.type !== void 0)
+  const options2 = schema.anyOf;
+  if (!Array.isArray(options2) || options2.length === 0 || schema.type !== void 0)
     return;
   const types = [];
-  for (const option of options) {
+  for (const option of options2) {
     if (!option || typeof option !== "object")
       return;
     compactTypeUnion(option);
@@ -16529,14 +16529,14 @@ var objectProcessor = (schema, ctx, _json, params) => {
 var unionProcessor = (schema, ctx, json2, params) => {
   const def = schema._zod.def;
   const isExclusive = def.inclusive === false;
-  const options = def.options.map((x, i) => processSchema(x, ctx, {
+  const options2 = def.options.map((x, i) => processSchema(x, ctx, {
     ...params,
     path: [...params.path, isExclusive ? "oneOf" : "anyOf", i]
   }));
   if (isExclusive) {
-    json2.oneOf = options;
+    json2.oneOf = options2;
   } else {
-    json2.anyOf = options;
+    json2.anyOf = options2;
   }
 };
 var intersectionProcessor = (schema, ctx, json2, params) => {
@@ -18150,10 +18150,10 @@ var ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => unionProcessor(inst, ctx, json2, params);
   inst.options = def.options;
 });
-function union(options, params) {
+function union(options2, params) {
   return new ZodUnion({
     type: "union",
-    options,
+    options: options2,
     ...util_exports.normalizeParams(params)
   });
 }
@@ -18163,10 +18163,10 @@ var ZodXor = /* @__PURE__ */ $constructor("ZodXor", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => unionProcessor(inst, ctx, json2, params);
   inst.options = def.options;
 });
-function xor(options, params) {
+function xor(options2, params) {
   return new ZodXor({
     type: "union",
-    options,
+    options: options2,
     inclusive: false,
     ...util_exports.normalizeParams(params)
   });
@@ -18175,10 +18175,10 @@ var ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("ZodDiscriminatedUnion"
   ZodUnion.init(inst, def);
   $ZodDiscriminatedUnion.init(inst, def);
 });
-function discriminatedUnion(discriminator, options, params) {
+function discriminatedUnion(discriminator, options2, params) {
   return new ZodDiscriminatedUnion({
     type: "union",
-    options,
+    options: options2,
     discriminator,
     ...util_exports.normalizeParams(params)
   });
@@ -19410,13 +19410,13 @@ function convertSchema(schema, ctx) {
   let baseSchema = convertBaseSchema(schema, ctx);
   const hasExplicitType = schema.type || schema.enum !== void 0 || schema.const !== void 0;
   if (schema.anyOf && Array.isArray(schema.anyOf)) {
-    const options = schema.anyOf.map((s) => convertSchema(s, ctx));
-    const anyOfUnion = z.union(options);
+    const options2 = schema.anyOf.map((s) => convertSchema(s, ctx));
+    const anyOfUnion = z.union(options2);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, anyOfUnion) : anyOfUnion;
   }
   if (schema.oneOf && Array.isArray(schema.oneOf)) {
-    const options = schema.oneOf.map((s) => convertSchema(s, ctx));
-    const oneOfUnion = z.xor(options);
+    const options2 = schema.oneOf.map((s) => convertSchema(s, ctx));
+    const oneOfUnion = z.xor(options2);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, oneOfUnion) : oneOfUnion;
   }
   if (schema.allOf && Array.isArray(schema.allOf)) {
@@ -20792,8 +20792,8 @@ var SdkError = class extends Error {
   * failure as `{ cause }` so it is reachable through the `Error.cause` chain that
   * loggers and error trackers walk.
   */
-  constructor(code, message, data, options) {
-    super(message, options);
+  constructor(code, message, data, options2) {
+    super(message, options2);
     this.code = code;
     this.data = data;
     this.name = "SdkError";
@@ -20807,8 +20807,8 @@ var SdkHttpError = class extends SdkError {
   /**
   * @param options - Standard `ErrorOptions`, forwarded to `Error` (see {@linkcode SdkError}).
   */
-  constructor(code, message, data, options) {
-    super(code, message, data, options);
+  constructor(code, message, data, options2) {
+    super(code, message, data, options2);
     this.name = "SdkHttpError";
   }
   get status() {
@@ -24690,12 +24690,12 @@ var Protocol = class {
       sendErrorResponse(ProtocolErrorCode.InvalidParams, envelopeError);
       return;
     }
-    const sendNotification = (notification, options) => this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, {
-      ...options,
+    const sendNotification = (notification, options2) => this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, {
+      ...options2,
       relatedRequestId: request.id
     });
-    const sendRequest = (r, resultSchema, options) => this._requestWithSchemaViaCodec(this._resolveOutboundCodec(r.method), r, resultSchema, {
-      ...options,
+    const sendRequest = (r, resultSchema, options2) => this._requestWithSchemaViaCodec(this._resolveOutboundCodec(r.method), r, resultSchema, {
+      ...options2,
       relatedRequestId: request.id
     });
     const abortController = new AbortController();
@@ -24872,18 +24872,18 @@ var Protocol = class {
   * explicit compatibility schemas. Spec methods are still era-gated here:
   * an explicit schema never smuggles a deleted method onto the wire.
   */
-  _requestWithSchema(request, resultSchema, options) {
+  _requestWithSchema(request, resultSchema, options2) {
     const codec2 = this._resolveOutboundCodec(request.method);
     this._assertOutboundRequestInEra(codec2, request.method);
-    return this._requestWithSchemaViaCodec(codec2, request, resultSchema, options);
+    return this._requestWithSchemaViaCodec(codec2, request, resultSchema, options2);
   }
   /**
   * The request funnel proper, keyed by the resolved era codec: the codec
   * owns result decoding (raw-first `resultType` discrimination — V-1 —
   * and the era's lift posture) before the schema validation step.
   */
-  _requestWithSchemaViaCodec(codec2, request, resultSchema, options) {
-    const { relatedRequestId, resumptionToken, onresumptiontoken, headers } = options ?? {};
+  _requestWithSchemaViaCodec(codec2, request, resultSchema, options2) {
+    const { relatedRequestId, resumptionToken, onresumptiontoken, headers } = options2 ?? {};
     const flowStartedAt = Date.now();
     let onAbort;
     let cleanupMessageId;
@@ -24901,8 +24901,8 @@ var Protocol = class {
         earlyReject(error62);
         return;
       }
-      if (options?.signal?.aborted) {
-        const reason = options.signal.reason;
+      if (options2?.signal?.aborted) {
+        const reason = options2.signal.reason;
         throw reason instanceof SdkError ? reason : new SdkError(SdkErrorCode.RequestTimeout, String(reason));
       }
       const requestAbort = codec2.era === MODERN_WIRE_REVISION && this._transport.hasPerRequestStream === true ? new AbortController() : void 0;
@@ -24913,8 +24913,8 @@ var Protocol = class {
         jsonrpc: "2.0",
         id: messageId
       };
-      if (options?.onprogress) {
-        this._progressHandlers.set(messageId, options.onprogress);
+      if (options2?.onprogress) {
+        this._progressHandlers.set(messageId, options2.onprogress);
         jsonrpcRequest.params = {
           ...request.params,
           _meta: {
@@ -24945,7 +24945,7 @@ var Protocol = class {
         reject(reason instanceof SdkError ? reason : new SdkError(SdkErrorCode.RequestTimeout, String(reason)));
       };
       this._responseHandlers.set(messageId, (response) => {
-        if (options?.signal?.aborted) return;
+        if (options2?.signal?.aborted) return;
         responseReceived = true;
         if (response instanceof Error) return reject(response);
         let decoded;
@@ -24956,12 +24956,12 @@ var Protocol = class {
         }
         if (decoded.kind === "invalid") return reject(decoded.error);
         if (decoded.kind === "input_required") {
-          if (options?.allowInputRequired === true) return resolve(manualInputRequiredValue(decoded));
+          if (options2?.allowInputRequired === true) return resolve(manualInputRequiredValue(decoded));
           const flow = {
             codec: codec2,
             request,
             resultSchema,
-            options,
+            options: options2,
             flowStartedAt,
             retry: (params, legOptions) => this._requestWithSchemaViaCodec(codec2, params === void 0 ? { method: request.method } : {
               method: request.method,
@@ -24976,11 +24976,11 @@ var Protocol = class {
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request.method}: ${parseResult.error}`));
         }, reject);
       });
-      onAbort = () => cancel(options?.signal?.reason);
-      options?.signal?.addEventListener("abort", onAbort, { once: true });
-      const timeout = options?.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
+      onAbort = () => cancel(options2?.signal?.reason);
+      options2?.signal?.addEventListener("abort", onAbort, { once: true });
+      const timeout = options2?.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
       const timeoutHandler = () => cancel(new SdkError(SdkErrorCode.RequestTimeout, "Request timed out", { timeout }));
-      this._setupTimeout(messageId, timeout, options?.maxTotalTimeout, timeoutHandler, options?.resetTimeoutOnProgress ?? false);
+      this._setupTimeout(messageId, timeout, options2?.maxTotalTimeout, timeoutHandler, options2?.resetTimeoutOnProgress ?? false);
       this._transport.send(outbound, {
         relatedRequestId,
         resumptionToken,
@@ -24992,7 +24992,7 @@ var Protocol = class {
         reject(error62);
       });
     }).finally(() => {
-      if (onAbort) options?.signal?.removeEventListener("abort", onAbort);
+      if (onAbort) options2?.signal?.removeEventListener("abort", onAbort);
       if (cleanupMessageId !== void 0) {
         this._responseHandlers.delete(cleanupMessageId);
         this._cleanupTimeout(cleanupMessageId);
@@ -25002,15 +25002,15 @@ var Protocol = class {
   /**
   * Emits a notification, which is a one-way message that does not expect a response.
   */
-  async notification(notification, options) {
-    return this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, options);
+  async notification(notification, options2) {
+    return this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, options2);
   }
   /**
   * The notification funnel proper, keyed by the resolved era codec —
   * direct sends and related notifications (`ctx.mcpReq.notify`) alike
   * resolve through the instance's negotiated era at send time.
   */
-  async _notificationViaCodec(codec2, notification, options) {
+  async _notificationViaCodec(codec2, notification, options2) {
     if (!this._transport) throw new SdkError(SdkErrorCode.NotConnected, "Not connected");
     if (isSpecNotificationMethod(notification.method) && !codec2.hasNotificationMethod(notification.method)) throw new SdkError(SdkErrorCode.MethodNotSupportedByProtocolVersion, `Notification '${notification.method}' is not supported by the negotiated protocol version (wire era ${codec2.era})`, {
       method: notification.method,
@@ -25021,17 +25021,17 @@ var Protocol = class {
       jsonrpc: "2.0",
       ...notification
     });
-    if ((this._options?.debouncedNotificationMethods ?? []).includes(notification.method) && !notification.params && options?.relatedRequestId === void 0) {
+    if ((this._options?.debouncedNotificationMethods ?? []).includes(notification.method) && !notification.params && options2?.relatedRequestId === void 0) {
       if (this._pendingDebouncedNotifications.has(notification.method)) return;
       this._pendingDebouncedNotifications.add(notification.method);
       Promise.resolve().then(() => {
         this._pendingDebouncedNotifications.delete(notification.method);
         if (!this._transport) return;
-        this._transport?.send(jsonrpcNotification, options).catch((error62) => this._onerror(error62));
+        this._transport?.send(jsonrpcNotification, options2).catch((error62) => this._onerror(error62));
       });
       return;
     }
-    await this._transport.send(jsonrpcNotification, options);
+    await this._transport.send(jsonrpcNotification, options2);
   }
   setRequestHandler(method, schemasOrHandler, maybeHandler) {
     this.assertRequestHandlerCapability(method);
@@ -25213,8 +25213,8 @@ var STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 var ReadBuffer = class {
   _buffer;
   _maxBufferSize;
-  constructor(options) {
-    this._maxBufferSize = options?.maxBufferSize ?? STDIO_DEFAULT_MAX_BUFFER_SIZE;
+  constructor(options2) {
+    this._maxBufferSize = options2?.maxBufferSize ?? STDIO_DEFAULT_MAX_BUFFER_SIZE;
   }
   append(chunk) {
     if ((this._buffer?.length ?? 0) + chunk.length > this._maxBufferSize) {
@@ -28257,39 +28257,39 @@ var require_schemes = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     wsComponent.fragment = void 0;
     return wsComponent;
   }
-  function urnParse(urnComponent, options) {
+  function urnParse(urnComponent, options2) {
     if (!urnComponent.path) {
       urnComponent.error = "URN can not be parsed";
       return urnComponent;
     }
     const matches = urnComponent.path.match(URN_REG);
     if (matches) {
-      const scheme = options.scheme || urnComponent.scheme || "urn";
+      const scheme = options2.scheme || urnComponent.scheme || "urn";
       urnComponent.nid = matches[1].toLowerCase();
       urnComponent.nss = matches[2];
-      const schemeHandler = getSchemeHandler(`${scheme}:${options.nid || urnComponent.nid}`);
+      const schemeHandler = getSchemeHandler(`${scheme}:${options2.nid || urnComponent.nid}`);
       urnComponent.path = void 0;
-      if (schemeHandler) urnComponent = schemeHandler.parse(urnComponent, options);
+      if (schemeHandler) urnComponent = schemeHandler.parse(urnComponent, options2);
     } else urnComponent.error = urnComponent.error || "URN can not be parsed.";
     return urnComponent;
   }
-  function urnSerialize(urnComponent, options) {
+  function urnSerialize(urnComponent, options2) {
     if (urnComponent.nid === void 0) throw new Error("URN without nid cannot be serialized");
-    const scheme = options.scheme || urnComponent.scheme || "urn";
+    const scheme = options2.scheme || urnComponent.scheme || "urn";
     const nid = urnComponent.nid.toLowerCase();
-    const schemeHandler = getSchemeHandler(`${scheme}:${options.nid || nid}`);
-    if (schemeHandler) urnComponent = schemeHandler.serialize(urnComponent, options);
+    const schemeHandler = getSchemeHandler(`${scheme}:${options2.nid || nid}`);
+    if (schemeHandler) urnComponent = schemeHandler.serialize(urnComponent, options2);
     const uriComponent = urnComponent;
     const nss = urnComponent.nss;
-    uriComponent.path = `${nid || options.nid}:${nss}`;
-    options.skipEscape = true;
+    uriComponent.path = `${nid || options2.nid}:${nss}`;
+    options2.skipEscape = true;
     return uriComponent;
   }
-  function urnuuidParse(urnComponent, options) {
+  function urnuuidParse(urnComponent, options2) {
     const uuidComponent = urnComponent;
     uuidComponent.uuid = uuidComponent.nss;
     uuidComponent.nss = void 0;
-    if (!options.tolerant && (!uuidComponent.uuid || !isUUID(uuidComponent.uuid))) uuidComponent.error = uuidComponent.error || "UUID is not valid.";
+    if (!options2.tolerant && (!uuidComponent.uuid || !isUUID(uuidComponent.uuid))) uuidComponent.error = uuidComponent.error || "UUID is not valid.";
     return uuidComponent;
   }
   function urnuuidSerialize(uuidComponent) {
@@ -28355,25 +28355,25 @@ var require_schemes = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
   const { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
   const { SCHEMES, getSchemeHandler } = require_schemes();
-  function normalize(uri, options) {
-    if (typeof uri === "string") uri = serialize(parse3(uri, options), options);
-    else if (typeof uri === "object") uri = parse3(serialize(uri, options), options);
+  function normalize(uri, options2) {
+    if (typeof uri === "string") uri = serialize(parse3(uri, options2), options2);
+    else if (typeof uri === "object") uri = parse3(serialize(uri, options2), options2);
     return uri;
   }
-  function resolve(baseURI, relativeURI, options) {
-    const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
+  function resolve(baseURI, relativeURI, options2) {
+    const schemelessOptions = options2 ? Object.assign({ scheme: "null" }, options2) : { scheme: "null" };
     const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
     return serialize(resolved, schemelessOptions);
   }
-  function resolveComponent(base, relative, options, skipNormalization) {
+  function resolveComponent(base, relative, options2, skipNormalization) {
     const target = {};
     if (!skipNormalization) {
-      base = parse3(serialize(base, options), options);
-      relative = parse3(serialize(relative, options), options);
+      base = parse3(serialize(base, options2), options2);
+      relative = parse3(serialize(relative, options2), options2);
     }
-    options = options || {};
-    if (!options.tolerant && relative.scheme) {
+    options2 = options2 || {};
+    if (!options2.tolerant && relative.scheme) {
       target.scheme = relative.scheme;
       target.userinfo = relative.userinfo;
       target.host = relative.host;
@@ -28411,25 +28411,25 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     target.fragment = relative.fragment;
     return target;
   }
-  function equal(uriA, uriB, options) {
+  function equal(uriA, uriB, options2) {
     if (typeof uriA === "string") {
       uriA = unescape(uriA);
-      uriA = serialize(normalizeComponentEncoding(parse3(uriA, options), true), {
-        ...options,
+      uriA = serialize(normalizeComponentEncoding(parse3(uriA, options2), true), {
+        ...options2,
         skipEscape: true
       });
     } else if (typeof uriA === "object") uriA = serialize(normalizeComponentEncoding(uriA, true), {
-      ...options,
+      ...options2,
       skipEscape: true
     });
     if (typeof uriB === "string") {
       uriB = unescape(uriB);
-      uriB = serialize(normalizeComponentEncoding(parse3(uriB, options), true), {
-        ...options,
+      uriB = serialize(normalizeComponentEncoding(parse3(uriB, options2), true), {
+        ...options2,
         skipEscape: true
       });
     } else if (typeof uriB === "object") uriB = serialize(normalizeComponentEncoding(uriB, true), {
-      ...options,
+      ...options2,
       skipEscape: true
     });
     return uriA.toLowerCase() === uriB.toLowerCase();
@@ -28451,24 +28451,24 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       secure: cmpts.secure,
       error: ""
     };
-    const options = Object.assign({}, opts);
+    const options2 = Object.assign({}, opts);
     const uriTokens = [];
-    const schemeHandler = getSchemeHandler(options.scheme || component.scheme);
-    if (schemeHandler && schemeHandler.serialize) schemeHandler.serialize(component, options);
-    if (component.path !== void 0) if (!options.skipEscape) {
+    const schemeHandler = getSchemeHandler(options2.scheme || component.scheme);
+    if (schemeHandler && schemeHandler.serialize) schemeHandler.serialize(component, options2);
+    if (component.path !== void 0) if (!options2.skipEscape) {
       component.path = escape(component.path);
       if (component.scheme !== void 0) component.path = component.path.split("%3A").join(":");
     } else component.path = unescape(component.path);
-    if (options.reference !== "suffix" && component.scheme) uriTokens.push(component.scheme, ":");
+    if (options2.reference !== "suffix" && component.scheme) uriTokens.push(component.scheme, ":");
     const authority = recomposeAuthority(component);
     if (authority !== void 0) {
-      if (options.reference !== "suffix") uriTokens.push("//");
+      if (options2.reference !== "suffix") uriTokens.push("//");
       uriTokens.push(authority);
       if (component.path && component.path[0] !== "/") uriTokens.push("/");
     }
     if (component.path !== void 0) {
       let s = component.path;
-      if (!options.absolutePath && (!schemeHandler || !schemeHandler.absolutePath)) s = removeDotSegments(s);
+      if (!options2.absolutePath && (!schemeHandler || !schemeHandler.absolutePath)) s = removeDotSegments(s);
       if (authority === void 0 && s[0] === "/" && s[1] === "/") s = "/%2F" + s.slice(2);
       uriTokens.push(s);
     }
@@ -28478,7 +28478,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
   }
   const URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
   function parse3(uri, opts) {
-    const options = Object.assign({}, opts);
+    const options2 = Object.assign({}, opts);
     const parsed = {
       scheme: void 0,
       userinfo: void 0,
@@ -28489,7 +28489,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       fragment: void 0
     };
     let isIP = false;
-    if (options.reference === "suffix") if (options.scheme) uri = options.scheme + ":" + uri;
+    if (options2.reference === "suffix") if (options2.scheme) uri = options2.scheme + ":" + uri;
     else uri = "//" + uri;
     const matches = uri.match(URI_PARSE);
     if (matches) {
@@ -28510,10 +28510,10 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       else if (parsed.scheme === void 0) parsed.reference = "relative";
       else if (parsed.fragment === void 0) parsed.reference = "absolute";
       else parsed.reference = "uri";
-      if (options.reference && options.reference !== "suffix" && options.reference !== parsed.reference) parsed.error = parsed.error || "URI is not a " + options.reference + " reference.";
-      const schemeHandler = getSchemeHandler(options.scheme || parsed.scheme);
-      if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
-        if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) try {
+      if (options2.reference && options2.reference !== "suffix" && options2.reference !== parsed.reference) parsed.error = parsed.error || "URI is not a " + options2.reference + " reference.";
+      const schemeHandler = getSchemeHandler(options2.scheme || parsed.scheme);
+      if (!options2.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
+        if (parsed.host && (options2.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) try {
           parsed.host = URL.domainToASCII(parsed.host.toLowerCase());
         } catch (e) {
           parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
@@ -28527,7 +28527,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
         if (parsed.path) parsed.path = escape(unescape(parsed.path));
         if (parsed.fragment) parsed.fragment = encodeURI(decodeURIComponent(parsed.fragment));
       }
-      if (schemeHandler && schemeHandler.parse) schemeHandler.parse(parsed, options);
+      if (schemeHandler && schemeHandler.parse) schemeHandler.parse(parsed, options2);
     } else parsed.error = parsed.error || "URI can not be parsed.";
     return parsed;
   }
@@ -29010,10 +29010,10 @@ var require_core$3 = /* @__PURE__ */ __commonJSMin(((exports) => {
   Ajv2.ValidationError = validation_error_1.default;
   Ajv2.MissingRefError = ref_error_1.default;
   exports.default = Ajv2;
-  function checkOptions(checkOpts, options, msg, log = "error") {
+  function checkOptions(checkOpts, options2, msg, log = "error") {
     for (const key in checkOpts) {
       const opt = key;
-      if (opt in options) this.logger[log](`${msg}: option ${key}. ${checkOpts[opt]}`);
+      if (opt in options2) this.logger[log](`${msg}: option ${key}. ${checkOpts[opt]}`);
     }
   }
   function getSchEnv(keyRef) {
@@ -32522,13 +32522,13 @@ function supportsScopeChallengeResolver(transport) {
 }
 var DEFAULT_LEGACY_SHIM_MAX_ROUNDS = 8;
 var DEFAULT_LEGACY_SHIM_ROUND_TIMEOUT_MS = 6e5;
-function resolveLegacyShimOptions(options) {
-  if (options?.maxRounds !== void 0 && (!Number.isInteger(options.maxRounds) || options.maxRounds < 1)) throw new RangeError(`inputRequired.maxRounds must be a positive integer (got ${options.maxRounds})`);
-  if (options?.roundTimeoutMs !== void 0 && (!Number.isFinite(options.roundTimeoutMs) || options.roundTimeoutMs <= 0)) throw new RangeError(`inputRequired.roundTimeoutMs must be a positive number (got ${options.roundTimeoutMs})`);
+function resolveLegacyShimOptions(options2) {
+  if (options2?.maxRounds !== void 0 && (!Number.isInteger(options2.maxRounds) || options2.maxRounds < 1)) throw new RangeError(`inputRequired.maxRounds must be a positive integer (got ${options2.maxRounds})`);
+  if (options2?.roundTimeoutMs !== void 0 && (!Number.isFinite(options2.roundTimeoutMs) || options2.roundTimeoutMs <= 0)) throw new RangeError(`inputRequired.roundTimeoutMs must be a positive number (got ${options2.roundTimeoutMs})`);
   return {
-    maxRounds: options?.maxRounds ?? DEFAULT_LEGACY_SHIM_MAX_ROUNDS,
-    roundTimeoutMs: options?.roundTimeoutMs ?? DEFAULT_LEGACY_SHIM_ROUND_TIMEOUT_MS,
-    legacyShim: options?.legacyShim ?? true
+    maxRounds: options2?.maxRounds ?? DEFAULT_LEGACY_SHIM_MAX_ROUNDS,
+    roundTimeoutMs: options2?.roundTimeoutMs ?? DEFAULT_LEGACY_SHIM_ROUND_TIMEOUT_MS,
+    legacyShim: options2?.legacyShim ?? true
   };
 }
 function coerceEmbeddedInputRequest(method, key, entry) {
@@ -32632,7 +32632,7 @@ var LegacyInputRequiredShim = class {
     }
   }
   /** Routes one embedded request through the host's existing 2025-era senders (gate already ran). */
-  async _dispatchLeg(embedded, options) {
+  async _dispatchLeg(embedded, options2) {
     switch (embedded.method) {
       case "elicitation/create": {
         let params = embedded.params;
@@ -32640,12 +32640,12 @@ var LegacyInputRequiredShim = class {
           ...params,
           elicitationId: syntheticElicitationId()
         };
-        return await this._host.sendElicitation(params, options);
+        return await this._host.sendElicitation(params, options2);
       }
       case "sampling/createMessage":
-        return await this._host.sendSampling(embedded.params, options);
+        return await this._host.sendSampling(embedded.params, options2);
       case "roots/list":
-        return await this._host.listRoots(embedded.params, options);
+        return await this._host.listRoots(embedded.params, options2);
     }
   }
 };
@@ -32692,9 +32692,9 @@ var Server = class extends Protocol {
       roundTimeoutMs: this._inputRequiredServing.roundTimeoutMs,
       resolvedClientCapabilities: (ctx) => this._inputRequestCapabilityView(ctx),
       verifyRequestState: (state, ctx, method) => this._verifyRequestState(state, ctx, method),
-      sendElicitation: (params, options) => this._sendElicitationLeg(params, options, { validateAcceptedContent: false }),
-      sendSampling: (params, options) => this.createMessage(params, options),
-      listRoots: (params, options) => this.listRoots(params, options)
+      sendElicitation: (params, options2) => this._sendElicitationLeg(params, options2, { validateAcceptedContent: false }),
+      sendSampling: (params, options2) => this.createMessage(params, options2),
+      listRoots: (params, options2) => this.listRoots(params, options2)
     });
   }
   /**
@@ -32704,17 +32704,17 @@ var Server = class extends Protocol {
   /**
   * Initializes this server with the given name and version information.
   */
-  constructor(_serverInfo, options) {
-    super(options);
+  constructor(_serverInfo, options2) {
+    super(options2);
     this._serverInfo = _serverInfo;
-    this._capabilities = options?.capabilities ? { ...options.capabilities } : {};
-    this._instructions = options?.instructions;
-    this._jsonSchemaValidator = options?.jsonSchemaValidator ?? new AjvJsonSchemaValidator();
-    this._requestStateVerify = options?.requestState?.verify;
-    this._inputRequiredServing = resolveLegacyShimOptions(options?.inputRequired);
-    if (options?.cacheHints !== void 0) {
-      for (const [operation, hint] of Object.entries(options.cacheHints)) if (hint !== void 0) assertValidCacheHint(hint, `cacheHints['${operation}']`);
-      this._cacheHints = options.cacheHints;
+    this._capabilities = options2?.capabilities ? { ...options2.capabilities } : {};
+    this._instructions = options2?.instructions;
+    this._jsonSchemaValidator = options2?.jsonSchemaValidator ?? new AjvJsonSchemaValidator();
+    this._requestStateVerify = options2?.requestState?.verify;
+    this._inputRequiredServing = resolveLegacyShimOptions(options2?.inputRequired);
+    if (options2?.cacheHints !== void 0) {
+      for (const [operation, hint] of Object.entries(options2.cacheHints)) if (hint !== void 0) assertValidCacheHint(hint, `cacheHints['${operation}']`);
+      this._cacheHints = options2.cacheHints;
     }
     this.setRequestHandler("initialize", (request) => this._oninitialize(request));
     this.setNotificationHandler("notifications/initialized", () => this.oninitialized?.());
@@ -32760,8 +32760,8 @@ var Server = class extends Protocol {
             }
           });
         },
-        elicitInput: (params, options) => this.elicitInput(params, options),
-        requestSampling: (params, options) => this.createMessage(params, options)
+        elicitInput: (params, options2) => this.elicitInput(params, options2),
+        requestSampling: (params, options2) => this.createMessage(params, options2)
       },
       http: hasHttpInfo ? {
         ...ctx.http,
@@ -33110,7 +33110,7 @@ var Server = class extends Protocol {
     this._assertPushApiInServedEra("ping");
     return this.request({ method: "ping" });
   }
-  async createMessage(params, options) {
+  async createMessage(params, options2) {
     this._assertPushApiInServedEra("sampling/createMessage");
     if ((params.tools || params.toolChoice) && !this._clientCapabilities?.sampling?.tools) throw new SdkError(SdkErrorCode.CapabilityNotSupported, "Client does not support sampling tools capability.");
     if (params.messages.length > 0) {
@@ -33134,7 +33134,7 @@ var Server = class extends Protocol {
     const wide = await this.request({
       method: "sampling/createMessage",
       params
-    }, options);
+    }, options2);
     const outcome = this._wireCodec().samplingResultVariant(hasTools, wide);
     if (!outcome.ok) throw new SdkError(SdkErrorCode.InvalidResult, `Invalid sampling/createMessage result: ${outcome.reason === "invalid" ? outcome.message : outcome.reason}`);
     return outcome.value;
@@ -33151,7 +33151,7 @@ var Server = class extends Protocol {
   * results in the 2026-07-28 protocol. If your factory serves both eras, this only works on the
   * legacy path.
   */
-  async elicitInput(params, options) {
+  async elicitInput(params, options2) {
     this._assertPushApiInServedEra("elicitation/create");
     switch (params.mode ?? "form") {
       case "url":
@@ -33161,7 +33161,7 @@ var Server = class extends Protocol {
         if (!this._clientCapabilities?.elicitation?.form) throw new SdkError(SdkErrorCode.CapabilityNotSupported, "Client does not support form elicitation.");
         break;
     }
-    return this._sendElicitationLeg(params, options);
+    return this._sendElicitationLeg(params, options2);
   }
   /**
   * The capability-check-free core of {@linkcode elicitInput}. The shim
@@ -33171,7 +33171,7 @@ var Server = class extends Protocol {
   * modern client driver (handlers validate via the schema-aware
   * `acceptedContent` overload and can re-ask).
   */
-  async _sendElicitationLeg(params, options, behavior) {
+  async _sendElicitationLeg(params, options2, behavior) {
     const mode = params.mode ?? "form";
     const validateAcceptedContent = behavior?.validateAcceptedContent ?? true;
     switch (mode) {
@@ -33180,7 +33180,7 @@ var Server = class extends Protocol {
         return this.request({
           method: "elicitation/create",
           params: urlParams
-        }, options);
+        }, options2);
       }
       case "form": {
         const formParams = params.mode === "form" ? params : {
@@ -33190,7 +33190,7 @@ var Server = class extends Protocol {
         const result = await this.request({
           method: "elicitation/create",
           params: formParams
-        }, options);
+        }, options2);
         if (validateAcceptedContent && result.action === "accept" && result.content && formParams.requestedSchema) try {
           const validationResult = this._jsonSchemaValidator.getValidator(formParams.requestedSchema)(result.content);
           if (!validationResult.valid) throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Elicitation response content does not match requested schema: ${validationResult.errorMessage}`);
@@ -33215,12 +33215,12 @@ var Server = class extends Protocol {
   * @param options Optional notification options. Useful when the completion notification should be related to a prior request.
   * @returns A function that emits the completion notification when awaited.
   */
-  createElicitationCompletionNotifier(elicitationId, options) {
+  createElicitationCompletionNotifier(elicitationId, options2) {
     if (!this._clientCapabilities?.elicitation?.url) throw new SdkError(SdkErrorCode.CapabilityNotSupported, "Client does not support URL elicitation (required for notifications/elicitation/complete)");
     return () => this.notification({
       method: "notifications/elicitation/complete",
       params: { elicitationId }
-    }, options);
+    }, options2);
   }
   /**
   * Requests the list of roots from the client.
@@ -33231,12 +33231,12 @@ var Server = class extends Protocol {
   * push-style server-to-client request model is replaced by input_required results in the
   * 2026-07-28 protocol. If your factory serves both eras, this only works on the legacy path.
   */
-  async listRoots(params, options) {
+  async listRoots(params, options2) {
     this._assertPushApiInServedEra("roots/list");
     return this.request({
       method: "roots/list",
       params
-    }, options);
+    }, options2);
   }
   /**
   * Sends a logging message to the client, if connected.
@@ -33311,11 +33311,11 @@ var McpServer = class {
       return;
     }
   }
-  constructor(serverInfo, options) {
-    this.server = new Server(serverInfo, options);
-    if (options?.capabilities?.tools) this.setToolRequestHandlers();
-    if (options?.capabilities?.resources) this.setResourceRequestHandlers();
-    if (options?.capabilities?.prompts) this.setPromptRequestHandlers();
+  constructor(serverInfo, options2) {
+    this.server = new Server(serverInfo, options2);
+    if (options2?.capabilities?.tools) this.setToolRequestHandlers();
+    if (options2?.capabilities?.resources) this.setResourceRequestHandlers();
+    if (options2?.capabilities?.prompts) this.setPromptRequestHandlers();
   }
   /**
   * Attaches to the given transport, starts it, and starts listening for messages.
@@ -33899,10 +33899,10 @@ var StdioServerTransport = class {
   _readBuffer;
   _started = false;
   _closed = false;
-  constructor(_stdin = process2.stdin, _stdout = process2.stdout, options) {
+  constructor(_stdin = process2.stdin, _stdout = process2.stdout, options2) {
     this._stdin = _stdin;
     this._stdout = _stdout;
-    this._readBuffer = new ReadBuffer({ maxBufferSize: options?.maxBufferSize });
+    this._readBuffer = new ReadBuffer({ maxBufferSize: options2?.maxBufferSize });
   }
   onclose;
   onerror;
@@ -34010,14 +34010,14 @@ var StdioConnectionChannel = class {
   }
   async start() {
   }
-  async send(message, options) {
+  async send(message, options2) {
     if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
       const { id } = message;
       if (id !== void 0) this._settle(id);
     }
     if (this._closed) return;
     if (this._outboundIntercept?.(message) === "handled") return;
-    return this._wire.send(message, options);
+    return this._wire.send(message, options2);
   }
   setProtocolVersion = (version2) => {
     this._wire.setProtocolVersion?.(version2);
@@ -34110,16 +34110,16 @@ function classifyOpeningMessage(message) {
     }
   };
 }
-function serveStdio(factory, options = {}) {
-  const legacyMode = options.legacy ?? "serve";
-  const wire = options.transport ?? new StdioServerTransport();
+function serveStdio(factory, options2 = {}) {
+  const legacyMode = options2.legacy ?? "serve";
+  const wire = options2.transport ?? new StdioServerTransport();
   let state = { phase: "opening" };
   let discarding;
   let closing = false;
   const isTornDown = () => closing || state.phase === "closed";
   const reportError = (error62) => {
     try {
-      options.onerror?.(error62);
+      options2.onerror?.(error62);
     } catch {
     }
   };
@@ -34132,7 +34132,7 @@ function serveStdio(factory, options = {}) {
       ...data !== void 0 && { data }
     }
   }).catch((error62) => reportError(toError(error62)));
-  const listenRouter = new StdioListenRouter(options.maxSubscriptions ?? DEFAULT_MAX_SUBSCRIPTIONS);
+  const listenRouter = new StdioListenRouter(options2.maxSubscriptions ?? DEFAULT_MAX_SUBSCRIPTIONS);
   const modernOutboundIntercept = (message) => {
     if (!isJSONRPCNotification(message)) return void 0;
     const routed = listenRouter.routeOutbound(message);
@@ -34444,8 +34444,8 @@ var choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
   optionIds: external_exports.array(identifier).min(1)
 }).strict().superRefine((request, context) => {
-  const options = Object.keys(request.question.options);
-  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== options.length || request.optionIds.some((id) => !options.includes(id))) {
+  const options2 = Object.keys(request.question.options);
+  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== options2.length || request.optionIds.some((id) => !options2.includes(id))) {
     context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
   }
 });
@@ -34560,6 +34560,273 @@ var providerConfigSchema = external_exports.union([
   layaConfigSchema
 ]);
 
+// src/domain/study/presentation.ts
+var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var nodeSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ id: identifier2, kind: external_exports.literal("expose"), itemId: identifier2 }).strict(),
+  external_exports.object({ id: identifier2, kind: external_exports.literal("ask"), taskId: identifier2 }).strict(),
+  external_exports.object({ id: identifier2, kind: external_exports.literal("terminal"), outcome: identifier2 }).strict()
+]);
+var responseIntervalSchema = external_exports.object({
+  type: external_exports.enum(["score", "noul"]),
+  minimum: external_exports.number().finite(),
+  maximum: external_exports.number().finite(),
+  minimumInclusive: external_exports.boolean(),
+  maximumInclusive: external_exports.boolean()
+}).strict();
+var transitionSchema = external_exports.object({
+  fromNodeId: identifier2,
+  optionId: identifier2.optional(),
+  when: responseIntervalSchema.optional(),
+  toNodeId: identifier2
+}).strict();
+var presentationSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("graph"),
+    nodes: external_exports.array(nodeSchema).min(1),
+    transitions: external_exports.array(transitionSchema),
+    entryNodeId: identifier2,
+    maxDecisions: external_exports.number().int().positive()
+  }).strict()
+]);
+
+// src/domain/study/stimulus.ts
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose2 = external_exports.string().trim().min(1);
+var sourceReferenceSchema = external_exports.object({
+  path: external_exports.string().min(1),
+  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var stimulusItemSchema = external_exports.object({
+  id: identifier3,
+  text: prose2
+}).strict();
+
+// src/domain/study/task.ts
+var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose3 = external_exports.string().trim().min(1);
+var taskFields = {
+  id: identifier4,
+  instructions: prose3,
+  comparisonKey: identifier4.optional(),
+  responseHistory: external_exports.enum(["include", "omit"]).optional()
+};
+var options = external_exports.record(identifier4, prose3).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+function validateChoiceTask(task, context) {
+  if (typeof task !== "object" || task === null || !("options" in task) || !("answerKeyOptionId" in task)) return;
+  const options2 = task.options;
+  const answerKeyOptionId = task.answerKeyOptionId;
+  if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in options2)) {
+    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+  }
+}
+var legacyChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  options,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var typedChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("choice"),
+  options,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var scoreTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("score"),
+  rubric: external_exports.array(prose3).min(2)
+}).strict();
+var noulTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("noul"),
+  criteria: external_exports.object({ true: prose3.optional(), false: prose3.optional() }).strict().optional()
+}).strict();
+var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
+var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
+
+// src/domain/study/arm.ts
+var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose4 = external_exports.string().trim().min(1);
+var journeyDefinitionFields = {
+  id: identifier5,
+  label: prose4,
+  items: external_exports.array(stimulusItemSchema).min(1),
+  tasks: external_exports.array(taskSchema).min(1),
+  presentation: presentationSchema
+};
+var journeyDefinitionSchema = external_exports.object(journeyDefinitionFields).strict().superRefine(validateJourneyDefinition);
+var studyArmSchema = external_exports.object({
+  ...journeyDefinitionFields,
+  sources: external_exports.array(sourceReferenceSchema).min(1)
+}).strict().superRefine(validateJourneyDefinition);
+function validateJourneyDefinition(arm, context) {
+  const presentation = arm.presentation;
+  const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
+  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
+  const itemIds = new Set(arm.items.map((item) => item.id));
+  const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
+  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
+  if (new Set(allIds).size !== allIds.length) {
+    context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
+  }
+  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
+  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
+  }
+  if (presentation.kind === "sequence") return;
+  const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
+  if (!nodesById.has(presentation.entryNodeId)) {
+    context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
+  }
+  for (const [index, node2] of presentation.nodes.entries()) {
+    if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
+    }
+    if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
+    }
+  }
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const [index, edge] of presentation.transitions.entries()) {
+    const source = nodesById.get(edge.fromNodeId);
+    if (!source) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
+      continue;
+    }
+    if (!nodesById.has(edge.toNodeId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
+    }
+    const edges = outgoing.get(edge.fromNodeId) ?? [];
+    outgoing.set(edge.fromNodeId, [...edges, edge]);
+    if (source.kind === "terminal") {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
+    }
+    if (source.kind === "expose" && (edge.optionId !== void 0 || edge.when !== void 0)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Exposure transitions must be unconditional." });
+    }
+  }
+  for (const [index, node2] of presentation.nodes.entries()) {
+    const edges = outgoing.get(node2.id) ?? [];
+    if (node2.kind === "terminal") {
+      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Terminal nodes cannot have outgoing transitions." });
+      continue;
+    }
+    if (node2.kind === "expose") {
+      if (edges.length !== 1 || edges[0]?.optionId !== void 0 || edges[0]?.when !== void 0) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
+      }
+      continue;
+    }
+    const task = taskById.get(node2.taskId);
+    if (!task) continue;
+    if (task.type !== "score" && task.type !== "noul") {
+      const optionIds = Object.keys(task.options);
+      const edgeOptionIds = edges.map((edge) => edge.optionId);
+      if (edges.some((edge) => edge.when !== void 0) || edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Choice task transitions must contain exactly one edge for every offered option and no others." });
+      }
+    } else {
+      const maximum = task.type === "score" ? task.rubric.length - 1 : 1;
+      validateResponseIntervals(edges, task.type, maximum, context, index);
+    }
+  }
+  if (nodesById.has(presentation.entryNodeId)) {
+    const visited = /* @__PURE__ */ new Set();
+    const pending = [presentation.entryNodeId];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
+    }
+    const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
+    if (unreachable.length > 0) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
+    }
+    const state = /* @__PURE__ */ new Map();
+    const decisionsToTerminal = /* @__PURE__ */ new Map();
+    let containsCycle = false;
+    const longestDecisionsToTerminal = (nodeId) => {
+      const node2 = nodesById.get(nodeId);
+      if (!node2) return null;
+      if (state.get(nodeId) === "visiting") {
+        containsCycle = true;
+        return null;
+      }
+      if (state.get(nodeId) === "visited") return decisionsToTerminal.get(nodeId) ?? null;
+      state.set(nodeId, "visiting");
+      let longest;
+      if (node2.kind === "terminal") {
+        longest = 0;
+      } else {
+        const edges = outgoing.get(nodeId) ?? [];
+        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
+        const completedContinuations = continuations.filter((count) => count !== null);
+        if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
+          longest = null;
+        } else {
+          const nextDecisionCount = Math.max(...completedContinuations);
+          longest = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+        }
+      }
+      state.set(nodeId, "visited");
+      decisionsToTerminal.set(nodeId, longest);
+      return longest;
+    };
+    const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
+    if (containsCycle) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Graph contains a cycle; every journey must terminate." });
+    } else if (longestPath === null) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Every graph branch must reach a terminal node." });
+    } else if (longestPath > presentation.maxDecisions) {
+      context.addIssue({
+        code: "custom",
+        path: ["presentation", "maxDecisions"],
+        message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`
+      });
+    }
+  }
+}
+function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
+  const issues = context;
+  const ranges = edges.map((edge, index) => ({ edge, index, range: edge.when }));
+  const fail = (message) => issues.addIssue({
+    code: "custom",
+    path: ["presentation", "nodes", nodeIndex],
+    message
+  });
+  if (ranges.some(({ edge, range }) => edge.optionId !== void 0 || range === void 0 || range.type !== type)) {
+    fail(`${type.toUpperCase()} task transitions must use matching typed response intervals only.`);
+    return;
+  }
+  const ordered = ranges.toSorted((left, right) => left.range.minimum - right.range.minimum || Number(right.range.minimumInclusive) - Number(left.range.minimumInclusive));
+  for (const { range } of ordered) {
+    if (range.minimum > range.maximum || range.minimum < 0 || range.maximum > maximum || range.minimum === range.maximum && !(range.minimumInclusive && range.maximumInclusive)) {
+      fail(`${type.toUpperCase()} route interval is reversed, empty, or outside its response domain.`);
+      return;
+    }
+  }
+  const first = ordered[0]?.range;
+  const last = ordered.at(-1)?.range;
+  if (!first || !last || first.minimum !== 0 || !first.minimumInclusive || last.maximum !== maximum || !last.maximumInclusive) {
+    fail(`${type.toUpperCase()} route intervals must cover the complete response domain.`);
+    return;
+  }
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1].range;
+    const current = ordered[index].range;
+    if (previous.maximum > current.minimum || previous.maximum === current.minimum && previous.maximumInclusive && current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals overlap or leave an ambiguous boundary.`);
+      return;
+    }
+    if (previous.maximum < current.minimum || previous.maximum === current.minimum && !previous.maximumInclusive && !current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals leave a gap in the response domain.`);
+      return;
+    }
+  }
+}
+
 // src/domain/run/request.ts
 var materialItemSchema = external_exports.object({
   id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
@@ -34586,6 +34853,20 @@ var inlineRunRequestSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["maxCalls"], message: "maxCalls must allow at least one decision for each respondent." });
   }
 });
+var inlineJourneyRequestSchema = external_exports.object({
+  kind: external_exports.literal("journey"),
+  label: external_exports.string().min(1).max(120).optional(),
+  respondents: external_exports.array(respondentProfileSchema).min(1),
+  journey: journeyDefinitionSchema,
+  provider: providerConfigSchema,
+  maxCalls: external_exports.number().int().positive()
+}).strict().superRefine((request, context) => {
+  const respondentIds = request.respondents.map(({ id }) => id);
+  if (new Set(respondentIds).size !== respondentIds.length) {
+    context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
+  }
+});
+var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
 
 // src/infrastructure/credentials/windows.ts
 import { spawn as nodeSpawn } from "node:child_process";
@@ -34611,10 +34892,10 @@ var WindowsCredentialStore = class {
   targets;
   helperPath;
   run;
-  constructor(options = {}) {
-    this.targets = { ...defaultTargets, ...options.credentialTargets };
-    this.helperPath = options.helperPath ?? locateHelper();
-    this.run = options.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
+  constructor(options2 = {}) {
+    this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    this.helperPath = options2.helperPath ?? locateHelper();
+    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
   }
   async availability(route) {
     try {
@@ -34711,6 +34992,11 @@ import { randomUUID } from "node:crypto";
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
+function questionForTask(task) {
+  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options } };
+  if ("rubric" in task) return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
+  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
+}
 var promptContract = {
   version: 6,
   stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
@@ -34744,6 +35030,75 @@ function emptyTrajectory() {
     eventRange: null,
     choices: [],
     responses: []
+  });
+}
+function compactTrajectory(arm, history) {
+  const exposureIds = [];
+  const choices = [];
+  const responses = [];
+  for (const event of history) {
+    if (event.type === "exposure") {
+      exposureIds.push(event.itemId);
+      continue;
+    }
+    const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
+    const result = event.type === "response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
+    if (!task) throw new Error(`Unknown task ${event.taskId} in journey history.`);
+    if (result.type === "choice") {
+      const choiceMeaning = task.type !== "score" && task.type !== "noul" ? task.options[result.choice] : void 0;
+      if (choiceMeaning === void 0) throw new Error(`Unknown choice ${result.choice} for task ${event.taskId} in journey history.`);
+      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+      responses.push(response);
+      choices.push({ taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds] });
+    } else if (result.type === "score") {
+      if (task.type !== "score" || result.legend[String(Math.round(result.score))] === void 0) throw new Error(`Score response does not match task ${event.taskId}.`);
+      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds] });
+    } else {
+      if (task.type !== "noul") throw new Error(`Noul response does not match task ${event.taskId}.`);
+      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds] });
+    }
+  }
+  const body = {
+    version: 1,
+    eventCount: history.length,
+    exposureCount: exposureIds.length,
+    decisionCount: responses.length,
+    eventRange: history.length === 0 ? null : { firstSequence: history[0].sequence, lastSequence: history.at(-1).sequence },
+    choices,
+    responses
+  };
+  return finishTrajectory(body);
+}
+function compileDecisionPacket(arm, profile, taskId, history = []) {
+  const task = arm.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) throw new Error(`Unknown task ${taskId}.`);
+  const itemsById = new Map(arm.items.map((item) => [item.id, item]));
+  let itemIds;
+  if (arm.presentation.kind === "sequence") {
+    itemIds = arm.items.map((item) => item.id);
+  } else {
+    const lastChoiceIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
+    itemIds = history.slice(lastChoiceIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
+  }
+  const encounteredItems = itemIds.map((id) => {
+    const item = itemsById.get(id);
+    if (!item) throw new Error(`Unknown encountered item ${id}.`);
+    return { id: item.id, text: item.text };
+  });
+  return compileDecisionRequest({
+    respondentProfile: {
+      intent: profile.intent,
+      context: profile.context,
+      desired_outcome: profile.desired_outcome,
+      engagement_cues: profile.engagement_cues,
+      friction_cues: profile.friction_cues
+    },
+    encounteredItems,
+    trajectory: compactTrajectory(
+      arm,
+      task.responseHistory === "omit" ? history.filter((event) => event.type === "exposure") : history
+    ),
+    question: questionForTask(task)
   });
 }
 function compileDecisionRequest(parts) {
@@ -34788,9 +35143,258 @@ function canonicalize(value) {
   throw new TypeError("Fingerprint input must contain only JSON values.");
 }
 
+// src/domain/journey/packet-walker.ts
+import { createHash as createHash3 } from "node:crypto";
+var DEFAULT_MAX_PREFLIGHT_PACKETS = 1e5;
+var DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
+function pathIdentity(choices) {
+  return choices.length === 0 ? "root" : choices.map(({ nodeId, choiceId }) => `${nodeId}=${choiceId}`).join(">");
+}
+function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
+  const maxPackets = options2.maxPackets ?? DEFAULT_MAX_PREFLIGHT_PACKETS;
+  const maxPacketBytes = options2.maxPacketBytes ?? DEFAULT_MAX_PREFLIGHT_PACKET_BYTES;
+  let packetCount = 0;
+  let packetBytes = 0;
+  let terminalJourneyCount = 0;
+  let incompleteReason;
+  let unverifiedReason;
+  let stopped = false;
+  const markIncomplete = (reason) => {
+    incompleteReason ??= reason;
+    stopped = true;
+  };
+  if (!Number.isSafeInteger(maxPackets) || maxPackets < 0) {
+    markIncomplete("Preflight packet limit must be a non-negative safe integer.");
+  }
+  if (!Number.isSafeInteger(maxPacketBytes) || maxPacketBytes < 0 || maxPacketBytes > DEFAULT_MAX_PREFLIGHT_PACKET_BYTES) {
+    markIncomplete(`Preflight byte limit must be between 0 and ${DEFAULT_MAX_PREFLIGHT_PACKET_BYTES}.`);
+  }
+  if (arms.length === 0 || respondents.length === 0) {
+    markIncomplete("Preflight requires at least one study arm and one respondent.");
+  }
+  const emitPacket = (arm, respondent, taskId, nodeId, decisionIndex, choices, events) => {
+    if (packetCount >= maxPackets) {
+      markIncomplete(`Preflight packet limit (${maxPackets}) reached before traversal completed.`);
+      return;
+    }
+    const pathId = pathIdentity(choices);
+    let request;
+    try {
+      request = compileDecisionPacket(arm, respondent, taskId, events);
+    } catch (error62) {
+      markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error62 instanceof Error ? error62.message : String(error62)}`);
+      return;
+    }
+    if (request.state.trajectory.responses.length > 0) {
+      unverifiedReason ??= "Prior response history can include provider probabilities or confidence with variable serialized size; future packet fit is not conservatively bounded.";
+    }
+    const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
+    const packetId = `packet-${createHash3("sha256").update(identity).digest("hex")}`;
+    const packet = { packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request };
+    const size = Buffer.byteLength(JSON.stringify(packet), "utf8");
+    if (packetBytes + size > maxPacketBytes) {
+      markIncomplete(`Preflight packet byte limit (${maxPacketBytes}) reached before traversal completed.`);
+      return;
+    }
+    visitPacket(packet);
+    packetCount += 1;
+    packetBytes += size;
+  };
+  for (const arm of arms) {
+    if (stopped) break;
+    const validation = ("sources" in arm ? studyArmSchema : journeyDefinitionSchema).safeParse(arm);
+    if (!validation.success) {
+      markIncomplete(`Study arm ${arm.id} is invalid: ${validation.error.issues.map((issue2) => issue2.message).join(" ")}`);
+      break;
+    }
+    for (const respondent of respondents) {
+      if (stopped) break;
+      const events = [];
+      const choices = [];
+      if (arm.presentation.kind === "sequence") {
+        for (const item of arm.items) {
+          events.push({ type: "exposure", sequence: events.length, nodeId: `sequence-expose-${item.id}`, itemId: item.id });
+        }
+        const visitTask = (taskIndex) => {
+          if (stopped) return;
+          const task = arm.tasks[taskIndex];
+          if (!task) {
+            terminalJourneyCount += 1;
+            return;
+          }
+          const decisionIndex = taskIndex + 1;
+          const nodeId = `sequence-ask-${task.id}`;
+          emitPacket(arm, respondent, task.id, nodeId, decisionIndex, choices, events);
+          if (stopped) return;
+          for (const response of representativeResponses(task)) {
+            const choiceId = response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`;
+            choices.push({ nodeId, choiceId });
+            events.push({ type: "response", sequence: events.length, nodeId, taskId: task.id, result: response });
+            visitTask(taskIndex + 1);
+            events.pop();
+            choices.pop();
+            if (stopped) return;
+          }
+        };
+        visitTask(0);
+        continue;
+      }
+      const graph = arm.presentation;
+      const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+      const activeNodes = /* @__PURE__ */ new Set();
+      const visitNode = (nodeId, decisionCount) => {
+        if (stopped) return;
+        if (activeNodes.has(nodeId)) {
+          markIncomplete(`Encountered a graph cycle at node ${nodeId} in ${respondent.id}/${arm.id}.`);
+          return;
+        }
+        const node2 = nodes.get(nodeId);
+        if (!node2) {
+          markIncomplete(`Graph references unknown node ${nodeId} in ${respondent.id}/${arm.id}.`);
+          return;
+        }
+        if (node2.kind === "terminal") {
+          terminalJourneyCount += 1;
+          return;
+        }
+        activeNodes.add(nodeId);
+        if (node2.kind === "expose") {
+          const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+          if (!edge) {
+            markIncomplete(`Exposure node ${node2.id} has no transition in ${respondent.id}/${arm.id}.`);
+          } else {
+            events.push({ type: "exposure", sequence: events.length, nodeId, itemId: node2.itemId });
+            visitNode(edge.toNodeId, decisionCount);
+            events.pop();
+          }
+          activeNodes.delete(nodeId);
+          return;
+        }
+        if (decisionCount >= graph.maxDecisions) {
+          markIncomplete(`Decision bound reached before terminal at node ${nodeId} in ${respondent.id}/${arm.id}.`);
+          activeNodes.delete(nodeId);
+          return;
+        }
+        const task = arm.tasks.find((candidate) => candidate.id === node2.taskId);
+        if (!task) {
+          markIncomplete(`Ask node ${nodeId} references unknown task ${node2.taskId} in ${respondent.id}/${arm.id}.`);
+          activeNodes.delete(nodeId);
+          return;
+        }
+        emitPacket(arm, respondent, task.id, nodeId, decisionCount + 1, choices, events);
+        if (stopped) {
+          activeNodes.delete(nodeId);
+          return;
+        }
+        const branches = "options" in task ? Object.keys(task.options).map((choice) => ({ edge: graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choice), response: { type: "choice", choice } })) : graph.transitions.filter((candidate) => candidate.fromNodeId === nodeId && candidate.when !== void 0).map((edge) => ({ edge, response: representativeResponses(task, edge.when)[0] }));
+        for (const branch of branches) {
+          const response = branch.response;
+          const choiceId = response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`;
+          const edge = branch.edge;
+          if (!edge) {
+            markIncomplete(`Ask node ${nodeId} has no transition for response ${choiceId} in ${respondent.id}/${arm.id}.`);
+            break;
+          }
+          choices.push({ nodeId, choiceId });
+          events.push({ type: "response", sequence: events.length, nodeId, taskId: task.id, result: response });
+          visitNode(edge.toNodeId, decisionCount + 1);
+          events.pop();
+          choices.pop();
+          if (stopped) break;
+        }
+        activeNodes.delete(nodeId);
+      };
+      visitNode(graph.entryNodeId, 0);
+    }
+  }
+  return {
+    status: incompleteReason === void 0 ? "complete" : "incomplete",
+    packetCount,
+    terminalJourneyCount,
+    ...incompleteReason === void 0 ? {} : { incompleteReason },
+    ...unverifiedReason === void 0 ? {} : { unverifiedReason }
+  };
+}
+function representativeResponses(task, interval) {
+  if ("options" in task) return Object.keys(task.options).map((choice) => ({ type: "choice", choice }));
+  const values = [];
+  if (interval) {
+    values.push(interval.minimum === interval.maximum ? interval.minimum : (interval.minimum + interval.maximum) / 2);
+  } else if ("rubric" in task) {
+    const last = task.rubric.length - 1;
+    for (let level = 0; level <= last; level += 0.5) values.push(level);
+  } else values.push(0, 0.5, 1);
+  return values.map((value) => {
+    if ("rubric" in task) {
+      const probabilities2 = Object.fromEntries(task.rubric.map((_meaning, index) => [String(index), 0]));
+      const low = Math.floor(value);
+      const high = Math.ceil(value);
+      if (low === high) probabilities2[String(low)] = 1;
+      else {
+        probabilities2[String(low)] = high - value;
+        probabilities2[String(high)] = value - low;
+      }
+      return { type: "score", score: value, legend: Object.fromEntries(task.rubric.map((meaning, index) => [String(index), meaning])), probabilities: probabilities2 };
+    }
+    return { type: "noul", noul: value };
+  });
+}
+
+// src/domain/journey/route-bounds.ts
+function estimateRunDecisionCalls(arms, respondents) {
+  if (arms.length === 0) throw new Error("Run call bounds require at least one study arm.");
+  if (respondents.length === 0) throw new Error("Run call bounds require at least one frozen respondent.");
+  let minimumDecisionCalls = 0;
+  let maximumDecisionCalls = 0;
+  for (const rawArm of arms) {
+    const arm = ("sources" in rawArm ? studyArmSchema : journeyDefinitionSchema).parse(rawArm);
+    const range = arm.presentation.kind === "sequence" ? { minimum: arm.tasks.length, maximum: arm.tasks.length } : graphDecisionRange(arm);
+    minimumDecisionCalls += range.minimum * respondents.length;
+    maximumDecisionCalls += range.maximum * respondents.length;
+    if (!Number.isSafeInteger(minimumDecisionCalls) || !Number.isSafeInteger(maximumDecisionCalls)) {
+      throw new RangeError("Run decision-call bounds exceed the safe integer range.");
+    }
+  }
+  return { minimumDecisionCalls, maximumDecisionCalls };
+}
+function graphDecisionRange(arm) {
+  if (arm.presentation.kind !== "graph") throw new Error("Graph decision bounds require a graph presentation.");
+  const graph = arm.presentation;
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const edge of graph.transitions) {
+    const edges = outgoing.get(edge.fromNodeId) ?? [];
+    edges.push(edge);
+    outgoing.set(edge.fromNodeId, edges);
+  }
+  const memo3 = /* @__PURE__ */ new Map();
+  const active = /* @__PURE__ */ new Set();
+  const visit2 = (nodeId) => {
+    const cached3 = memo3.get(nodeId);
+    if (cached3) return cached3;
+    if (active.has(nodeId)) throw new Error(`Run call bounds encountered a graph cycle at ${nodeId}.`);
+    const node2 = nodes.get(nodeId);
+    if (!node2) throw new Error(`Run call bounds encountered an unknown node ${nodeId}.`);
+    if (node2.kind === "terminal") return { minimum: 0, maximum: 0 };
+    active.add(nodeId);
+    const edges = outgoing.get(nodeId) ?? [];
+    if (edges.length === 0) throw new Error(`Run call bounds found no outgoing transition at ${nodeId}.`);
+    const branches = edges.map((edge) => visit2(edge.toNodeId));
+    const decisionCost = node2.kind === "ask" ? 1 : 0;
+    const range = {
+      minimum: decisionCost + Math.min(...branches.map((branch) => branch.minimum)),
+      maximum: decisionCost + Math.max(...branches.map((branch) => branch.maximum))
+    };
+    active.delete(nodeId);
+    memo3.set(nodeId, range);
+    return range;
+  };
+  return visit2(graph.entryNodeId);
+}
+
 // src/application/run-inspection.ts
 function fingerprintRunRequest(input2) {
-  const parsed = inlineRunRequestSchema.safeParse(input2);
+  const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) return void 0;
   return hashCanonical({ request: parsed.data, compilerFingerprint: promptContractHash() });
 }
@@ -34828,11 +35432,12 @@ function problemForFit(respondentId, fit) {
   };
 }
 async function prepareRun(input2, provider) {
-  const parsed = inlineRunRequestSchema.safeParse(input2);
+  const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) {
     return { inspection: invalidRequestInspection(input2, parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; ")) };
   }
   const request = parsed.data;
+  if (request.kind === "journey") return prepareJourneyAdmission(request, provider);
   const compilerFingerprint = promptContractHash();
   const evaluations = [];
   const fits = [];
@@ -34890,11 +35495,75 @@ async function prepareRun(input2, provider) {
   };
   return { inspection, prepared };
 }
+async function prepareJourneyAdmission(request, provider) {
+  const compilerFingerprint = promptContractHash();
+  let callBounds;
+  try {
+    callBounds = estimateRunDecisionCalls([request.journey], request.respondents);
+  } catch (error62) {
+    return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: 0, problems: [{ code: "invalid_journey", message: error62 instanceof Error ? error62.message : "Journey routes are invalid." }], fits: [] } };
+  }
+  const problems = [];
+  const warnings = [];
+  const fits = [];
+  const packets = [];
+  if (request.maxCalls < callBounds.minimumDecisionCalls) {
+    problems.push({ code: "insufficient_call_limit", message: `maxCalls (${request.maxCalls}) is below the journey minimum (${callBounds.minimumDecisionCalls}).` });
+  } else if (request.maxCalls < callBounds.maximumDecisionCalls) {
+    warnings.push({ code: "call_limit_may_stop_journey", message: `maxCalls (${request.maxCalls}) is below the journey maximum (${callBounds.maximumDecisionCalls}); some respondents may not reach a terminal node.` });
+  }
+  const traversal = walkStudyPackets([request.journey], request.respondents, (packet) => {
+    packets.push(packet);
+  });
+  if (traversal.status !== "complete") {
+    problems.push({ code: "journey_preflight_incomplete", message: traversal.incompleteReason ?? "Journey context traversal is incomplete." });
+  }
+  if (traversal.unverifiedReason) {
+    warnings.push({ code: "context_fit_unverified", message: `${traversal.unverifiedReason} Each actual packet is checked by the selected provider before inference.` });
+  }
+  const kind = request.provider.kind;
+  const modelIdentity = kind === "jev" ? request.provider.model : request.provider.checkpoint;
+  for (const packet of packets) {
+    let fit;
+    if (!provider.measure) fit = missingMeasureFit(provider, kind, modelIdentity);
+    else {
+      try {
+        fit = await provider.measure(packet.request);
+      } catch {
+        fit = { ...missingMeasureFit(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
+      }
+    }
+    fits.push({ respondentId: packet.respondentId, nodeId: packet.nodeId, pathId: packet.pathId, packetId: packet.packetId, fit });
+    const problem = problemForFit(packet.respondentId, fit);
+    if (problem) problems.push({ ...problem, nodeId: packet.nodeId, pathId: packet.pathId });
+  }
+  const inspection = {
+    valid: problems.length === 0,
+    respondentCount: request.respondents.length,
+    minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    problems,
+    ...warnings.length === 0 ? {} : { warnings },
+    fits
+  };
+  if (!inspection.valid) return { inspection };
+  return {
+    inspection,
+    journey: {
+      request,
+      requestFingerprint: hashCanonical({ request, compilerFingerprint }),
+      compilerFingerprint,
+      minimumCalls: callBounds.minimumDecisionCalls,
+      maximumCalls: callBounds.maximumDecisionCalls,
+      packets
+    }
+  };
+}
 
 // src/application/run-service.ts
 var RunServiceError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
+  constructor(code, message, options2) {
+    super(message, options2);
     this.code = code;
     this.name = "RunServiceError";
   }
@@ -34908,10 +35577,10 @@ function normalizeRequest(input2) {
   }
   return parsed.data;
 }
-function createRunService(store, dataRoot, providerFactory, launcher, options = {}) {
+function createRunService(store, dataRoot, providerFactory, launcher, options2 = {}) {
   async function assertReady(provider) {
     try {
-      await options.assertProviderReady?.(provider);
+      await options2.assertProviderReady?.(provider);
     } catch (error62) {
       if (error62 instanceof RunServiceError) throw error62;
       if (error62 instanceof CredentialStoreError) {
@@ -35027,13 +35696,13 @@ import { DatabaseSync } from "node:sqlite";
 
 // src/domain/decision/validate.ts
 var DecisionError = class extends Error {
-  constructor(message, options) {
-    super(message, options);
+  constructor(message, options2) {
+    super(message, options2);
     this.name = "DecisionError";
   }
 };
 var probabilitySumTolerance = 0.01;
-function validateDecision(request, result, options = {}) {
+function validateDecision(request, result, options2 = {}) {
   const parsedRequest = decisionRequestSchema.safeParse(request);
   if (!parsedRequest.success) {
     throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
@@ -35068,12 +35737,12 @@ function validateDecision(request, result, options = {}) {
       }
     }
   } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.");
-  const maxAttempts = options.maxAttempts ?? 1;
+  const maxAttempts = options2.maxAttempts ?? 1;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
     throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
   }
   for (const key of ["provider", "model", "checkpoint"]) {
-    if (options[key] !== void 0 && decision[key] !== options[key]) {
+    if (options2[key] !== void 0 && decision[key] !== options2[key]) {
       throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
     }
   }
@@ -35096,8 +35765,8 @@ var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
 var RunStoreError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
+  constructor(code, message, options2) {
+    super(message, options2);
     this.code = code;
     this.name = "RunStoreError";
   }
@@ -35250,7 +35919,7 @@ function validatePrepared(prepared) {
   if (seenRespondents.size !== respondentIds.size) throw new RunStoreError("invalid_prepared_run", "Every respondent must have exactly one prepared evaluation.");
   return { ...prepared, request: parsedRequest.data };
 }
-function openRunStore(dataRoot, options = {}) {
+function openRunStore(dataRoot, options2 = {}) {
   if (!path4.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync(dataRoot, { recursive: true });
   const database = new DatabaseSync(path4.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
@@ -35260,7 +35929,7 @@ function openRunStore(dataRoot, options = {}) {
     database.close();
     throw error62;
   }
-  return new SQLiteRunStore(database, path4.join(dataRoot, "runs.sqlite"), options.now ?? Date.now);
+  return new SQLiteRunStore(database, path4.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 var SQLiteRunStore = class {
   constructor(database, databasePath, now) {
@@ -35874,11 +36543,11 @@ function measureJevContext(request, model, route = "openrouter") {
   };
 }
 var JevProvider = class {
-  constructor(config2, fetchRequest = fetch, options = {}) {
+  constructor(config2, fetchRequest = fetch, options2 = {}) {
     this.fetchRequest = fetchRequest;
     this.config = jevConfigSchema.parse(config2);
-    this.credentialStore = options.credentialStore ?? new WindowsCredentialStore();
-    this.measureContext = options.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
+    this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
   }
   fetchRequest;
   config;
@@ -35984,7 +36653,7 @@ function retryDelayMs(attempt) {
 }
 
 // src/providers/laya/context-fit.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path6 from "node:path";
 
@@ -36223,7 +36892,7 @@ async function tokenizerPromise(config2) {
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile(absolutePath);
-    const sha256 = createHash3("sha256").update(bytes).digest("hex");
+    const sha256 = createHash4("sha256").update(bytes).digest("hex");
     if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
     let raw;
     try {
@@ -36279,8 +36948,8 @@ async function measureLayaContext(request, config2) {
   };
   const fullHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
   const configuredHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, config2.headLimit);
-  const options = renderOptions(question);
-  const optionTokenLengths = options.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
+  const options2 = renderOptions(question);
+  const optionTokenLengths = options2.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
   const fullState = tokenizer.encode(serializeState(request.state).split(tokenizer.maskToken).join(" "));
   const stateBudget = config2.contextLimit - fullHead.ids.length;
   const tokens = fullHead.ids.length + fullState.length;
@@ -36366,13 +37035,13 @@ async function checkLayaFit(request, config2, measureFit) {
   return measurement;
 }
 var LayaProvider = class {
-  constructor(config2, options = {}) {
+  constructor(config2, options2 = {}) {
     this.config = config2;
-    this.options = options;
+    this.options = options2;
     if (config2.kind !== "laya" || !config2.baseUrl || !config2.checkpoint || !config2.tokenizerJsonPath || !/^[a-f\d]{64}$/i.test(config2.tokenizerSha256) || !Number.isInteger(config2.contextLimit) || config2.contextLimit < 1 || !Number.isInteger(config2.headLimit) || config2.headLimit < 1 || !Number.isInteger(config2.timeoutMs) || config2.timeoutMs < 1 || config2.precision !== void 0 && !config2.precision) {
       throw new TypeError("Laya configuration requires a base URL, checkpoint, positive context limit, and positive timeout.");
     }
-    this.fetchRequest = options.fetchRequest ?? fetch;
+    this.fetchRequest = options2.fetchRequest ?? fetch;
   }
   config;
   options;

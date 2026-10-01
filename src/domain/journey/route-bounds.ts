@@ -1,4 +1,4 @@
-import { studyArmSchema, type StudyArm } from '../study/arm.js';
+import { journeyDefinitionSchema, studyArmSchema, type JourneyDefinition, type StudyArm } from '../study/arm.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 
 export type RunDecisionCallBounds = {
@@ -8,14 +8,14 @@ export type RunDecisionCallBounds = {
 
 type DecisionRange = { minimum: number; maximum: number };
 
-export function estimateRunDecisionCalls(arms: readonly StudyArm[], respondents: readonly RespondentProfile[]): RunDecisionCallBounds {
+export function estimateRunDecisionCalls(arms: readonly (JourneyDefinition | StudyArm)[], respondents: readonly RespondentProfile[]): RunDecisionCallBounds {
   if (arms.length === 0) throw new Error('Run call bounds require at least one study arm.');
   if (respondents.length === 0) throw new Error('Run call bounds require at least one frozen respondent.');
 
   let minimumDecisionCalls = 0;
   let maximumDecisionCalls = 0;
   for (const rawArm of arms) {
-    const arm = studyArmSchema.parse(rawArm);
+    const arm = ('sources' in rawArm ? studyArmSchema : journeyDefinitionSchema).parse(rawArm);
     const range = arm.presentation.kind === 'sequence'
       ? { minimum: arm.tasks.length, maximum: arm.tasks.length }
       : graphDecisionRange(arm);
@@ -28,7 +28,7 @@ export function estimateRunDecisionCalls(arms: readonly StudyArm[], respondents:
   return { minimumDecisionCalls, maximumDecisionCalls };
 }
 
-function graphDecisionRange(arm: StudyArm): DecisionRange {
+function graphDecisionRange(arm: JourneyDefinition): DecisionRange {
   if (arm.presentation.kind !== 'graph') throw new Error('Graph decision bounds require a graph presentation.');
   const graph = arm.presentation;
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));

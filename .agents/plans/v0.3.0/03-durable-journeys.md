@@ -1,8 +1,8 @@
 # Durable authored journeys
 
-Status: draft for review.
+Status: in progress.
 
-> **For agentic workers:** Use `executing-plans` to implement this plan inline after review. Do not begin implementation while this plan remains a draft.
+> **For agentic workers:** Use `executing-plans` to implement this plan inline, task by task.
 
 **Goal:** An agent can run a finite authored journey through the same durable run lifecycle as a direct question. Sheg records each respondent's reached turns, exact pre-question contexts, typed responses, exposures, and route outcomes so a later request can refer to the original state without replaying the journey.
 
@@ -34,16 +34,16 @@ The single-question request remains supported. It shares the same provider, dura
 - [x] Existing request shape is a one-question `poll`; existing SQLite store persists a fixed list of evaluations and attempt rows.
 - [x] `src/domain/journey/run.ts`, `src/domain/journey/packet-walker.ts`, and `src/domain/journey/trace.ts` already define validated finite journeys and prompt-state compilation for the file-backed runner.
 - [x] The current detached question worker and SQLite run store own one accepted request across MCP connections. ADR-0018 and ADR-0019 make SQLite and detached workers the accepted boundaries.
-- [ ] Review the proposed dynamic reached-turn persistence and result semantics with the user before implementation.
+- [x] Review the proposed dynamic reached-turn persistence and result semantics with the user before implementation. Approved in the active release-roadmap instruction on 2026-10-01.
 
 ## Execution tasks
 
 ### Task 1: Define direct journey request and shared admission
 
-- [ ] **Files:** `src/domain/run/request.ts`, `src/application/run-inspection.ts`, `src/application/preflight.ts`, relevant journey/inspection tests, and request contract fixtures. **Produces:** strict inline run-request variants for direct questions and finite journeys, with one shared validation/admission boundary.
-- [ ] Add behavior tests first for inline sequence and branching graph requests, duplicate identities, invalid destinations, typed route semantics, per-respondent reachable packet-fit inspection, finite logical decision bounds, and original physical `maxCalls` validation.
-- [ ] Preserve the existing direct-question request path and use the same resolved/frozen request semantics for `run_inspect` and `run_start`. Inspection remains optional and inference-free.
-- [ ] Decide and test the exact request discriminator and composition from existing domain types. Keep JSON direct and agent-authored; do not introduce a second study/session identity.
+- [x] **Files:** `src/domain/run/request.ts`, `src/application/run-inspection.ts`, shared journey packet/boundary types, and relevant journey/inspection tests. **Produces:** strict inline run-request variants for direct questions and finite journeys, with one shared validation/admission boundary. MCP `run_start` wiring remains in Task 4 so no journey request is exposed before durable execution exists.
+- [x] Add behavior tests first for inline sequence and branching graph requests, duplicate identities, invalid destinations, typed route semantics, per-respondent reachable packet-fit inspection, finite logical decision bounds, and original physical `maxCalls` validation.
+- [x] Preserve the existing direct-question request path. Inspection remains optional and inference-free; the shared admission result is ready for `run_start` wiring in Task 4.
+- [x] Decide and test the exact request discriminator and composition from existing domain types. Keep JSON direct and agent-authored; do not introduce a second study/session identity.
 
 ### Task 2: Persist reached turn state and stable references
 
@@ -78,4 +78,4 @@ The single-question request remains supported. It shares the same provider, dura
 
 ## Handoff and review request
 
-This is a proposed implementation plan, not an authorization to begin implementation. Please review the dynamic reached-turn persistence model, the inline request shape, and how the existing CLI is preserved before Task 1 starts. The issue's delivery contract says the issue itself authorizes planning only until the applicable implementation plan is reviewed. Once approved, implement inline on `codex/v0.3.0-release-spec`; feature PRs target `develop`. Do not change the release version, tag, publish, merge, or make paid calls under this plan.
+The issue itself authorized planning only until this plan was reviewed. The user has now approved the roadmap execution and this plan through the active goal. Implement inline on `codex/v0.3.0-release-spec`; feature PRs target `develop`. Do not change the release version, tag, publish, merge, or make paid calls under this plan.

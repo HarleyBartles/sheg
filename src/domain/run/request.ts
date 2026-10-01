@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { decisionQuestionSchema } from '../decision/decision.js';
 import { respondentProfileSchema } from '../respondents/profile.js';
 import { providerConfigSchema } from '../../providers/config.js';
+import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js';
 
 const materialItemSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
@@ -32,8 +33,29 @@ export const inlineRunRequestSchema = z.object({
   }
 });
 
+export const inlineJourneyRequestSchema = z.object({
+  kind: z.literal('journey'),
+  label: z.string().min(1).max(120).optional(),
+  respondents: z.array(respondentProfileSchema).min(1),
+  journey: journeyDefinitionSchema,
+  provider: providerConfigSchema,
+  maxCalls: z.number().int().positive(),
+}).strict().superRefine((request, context) => {
+  const respondentIds = request.respondents.map(({ id }) => id);
+  if (new Set(respondentIds).size !== respondentIds.length) {
+    context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });
+  }
+});
+
+export const runRequestSchema = z.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
+
 export type InlineRunRequest = z.input<typeof inlineRunRequestSchema>;
 export type ParsedInlineRunRequest = z.output<typeof inlineRunRequestSchema>;
+export type InlineJourneyRequest = z.input<typeof inlineJourneyRequestSchema>;
+export type ParsedInlineJourneyRequest = z.output<typeof inlineJourneyRequestSchema>;
+export type RunRequest = z.input<typeof runRequestSchema>;
+export type ParsedRunRequest = z.output<typeof runRequestSchema>;
+export type { JourneyDefinition };
 
 export type FrozenEvaluation = {
   evaluationId: string;

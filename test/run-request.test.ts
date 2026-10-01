@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inlineRunRequestSchema, type InlineRunRequest } from '../src/domain/run/request.js';
+import { inlineRunRequestSchema, runRequestSchema, type InlineRunRequest } from '../src/domain/run/request.js';
 
 function profile(id: string, intent: string) {
   return {
@@ -61,6 +61,61 @@ test('the direct request rejects missing, multiple, duplicate-identity and extra
 test('the direct request requires enough physical call allowance for one answer per respondent', () => {
   const input = validRequest();
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, respondents: [profile('a', 'First'), profile('b', 'Second')], maxCalls: 1 }).success, false);
+});
+
+test('a direct journey request accepts inline typed route definitions without study files', () => {
+  const input = {
+    kind: 'journey',
+    respondents: [profile('reader-a', 'First')],
+    journey: {
+      id: 'article', label: 'Article journey',
+      items: [{ id: 'section-one', text: 'Opening section.' }, { id: 'section-three', text: 'Later section.' }],
+      tasks: [
+        { id: 'continue', type: 'choice', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } },
+        { id: 'interest', type: 'choice', instructions: 'Did interest fade?', options: { yes: 'Yes', no: 'No' } },
+      ],
+      presentation: { kind: 'graph', entryNodeId: 'entry', maxDecisions: 2, nodes: [
+        { id: 'entry', kind: 'ask', taskId: 'continue' },
+        { id: 'expose-section-three', kind: 'expose', itemId: 'section-three' },
+        { id: 'lost-interest', kind: 'ask', taskId: 'interest' },
+        { id: 'finished', kind: 'terminal', outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'entry', optionId: 'continue', toNodeId: 'expose-section-three' },
+        { fromNodeId: 'entry', optionId: 'leave', toNodeId: 'finished' },
+        { fromNodeId: 'expose-section-three', toNodeId: 'lost-interest' },
+        { fromNodeId: 'lost-interest', optionId: 'yes', toNodeId: 'finished' },
+        { fromNodeId: 'lost-interest', optionId: 'no', toNodeId: 'finished' },
+      ] },
+    },
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' },
+    maxCalls: 1,
+  };
+  const parsed = runRequestSchema.safeParse(input);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.kind, 'journey');
+    assert.equal(parsed.data.journey.presentation.kind, 'graph');
+  }
+});
+
+test('journey request rejects invalid routes and nonpositive physical call limits', () => {
+  const input = {
+    kind: 'journey', respondents: [profile('reader-a', 'First')],
+    journey: { id: 'article', label: 'Article journey', items: [{ id: 'section-one', text: 'Opening.' }],
+      tasks: [{ id: 'continue', type: 'choice', instructions: 'Continue?', options: { continue: 'Continue', leave: 'Leave' } }],
+      presentation: { kind: 'graph', entryNodeId: 'entry', maxDecisions: 1, nodes: [
+        { id: 'entry', kind: 'ask', taskId: 'continue' }, { id: 'finished', kind: 'terminal', outcome: 'complete' },
+      ], transitions: [{ fromNodeId: 'entry', optionId: 'continue', toNodeId: 'finished' }] } },
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  };
+  assert.equal(runRequestSchema.safeParse(input).success, false);
+  const validRoutes = { ...input, journey: { ...input.journey, presentation: { ...input.journey.presentation, transitions: [
+    { fromNodeId: 'entry', optionId: 'continue', toNodeId: 'finished' },
+    { fromNodeId: 'entry', optionId: 'leave', toNodeId: 'finished' },
+  ] } } };
+  assert.equal(runRequestSchema.safeParse({ ...validRoutes, maxCalls: 0 }).success, false);
+  assert.equal(runRequestSchema.safeParse({ ...validRoutes, respondents: [profile('reader-a', 'First'), profile('reader-a', 'Duplicate')] }).success, false);
+  assert.equal(runRequestSchema.safeParse({ ...validRoutes, journey: { ...validRoutes.journey, extra: true } }).success, false);
 });
 
 test('provider inputs normalize Jev defaults and preserve accepted Laya configuration', () => {

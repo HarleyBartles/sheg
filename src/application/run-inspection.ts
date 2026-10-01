@@ -2,15 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { compileDecisionRequest, emptyTrajectory, promptContractHash } from '../domain/decision/prompt.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
-import { inlineRunRequestSchema, type FrozenEvaluation, type PreparedRun } from '../domain/run/request.js';
+import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
 import { hashCanonical } from '../infrastructure/identity.js';
+import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
+import { estimateRunDecisionCalls } from '../domain/journey/route-bounds.js';
 
 export type { Inspection } from '../domain/run/lifecycle.js';
 export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/run/request.js';
+export type PreparedJourneyAdmission = { request: ParsedInlineJourneyRequest; requestFingerprint: string; compilerFingerprint: string; minimumCalls: number; maximumCalls: number; packets: PreflightPacket[] };
 
 export function fingerprintRunRequest(input: unknown): string | undefined {
-  const parsed = inlineRunRequestSchema.safeParse(input);
+  const parsed = runRequestSchema.safeParse(input);
   if (!parsed.success) return undefined;
   return hashCanonical({ request: parsed.data, compilerFingerprint: promptContractHash() });
 }
@@ -56,13 +59,15 @@ function problemForFit(respondentId: string, fit: ProviderContextFit): RunProble
 export async function prepareRun(
   input: unknown,
   provider: DecisionProvider,
-): Promise<{ inspection: Inspection; prepared?: PreparedRun }> {
-  const parsed = inlineRunRequestSchema.safeParse(input);
+): Promise<{ inspection: Inspection; prepared?: PreparedRun; journey?: PreparedJourneyAdmission }> {
+  const parsed = runRequestSchema.safeParse(input);
   if (!parsed.success) {
     return { inspection: invalidRequestInspection(input, parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')) };
   }
 
   const request = parsed.data;
+  if (request.kind === 'journey') return prepareJourneyAdmission(request, provider);
+
   const compilerFingerprint = promptContractHash();
   const evaluations: FrozenEvaluation[] = [];
   const fits: Inspection['fits'] = [];
@@ -123,4 +128,67 @@ export async function prepareRun(
     evaluations,
   };
   return { inspection, prepared };
+}
+
+async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, provider: DecisionProvider): Promise<{ inspection: Inspection; journey?: PreparedJourneyAdmission }> {
+  const compilerFingerprint = promptContractHash();
+  let callBounds: ReturnType<typeof estimateRunDecisionCalls>;
+  try { callBounds = estimateRunDecisionCalls([request.journey], request.respondents); }
+  catch (error) {
+    return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: 0, problems: [{ code: 'invalid_journey', message: error instanceof Error ? error.message : 'Journey routes are invalid.' }], fits: [] } };
+  }
+
+  const problems: Inspection['problems'] = [];
+  const warnings: NonNullable<Inspection['warnings']> = [];
+  const fits: Inspection['fits'] = [];
+  const packets: PreflightPacket[] = [];
+  if (request.maxCalls < callBounds.minimumDecisionCalls) {
+    problems.push({ code: 'insufficient_call_limit', message: `maxCalls (${request.maxCalls}) is below the journey minimum (${callBounds.minimumDecisionCalls}).` });
+  } else if (request.maxCalls < callBounds.maximumDecisionCalls) {
+    warnings.push({ code: 'call_limit_may_stop_journey', message: `maxCalls (${request.maxCalls}) is below the journey maximum (${callBounds.maximumDecisionCalls}); some respondents may not reach a terminal node.` });
+  }
+
+  const traversal = walkStudyPackets([request.journey], request.respondents, (packet) => { packets.push(packet); });
+  if (traversal.status !== 'complete') {
+    problems.push({ code: 'journey_preflight_incomplete', message: traversal.incompleteReason ?? 'Journey context traversal is incomplete.' });
+  }
+  if (traversal.unverifiedReason) {
+    warnings.push({ code: 'context_fit_unverified', message: `${traversal.unverifiedReason} Each actual packet is checked by the selected provider before inference.` });
+  }
+
+  const kind = request.provider.kind;
+  const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+  for (const packet of packets) {
+    let fit: ProviderContextFit;
+    if (!provider.measure) fit = missingMeasureFit(provider, kind, modelIdentity);
+    else {
+      try { fit = await provider.measure(packet.request); }
+      catch { fit = { ...missingMeasureFit(provider, kind, modelIdentity), reason: 'provider-measurement-failed' }; }
+    }
+    fits.push({ respondentId: packet.respondentId, nodeId: packet.nodeId, pathId: packet.pathId, packetId: packet.packetId, fit });
+    const problem = problemForFit(packet.respondentId, fit);
+    if (problem) problems.push({ ...problem, nodeId: packet.nodeId, pathId: packet.pathId });
+  }
+
+  const inspection: Inspection = {
+    valid: problems.length === 0,
+    respondentCount: request.respondents.length,
+    minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    problems,
+    ...(warnings.length === 0 ? {} : { warnings }),
+    fits,
+  };
+  if (!inspection.valid) return { inspection };
+  return {
+    inspection,
+    journey: {
+      request,
+      requestFingerprint: hashCanonical({ request, compilerFingerprint }),
+      compilerFingerprint,
+      minimumCalls: callBounds.minimumDecisionCalls,
+      maximumCalls: callBounds.maximumDecisionCalls,
+      packets,
+    },
+  };
 }

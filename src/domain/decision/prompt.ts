@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { decisionRequestSchema, type DecisionRequest, type DecisionValue } from './decision.js';
 import type { RespondentPerspective, RespondentProfile } from '../respondents/profile.js';
-import type { StudyArm } from '../study/arm.js';
+import type { JourneyDefinition } from '../study/arm.js';
 
 export type PromptHistoryEvent =
   | { type: 'exposure'; sequence: number; nodeId: string; itemId: string }
@@ -44,7 +44,7 @@ export type DecisionPacketParts = {
   question: DecisionRequest['question'];
 };
 
-export function questionForTask(task: StudyArm['tasks'][number]): DecisionRequest['question'] {
+export function questionForTask(task: JourneyDefinition['tasks'][number]): DecisionRequest['question'] {
   if ('options' in task) return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options } };
   if ('rubric' in task) return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
   return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }) };
@@ -90,7 +90,7 @@ export function emptyTrajectory(): TrajectorySummary {
   });
 }
 
-function compactTrajectory(arm: StudyArm, history: readonly PromptHistoryEvent[]): TrajectorySummary {
+function compactTrajectory(arm: JourneyDefinition, history: readonly PromptHistoryEvent[]): TrajectorySummary {
   const exposureIds: string[] = [];
   const choices: TrajectoryChoice[] = [];
   const responses: TrajectoryResponse[] = [];
@@ -132,7 +132,7 @@ function compactTrajectory(arm: StudyArm, history: readonly PromptHistoryEvent[]
 }
 
 export function compileDecisionPacket(
-  arm: StudyArm,
+  arm: JourneyDefinition,
   profile: RespondentProfile,
   taskId: string,
   history: readonly PromptHistoryEvent[] = [],

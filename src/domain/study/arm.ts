@@ -7,14 +7,23 @@ import type { StudyTask } from './task.js';
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const prose = z.string().trim().min(1);
 
-export const studyArmSchema = z.object({
+const journeyDefinitionFields = {
   id: identifier,
   label: prose,
-  sources: z.array(sourceReferenceSchema).min(1),
   items: z.array(stimulusItemSchema).min(1),
   tasks: z.array(taskSchema).min(1),
   presentation: presentationSchema,
-}).strict().superRefine((arm, context) => {
+};
+
+export const journeyDefinitionSchema = z.object(journeyDefinitionFields).strict().superRefine(validateJourneyDefinition);
+type ParsedJourneyDefinition = z.output<typeof journeyDefinitionSchema>;
+
+export const studyArmSchema = z.object({
+  ...journeyDefinitionFields,
+  sources: z.array(sourceReferenceSchema).min(1),
+}).strict().superRefine(validateJourneyDefinition);
+
+function validateJourneyDefinition(arm: JourneyDefinition, context: z.RefinementCtx): void {
   const presentation = arm.presentation;
   const nodeValues = presentation.kind === 'sequence' ? [] : presentation.nodes;
   const nodeIds = new Set(nodeValues.map((node) => node.id));
@@ -154,10 +163,11 @@ export const studyArmSchema = z.object({
       });
     }
   }
-});
+}
 
 type ParsedStudyArm = z.infer<typeof studyArmSchema>;
 export type StudyArm = Omit<ParsedStudyArm, 'tasks'> & { tasks: StudyTask[] };
+export type JourneyDefinition = Omit<ParsedJourneyDefinition, 'tasks'> & { tasks: StudyTask[] };
 
 function validateResponseIntervals(
   edges: readonly PresentationTransition[],

@@ -12934,14 +12934,14 @@ function compileValidator(schema, parser) {
     return parser;
   }
 }
-function compile(schema, options) {
+function compile(schema, options2) {
   try {
     const parser = compileFn(schema);
     const clone2 = withParser(schema, parser);
     clone2._zod.bag.validator = compileValidator(schema, parser);
     return clone2;
   } catch (err) {
-    if (options?.strict)
+    if (options2?.strict)
       throw err;
     return schema;
   }
@@ -13001,7 +13001,7 @@ function installCompiledUserMethods(target, source, parser) {
     };
   }
 }
-function compileFn(schema, options) {
+function compileFn(schema, options2) {
   let recursive2 = true;
   try {
     recursive2 = isRecursiveSchema(schema);
@@ -13017,12 +13017,12 @@ function compileFn(schema, options) {
     definite: true
   };
   const doc = new Doc(["input"]);
-  const outputAccessor = generateCheck(doc, ctx, schema, "input", !options?.assertOnly);
+  const outputAccessor = generateCheck(doc, ctx, schema, "input", !options2?.assertOnly);
   doc.write(outputAccessor === null ? `return true;` : `return ${outputAccessor};`);
   const constantNames = ["INVALID", ...ctx.constants.keys()];
   const constantValues = [INVALID, ...ctx.constants.values()];
   const code = doc.content.join("\n");
-  const fullCode = options?.debug ? constantNames.length > 0 ? `// Constants: ${constantNames.join(", ")}
+  const fullCode = options2?.debug ? constantNames.length > 0 ? `// Constants: ${constantNames.join(", ")}
 ${code}` : code : "";
   const F = Function;
   const factoryCode = `return (input) => {
@@ -13035,7 +13035,7 @@ ${code}
   } catch (err) {
     throw new ZodCompileUnsupportedError(`this schema (generated code failed to evaluate: ${err.message})`);
   }
-  if (options?.debug) {
+  if (options2?.debug) {
     fn.code = fullCode;
   }
   fn.definite = ctx.definite;
@@ -14136,31 +14136,31 @@ function getTupleOptStart2(items, key) {
 }
 function generateUnionCheck(doc, ctx, schema, accessor) {
   const def = schema._zod.def;
-  const options = def.options;
+  const options2 = def.options;
   if (def.discriminator) {
     return generateDiscriminatedUnionCheck(doc, ctx, def, accessor);
   }
   if (def.inclusive === false) {
     throw new ZodCompileUnsupportedError("exclusive unions (z.xor)");
   }
-  if (options.length === 0) {
+  if (options2.length === 0) {
     doc.write("return INVALID;");
     return accessor;
   }
-  if (options.length === 1) {
-    return generateCheck(doc, ctx, options[0], accessor);
+  if (options2.length === 1) {
+    return generateCheck(doc, ctx, options2[0], accessor);
   }
-  const allLiterals = options.every((opt) => opt._zod.def.type === "literal" && !opt._zod.def.checks?.length);
+  const allLiterals = options2.every((opt) => opt._zod.def.type === "literal" && !opt._zod.def.checks?.length);
   if (allLiterals) {
-    const values = new Set(options.flatMap((opt) => opt._zod.def.values));
+    const values = new Set(options2.flatMap((opt) => opt._zod.def.values));
     const valuesConst = addConstant(ctx, values);
     doc.write(`if (!${valuesConst}.has(${accessor})) return INVALID;`);
     return accessor;
   }
   const outputVar = newVar(ctx);
   doc.write(`let ${outputVar};`);
-  for (let i = 0; i < options.length; i++) {
-    const opt = options[i];
+  for (let i = 0; i < options2.length; i++) {
+    const opt = options2[i];
     if (i === 0) {
       doc.write(`${outputVar} = (() => {`);
     } else {
@@ -15229,26 +15229,26 @@ function _array(Class2, element, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _union(Class2, options, params) {
+function _union(Class2, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     ...normalizeParams(params)
   });
 }
-function _xor(Class2, options, params) {
+function _xor(Class2, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     inclusive: false,
     ...normalizeParams(params)
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _discriminatedUnion(Class2, discriminator, options, params) {
+function _discriminatedUnion(Class2, discriminator, options2, params) {
   return new Class2({
     type: "union",
-    options,
+    options: options2,
     discriminator,
     ...normalizeParams(params)
   });
@@ -15770,11 +15770,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     ctx.sharedDefsExtractedFor = ctx.external;
 }
 function compactTypeUnion(schema) {
-  const options = schema.anyOf;
-  if (!Array.isArray(options) || options.length === 0 || schema.type !== void 0)
+  const options2 = schema.anyOf;
+  if (!Array.isArray(options2) || options2.length === 0 || schema.type !== void 0)
     return;
   const types = [];
-  for (const option of options) {
+  for (const option of options2) {
     if (!option || typeof option !== "object")
       return;
     compactTypeUnion(option);
@@ -16478,14 +16478,14 @@ var objectProcessor = (schema, ctx, _json, params) => {
 var unionProcessor = (schema, ctx, json2, params) => {
   const def = schema._zod.def;
   const isExclusive = def.inclusive === false;
-  const options = def.options.map((x, i) => processSchema(x, ctx, {
+  const options2 = def.options.map((x, i) => processSchema(x, ctx, {
     ...params,
     path: [...params.path, isExclusive ? "oneOf" : "anyOf", i]
   }));
   if (isExclusive) {
-    json2.oneOf = options;
+    json2.oneOf = options2;
   } else {
-    json2.anyOf = options;
+    json2.anyOf = options2;
   }
 };
 var intersectionProcessor = (schema, ctx, json2, params) => {
@@ -18099,10 +18099,10 @@ var ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => unionProcessor(inst, ctx, json2, params);
   inst.options = def.options;
 });
-function union(options, params) {
+function union(options2, params) {
   return new ZodUnion({
     type: "union",
-    options,
+    options: options2,
     ...util_exports.normalizeParams(params)
   });
 }
@@ -18112,10 +18112,10 @@ var ZodXor = /* @__PURE__ */ $constructor("ZodXor", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => unionProcessor(inst, ctx, json2, params);
   inst.options = def.options;
 });
-function xor(options, params) {
+function xor(options2, params) {
   return new ZodXor({
     type: "union",
-    options,
+    options: options2,
     inclusive: false,
     ...util_exports.normalizeParams(params)
   });
@@ -18124,10 +18124,10 @@ var ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("ZodDiscriminatedUnion"
   ZodUnion.init(inst, def);
   $ZodDiscriminatedUnion.init(inst, def);
 });
-function discriminatedUnion(discriminator, options, params) {
+function discriminatedUnion(discriminator, options2, params) {
   return new ZodDiscriminatedUnion({
     type: "union",
-    options,
+    options: options2,
     discriminator,
     ...util_exports.normalizeParams(params)
   });
@@ -19359,13 +19359,13 @@ function convertSchema(schema, ctx) {
   let baseSchema = convertBaseSchema(schema, ctx);
   const hasExplicitType = schema.type || schema.enum !== void 0 || schema.const !== void 0;
   if (schema.anyOf && Array.isArray(schema.anyOf)) {
-    const options = schema.anyOf.map((s) => convertSchema(s, ctx));
-    const anyOfUnion = z.union(options);
+    const options2 = schema.anyOf.map((s) => convertSchema(s, ctx));
+    const anyOfUnion = z.union(options2);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, anyOfUnion) : anyOfUnion;
   }
   if (schema.oneOf && Array.isArray(schema.oneOf)) {
-    const options = schema.oneOf.map((s) => convertSchema(s, ctx));
-    const oneOfUnion = z.xor(options);
+    const options2 = schema.oneOf.map((s) => convertSchema(s, ctx));
+    const oneOfUnion = z.xor(options2);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, oneOfUnion) : oneOfUnion;
   }
   if (schema.allOf && Array.isArray(schema.allOf)) {
@@ -19723,8 +19723,8 @@ var choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
   optionIds: external_exports.array(identifier).min(1)
 }).strict().superRefine((request, context) => {
-  const options = Object.keys(request.question.options);
-  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== options.length || request.optionIds.some((id) => !options.includes(id))) {
+  const options2 = Object.keys(request.question.options);
+  if (new Set(request.optionIds).size !== request.optionIds.length || request.optionIds.length !== options2.length || request.optionIds.some((id) => !options2.includes(id))) {
     context.addIssue({ code: "custom", path: ["optionIds"], message: "Request option IDs must uniquely match the offered options." });
   }
 });
@@ -19754,13 +19754,13 @@ var decisionValueSchema = external_exports.discriminatedUnion("type", [
 
 // src/domain/decision/validate.ts
 var DecisionError = class extends Error {
-  constructor(message, options) {
-    super(message, options);
+  constructor(message, options2) {
+    super(message, options2);
     this.name = "DecisionError";
   }
 };
 var probabilitySumTolerance = 0.01;
-function validateDecision(request, result, options = {}) {
+function validateDecision(request, result, options2 = {}) {
   const parsedRequest = decisionRequestSchema.safeParse(request);
   if (!parsedRequest.success) {
     throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
@@ -19795,12 +19795,12 @@ function validateDecision(request, result, options = {}) {
       }
     }
   } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.");
-  const maxAttempts = options.maxAttempts ?? 1;
+  const maxAttempts = options2.maxAttempts ?? 1;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
     throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
   }
   for (const key of ["provider", "model", "checkpoint"]) {
-    if (options[key] !== void 0 && decision[key] !== options[key]) {
+    if (options2[key] !== void 0 && decision[key] !== options2[key]) {
       throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
     }
   }
@@ -19917,10 +19917,10 @@ var WindowsCredentialStore = class {
   targets;
   helperPath;
   run;
-  constructor(options = {}) {
-    this.targets = { ...defaultTargets, ...options.credentialTargets };
-    this.helperPath = options.helperPath ?? locateHelper();
-    this.run = options.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
+  constructor(options2 = {}) {
+    this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    this.helperPath = options2.helperPath ?? locateHelper();
+    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
   }
   async availability(route) {
     try {
@@ -20078,11 +20078,11 @@ function measureJevContext(request, model, route = "openrouter") {
   };
 }
 var JevProvider = class {
-  constructor(config2, fetchRequest = fetch, options = {}) {
+  constructor(config2, fetchRequest = fetch, options2 = {}) {
     this.fetchRequest = fetchRequest;
     this.config = jevConfigSchema.parse(config2);
-    this.credentialStore = options.credentialStore ?? new WindowsCredentialStore();
-    this.measureContext = options.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
+    this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
   }
   fetchRequest;
   config;
@@ -20483,8 +20483,8 @@ async function measureLayaContext(request, config2) {
   };
   const fullHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
   const configuredHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, config2.headLimit);
-  const options = renderOptions(question);
-  const optionTokenLengths = options.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
+  const options2 = renderOptions(question);
+  const optionTokenLengths = options2.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
   const fullState = tokenizer.encode(serializeState(request.state).split(tokenizer.maskToken).join(" "));
   const stateBudget = config2.contextLimit - fullHead.ids.length;
   const tokens = fullHead.ids.length + fullState.length;
@@ -20570,13 +20570,13 @@ async function checkLayaFit(request, config2, measureFit) {
   return measurement;
 }
 var LayaProvider = class {
-  constructor(config2, options = {}) {
+  constructor(config2, options2 = {}) {
     this.config = config2;
-    this.options = options;
+    this.options = options2;
     if (config2.kind !== "laya" || !config2.baseUrl || !config2.checkpoint || !config2.tokenizerJsonPath || !/^[a-f\d]{64}$/i.test(config2.tokenizerSha256) || !Number.isInteger(config2.contextLimit) || config2.contextLimit < 1 || !Number.isInteger(config2.headLimit) || config2.headLimit < 1 || !Number.isInteger(config2.timeoutMs) || config2.timeoutMs < 1 || config2.precision !== void 0 && !config2.precision) {
       throw new TypeError("Laya configuration requires a base URL, checkpoint, positive context limit, and positive timeout.");
     }
-    this.fetchRequest = options.fetchRequest ?? fetch;
+    this.fetchRequest = options2.fetchRequest ?? fetch;
   }
   config;
   options;
@@ -20748,6 +20748,273 @@ var providerConfigSchema = external_exports.union([
   layaConfigSchema
 ]);
 
+// src/domain/study/presentation.ts
+var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var nodeSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ id: identifier2, kind: external_exports.literal("expose"), itemId: identifier2 }).strict(),
+  external_exports.object({ id: identifier2, kind: external_exports.literal("ask"), taskId: identifier2 }).strict(),
+  external_exports.object({ id: identifier2, kind: external_exports.literal("terminal"), outcome: identifier2 }).strict()
+]);
+var responseIntervalSchema = external_exports.object({
+  type: external_exports.enum(["score", "noul"]),
+  minimum: external_exports.number().finite(),
+  maximum: external_exports.number().finite(),
+  minimumInclusive: external_exports.boolean(),
+  maximumInclusive: external_exports.boolean()
+}).strict();
+var transitionSchema = external_exports.object({
+  fromNodeId: identifier2,
+  optionId: identifier2.optional(),
+  when: responseIntervalSchema.optional(),
+  toNodeId: identifier2
+}).strict();
+var presentationSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("graph"),
+    nodes: external_exports.array(nodeSchema).min(1),
+    transitions: external_exports.array(transitionSchema),
+    entryNodeId: identifier2,
+    maxDecisions: external_exports.number().int().positive()
+  }).strict()
+]);
+
+// src/domain/study/stimulus.ts
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose2 = external_exports.string().trim().min(1);
+var sourceReferenceSchema = external_exports.object({
+  path: external_exports.string().min(1),
+  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var stimulusItemSchema = external_exports.object({
+  id: identifier3,
+  text: prose2
+}).strict();
+
+// src/domain/study/task.ts
+var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose3 = external_exports.string().trim().min(1);
+var taskFields = {
+  id: identifier4,
+  instructions: prose3,
+  comparisonKey: identifier4.optional(),
+  responseHistory: external_exports.enum(["include", "omit"]).optional()
+};
+var options = external_exports.record(identifier4, prose3).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+function validateChoiceTask(task, context) {
+  if (typeof task !== "object" || task === null || !("options" in task) || !("answerKeyOptionId" in task)) return;
+  const options2 = task.options;
+  const answerKeyOptionId = task.answerKeyOptionId;
+  if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in options2)) {
+    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+  }
+}
+var legacyChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  options,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var typedChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("choice"),
+  options,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var scoreTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("score"),
+  rubric: external_exports.array(prose3).min(2)
+}).strict();
+var noulTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal("noul"),
+  criteria: external_exports.object({ true: prose3.optional(), false: prose3.optional() }).strict().optional()
+}).strict();
+var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
+var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
+
+// src/domain/study/arm.ts
+var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose4 = external_exports.string().trim().min(1);
+var journeyDefinitionFields = {
+  id: identifier5,
+  label: prose4,
+  items: external_exports.array(stimulusItemSchema).min(1),
+  tasks: external_exports.array(taskSchema).min(1),
+  presentation: presentationSchema
+};
+var journeyDefinitionSchema = external_exports.object(journeyDefinitionFields).strict().superRefine(validateJourneyDefinition);
+var studyArmSchema = external_exports.object({
+  ...journeyDefinitionFields,
+  sources: external_exports.array(sourceReferenceSchema).min(1)
+}).strict().superRefine(validateJourneyDefinition);
+function validateJourneyDefinition(arm, context) {
+  const presentation = arm.presentation;
+  const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
+  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
+  const itemIds = new Set(arm.items.map((item) => item.id));
+  const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
+  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
+  if (new Set(allIds).size !== allIds.length) {
+    context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
+  }
+  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
+  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
+  }
+  if (presentation.kind === "sequence") return;
+  const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
+  if (!nodesById.has(presentation.entryNodeId)) {
+    context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
+  }
+  for (const [index, node2] of presentation.nodes.entries()) {
+    if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
+    }
+    if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
+    }
+  }
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const [index, edge] of presentation.transitions.entries()) {
+    const source = nodesById.get(edge.fromNodeId);
+    if (!source) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
+      continue;
+    }
+    if (!nodesById.has(edge.toNodeId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
+    }
+    const edges = outgoing.get(edge.fromNodeId) ?? [];
+    outgoing.set(edge.fromNodeId, [...edges, edge]);
+    if (source.kind === "terminal") {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
+    }
+    if (source.kind === "expose" && (edge.optionId !== void 0 || edge.when !== void 0)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Exposure transitions must be unconditional." });
+    }
+  }
+  for (const [index, node2] of presentation.nodes.entries()) {
+    const edges = outgoing.get(node2.id) ?? [];
+    if (node2.kind === "terminal") {
+      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Terminal nodes cannot have outgoing transitions." });
+      continue;
+    }
+    if (node2.kind === "expose") {
+      if (edges.length !== 1 || edges[0]?.optionId !== void 0 || edges[0]?.when !== void 0) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
+      }
+      continue;
+    }
+    const task = taskById.get(node2.taskId);
+    if (!task) continue;
+    if (task.type !== "score" && task.type !== "noul") {
+      const optionIds = Object.keys(task.options);
+      const edgeOptionIds = edges.map((edge) => edge.optionId);
+      if (edges.some((edge) => edge.when !== void 0) || edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Choice task transitions must contain exactly one edge for every offered option and no others." });
+      }
+    } else {
+      const maximum = task.type === "score" ? task.rubric.length - 1 : 1;
+      validateResponseIntervals(edges, task.type, maximum, context, index);
+    }
+  }
+  if (nodesById.has(presentation.entryNodeId)) {
+    const visited = /* @__PURE__ */ new Set();
+    const pending = [presentation.entryNodeId];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
+    }
+    const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
+    if (unreachable.length > 0) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
+    }
+    const state = /* @__PURE__ */ new Map();
+    const decisionsToTerminal = /* @__PURE__ */ new Map();
+    let containsCycle = false;
+    const longestDecisionsToTerminal = (nodeId) => {
+      const node2 = nodesById.get(nodeId);
+      if (!node2) return null;
+      if (state.get(nodeId) === "visiting") {
+        containsCycle = true;
+        return null;
+      }
+      if (state.get(nodeId) === "visited") return decisionsToTerminal.get(nodeId) ?? null;
+      state.set(nodeId, "visiting");
+      let longest;
+      if (node2.kind === "terminal") {
+        longest = 0;
+      } else {
+        const edges = outgoing.get(nodeId) ?? [];
+        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
+        const completedContinuations = continuations.filter((count) => count !== null);
+        if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
+          longest = null;
+        } else {
+          const nextDecisionCount = Math.max(...completedContinuations);
+          longest = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+        }
+      }
+      state.set(nodeId, "visited");
+      decisionsToTerminal.set(nodeId, longest);
+      return longest;
+    };
+    const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
+    if (containsCycle) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Graph contains a cycle; every journey must terminate." });
+    } else if (longestPath === null) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Every graph branch must reach a terminal node." });
+    } else if (longestPath > presentation.maxDecisions) {
+      context.addIssue({
+        code: "custom",
+        path: ["presentation", "maxDecisions"],
+        message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`
+      });
+    }
+  }
+}
+function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
+  const issues = context;
+  const ranges = edges.map((edge, index) => ({ edge, index, range: edge.when }));
+  const fail = (message) => issues.addIssue({
+    code: "custom",
+    path: ["presentation", "nodes", nodeIndex],
+    message
+  });
+  if (ranges.some(({ edge, range }) => edge.optionId !== void 0 || range === void 0 || range.type !== type)) {
+    fail(`${type.toUpperCase()} task transitions must use matching typed response intervals only.`);
+    return;
+  }
+  const ordered = ranges.toSorted((left, right) => left.range.minimum - right.range.minimum || Number(right.range.minimumInclusive) - Number(left.range.minimumInclusive));
+  for (const { range } of ordered) {
+    if (range.minimum > range.maximum || range.minimum < 0 || range.maximum > maximum || range.minimum === range.maximum && !(range.minimumInclusive && range.maximumInclusive)) {
+      fail(`${type.toUpperCase()} route interval is reversed, empty, or outside its response domain.`);
+      return;
+    }
+  }
+  const first = ordered[0]?.range;
+  const last = ordered.at(-1)?.range;
+  if (!first || !last || first.minimum !== 0 || !first.minimumInclusive || last.maximum !== maximum || !last.maximumInclusive) {
+    fail(`${type.toUpperCase()} route intervals must cover the complete response domain.`);
+    return;
+  }
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1].range;
+    const current = ordered[index].range;
+    if (previous.maximum > current.minimum || previous.maximum === current.minimum && previous.maximumInclusive && current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals overlap or leave an ambiguous boundary.`);
+      return;
+    }
+    if (previous.maximum < current.minimum || previous.maximum === current.minimum && !previous.maximumInclusive && !current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals leave a gap in the response domain.`);
+      return;
+    }
+  }
+}
+
 // src/domain/run/request.ts
 var materialItemSchema = external_exports.object({
   id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
@@ -20774,6 +21041,20 @@ var inlineRunRequestSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["maxCalls"], message: "maxCalls must allow at least one decision for each respondent." });
   }
 });
+var inlineJourneyRequestSchema = external_exports.object({
+  kind: external_exports.literal("journey"),
+  label: external_exports.string().min(1).max(120).optional(),
+  respondents: external_exports.array(respondentProfileSchema).min(1),
+  journey: journeyDefinitionSchema,
+  provider: providerConfigSchema,
+  maxCalls: external_exports.number().int().positive()
+}).strict().superRefine((request, context) => {
+  const respondentIds = request.respondents.map(({ id }) => id);
+  if (new Set(respondentIds).size !== respondentIds.length) {
+    context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
+  }
+});
+var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
 
 // src/infrastructure/identity.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -20803,8 +21084,8 @@ var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
 var RunStoreError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
+  constructor(code, message, options2) {
+    super(message, options2);
     this.code = code;
     this.name = "RunStoreError";
   }
@@ -20957,7 +21238,7 @@ function validatePrepared(prepared) {
   if (seenRespondents.size !== respondentIds.size) throw new RunStoreError("invalid_prepared_run", "Every respondent must have exactly one prepared evaluation.");
   return { ...prepared, request: parsedRequest.data };
 }
-function openRunStore(dataRoot, options = {}) {
+function openRunStore(dataRoot, options2 = {}) {
   if (!path3.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync(dataRoot, { recursive: true });
   const database = new DatabaseSync(path3.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
@@ -20967,7 +21248,7 @@ function openRunStore(dataRoot, options = {}) {
     database.close();
     throw error62;
   }
-  return new SQLiteRunStore(database, path3.join(dataRoot, "runs.sqlite"), options.now ?? Date.now);
+  return new SQLiteRunStore(database, path3.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 var SQLiteRunStore = class {
   constructor(database, databasePath, now) {
