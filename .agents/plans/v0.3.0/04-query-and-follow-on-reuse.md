@@ -38,17 +38,19 @@
 - Modify: `src/domain/run/request.ts`
 - Modify: `src/domain/run/lifecycle.ts`
 - Test: `test/run-request.test.ts` (or the current domain request test owner)
+- Regenerate: `dist/` through `npm run build` because the shared request module is bundled into MCP and worker entrypoints
 
 **Interfaces:**
 - Consumes: current `ParsedInlineRunRequest`, `ParsedInlineJourneyRequest`, `AnswerRow`, and typed `DecisionValue` contracts.
 - Produces: strict `run_query` criteria and `follow-on` request schemas. Criteria use conjunction across optional respondent ID, evaluation status, question ID, encountered material ID, typed response (`choice` with choice ID, `score` with one of `eq|lt|lte|gt|gte` and a finite value, or `noul` with the same numeric operators), and journey terminal outcome. Follow-on selection is either these criteria for one source run or explicit `{evaluationId, contextId}` references scoped to one source run. Context mode is `recorded`, `fresh-material`, `omit-history`, or `continue`; each request contains one typed question, selected provider, and `maxCalls`. A selected source respondent may appear in multiple turns; each turn remains a distinct evaluation/context, even when respondent IDs repeat. Run discovery criteria add created-after/before and referenced material ID to existing status/label filters.
 
-- [ ] Add schema behavior tests in `test/run-request.test.ts` for each typed criterion, AND combination, invalid response-kind/operator pairing, duplicate explicit evaluation/context references, and prohibition on a direct-departure criterion pretending to be a typed lost-interest answer.
-- [ ] Add follow-on request tests for criteria vs explicit refs, context modes and their required inputs, unique selected evaluation references, and preserving user-authored question/material/provider/call settings.
-- [ ] Add result/projection type tests in `test/run-request.test.ts` that distinguish source completeness from whether the current result page is exhausted.
-- [ ] Implement strict schemas and types. Keep selectors finite and explicit; no SQL fragments, arbitrary expressions, free-form relevance scoring, or automatic respondent selection.
-- [ ] Run `node --import tsx --test test/run-request.test.ts`; expect all schema behavior tests to pass.
-- [ ] Commit the domain contract and tests as `feat: define recorded evidence selectors`.
+- [x] Add schema behavior tests in `test/run-request.test.ts` for each typed criterion, AND combination, invalid response-kind/operator pairing, duplicate explicit evaluation/context references, and prohibition on a direct-departure criterion pretending to be a typed lost-interest answer.
+- [x] Add follow-on request tests for criteria vs explicit refs, context modes and their required inputs, unique selected evaluation references, and preserving user-authored question/material/provider/call settings.
+- [x] Add result/projection type tests in `test/run-request.test.ts` that distinguish source completeness from whether the current result page is exhausted.
+- [x] Implement strict schemas and types. Keep selectors finite and explicit; no SQL fragments, arbitrary expressions, free-form relevance scoring, or automatic respondent selection.
+- [x] Run `node --import tsx --test test/run-request.test.ts`; expect all schema behavior tests to pass.
+- [x] Run `npm run build` and stage its owned bundle outputs before the commit.
+- [ ] Commit the domain contract, tests, and generated bundles as `feat: define recorded evidence selectors`.
 
 ## Task 2: Add bounded evidence query and honest source completeness
 

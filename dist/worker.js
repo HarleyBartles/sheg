@@ -21334,6 +21334,89 @@ var inlineJourneyRequestSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
   }
 });
+var evidenceAnswerCriterionSchema = external_exports.discriminatedUnion("type", [
+  external_exports.object({ type: external_exports.literal("choice"), choiceId: external_exports.string().min(1) }).strict(),
+  external_exports.object({ type: external_exports.literal("score"), operator: external_exports.enum(["eq", "lt", "lte", "gt", "gte"]), value: external_exports.number().finite() }).strict(),
+  external_exports.object({ type: external_exports.literal("noul"), operator: external_exports.enum(["eq", "lt", "lte", "gt", "gte"]), value: external_exports.number().finite().min(0).max(1) }).strict()
+]);
+var evidenceCriteriaSchema = external_exports.object({
+  respondentId: external_exports.string().min(1).optional(),
+  status: external_exports.enum(["pending", "answered", "failed", "unreached"]).optional(),
+  questionId: external_exports.string().min(1).optional(),
+  materialId: materialItemSchema.shape.id.optional(),
+  answer: evidenceAnswerCriterionSchema.optional(),
+  outcome: external_exports.string().min(1).optional()
+}).strict();
+var followOnReferenceSchema = external_exports.object({ evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict();
+var followOnSelectionSchema = external_exports.union([
+  external_exports.object({ criteria: evidenceCriteriaSchema }).strict(),
+  external_exports.object({ references: external_exports.array(followOnReferenceSchema).min(1).max(1e4) }).strict().superRefine((selection, context) => {
+    if (new Set(selection.references.map(({ evaluationId }) => evaluationId)).size !== selection.references.length || new Set(selection.references.map(({ contextId }) => contextId)).size !== selection.references.length) {
+      context.addIssue({ code: "custom", path: ["references"], message: "Evaluation and context references must each be unique." });
+    }
+  })
+]);
+var followOnRunRequestSchema = external_exports.object({
+  kind: external_exports.literal("follow-on"),
+  label: external_exports.string().min(1).max(120).optional(),
+  sourceRunId: external_exports.string().uuid(),
+  selection: followOnSelectionSchema,
+  context: external_exports.object({ mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]) }).strict(),
+  material: external_exports.array(materialItemSchema).min(1).optional(),
+  questions: external_exports.tuple([decisionQuestionSchema]),
+  provider: providerConfigSchema,
+  maxCalls: external_exports.number().int().positive()
+}).strict().superRefine((request, context) => {
+  if (request.context.mode === "fresh-material" && !request.material) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Fresh-material context requires explicit material." });
+  }
+  if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
+  }
+});
+var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
+var runListQuerySchema = external_exports.object({
+  status: external_exports.enum(runStatuses).optional(),
+  label: external_exports.string().min(1).optional(),
+  createdAfter: external_exports.string().datetime().optional(),
+  createdBefore: external_exports.string().datetime().optional(),
+  materialId: materialItemSchema.shape.id.optional(),
+  cursor: external_exports.string().optional(),
+  limit: external_exports.number().int().min(1).max(200).optional()
+}).strict().superRefine((query, context) => {
+  if (query.createdAfter && query.createdBefore && Date.parse(query.createdAfter) > Date.parse(query.createdBefore)) {
+    context.addIssue({ code: "custom", path: ["createdBefore"], message: "createdBefore must not precede createdAfter." });
+  }
+});
+var runEvidenceQuerySchema = external_exports.object({
+  sourceRunId: external_exports.string().uuid(),
+  criteria: evidenceCriteriaSchema.default({}),
+  cursor: external_exports.string().optional(),
+  limit: external_exports.number().int().min(1).max(200).optional()
+}).strict();
+var runEvidenceItemSchema = external_exports.object({
+  sourceRunId: external_exports.string().uuid(),
+  evaluationId: external_exports.string().uuid(),
+  contextId: external_exports.string().uuid(),
+  respondentId: external_exports.string().min(1),
+  questionId: external_exports.string().min(1),
+  status: external_exports.enum(["pending", "answered", "failed", "unreached"]),
+  result: decisionResultSchema.optional(),
+  turnId: external_exports.string().min(1).optional(),
+  nodeId: external_exports.string().min(1).optional(),
+  occurrence: external_exports.number().int().positive().optional(),
+  outcome: external_exports.string().optional(),
+  provenance: external_exports.object({ provider: external_exports.enum(["jev", "laya"]), model: external_exports.string().min(1), endpoint: external_exports.string().optional(), compilerFingerprint: external_exports.string().min(1), contextFingerprint: external_exports.string().min(1) }).strict()
+}).strict();
+var runEvidencePageSchema = external_exports.object({
+  items: external_exports.array(runEvidenceItemSchema),
+  totalMatches: external_exports.number().int().nonnegative(),
+  sourceRunId: external_exports.string().uuid(),
+  sourceStatus: external_exports.enum(runStatuses),
+  sourceComplete: external_exports.boolean(),
+  coverage: external_exports.object({ totalEvaluations: external_exports.number().int().nonnegative(), completedEvaluations: external_exports.number().int().nonnegative(), failedEvaluations: external_exports.number().int().nonnegative() }).strict(),
+  nextCursor: external_exports.string().min(1).optional()
+}).strict();
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
 
 // src/infrastructure/run-store.ts

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inlineRunRequestSchema, runRequestSchema, type InlineRunRequest } from '../src/domain/run/request.js';
+import { evidenceCriteriaSchema, followOnRunRequestSchema, inlineRunRequestSchema, runEvidencePageSchema, runEvidenceQuerySchema, runListQuerySchema, runRequestSchema, type InlineRunRequest } from '../src/domain/run/request.js';
 
 function profile(id: string, intent: string) {
   return {
@@ -130,4 +130,49 @@ test('provider inputs normalize Jev defaults and preserve accepted Laya configur
   });
   const laya = inlineRunRequestSchema.parse({ ...input, provider: { ...input.provider, precision: '' } });
   assert.equal(laya.provider.kind, 'laya');
+});
+
+test('evidence criteria combine typed response, question, material, respondent, and route facts', () => {
+  const parsed = evidenceCriteriaSchema.parse({
+    respondentId: 'reader-a', status: 'answered', questionId: 'lost-interest', materialId: 'section-three',
+    answer: { type: 'choice', choiceId: 'yes' }, outcome: 'left-lost-interest',
+  });
+  assert.equal(parsed.answer?.type, 'choice');
+  assert.equal(evidenceCriteriaSchema.safeParse({ answer: { type: 'score', operator: 'gte', value: 4 } }).success, true);
+  assert.equal(evidenceCriteriaSchema.safeParse({ answer: { type: 'noul', operator: 'lt', value: 0.4 } }).success, true);
+  assert.equal(evidenceCriteriaSchema.safeParse({ answer: { type: 'choice', operator: 'gte', value: 4 } }).success, false);
+  assert.equal(evidenceCriteriaSchema.safeParse({ answer: { type: 'score', operator: 'eq', value: Number.NaN } }).success, false);
+  assert.equal(evidenceCriteriaSchema.safeParse({ departure: 'lost-interest' }).success, false);
+});
+
+test('follow-on requests select criteria or exact evaluation/context references and declare context intent', () => {
+  const base = {
+    kind: 'follow-on', sourceRunId: '123e4567-e89b-42d3-a456-426614174000',
+    questions: [{ ...question, id: 'what-lost-interest' }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  };
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: { questionId: 'lost-interest', answer: { type: 'choice', choiceId: 'yes' } } }, context: { mode: 'recorded' } }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [{ evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174002' }] }, context: { mode: 'fresh-material' }, material: [{ id: 'section-three', text: 'Exact text.' }] }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [{ evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174002' }, { evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174003' }] }, context: { mode: 'recorded' } }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [] }, context: { mode: 'recorded' } }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'fresh-material' } }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'recorded' }, rationale: 'They lost interest.' }).success, false);
+});
+
+test('evidence page reports query-page exhaustion separately from source completion', () => {
+  const page = {
+    items: [], totalMatches: 12, sourceRunId: '123e4567-e89b-42d3-a456-426614174000', sourceStatus: 'running', sourceComplete: false,
+    coverage: { totalEvaluations: 80, completedEvaluations: 12, failedEvaluations: 0 },
+    nextCursor: 'cursor-token',
+  };
+  assert.equal(runEvidencePageSchema.parse(page).sourceComplete, false);
+  assert.equal(runEvidencePageSchema.safeParse({ ...page, sourceComplete: true, nextCursor: undefined }).success, true);
+  assert.deepEqual(runEvidenceQuerySchema.parse({ sourceRunId: page.sourceRunId }), { sourceRunId: page.sourceRunId, criteria: {} });
+  assert.equal(runEvidenceQuerySchema.safeParse({ sourceRunId: 'not-a-run', criteria: {}, limit: 201 }).success, false);
+});
+
+test('run discovery validates time and material criteria alongside status and label', () => {
+  assert.equal(runListQuerySchema.safeParse({ createdAfter: '2026-01-01T00:00:00.000Z', createdBefore: '2026-02-01T00:00:00.000Z', materialId: 'section-three', status: 'completed', label: 'pilot' }).success, true);
+  assert.equal(runListQuerySchema.safeParse({ createdAfter: 'yesterday', createdBefore: '2026-01-01T00:00:00.000Z' }).success, false);
+  assert.equal(runListQuerySchema.safeParse({ materialId: 'bad id' }).success, false);
 });

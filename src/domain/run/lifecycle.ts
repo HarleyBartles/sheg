@@ -1,6 +1,6 @@
 import type { DecisionResult, DecisionValue } from '../decision/decision.js';
 import type { ProviderContextFit } from '../decision/provider.js';
-import type { FrozenEvaluation } from './request.js';
+import type { EvidenceCriteria, FrozenEvaluation, RunEvidenceItem, RunEvidencePage, RunEvidenceQuery, RunListQueryInput } from './request.js';
 import type { PromptHistoryEvent } from '../decision/prompt.js';
 import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
@@ -78,6 +78,7 @@ export type AnswerRow = {
 };
 
 export type Page<T> = { items: T[]; nextCursor?: string };
+export type { EvidenceCriteria, RunEvidenceItem, RunEvidencePage, RunEvidenceQuery, RunListQueryInput };
 
 export type WorkerClaim = { runId: string; ownerToken: string };
 
