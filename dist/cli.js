@@ -20519,7 +20519,7 @@ import { setTimeout as delay2 } from "node:timers/promises";
 
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir, open as open2, readFile as readFile2, rename, rm } from "node:fs/promises";
+import { link, mkdir, open as open2, readFile as readFile2, rename, rm } from "node:fs/promises";
 import path2 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 var ProcessLockError = class extends Error {
@@ -20535,7 +20535,7 @@ var ProcessLock = class _ProcessLock {
   }
   lockPath;
   record;
-  static async acquire(directory, name) {
+  static async acquire(directory, name, renameLock = rename) {
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
     const lockPath = path2.join(directory, `${name}.lock`);
     const record2 = { pid: process.pid, token: randomUUID2() };
@@ -20564,9 +20564,20 @@ var ProcessLock = class _ProcessLock {
       if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
       const stalePath = `${lockPath}.${process.pid}.${randomUUID2()}.stale`;
       try {
-        await rename(lockPath, stalePath);
+        await renameLock(lockPath, stalePath);
+        const claimed = await readLock(stalePath);
+        if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
+          try {
+            await link(stalePath, lockPath);
+            await rm(stalePath, { force: true });
+          } catch (restoreError) {
+            if (restoreError.code !== "EEXIST") throw restoreError;
+          }
+          throw new ProcessLockError("Lock ownership changed during stale recovery.");
+        }
         await rm(stalePath, { force: true });
       } catch (error62) {
+        if (error62 instanceof ProcessLockError) throw error62;
         if (error62.code === "ENOENT") continue;
         throw error62;
       }

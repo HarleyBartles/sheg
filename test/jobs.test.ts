@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { copyFile, mkdir as makeDirectory, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir as makeDirectory, mkdtemp, readFile, rename as renameFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -171,6 +171,37 @@ test('a killed child process leaves reclaimable stale ownership', async (t) => {
   await new Promise<void>((resolve) => child.once('exit', () => resolve()));
   const recovered = await ProcessLock.acquire(directory, 'run-child');
   await recovered.release();
+});
+
+test('a delayed stale-lock reclaimer cannot remove a replacement live lock', async (t) => {
+  const directory = await tempDirectory(t);
+  const lockPath = path.join(directory, 'run-race.lock');
+  await writeFile(lockPath, `${JSON.stringify({ pid: 2147483647, token: 'stale-owner' })}\n`);
+
+  let announceRename!: () => void;
+  const renameRequested = new Promise<void>((resolve) => { announceRename = resolve; });
+  let resumeRename!: () => void;
+  const renameGate = new Promise<void>((resolve) => { resumeRename = resolve; });
+  let parked = false;
+  const delayedRename: typeof renameFile = async (source, destination): Promise<void> => {
+    if (!parked) {
+      parked = true;
+      announceRename();
+      await renameGate;
+    }
+    await renameFile(source, destination);
+  };
+
+  const delayedReclaimer = ProcessLock.acquire(directory, 'run-race', delayedRename);
+  await renameRequested;
+  const winningOwner = await ProcessLock.acquire(directory, 'run-race');
+  const winningRecord = await readFile(lockPath, 'utf8');
+  resumeRename();
+
+  await assert.rejects(delayedReclaimer, ProcessLockError);
+  assert.equal(await readFile(lockPath, 'utf8'), winningRecord);
+  await assert.rejects(ProcessLock.acquire(directory, 'run-race'), ProcessLockError);
+  await winningOwner.release();
 });
 
 test('a live second process retains exclusive run ownership', async (t) => {

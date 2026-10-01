@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -15,7 +15,7 @@ export class ProcessLockError extends Error {
 export class ProcessLock {
   private constructor(private readonly lockPath: string, private readonly record: LockRecord) {}
 
-  static async acquire(directory: string, name: string): Promise<ProcessLock> {
+  static async acquire(directory: string, name: string, renameLock: typeof rename = rename): Promise<ProcessLock> {
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError('Lock name contains unsupported characters.');
     const lockPath = path.join(directory, `${name}.lock`);
     const record = { pid: process.pid, token: randomUUID() };
@@ -47,9 +47,23 @@ export class ProcessLock {
       if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
       const stalePath = `${lockPath}.${process.pid}.${randomUUID()}.stale`;
       try {
-        await rename(lockPath, stalePath);
+        await renameLock(lockPath, stalePath);
+        const claimed = await readLock(stalePath);
+        if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
+          // Another process replaced the stale record after our read. Restore the
+          // claimed file only if the canonical path is still free; link is
+          // exclusive, so restoration cannot overwrite a newer owner.
+          try {
+            await link(stalePath, lockPath);
+            await rm(stalePath, { force: true });
+          } catch (restoreError) {
+            if ((restoreError as NodeJS.ErrnoException).code !== 'EEXIST') throw restoreError;
+          }
+          throw new ProcessLockError('Lock ownership changed during stale recovery.');
+        }
         await rm(stalePath, { force: true });
       } catch (error) {
+        if (error instanceof ProcessLockError) throw error;
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
         throw error;
       }
