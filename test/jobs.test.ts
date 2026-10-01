@@ -182,6 +182,10 @@ test('a delayed stale-lock reclaimer cannot remove a replacement live lock', asy
   const renameRequested = new Promise<void>((resolve) => { announceRename = resolve; });
   let resumeRename!: () => void;
   const renameGate = new Promise<void>((resolve) => { resumeRename = resolve; });
+  let announceClaim!: () => void;
+  const claimMoved = new Promise<void>((resolve) => { announceClaim = resolve; });
+  let resumeClaim!: () => void;
+  const claimGate = new Promise<void>((resolve) => { resumeClaim = resolve; });
   let parked = false;
   const delayedRename: typeof renameFile = async (source, destination): Promise<void> => {
     if (!parked) {
@@ -192,12 +196,19 @@ test('a delayed stale-lock reclaimer cannot remove a replacement live lock', asy
     await renameFile(source, destination);
   };
 
-  const delayedReclaimer = ProcessLock.acquire(directory, 'run-race', delayedRename);
+  const delayedReclaimer = ProcessLock.acquire(directory, 'run-race', {
+    rename: delayedRename,
+    afterStaleRename: async () => { announceClaim(); await claimGate; },
+  });
   await renameRequested;
   const winningOwner = await ProcessLock.acquire(directory, 'run-race');
   const winningRecord = await readFile(lockPath, 'utf8');
   resumeRename();
+  await claimMoved;
 
+  await assert.rejects(ProcessLock.acquire(directory, 'run-race'), ProcessLockError);
+  assert.equal(await readFile(lockPath, 'utf8'), winningRecord);
+  resumeClaim();
   await assert.rejects(delayedReclaimer, ProcessLockError);
   assert.equal(await readFile(lockPath, 'utf8'), winningRecord);
   await assert.rejects(ProcessLock.acquire(directory, 'run-race'), ProcessLockError);

@@ -35231,13 +35231,13 @@ function sameReservation(left, right) {
 
 // src/infrastructure/checkpoint-store.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir, rename as rename2, rm as rm2 } from "node:fs/promises";
+import { mkdir as mkdir2, open as open3, readFile as readFile3, readdir as readdir2, rename as rename2, rm as rm2 } from "node:fs/promises";
 import path3 from "node:path";
 import { setTimeout as delay2 } from "node:timers/promises";
 
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { link, mkdir, open as open2, readFile as readFile2, rename, rm } from "node:fs/promises";
+import { link, mkdir, open as open2, readFile as readFile2, readdir, rename, rm } from "node:fs/promises";
 import path2 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 var ProcessLockError = class extends Error {
@@ -35253,7 +35253,7 @@ var ProcessLock = class _ProcessLock {
   }
   lockPath;
   record;
-  static async acquire(directory, name, renameLock = rename) {
+  static async acquire(directory, name, operations = {}) {
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
     const lockPath = path2.join(directory, `${name}.lock`);
     const record2 = { pid: process.pid, token: randomUUID2() };
@@ -35269,6 +35269,19 @@ var ProcessLock = class _ProcessLock {
         } finally {
           await handle.close();
         }
+        const claims = await staleClaims(lockPath);
+        const activeClaims = [];
+        for (const file2 of claims) {
+          const claimed = await readLock(file2);
+          if (!claimed) continue;
+          if (processExists(claimed.pid)) activeClaims.push({ file: file2, record: claimed });
+          else await rm(file2, { force: true });
+        }
+        if (activeClaims.length > 0) {
+          await removeIfOwned(lockPath, record2);
+          for (const claim2 of activeClaims) await restoreClaim(lockPath, claim2.file, claim2.record);
+          throw new ProcessLockError(`Run is already owned by process ${activeClaims[0].record.pid}.`);
+        }
         return new _ProcessLock(lockPath, record2);
       } catch (error62) {
         const code = error62.code;
@@ -35282,15 +35295,11 @@ var ProcessLock = class _ProcessLock {
       if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
       const stalePath = `${lockPath}.${process.pid}.${randomUUID2()}.stale`;
       try {
-        await renameLock(lockPath, stalePath);
+        await (operations.rename ?? rename)(lockPath, stalePath);
+        await operations.afterStaleRename?.();
         const claimed = await readLock(stalePath);
         if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
-          try {
-            await link(stalePath, lockPath);
-            await rm(stalePath, { force: true });
-          } catch (restoreError) {
-            if (restoreError.code !== "EEXIST") throw restoreError;
-          }
+          if (claimed && processExists(claimed.pid)) await restoreClaim(lockPath, stalePath, claimed);
           throw new ProcessLockError("Lock ownership changed during stale recovery.");
         }
         await rm(stalePath, { force: true });
@@ -35303,10 +35312,47 @@ var ProcessLock = class _ProcessLock {
     throw new ProcessLockError("Could not acquire process lock after retrying incomplete or stale ownership.");
   }
   async release() {
-    const current = await readLock(this.lockPath);
-    if (current?.token === this.record.token) await rm(this.lockPath, { force: true });
+    await removeIfOwned(this.lockPath, this.record);
+    for (const file2 of await staleClaims(this.lockPath)) {
+      const current = await readLock(file2);
+      if (current?.token === this.record.token) await rm(file2, { force: true });
+    }
   }
 };
+async function staleClaims(lockPath) {
+  const directory = path2.dirname(lockPath);
+  const prefix = `${path2.basename(lockPath)}.`;
+  try {
+    const entries = await readdir(directory);
+    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path2.join(directory, entry));
+  } catch (error62) {
+    if (error62.code === "ENOENT") return [];
+    throw error62;
+  }
+}
+async function removeIfOwned(lockPath, record2) {
+  const current = await readLock(lockPath);
+  if (current?.token === record2.token) await rm(lockPath, { force: true });
+}
+async function restoreClaim(lockPath, claimPath, record2) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const claimed = await readLock(claimPath);
+    if (claimed?.token !== record2.token || !processExists(record2.pid)) return;
+    try {
+      await link(claimPath, lockPath);
+      await rm(claimPath, { force: true });
+      return;
+    } catch (error62) {
+      if (error62.code !== "EEXIST") throw error62;
+      const current = await readLock(lockPath);
+      if (current?.token === record2.token) {
+        await rm(claimPath, { force: true });
+        return;
+      }
+      await delay(Math.min(2 + attempt, 20));
+    }
+  }
+}
 async function readLock(filePath) {
   try {
     const value = JSON.parse(await readFile2(filePath, "utf8"));
@@ -35667,7 +35713,7 @@ var CheckpointStore = class {
   async list() {
     let names;
     try {
-      names = await readdir(this.directory);
+      names = await readdir2(this.directory);
     } catch (error62) {
       if (error62.code === "ENOENT") return [];
       throw error62;
