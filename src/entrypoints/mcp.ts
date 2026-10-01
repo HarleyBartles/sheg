@@ -9,11 +9,9 @@ import { resolveDataRoot } from '../infrastructure/data-root.js';
 import { openRunStore, RunStoreError } from '../infrastructure/run-store.js';
 import { DetachedWorkerLauncher } from '../infrastructure/worker-launcher.js';
 import { assertProviderReady, createProvider } from '../providers/factory.js';
-import { runRequestSchema } from '../domain/run/request.js';
-import type { RunStatus } from '../domain/run/lifecycle.js';
+import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
 
-const statusSchema = z.enum(['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted']);
-const runListSchema = z.object({ status: statusSchema.optional(), label: z.string().optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict();
+const runListSchema = runListQuerySchema;
 const runDeleteSchema = z.object({ runIds: z.array(z.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, 'Run IDs must be unique.'), dryRun: z.boolean().default(false) }).strict();
 const runGetSchema = z.discriminatedUnion('view', [
   z.object({ runId: z.string().uuid(), view: z.literal('status') }).strict(),
@@ -23,10 +21,11 @@ const runGetSchema = z.discriminatedUnion('view', [
 ]);
 
 export function createPollingServer(service: RunService = createDefaultRunService()): McpServer {
-  const server = new McpServer({ name: 'sheg', version: '0.3.0' }, { instructions: 'Submit a direct typed request or finite journey, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work.' });
-  server.registerTool('run_inspect', { description: 'Validate a direct typed request or finite respondent journey and measure context fit without inference, persistence, or worker launch.', inputSchema: z.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
-  server.registerTool('run_start', { description: 'Accept a direct respondent request or finite journey as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
-  server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query as { status?: RunStatus; label?: string; cursor?: string; limit?: number })));
+  const server = new McpServer({ name: 'sheg', version: '0.3.0' }, { instructions: 'Submit direct typed requests, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work.' });
+  server.registerTool('run_inspect', { description: 'Validate a direct typed request, finite respondent journey, or follow-on selection and measure the exact packet context fit without inference or run creation.', inputSchema: z.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
+  server.registerTool('run_start', { description: 'Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
+  server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
+  server.registerTool('run_query', { description: 'Query typed answers and route outcomes in one run. Results identify exact source evaluations and contexts for follow-on requests. sourceComplete distinguishes a finished source from matches so far.', inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => service.queryEvidence(query)));
   server.registerTool('run_get', { description: 'Retrieve one view of a run: status, frozen request, paginated answers, or reached journey contexts and routes. Discovery never launches or resumes work.', inputSchema: runGetSchema }, async (input) => safeResult(() => {
     if (input.view === 'status') return service.getStatus(input.runId);
     if (input.view === 'request') return service.getRequest(input.runId);

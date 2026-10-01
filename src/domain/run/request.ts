@@ -80,17 +80,31 @@ export const followOnRunRequestSchema = z.object({
   label: z.string().min(1).max(120).optional(),
   sourceRunId: z.string().uuid(),
   selection: followOnSelectionSchema,
-  context: z.object({ mode: z.enum(['recorded', 'fresh-material', 'omit-history', 'continue']) }).strict(),
+  context: z.object({ mode: z.enum(['recorded', 'fresh-material', 'omit-history', 'continue']), materialIds: z.array(materialItemSchema.shape.id).min(1).optional() }).strict().superRefine((contextInput, context) => {
+    if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
+      context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Material references must be unique and ordered.' });
+    }
+    if (contextInput.mode === 'recorded' && contextInput.materialIds) {
+      context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Recorded context does not allow material changes.' });
+    }
+  }),
   material: z.array(materialItemSchema).min(1).optional(),
   questions: z.tuple([decisionQuestionSchema]),
   provider: providerConfigSchema,
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
-  if (request.context.mode === 'fresh-material' && !request.material) {
-    context.addIssue({ code: 'custom', path: ['material'], message: 'Fresh-material context requires explicit material.' });
+  const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
+  if ((request.context.mode === 'fresh-material' || request.context.mode === 'omit-history') && !hasMaterial) {
+    context.addIssue({ code: 'custom', path: ['context', 'materialIds'], message: `${request.context.mode} context requires explicit material or material references.` });
   }
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: 'custom', path: ['material'], message: 'Material IDs must be unique within a follow-on request.' });
+  }
+  if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
+    context.addIssue({ code: 'custom', path: ['material'], message: 'Inline material IDs must not duplicate selected source material IDs.' });
+  }
+  if (request.context.mode === 'recorded' && request.material) {
+    context.addIssue({ code: 'custom', path: ['material'], message: 'Recorded context does not allow material changes.' });
   }
 });
 
@@ -146,12 +160,13 @@ export const runEvidencePageSchema = z.object({
   nextCursor: z.string().min(1).optional(),
 }).strict();
 
-export const runRequestSchema = z.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
+export const runRequestSchema = z.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
 export type InlineRunRequest = z.input<typeof inlineRunRequestSchema>;
 export type ParsedInlineRunRequest = z.output<typeof inlineRunRequestSchema>;
 export type InlineJourneyRequest = z.input<typeof inlineJourneyRequestSchema>;
 export type ParsedInlineJourneyRequest = z.output<typeof inlineJourneyRequestSchema>;
+export type ParsedRunRequest = z.output<typeof runRequestSchema>;
 export type EvidenceCriteria = z.infer<typeof evidenceCriteriaSchema>;
 export type FollowOnRunRequest = z.input<typeof followOnRunRequestSchema>;
 export type ParsedFollowOnRunRequest = z.output<typeof followOnRunRequestSchema>;
@@ -160,7 +175,6 @@ export type RunEvidenceQuery = z.infer<typeof runEvidenceQuerySchema>;
 export type RunEvidenceItem = z.infer<typeof runEvidenceItemSchema>;
 export type RunEvidencePage = z.infer<typeof runEvidencePageSchema>;
 export type RunRequest = z.input<typeof runRequestSchema>;
-export type ParsedRunRequest = z.output<typeof runRequestSchema>;
 export type { JourneyDefinition };
 
 export type FrozenEvaluation = {
@@ -173,10 +187,36 @@ export type FrozenEvaluation = {
 };
 
 export type PreparedRun = {
-  request: ParsedInlineRunRequest;
+  request: ParsedInlineRunRequest | ParsedFollowOnRunRequest;
   requestFingerprint: string;
   compilerFingerprint: string;
   evaluations: FrozenEvaluation[];
+  lineage?: FollowOnLineage;
+};
+
+export type FollowOnSourceVersion = { status: import('./lifecycle.js').RunStatus; usedCalls: number; reservedCalls: number; maxOrdinal: number };
+export type FollowOnSourceTurn = {
+  evaluationId: string;
+  contextId: string;
+  respondentId: string;
+  packet: import('../decision/decision.js').DecisionRequest & { state: import('../decision/prompt.js').PromptState };
+  result?: import('../decision/decision.js').DecisionResult;
+};
+export type FollowOnSourceSet = {
+  sourceRunId: string;
+  sourceStatus: import('./lifecycle.js').RunStatus;
+  sourceComplete: boolean;
+  version: FollowOnSourceVersion;
+  turns: FollowOnSourceTurn[];
+};
+export type FollowOnLineage = {
+  sourceRunId: string;
+  sourceStatusAtAcceptance: import('./lifecycle.js').RunStatus;
+  sourceCompleteAtAcceptance: boolean;
+  sourceVersion: FollowOnSourceVersion;
+  sourceAvailable?: boolean;
+  sourceRecordState?: 'live' | 'historical';
+  selections: Array<{ sourceEvaluationId: string; sourceContextId: string; respondentId: string; evaluationId: string; contextId: string }>;
 };
 
 export type PreparedJourneyRun = {

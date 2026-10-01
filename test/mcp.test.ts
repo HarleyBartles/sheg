@@ -46,7 +46,7 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
   const f = await connectedFixture();
   try {
     const tools = await f.client.listTools();
-    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_resume', 'run_start', 'run_storage']);
+    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_query', 'run_resume', 'run_start', 'run_storage']);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
@@ -65,6 +65,12 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
     const answers = await f.client.callTool({ name: 'run_get', arguments: { runId: run.runId, view: 'answers', limit: 1 } });
     assert.equal((answers.structuredContent as { items: Array<{ status: string; contextId: string }> }).items[0]?.status, 'pending');
     assert.ok((answers.structuredContent as { items: Array<{ contextId: string }> }).items[0]?.contextId);
+    const queried = await f.client.callTool({ name: 'run_query', arguments: { sourceRunId: run.runId, criteria: { materialId: 'opening' }, limit: 1 } });
+    assert.equal(queried.isError ?? false, false);
+    const evidence = queried.structuredContent as { items: unknown[]; totalMatches: number; sourceStatus: string; sourceComplete: boolean };
+    assert.equal(evidence.totalMatches, 1);
+    assert.equal(evidence.sourceStatus, 'prepared');
+    assert.equal(evidence.sourceComplete, false);
     const cancelled = await f.client.callTool({ name: 'run_cancel', arguments: { runId: run.runId } });
     assert.equal((cancelled.structuredContent as { status: string }).status, 'cancelled');
 
@@ -105,6 +111,43 @@ test('MCP inspects and accepts an inline journey, then exposes its initial durab
     assert.equal((retry.structuredContent as { runId: string }).runId, run.runId);
     assert.equal(retry.isError ?? false, false);
     assert.equal(f.store.list({}).items.length, 1);
+  } finally { await f.close(); }
+});
+
+test('MCP queries typed evidence and starts a context-preserving follow-on', async () => {
+  const f = await connectedFixture();
+  try {
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: request() } });
+    const sourceRunId = (started.structuredContent as { runId: string }).runId;
+    const claim = f.store.claim(sourceRunId, Date.now(), 1234);
+    assert.ok(claim);
+    const attempt = f.store.reserveNext(claim, Date.now());
+    assert.ok(attempt);
+    f.store.settle(claim, attempt.attemptId, { kind: 'answered', result: {
+      type: 'choice', choice: 'leave', probabilities: { continue: 0.15, leave: 0.85 }, confidence: 0.85,
+      attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+    } });
+    f.store.finish(claim);
+    const queried = await f.client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: { answer: { type: 'choice', choiceId: 'leave' } } } });
+    assert.equal(queried.isError ?? false, false);
+    const evidence = queried.structuredContent as { items: Array<{ evaluationId: string; contextId: string }>; sourceComplete: boolean };
+    assert.equal(evidence.items.length, 1);
+    assert.equal(evidence.sourceComplete, true);
+    const followOn = {
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
+      context: { mode: 'recorded' }, questions: [{ type: 'noul', id: 'why-left', instructions: 'What caused you to leave?' }],
+      provider: request().provider, maxCalls: 1,
+    };
+    const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: followOn } });
+    assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
+    const accepted = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: followOn } });
+    assert.equal(accepted.isError ?? false, false);
+    const followOnRunId = (accepted.structuredContent as { runId: string }).runId;
+    const saved = await f.client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'request' } });
+    const data = saved.structuredContent as { request: { kind: string }; lineage: { sourceRunId: string; selections: unknown[] } };
+    assert.equal(data.request.kind, 'follow-on');
+    assert.equal(data.lineage.sourceRunId, sourceRunId);
+    assert.equal(data.lineage.selections.length, 1);
   } finally { await f.close(); }
 });
 

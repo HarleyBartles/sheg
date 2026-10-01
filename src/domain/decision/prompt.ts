@@ -90,6 +90,81 @@ export function emptyTrajectory(): TrajectorySummary {
   });
 }
 
+export function appendTrajectoryResponse(
+  trajectory: TrajectorySummary,
+  question: DecisionRequest['question'],
+  result: DecisionValue,
+  exposedItemIds: readonly string[],
+): TrajectorySummary {
+  if (question.type !== result.type) throw new Error('Decision response type does not match the saved question.');
+  const exposed = [...exposedItemIds];
+  let response: TrajectoryResponse;
+  let choices = trajectory.choices;
+  if (result.type === 'choice' && question.type === 'choice') {
+    const choiceMeaning = question.options[result.choice];
+    if (choiceMeaning === undefined) throw new Error(`Saved answer choice ${result.choice} was not offered.`);
+    response = { type: 'choice', taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed,
+      ...(result.probabilities === undefined ? {} : { probabilities: { ...result.probabilities } }),
+      ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+    choices = [...trajectory.choices, { taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed }];
+  } else if (result.type === 'score' && question.type === 'score') {
+    if (result.score < 0 || result.score > question.rubric.length - 1) throw new Error('Saved Score answer is outside its question rubric.');
+    response = { type: 'score', taskId: question.id, score: result.score,
+      meaning: `Expected rubric level ${result.score}; rubric: ${question.rubric.join(' | ')}`,
+      probabilities: { ...result.probabilities }, legend: { ...result.legend },
+      ...(result.confidence === undefined ? {} : { confidence: result.confidence }), exposedItemIds: exposed };
+  } else if (result.type === 'noul' && question.type === 'noul') {
+    response = { type: 'noul', taskId: question.id, noul: result.noul, proposition: question.instructions, exposedItemIds: exposed };
+  } else throw new Error('Decision response type does not match the saved question.');
+
+  return finishTrajectory({
+    version: 1,
+    eventCount: trajectory.eventCount + 1,
+    exposureCount: trajectory.exposureCount,
+    decisionCount: trajectory.decisionCount + 1,
+    eventRange: trajectory.eventRange === null
+      ? { firstSequence: 0, lastSequence: 0 }
+      : { firstSequence: trajectory.eventRange.firstSequence, lastSequence: trajectory.eventCount },
+    choices,
+    responses: [...trajectory.responses, response],
+  });
+}
+
+export function prepareFollowOnPacket(input: {
+  source: DecisionRequest & { state: PromptState };
+  mode: 'recorded' | 'fresh-material' | 'omit-history' | 'continue';
+  question: DecisionRequest['question'];
+  material?: readonly { id: string; text: string }[];
+  result?: DecisionValue;
+}): DecisionRequest & { state: PromptState } {
+  const { source, mode, question } = input;
+  if (mode === 'recorded') return compileDecisionRequest({
+    respondentProfile: source.state.respondent.profile,
+    encounteredItems: source.state.encounteredItems,
+    trajectory: source.state.trajectory,
+    question,
+  }) as DecisionRequest & { state: PromptState };
+  const material = input.material ? input.material.map(({ id, text }) => ({ id, text })) : [];
+  let state: PromptState;
+  if (mode === 'continue') {
+    if (!input.result) throw new Error('Continue context requires the selected completed answer.');
+    const currentIds = source.state.encounteredItems.map(({ id }) => id);
+    state = {
+      respondent: { profile: { ...source.state.respondent.profile } },
+      encounteredItems: [...source.state.encounteredItems.map((item) => ({ ...item })), ...material],
+      trajectory: appendTrajectoryResponse(source.state.trajectory, source.question, input.result, currentIds),
+    };
+  } else {
+    if (material.length === 0) throw new Error(`${mode} context requires explicit material.`);
+    state = {
+      respondent: { profile: { ...source.state.respondent.profile } },
+      encounteredItems: material,
+      trajectory: emptyTrajectory(),
+    };
+  }
+  return compileDecisionRequest({ respondentProfile: state.respondent.profile, encounteredItems: state.encounteredItems, trajectory: state.trajectory, question }) as DecisionRequest & { state: PromptState };
+}
+
 function compactTrajectory(arm: JourneyDefinition, history: readonly PromptHistoryEvent[]): TrajectorySummary {
   const exposureIds: string[] = [];
   const choices: TrajectoryChoice[] = [];

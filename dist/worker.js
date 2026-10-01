@@ -21361,17 +21361,31 @@ var followOnRunRequestSchema = external_exports.object({
   label: external_exports.string().min(1).max(120).optional(),
   sourceRunId: external_exports.string().uuid(),
   selection: followOnSelectionSchema,
-  context: external_exports.object({ mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]) }).strict(),
+  context: external_exports.object({ mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]), materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional() }).strict().superRefine((contextInput, context) => {
+    if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
+      context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
+    }
+    if (contextInput.mode === "recorded" && contextInput.materialIds) {
+      context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
+    }
+  }),
   material: external_exports.array(materialItemSchema).min(1).optional(),
   questions: external_exports.tuple([decisionQuestionSchema]),
   provider: providerConfigSchema,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
-  if (request.context.mode === "fresh-material" && !request.material) {
-    context.addIssue({ code: "custom", path: ["material"], message: "Fresh-material context requires explicit material." });
+  const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
+  if ((request.context.mode === "fresh-material" || request.context.mode === "omit-history") && !hasMaterial) {
+    context.addIssue({ code: "custom", path: ["context", "materialIds"], message: `${request.context.mode} context requires explicit material or material references.` });
   }
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
+  }
+  if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
+  }
+  if (request.context.mode === "recorded" && request.material) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Recorded context does not allow material changes." });
   }
 });
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
@@ -21422,10 +21436,10 @@ var runEvidencePageSchema = external_exports.object({
   }).strict(),
   nextCursor: external_exports.string().min(1).optional()
 }).strict();
-var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
+var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
 // src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
@@ -21625,10 +21639,33 @@ function initialize(database) {
   }
 }
 function validatePrepared(prepared) {
-  const parsedRequest = inlineRunRequestSchema.safeParse(prepared.request);
+  const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError("invalid_prepared_run", "Prepared run request or fingerprint is invalid.");
   }
+  if (parsedRequest.data.kind === "follow-on") {
+    const lineage = prepared.lineage;
+    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId || lineage.selections.length !== prepared.evaluations.length || lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === "completed")) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage does not match its request and frozen evaluations.");
+    }
+    const selectedIds = /* @__PURE__ */ new Set();
+    const selectedContexts = /* @__PURE__ */ new Set();
+    const evaluationIds2 = /* @__PURE__ */ new Set();
+    const contextIds2 = /* @__PURE__ */ new Set();
+    for (const [index, evaluation] of prepared.evaluations.entries()) {
+      const selection = lineage.selections[index];
+      const packet = decisionRequestSchema.safeParse(evaluation.packet);
+      if (!packet.success || selection.respondentId !== evaluation.respondentId || selection.evaluationId !== evaluation.evaluationId || selection.contextId !== evaluation.contextId || evaluation.questionId !== parsedRequest.data.questions[0].id || packet.data.question.id !== evaluation.questionId || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint || selectedIds.has(selection.sourceEvaluationId) || selectedContexts.has(selection.sourceContextId) || evaluationIds2.has(evaluation.evaluationId) || contextIds2.has(evaluation.contextId)) {
+        throw new RunStoreError("invalid_prepared_run", "Prepared follow-on evaluation or source selection is inconsistent.");
+      }
+      selectedIds.add(selection.sourceEvaluationId);
+      selectedContexts.add(selection.sourceContextId);
+      evaluationIds2.add(evaluation.evaluationId);
+      contextIds2.add(evaluation.contextId);
+    }
+    return { ...prepared, request: parsedRequest.data };
+  }
+  if (parsedRequest.data.kind !== "poll") throw new RunStoreError("invalid_prepared_run", "A journey must be accepted through journey preparation.");
   if (prepared.evaluations.length !== parsedRequest.data.respondents.length) {
     throw new RunStoreError("invalid_prepared_run", "Prepared run evaluations do not match the respondent count.");
   }
@@ -21744,6 +21781,19 @@ var SQLiteRunStore = class {
         this.reconcileInside(runId3, this.now());
         return { created: false, run: this.statusInside(runId3) };
       }
+      if (prepared.request.kind === "follow-on") {
+        const source = this.database.prepare("SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?").get(prepared.lineage.sourceRunId);
+        if (!source) throw this.notFound();
+        const maxOrdinal = asNumber(this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(prepared.lineage.sourceRunId).maximum, "maximum evaluation ordinal");
+        const version2 = prepared.lineage.sourceVersion;
+        if (asText(source.status, "source run status") !== version2.status || asNumber(source.used_calls, "source used calls") !== version2.usedCalls || asNumber(source.reserved_calls, "source reserved calls") !== version2.reservedCalls || maxOrdinal !== version2.maxOrdinal) {
+          throw new RunStoreError("source_changed_during_acceptance", "The source run changed after follow-on inspection. Inspect the request again to use its current evidence.");
+        }
+        for (const selection of prepared.lineage.selections) {
+          const sourceEvaluation = this.database.prepare("SELECT 1 AS found FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND context_id = ?").get(prepared.lineage.sourceRunId, selection.sourceEvaluationId, selection.sourceContextId);
+          if (!sourceEvaluation) throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
+        }
+      }
       const runId2 = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
@@ -21756,7 +21806,7 @@ var SQLiteRunStore = class {
         createdAt,
         nowMs,
         prepared.request.label ?? null,
-        JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint }),
+        JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint, ...prepared.lineage ? { lineage: prepared.lineage } : {} }),
         prepared.evaluations.length,
         prepared.request.maxCalls
       );
@@ -21886,6 +21936,10 @@ var SQLiteRunStore = class {
     if (parsed.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint")) {
       throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
     }
+    if (parsed.request.kind === "follow-on" && parsed.lineage) {
+      const sourceAvailable = Boolean(this.database.prepare("SELECT 1 AS found FROM runs WHERE run_id = ?").get(parsed.lineage.sourceRunId));
+      return { ...parsed, lineage: { ...parsed.lineage, sourceAvailable, sourceRecordState: sourceAvailable ? "live" : "historical" } };
+    }
     return parsed;
   }
   getJourneyRun(runId2) {
@@ -21988,10 +22042,12 @@ var SQLiteRunStore = class {
       params.push(Date.parse(query.createdBefore));
     }
     if (query.materialId !== void 0) {
-      clauses.push(`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
-        THEN json_extract(runs.request_json, '$.request.material') ELSE json_extract(runs.request_json, '$.request.journey.items') END) AS source_material
-        WHERE json_extract(source_material.value, '$.id') = ?)`);
-      params.push(query.materialId);
+      clauses.push(`(EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
+        THEN json_extract(runs.request_json, '$.request.material') WHEN json_extract(runs.request_json, '$.request.kind') = 'journey'
+        THEN json_extract(runs.request_json, '$.request.journey.items') ELSE json_extract(runs.request_json, '$.request.material') END) AS source_material
+        WHERE json_extract(source_material.value, '$.id') = ?) OR EXISTS (SELECT 1 FROM evaluations AS material_evaluation, json_each(material_evaluation.packet_json, '$.state.encounteredItems') AS encountered
+        WHERE material_evaluation.run_id = runs.run_id AND json_extract(encountered.value, '$.id') = ?))`);
+      params.push(query.materialId, query.materialId);
     }
     if (cursor) {
       clauses.push("(created_ms > ? OR (created_ms = ? AND run_id > ?))");
@@ -22007,6 +22063,84 @@ var SQLiteRunStore = class {
       items,
       ...hasMore && last ? { nextCursor: encodeCursor({ kind: "runs", createdMs: asNumber(last.created_ms, "created time"), runId: asText(last.run_id, "run ID"), filtersFingerprint }) } : {}
     };
+  }
+  resolveFollowOnSources(input2) {
+    this.ensureOpen();
+    const request = followOnRunRequestSchema.parse(input2);
+    return this.readTransaction(() => {
+      const run = this.database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
+      if (!run) throw this.notFound();
+      const stored = parseJson(run.request_json, "source run request");
+      const sourceRequest = runRequestSchema.safeParse(stored.request);
+      if (!sourceRequest.success) throw new RunStoreError("data_integrity_error", "Stored source run request is invalid.");
+      const sourceStatus = asText(run.status, "run status");
+      const usedCalls = asNumber(run.used_calls, "used calls");
+      const reservedCalls = asNumber(run.reserved_calls, "reserved calls");
+      const maxOrdinal = asNumber(this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(request.sourceRunId).maximum, "maximum evaluation ordinal");
+      const where = ["e.run_id = ?", "e.ordinal <= ?"];
+      const parameters = [request.sourceRunId, maxOrdinal];
+      if ("references" in request.selection) {
+        const terms = request.selection.references.map(() => "(e.evaluation_id = ? AND e.context_id = ?)");
+        where.push(`(${terms.join(" OR ")})`);
+        for (const reference of request.selection.references) parameters.push(reference.evaluationId, reference.contextId);
+      } else {
+        const criteria = request.selection.criteria;
+        if (criteria.respondentId !== void 0) {
+          where.push("e.respondent_id = ?");
+          parameters.push(criteria.respondentId);
+        }
+        if (criteria.status !== void 0) {
+          where.push("e.status = ?");
+          parameters.push(criteria.status);
+        }
+        if (criteria.questionId !== void 0) {
+          where.push("e.question_id = ?");
+          parameters.push(criteria.questionId);
+        }
+        if (criteria.materialId !== void 0) {
+          where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
+          parameters.push(criteria.materialId);
+        }
+        if (criteria.answer?.type === "choice") {
+          where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
+          parameters.push(criteria.answer.choiceId);
+        } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
+          const field = criteria.answer.type === "score" ? "score" : "noul";
+          const operator = criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">=";
+          where.push(`json_extract(e.result_json, '$.type') = '${field}' AND json_extract(e.result_json, '$.${field}') ${operator} ?`);
+          parameters.push(criteria.answer.value);
+        }
+        if (criteria.outcome !== void 0) {
+          where.push("jr.outcome = ?");
+          parameters.push(criteria.outcome);
+        }
+      }
+      const rows = this.database.prepare(`SELECT e.* FROM evaluations AS e
+        LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        WHERE ${where.join(" AND ")} ORDER BY e.ordinal LIMIT 10001`).all(...parameters);
+      if (rows.length > 1e4) throw new RunStoreError("follow_on_selection_too_large", "Follow-on selection matched more than 10,000 evaluations. Narrow the criteria or use explicit references.");
+      if ("references" in request.selection && rows.length !== request.selection.references.length) {
+        throw new RunStoreError("follow_on_reference_not_found", "One or more evaluation/context references were not found in the source run.");
+      }
+      const turns = rows.map((row) => {
+        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "source packet"));
+        const result = row.result_json === null ? void 0 : decisionResultSchema.parse(parseJson(row.result_json, "source answer"));
+        return {
+          evaluationId: asText(row.evaluation_id, "evaluation ID"),
+          contextId: asText(row.context_id, "context ID"),
+          respondentId: asText(row.respondent_id, "respondent ID"),
+          packet,
+          ...result ? { result } : {}
+        };
+      });
+      return {
+        sourceRunId: request.sourceRunId,
+        sourceStatus,
+        sourceComplete: sourceStatus === "completed",
+        version: { status: sourceStatus, usedCalls, reservedCalls, maxOrdinal },
+        turns
+      };
+    });
   }
   queryEvidence(input2) {
     this.ensureOpen();
@@ -22086,8 +22220,15 @@ var SQLiteRunStore = class {
       };
       let respondentCoverage = cursor?.coverage.respondents;
       if (!respondentCoverage) {
-        const total = parsedRequest.data.respondents.length;
-        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
+        const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
+        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+                SELECT respondent_id, CASE
+                  WHEN SUM(status = 'pending') > 0 THEN 'active'
+                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
+                  ELSE 'answered' END AS status
+                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
+              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
         const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, "respondent status"), asNumber(row.count, "respondent count")]));
         const completed = countByStatus.get(parsedRequest.data.kind === "journey" ? "completed" : "answered") ?? 0;
         const failed = countByStatus.get("failed") ?? 0;
@@ -22235,7 +22376,9 @@ var SQLiteRunStore = class {
         const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId2)?.status, "run status");
         const evaluationCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId2).count, "evaluation count");
         const attemptCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId2).count, "attempt count");
-        return { runId: runId2, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running" };
+        const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId2);
+        const retainedFollowOnRunIds = dependentRows.map((row) => asText(row.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
+        return { runId: runId2, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running", retainedFollowOnRunIds };
       });
       return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
     });
@@ -22541,6 +22684,20 @@ var SQLiteRunStore = class {
   }
   transaction(operation) {
     this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      this.database.exec("COMMIT");
+      return result;
+    } catch (error62) {
+      try {
+        this.database.exec("ROLLBACK");
+      } catch {
+      }
+      throw error62;
+    }
+  }
+  readTransaction(operation) {
+    this.database.exec("BEGIN");
     try {
       const result = operation();
       this.database.exec("COMMIT");

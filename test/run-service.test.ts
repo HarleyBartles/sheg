@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
-import type { InlineRunRequest } from '../src/domain/run/request.js';
+import type { FollowOnRunRequest, InlineRunRequest } from '../src/domain/run/request.js';
 import { prepareRun } from '../src/application/run-inspection.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
@@ -133,7 +133,70 @@ test('worker launch failure returns the retained run identity and failed status'
     assert.equal(run.status, 'failed');
     assert.equal(run.failure?.code, 'worker_launch_failed');
     assert.equal(run.failure?.message.includes('host path detail'), false);
-    assert.equal(fixture.store.getRequest(run.runId).request.material[0]!.text, 'Section three');
+    const saved = fixture.store.getRequest(run.runId);
+    assert.equal(saved.request.kind, 'poll');
+    if (saved.request.kind === 'poll') assert.equal(saved.request.material[0]!.text, 'Section three');
+  } finally { await fixture.close(); }
+});
+
+test('follow-on inspection fits frozen saved context and acceptance retains source lineage', async () => {
+  const fixture = await setup();
+  const counters = { measures: 0, decisions: 0 };
+  let launches = 0;
+  try {
+    const sourcePrepared = await prepareRun(request(), provider());
+    assert.ok(sourcePrepared.prepared);
+    const source = fixture.store.accept(randomUUID(), sourcePrepared.prepared).run;
+    const claim = fixture.store.claim(source.runId, Date.now(), 1234);
+    assert.ok(claim);
+    const reservation = fixture.store.reserveNext(claim, Date.now());
+    assert.ok(reservation);
+    fixture.store.settle(claim, reservation.attemptId, { kind: 'answered', result: { type: 'choice', choice: 'leave', probabilities: { continue: 0.1, leave: 0.9 }, confidence: 0.9, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} } });
+    fixture.store.finish(claim);
+    const followOn: FollowOnRunRequest = {
+      kind: 'follow-on', sourceRunId: source.runId,
+      selection: { criteria: { answer: { type: 'choice', choiceId: 'leave' } } },
+      context: { mode: 'recorded' },
+      questions: [{ type: 'noul', id: 'why-leave', instructions: 'What caused you to leave?' }],
+      provider: request().provider, maxCalls: 1,
+    };
+    const service = createRunService(fixture.store, fixture.root, () => provider('fits', counters), { async launch() { launches += 1; } }, { assertProviderReady: async () => undefined });
+    const before = fixture.store.list({}).items.length;
+    const inspection = await service.inspect(followOn);
+    assert.equal(inspection.valid, true, JSON.stringify(inspection));
+    assert.equal(inspection.respondentCount, 1);
+    assert.equal(counters.measures, 1);
+    assert.equal(counters.decisions, 0);
+    assert.equal(fixture.store.list({}).items.length, before);
+    const accepted = await service.start(randomUUID(), followOn);
+    assert.equal(accepted.status, 'prepared');
+    assert.equal(launches, 1);
+    const saved = fixture.store.getRequest(accepted.runId);
+    assert.equal(saved.request.kind, 'follow-on');
+    if (saved.request.kind === 'follow-on') {
+      assert.equal(saved.lineage?.sourceRunId, source.runId);
+      assert.equal(saved.lineage?.sourceAvailable, true);
+    }
+    assert.deepEqual(fixture.store.list({ materialId: 'section-three' }).items.map(({ runId }) => runId).sort(), [source.runId, accepted.runId].sort());
+    const preview = fixture.store.previewDelete([source.runId]);
+    assert.deepEqual(preview.runs[0]?.retainedFollowOnRunIds, [accepted.runId]);
+    const followOnClaim = fixture.store.claim(accepted.runId, Date.now(), 4321);
+    assert.ok(followOnClaim);
+    const followOnAttempt = fixture.store.reserveNext(followOnClaim, Date.now());
+    assert.ok(followOnAttempt);
+    fixture.store.settle(followOnClaim, followOnAttempt.attemptId, { kind: 'answered', result: {
+      type: 'noul', noul: 0.6, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+    } });
+    fixture.store.finish(followOnClaim);
+    fixture.store.deleteRuns([source.runId]);
+    const retained = fixture.store.getRequest(accepted.runId);
+    assert.equal(retained.request.kind, 'follow-on');
+    if (retained.request.kind === 'follow-on') {
+      assert.equal(retained.lineage?.sourceRunId, source.runId);
+      assert.equal(retained.lineage?.sourceAvailable, false);
+      assert.equal(retained.lineage?.sourceRecordState, 'historical');
+    }
+    assert.equal(fixture.store.answers(accepted.runId).items[0]?.result?.type, 'noul');
   } finally { await fixture.close(); }
 });
 

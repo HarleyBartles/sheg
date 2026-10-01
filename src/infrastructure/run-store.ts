@@ -7,10 +7,11 @@ import { validateDecision } from '../domain/decision/validate.js';
 import { compileDecisionPacket } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
 import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
-import { inlineRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FrozenEvaluation, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput } from '../domain/run/request.js';
+import { decisionResultSchema } from '../domain/decision/decision.js';
+import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const LEASE_MS = 30_000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -20,7 +21,7 @@ export type AttemptOutcome =
   | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run' };
 
 export type RunListQuery = RunListQueryInput;
-export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean }>; blockedByActiveWork: boolean };
+export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean; retainedFollowOnRunIds: string[] }>; blockedByActiveWork: boolean };
 export type DeleteResult = { deletedRunIds: string[]; removed: { runs: number; evaluations: number; attempts: number } };
 export type StorageInfo = { integrity: 'ok' | 'failed'; databaseBytes: number; runCount: number; evaluationCount: number; attemptCount: number; activeRunCount: number };
 export type JourneyTransition = { respondentId: string; expectedRevision: number; state: JourneyRespondentState; nextEvaluation?: JourneyEvaluation };
@@ -80,11 +81,12 @@ export interface RunStore {
   accept(submissionId: string, prepared: PreparedRun): { created: boolean; run: RunStatusView };
   acceptJourney(submissionId: string, prepared: PreparedJourneyRun): { created: boolean; run: RunStatusView };
   getStatus(runId: string): RunStatusView;
-  getRequestKind(runId: string): 'poll' | 'journey';
+  getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on';
   getRequest(runId: string): PreparedRun;
   getJourneyRun(runId: string): JourneyRunRecord;
   list(query: RunListQuery): Page<RunStatusView>;
   queryEvidence(query: RunEvidenceQuery): RunEvidencePage;
+  resolveFollowOnSources(request: ParsedFollowOnRunRequest): FollowOnSourceSet;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   requestCancel(runId: string): RunStatusView;
   resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
@@ -270,11 +272,32 @@ function initialize(database: DatabaseSync): void {
 }
 
 function validatePrepared(prepared: PreparedRun): PreparedRun {
-  const parsedRequest = inlineRunRequestSchema.safeParse(prepared.request);
+  const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 ||
       hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError('invalid_prepared_run', 'Prepared run request or fingerprint is invalid.');
   }
+  if (parsedRequest.data.kind === 'follow-on') {
+    const lineage = prepared.lineage;
+    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId || lineage.selections.length !== prepared.evaluations.length ||
+        lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === 'completed')) {
+      throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on lineage does not match its request and frozen evaluations.');
+    }
+    const selectedIds = new Set<string>(); const selectedContexts = new Set<string>(); const evaluationIds = new Set<string>(); const contextIds = new Set<string>();
+    for (const [index, evaluation] of prepared.evaluations.entries()) {
+      const selection = lineage.selections[index]!;
+      const packet = decisionRequestSchema.safeParse(evaluation.packet);
+      if (!packet.success || selection.respondentId !== evaluation.respondentId || selection.evaluationId !== evaluation.evaluationId || selection.contextId !== evaluation.contextId ||
+          evaluation.questionId !== parsedRequest.data.questions[0].id || packet.data.question.id !== evaluation.questionId ||
+          hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint ||
+          selectedIds.has(selection.sourceEvaluationId) || selectedContexts.has(selection.sourceContextId) || evaluationIds.has(evaluation.evaluationId) || contextIds.has(evaluation.contextId)) {
+        throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on evaluation or source selection is inconsistent.');
+      }
+      selectedIds.add(selection.sourceEvaluationId); selectedContexts.add(selection.sourceContextId); evaluationIds.add(evaluation.evaluationId); contextIds.add(evaluation.contextId);
+    }
+    return { ...prepared, request: parsedRequest.data };
+  }
+  if (parsedRequest.data.kind !== 'poll') throw new RunStoreError('invalid_prepared_run', 'A journey must be accepted through journey preparation.');
   if (prepared.evaluations.length !== parsedRequest.data.respondents.length) {
     throw new RunStoreError('invalid_prepared_run', 'Prepared run evaluations do not match the respondent count.');
   }
@@ -401,6 +424,21 @@ class SQLiteRunStore implements RunStore {
         return { created: false, run: this.statusInside(runId) };
       }
 
+      if (prepared.request.kind === 'follow-on') {
+        const source = this.database.prepare('SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?').get(prepared.lineage!.sourceRunId) as DatabaseRow | undefined;
+        if (!source) throw this.notFound();
+        const maxOrdinal = asNumber((this.database.prepare('SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?').get(prepared.lineage!.sourceRunId) as DatabaseRow).maximum, 'maximum evaluation ordinal');
+        const version = prepared.lineage!.sourceVersion;
+        if (asText(source.status, 'source run status') !== version.status || asNumber(source.used_calls, 'source used calls') !== version.usedCalls ||
+            asNumber(source.reserved_calls, 'source reserved calls') !== version.reservedCalls || maxOrdinal !== version.maxOrdinal) {
+          throw new RunStoreError('source_changed_during_acceptance', 'The source run changed after follow-on inspection. Inspect the request again to use its current evidence.');
+        }
+        for (const selection of prepared.lineage!.selections) {
+          const sourceEvaluation = this.database.prepare('SELECT 1 AS found FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND context_id = ?').get(prepared.lineage!.sourceRunId, selection.sourceEvaluationId, selection.sourceContextId);
+          if (!sourceEvaluation) throw new RunStoreError('source_changed_during_acceptance', 'A selected source evaluation changed after follow-on inspection. Inspect the request again.');
+        }
+      }
+
       const runId = randomUUID();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
@@ -408,7 +446,7 @@ class SQLiteRunStore implements RunStore {
         (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls)
         VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?)`)
         .run(runId, submissionId, prepared.requestFingerprint, createdAt, nowMs, prepared.request.label ?? null,
-          JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint }), prepared.evaluations.length, prepared.request.maxCalls);
+          JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint, ...(prepared.lineage ? { lineage: prepared.lineage } : {}) }), prepared.evaluations.length, prepared.request.maxCalls);
       const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
         (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, packet_json, packet_fingerprint, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
@@ -469,7 +507,7 @@ class SQLiteRunStore implements RunStore {
     });
   }
 
-  getRequestKind(runId: string): 'poll' | 'journey' {
+  getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on' {
     this.getStatus(runId);
     const row = this.database.prepare('SELECT request_json FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
     if (!row) throw this.notFound();
@@ -502,6 +540,10 @@ class SQLiteRunStore implements RunStore {
     })) });
     if (parsed.requestFingerprint !== asText(row.request_fingerprint, 'request fingerprint')) {
       throw new RunStoreError('data_integrity_error', 'Stored run and request fingerprints do not match.');
+    }
+    if (parsed.request.kind === 'follow-on' && parsed.lineage) {
+      const sourceAvailable = Boolean(this.database.prepare('SELECT 1 AS found FROM runs WHERE run_id = ?').get(parsed.lineage.sourceRunId));
+      return { ...parsed, lineage: { ...parsed.lineage, sourceAvailable, sourceRecordState: sourceAvailable ? 'live' : 'historical' } };
     }
     return parsed;
   }
@@ -602,10 +644,12 @@ class SQLiteRunStore implements RunStore {
     if (query.createdAfter !== undefined) { clauses.push('created_ms >= ?'); params.push(Date.parse(query.createdAfter)); }
     if (query.createdBefore !== undefined) { clauses.push('created_ms <= ?'); params.push(Date.parse(query.createdBefore)); }
     if (query.materialId !== undefined) {
-      clauses.push(`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
-        THEN json_extract(runs.request_json, '$.request.material') ELSE json_extract(runs.request_json, '$.request.journey.items') END) AS source_material
-        WHERE json_extract(source_material.value, '$.id') = ?)`);
-      params.push(query.materialId);
+      clauses.push(`(EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
+        THEN json_extract(runs.request_json, '$.request.material') WHEN json_extract(runs.request_json, '$.request.kind') = 'journey'
+        THEN json_extract(runs.request_json, '$.request.journey.items') ELSE json_extract(runs.request_json, '$.request.material') END) AS source_material
+        WHERE json_extract(source_material.value, '$.id') = ?) OR EXISTS (SELECT 1 FROM evaluations AS material_evaluation, json_each(material_evaluation.packet_json, '$.state.encounteredItems') AS encountered
+        WHERE material_evaluation.run_id = runs.run_id AND json_extract(encountered.value, '$.id') = ?))`);
+      params.push(query.materialId, query.materialId);
     }
     if (cursor) {
       clauses.push('(created_ms > ? OR (created_ms = ? AND run_id > ?))');
@@ -621,6 +665,65 @@ class SQLiteRunStore implements RunStore {
       items,
       ...(hasMore && last ? { nextCursor: encodeCursor({ kind: 'runs', createdMs: asNumber(last.created_ms, 'created time'), runId: asText(last.run_id, 'run ID'), filtersFingerprint } satisfies CursorPayload) } : {}),
     };
+  }
+
+  resolveFollowOnSources(input: ParsedFollowOnRunRequest): FollowOnSourceSet {
+    this.ensureOpen();
+    const request = followOnRunRequestSchema.parse(input);
+    return this.readTransaction(() => {
+      const run = this.database.prepare('SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?').get(request.sourceRunId) as DatabaseRow | undefined;
+      if (!run) throw this.notFound();
+      const stored = parseJson<{ request?: unknown }>(run.request_json, 'source run request');
+      const sourceRequest = runRequestSchema.safeParse(stored.request);
+      if (!sourceRequest.success) throw new RunStoreError('data_integrity_error', 'Stored source run request is invalid.');
+      const sourceStatus = asText(run.status, 'run status') as RunStatus;
+      const usedCalls = asNumber(run.used_calls, 'used calls');
+      const reservedCalls = asNumber(run.reserved_calls, 'reserved calls');
+      const maxOrdinal = asNumber((this.database.prepare('SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?').get(request.sourceRunId) as DatabaseRow).maximum, 'maximum evaluation ordinal');
+      const where = ['e.run_id = ?', 'e.ordinal <= ?'];
+      const parameters: Array<string | number> = [request.sourceRunId, maxOrdinal];
+      if ('references' in request.selection) {
+        const terms = request.selection.references.map(() => '(e.evaluation_id = ? AND e.context_id = ?)');
+        where.push(`(${terms.join(' OR ')})`);
+        for (const reference of request.selection.references) parameters.push(reference.evaluationId, reference.contextId);
+      } else {
+        const criteria = request.selection.criteria;
+        if (criteria.respondentId !== undefined) { where.push('e.respondent_id = ?'); parameters.push(criteria.respondentId); }
+        if (criteria.status !== undefined) { where.push('e.status = ?'); parameters.push(criteria.status); }
+        if (criteria.questionId !== undefined) { where.push('e.question_id = ?'); parameters.push(criteria.questionId); }
+        if (criteria.materialId !== undefined) {
+          where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
+          parameters.push(criteria.materialId);
+        }
+        if (criteria.answer?.type === 'choice') {
+          where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?"); parameters.push(criteria.answer.choiceId);
+        } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
+          const field = criteria.answer.type === 'score' ? 'score' : 'noul';
+          const operator = criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>=';
+          where.push(`json_extract(e.result_json, '$.type') = '${field}' AND json_extract(e.result_json, '$.${field}') ${operator} ?`); parameters.push(criteria.answer.value);
+        }
+        if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
+      }
+      const rows = this.database.prepare(`SELECT e.* FROM evaluations AS e
+        LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        WHERE ${where.join(' AND ')} ORDER BY e.ordinal LIMIT 10001`).all(...parameters) as DatabaseRow[];
+      if (rows.length > 10_000) throw new RunStoreError('follow_on_selection_too_large', 'Follow-on selection matched more than 10,000 evaluations. Narrow the criteria or use explicit references.');
+      if ('references' in request.selection && rows.length !== request.selection.references.length) {
+        throw new RunStoreError('follow_on_reference_not_found', 'One or more evaluation/context references were not found in the source run.');
+      }
+      const turns: FollowOnSourceSet['turns'] = rows.map((row) => {
+        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'source packet')) as FollowOnSourceSet['turns'][number]['packet'];
+        const result = row.result_json === null ? undefined : decisionResultSchema.parse(parseJson(row.result_json, 'source answer'));
+        return {
+          evaluationId: asText(row.evaluation_id, 'evaluation ID'), contextId: asText(row.context_id, 'context ID'),
+          respondentId: asText(row.respondent_id, 'respondent ID'), packet, ...(result ? { result } : {}),
+        };
+      });
+      return {
+        sourceRunId: request.sourceRunId, sourceStatus, sourceComplete: sourceStatus === 'completed',
+        version: { status: sourceStatus, usedCalls, reservedCalls, maxOrdinal }, turns,
+      };
+    });
   }
 
   queryEvidence(input: RunEvidenceQuery): RunEvidencePage {
@@ -698,10 +801,21 @@ class SQLiteRunStore implements RunStore {
       };
       let respondentCoverage = cursor?.coverage.respondents;
       if (!respondentCoverage) {
-        const total = parsedRequest.data.respondents.length;
+        const total = parsedRequest.data.kind === 'journey' ? parsedRequest.data.respondents.length
+          : parsedRequest.data.kind === 'poll' ? parsedRequest.data.respondents.length
+            : asNumber((this.database.prepare('SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'respondent denominator');
         const statusCounts = parsedRequest.data.kind === 'journey'
           ? this.database.prepare('SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status').all(query.sourceRunId) as DatabaseRow[]
-          : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal) as DatabaseRow[];
+          : parsedRequest.data.kind === 'follow-on'
+            ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+                SELECT respondent_id, CASE
+                  WHEN SUM(status = 'pending') > 0 THEN 'active'
+                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
+                  ELSE 'answered' END AS status
+                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
+              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) as DatabaseRow[]
+            : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal) as DatabaseRow[];
         const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, 'respondent status'), asNumber(row.count, 'respondent count')]));
         const completed = countByStatus.get(parsedRequest.data.kind === 'journey' ? 'completed' : 'answered') ?? 0;
         const failed = countByStatus.get('failed') ?? 0;
@@ -857,7 +971,9 @@ class SQLiteRunStore implements RunStore {
         const status = asText((this.database.prepare('SELECT status FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined)?.status, 'run status') as RunStatus;
         const evaluationCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as DatabaseRow).count, 'evaluation count');
         const attemptCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as DatabaseRow).count, 'attempt count');
-        return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === 'prepared' || status === 'running' };
+        const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId) as DatabaseRow[];
+        const retainedFollowOnRunIds = dependentRows.map((row) => asText(row.run_id, 'dependent follow-on run ID')).filter((dependentId) => !runIds.includes(dependentId));
+        return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === 'prepared' || status === 'running', retainedFollowOnRunIds };
       });
       return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
     });
@@ -1198,6 +1314,18 @@ class SQLiteRunStore implements RunStore {
       return result;
     } catch (error) {
       try { this.database.exec('ROLLBACK'); } catch { /* The original operation error carries the useful detail. */ }
+      throw error;
+    }
+  }
+
+  private readTransaction<T>(operation: () => T): T {
+    this.database.exec('BEGIN');
+    try {
+      const result = operation();
+      this.database.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try { this.database.exec('ROLLBACK'); } catch { /* Preserve the useful resolver error. */ }
       throw error;
     }
   }

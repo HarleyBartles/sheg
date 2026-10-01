@@ -34893,17 +34893,31 @@ var followOnRunRequestSchema = external_exports.object({
   label: external_exports.string().min(1).max(120).optional(),
   sourceRunId: external_exports.string().uuid(),
   selection: followOnSelectionSchema,
-  context: external_exports.object({ mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]) }).strict(),
+  context: external_exports.object({ mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]), materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional() }).strict().superRefine((contextInput, context) => {
+    if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
+      context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
+    }
+    if (contextInput.mode === "recorded" && contextInput.materialIds) {
+      context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
+    }
+  }),
   material: external_exports.array(materialItemSchema).min(1).optional(),
   questions: external_exports.tuple([decisionQuestionSchema]),
   provider: providerConfigSchema,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
-  if (request.context.mode === "fresh-material" && !request.material) {
-    context.addIssue({ code: "custom", path: ["material"], message: "Fresh-material context requires explicit material." });
+  const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
+  if ((request.context.mode === "fresh-material" || request.context.mode === "omit-history") && !hasMaterial) {
+    context.addIssue({ code: "custom", path: ["context", "materialIds"], message: `${request.context.mode} context requires explicit material or material references.` });
   }
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
+  }
+  if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
+  }
+  if (request.context.mode === "recorded" && request.material) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Recorded context does not allow material changes." });
   }
 });
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
@@ -34954,7 +34968,7 @@ var runEvidencePageSchema = external_exports.object({
   }).strict(),
   nextCursor: external_exports.string().min(1).optional()
 }).strict();
-var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema]);
+var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
 // src/infrastructure/credentials/windows.ts
 import { spawn as nodeSpawn } from "node:child_process";
@@ -35119,6 +35133,77 @@ function emptyTrajectory() {
     choices: [],
     responses: []
   });
+}
+function appendTrajectoryResponse(trajectory, question, result, exposedItemIds) {
+  if (question.type !== result.type) throw new Error("Decision response type does not match the saved question.");
+  const exposed = [...exposedItemIds];
+  let response;
+  let choices = trajectory.choices;
+  if (result.type === "choice" && question.type === "choice") {
+    const choiceMeaning = question.options[result.choice];
+    if (choiceMeaning === void 0) throw new Error(`Saved answer choice ${result.choice} was not offered.`);
+    response = {
+      type: "choice",
+      taskId: question.id,
+      choiceId: result.choice,
+      choiceMeaning,
+      exposedItemIds: exposed,
+      ...result.probabilities === void 0 ? {} : { probabilities: { ...result.probabilities } },
+      ...result.confidence === void 0 ? {} : { confidence: result.confidence }
+    };
+    choices = [...trajectory.choices, { taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed }];
+  } else if (result.type === "score" && question.type === "score") {
+    if (result.score < 0 || result.score > question.rubric.length - 1) throw new Error("Saved Score answer is outside its question rubric.");
+    response = {
+      type: "score",
+      taskId: question.id,
+      score: result.score,
+      meaning: `Expected rubric level ${result.score}; rubric: ${question.rubric.join(" | ")}`,
+      probabilities: { ...result.probabilities },
+      legend: { ...result.legend },
+      ...result.confidence === void 0 ? {} : { confidence: result.confidence },
+      exposedItemIds: exposed
+    };
+  } else if (result.type === "noul" && question.type === "noul") {
+    response = { type: "noul", taskId: question.id, noul: result.noul, proposition: question.instructions, exposedItemIds: exposed };
+  } else throw new Error("Decision response type does not match the saved question.");
+  return finishTrajectory({
+    version: 1,
+    eventCount: trajectory.eventCount + 1,
+    exposureCount: trajectory.exposureCount,
+    decisionCount: trajectory.decisionCount + 1,
+    eventRange: trajectory.eventRange === null ? { firstSequence: 0, lastSequence: 0 } : { firstSequence: trajectory.eventRange.firstSequence, lastSequence: trajectory.eventCount },
+    choices,
+    responses: [...trajectory.responses, response]
+  });
+}
+function prepareFollowOnPacket(input2) {
+  const { source, mode, question } = input2;
+  if (mode === "recorded") return compileDecisionRequest({
+    respondentProfile: source.state.respondent.profile,
+    encounteredItems: source.state.encounteredItems,
+    trajectory: source.state.trajectory,
+    question
+  });
+  const material = input2.material ? input2.material.map(({ id, text }) => ({ id, text })) : [];
+  let state;
+  if (mode === "continue") {
+    if (!input2.result) throw new Error("Continue context requires the selected completed answer.");
+    const currentIds = source.state.encounteredItems.map(({ id }) => id);
+    state = {
+      respondent: { profile: { ...source.state.respondent.profile } },
+      encounteredItems: [...source.state.encounteredItems.map((item) => ({ ...item })), ...material],
+      trajectory: appendTrajectoryResponse(source.state.trajectory, source.question, input2.result, currentIds)
+    };
+  } else {
+    if (material.length === 0) throw new Error(`${mode} context requires explicit material.`);
+    state = {
+      respondent: { profile: { ...source.state.respondent.profile } },
+      encounteredItems: material,
+      trajectory: emptyTrajectory()
+    };
+  }
+  return compileDecisionRequest({ respondentProfile: state.respondent.profile, encounteredItems: state.encounteredItems, trajectory: state.trajectory, question });
 }
 function compactTrajectory(arm, history) {
   const exposureIds = [];
@@ -35481,6 +35566,98 @@ function graphDecisionRange(arm) {
 }
 
 // src/application/run-inspection.ts
+async function prepareFollowOnRun(request, source, provider) {
+  const compilerFingerprint = promptContractHash();
+  const question = request.questions[0];
+  const fits = [];
+  const problems = [];
+  const evaluations = [];
+  const selections = [];
+  for (const turn of source.turns) {
+    let selectedMaterial = [...request.material ?? []];
+    if (request.context.materialIds) {
+      const byId = new Map(turn.packet.state.encounteredItems.map((item) => [item.id, item]));
+      const referencedMaterial = [];
+      for (const id of request.context.materialIds) {
+        const item = byId.get(id);
+        if (!item) throw new RunProblemError("follow_on_material_not_found", `Material ${id} was not encountered in evaluation ${turn.evaluationId}.`);
+        referencedMaterial.push({ ...item });
+      }
+      selectedMaterial = [...referencedMaterial, ...selectedMaterial];
+    }
+    const rawResult = turn.result ? decisionValueSchema.parse(turn.result.type === "choice" ? { type: turn.result.type, choice: turn.result.choice, probabilities: turn.result.probabilities, confidence: turn.result.confidence } : turn.result.type === "score" ? { type: turn.result.type, score: turn.result.score, probabilities: turn.result.probabilities, legend: turn.result.legend, confidence: turn.result.confidence } : { type: turn.result.type, noul: turn.result.noul }) : void 0;
+    let packet;
+    try {
+      packet = prepareFollowOnPacket({
+        source: turn.packet,
+        mode: request.context.mode,
+        question,
+        ...request.context.mode === "recorded" ? {} : { material: selectedMaterial },
+        ...rawResult ? { result: rawResult } : {}
+      });
+    } catch (error62) {
+      throw new RunProblemError("follow_on_context_invalid", error62 instanceof Error ? error62.message : "Follow-on context could not be prepared.");
+    }
+    const modelIdentity = request.provider.kind === "jev" ? request.provider.model : request.provider.checkpoint;
+    let fit;
+    if (!provider.measure) fit = missingMeasureFit(provider, request.provider.kind, modelIdentity);
+    else {
+      try {
+        fit = await provider.measure(packet);
+      } catch {
+        fit = { ...missingMeasureFit(provider, request.provider.kind, modelIdentity), reason: "provider-measurement-failed" };
+      }
+    }
+    fits.push({ respondentId: turn.respondentId, fit });
+    const problem = problemForFit(turn.respondentId, fit);
+    if (problem) problems.push(problem);
+    const evaluationId = randomUUID();
+    const contextId = randomUUID();
+    evaluations.push({
+      evaluationId,
+      contextId,
+      respondentId: turn.respondentId,
+      questionId: question.id,
+      packet,
+      packetFingerprint: hashCanonical({ packet, compilerFingerprint })
+    });
+    selections.push({ sourceEvaluationId: turn.evaluationId, sourceContextId: turn.contextId, respondentId: turn.respondentId, evaluationId, contextId });
+  }
+  if (evaluations.length === 0) problems.push({ code: "no_follow_on_matches", message: "No source evaluations match this follow-on selection." });
+  if (evaluations.length > request.maxCalls) problems.push({ code: "insufficient_call_limit", message: `maxCalls (${request.maxCalls}) is below the selected evaluation count (${evaluations.length}).` });
+  const sourceWarning = source.sourceComplete ? void 0 : {
+    code: "source_incomplete",
+    message: ["prepared", "running"].includes(source.sourceStatus) ? `${evaluations.length} evaluations match so far. Source run is ${source.sourceStatus}; more may match after it completes.` : `Source run is ${source.sourceStatus} and incomplete. This follow-on uses the evidence currently recorded.`
+  };
+  const inspection = {
+    valid: problems.length === 0,
+    respondentCount: evaluations.length,
+    minimumCalls: evaluations.length,
+    problems,
+    fits,
+    ...sourceWarning ? { warnings: [sourceWarning] } : {}
+  };
+  const lineage = {
+    sourceRunId: source.sourceRunId,
+    sourceStatusAtAcceptance: source.sourceStatus,
+    sourceCompleteAtAcceptance: source.sourceComplete,
+    sourceVersion: source.version,
+    selections
+  };
+  return {
+    sourceVersion: source.version,
+    inspection,
+    prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, lineage }
+  };
+}
+var RunProblemError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "RunProblemError";
+  }
+  code;
+};
 function materializeJourneyRun(admission) {
   const { request, requestFingerprint, compilerFingerprint, packets } = admission;
   const evaluations = [];
@@ -35584,6 +35761,15 @@ async function prepareRun(input2, provider) {
   }
   const request = parsed.data;
   if (request.kind === "journey") return prepareJourneyAdmission(request, provider);
+  if (request.kind === "follow-on") {
+    return { inspection: {
+      valid: false,
+      respondentCount: 0,
+      minimumCalls: 0,
+      problems: [{ code: "follow_on_resolution_required", message: "Follow-on requests must be resolved against their source run before provider fit inspection." }],
+      fits: []
+    } };
+  }
   const compilerFingerprint = promptContractHash();
   const evaluations = [];
   const fits = [];
@@ -35743,6 +35929,15 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     } catch (error62) {
       return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: "invalid_request", message: error62 instanceof Error ? error62.message : "Request is invalid." }], fits: [] };
     }
+    if (request.kind === "follow-on") {
+      try {
+        const followOn = followOnRunRequestSchema.parse(request);
+        const source = store.resolveFollowOnSources(followOn);
+        return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
+      } catch (error62) {
+        return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error62 instanceof Error && "code" in error62 ? String(error62.code) : "follow_on_resolution_failed", message: error62 instanceof Error ? error62.message : "Follow-on request could not be resolved." }], fits: [] };
+      }
+    }
     return (await prepareRun(request, providerFactory(request.provider))).inspection;
   }
   async function start(submissionId, input2) {
@@ -35753,11 +35948,26 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     const prior = store.findSubmission(submissionId, requestFingerprint);
     if (prior) return prior;
     await assertReady(request.provider);
-    const admission = await prepareRun(request, providerFactory(request.provider));
-    if (!admission.prepared && !admission.journey || !admission.inspection.valid) {
-      throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
+    let accepted;
+    if (request.kind === "follow-on") {
+      try {
+        const followOn = followOnRunRequestSchema.parse(request);
+        const source = store.resolveFollowOnSources(followOn);
+        const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
+        if (!admission.inspection.valid) throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
+        accepted = store.accept(submissionId, admission.prepared);
+      } catch (error62) {
+        if (error62 instanceof RunServiceError) throw error62;
+        if (error62 instanceof Error && "code" in error62) throw new RunServiceError(String(error62.code), error62.message, { cause: error62 });
+        throw new RunServiceError("follow_on_resolution_failed", error62 instanceof Error ? error62.message : "Follow-on request could not be resolved.", { cause: error62 });
+      }
+    } else {
+      const admission = await prepareRun(request, providerFactory(request.provider));
+      if (!admission.prepared && !admission.journey || !admission.inspection.valid) {
+        throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
+      }
+      accepted = admission.prepared ? store.accept(submissionId, admission.prepared) : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey));
     }
-    const accepted = admission.prepared ? store.accept(submissionId, admission.prepared) : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey));
     if (!accepted.created) return accepted.run;
     try {
       await launcher.launch(dataRoot, accepted.run.runId);
@@ -35795,6 +36005,7 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     storageInfo: () => store.storageInfo(),
     optimizeStorage: () => store.optimizeStorage(),
     list: (query) => store.list(query),
+    queryEvidence: (query) => store.queryEvidence(runEvidenceQuerySchema.parse(query)),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequestKind(runId) === "journey" ? store.getJourneyRun(runId) : store.getRequest(runId),
     getJourneyRun: (runId) => store.getJourneyRun(runId),
@@ -35907,7 +36118,7 @@ function validateDistribution(distribution, expectedIds, label) {
 }
 
 // src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
@@ -36107,10 +36318,33 @@ function initialize(database) {
   }
 }
 function validatePrepared(prepared) {
-  const parsedRequest = inlineRunRequestSchema.safeParse(prepared.request);
+  const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError("invalid_prepared_run", "Prepared run request or fingerprint is invalid.");
   }
+  if (parsedRequest.data.kind === "follow-on") {
+    const lineage = prepared.lineage;
+    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId || lineage.selections.length !== prepared.evaluations.length || lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === "completed")) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage does not match its request and frozen evaluations.");
+    }
+    const selectedIds = /* @__PURE__ */ new Set();
+    const selectedContexts = /* @__PURE__ */ new Set();
+    const evaluationIds2 = /* @__PURE__ */ new Set();
+    const contextIds2 = /* @__PURE__ */ new Set();
+    for (const [index, evaluation] of prepared.evaluations.entries()) {
+      const selection = lineage.selections[index];
+      const packet = decisionRequestSchema.safeParse(evaluation.packet);
+      if (!packet.success || selection.respondentId !== evaluation.respondentId || selection.evaluationId !== evaluation.evaluationId || selection.contextId !== evaluation.contextId || evaluation.questionId !== parsedRequest.data.questions[0].id || packet.data.question.id !== evaluation.questionId || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint || selectedIds.has(selection.sourceEvaluationId) || selectedContexts.has(selection.sourceContextId) || evaluationIds2.has(evaluation.evaluationId) || contextIds2.has(evaluation.contextId)) {
+        throw new RunStoreError("invalid_prepared_run", "Prepared follow-on evaluation or source selection is inconsistent.");
+      }
+      selectedIds.add(selection.sourceEvaluationId);
+      selectedContexts.add(selection.sourceContextId);
+      evaluationIds2.add(evaluation.evaluationId);
+      contextIds2.add(evaluation.contextId);
+    }
+    return { ...prepared, request: parsedRequest.data };
+  }
+  if (parsedRequest.data.kind !== "poll") throw new RunStoreError("invalid_prepared_run", "A journey must be accepted through journey preparation.");
   if (prepared.evaluations.length !== parsedRequest.data.respondents.length) {
     throw new RunStoreError("invalid_prepared_run", "Prepared run evaluations do not match the respondent count.");
   }
@@ -36226,6 +36460,19 @@ var SQLiteRunStore = class {
         this.reconcileInside(runId2, this.now());
         return { created: false, run: this.statusInside(runId2) };
       }
+      if (prepared.request.kind === "follow-on") {
+        const source = this.database.prepare("SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?").get(prepared.lineage.sourceRunId);
+        if (!source) throw this.notFound();
+        const maxOrdinal = asNumber(this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(prepared.lineage.sourceRunId).maximum, "maximum evaluation ordinal");
+        const version2 = prepared.lineage.sourceVersion;
+        if (asText(source.status, "source run status") !== version2.status || asNumber(source.used_calls, "source used calls") !== version2.usedCalls || asNumber(source.reserved_calls, "source reserved calls") !== version2.reservedCalls || maxOrdinal !== version2.maxOrdinal) {
+          throw new RunStoreError("source_changed_during_acceptance", "The source run changed after follow-on inspection. Inspect the request again to use its current evidence.");
+        }
+        for (const selection of prepared.lineage.selections) {
+          const sourceEvaluation = this.database.prepare("SELECT 1 AS found FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND context_id = ?").get(prepared.lineage.sourceRunId, selection.sourceEvaluationId, selection.sourceContextId);
+          if (!sourceEvaluation) throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
+        }
+      }
       const runId = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
@@ -36238,7 +36485,7 @@ var SQLiteRunStore = class {
         createdAt,
         nowMs,
         prepared.request.label ?? null,
-        JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint }),
+        JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint, ...prepared.lineage ? { lineage: prepared.lineage } : {} }),
         prepared.evaluations.length,
         prepared.request.maxCalls
       );
@@ -36368,6 +36615,10 @@ var SQLiteRunStore = class {
     if (parsed.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint")) {
       throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
     }
+    if (parsed.request.kind === "follow-on" && parsed.lineage) {
+      const sourceAvailable = Boolean(this.database.prepare("SELECT 1 AS found FROM runs WHERE run_id = ?").get(parsed.lineage.sourceRunId));
+      return { ...parsed, lineage: { ...parsed.lineage, sourceAvailable, sourceRecordState: sourceAvailable ? "live" : "historical" } };
+    }
     return parsed;
   }
   getJourneyRun(runId) {
@@ -36470,10 +36721,12 @@ var SQLiteRunStore = class {
       params.push(Date.parse(query.createdBefore));
     }
     if (query.materialId !== void 0) {
-      clauses.push(`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
-        THEN json_extract(runs.request_json, '$.request.material') ELSE json_extract(runs.request_json, '$.request.journey.items') END) AS source_material
-        WHERE json_extract(source_material.value, '$.id') = ?)`);
-      params.push(query.materialId);
+      clauses.push(`(EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
+        THEN json_extract(runs.request_json, '$.request.material') WHEN json_extract(runs.request_json, '$.request.kind') = 'journey'
+        THEN json_extract(runs.request_json, '$.request.journey.items') ELSE json_extract(runs.request_json, '$.request.material') END) AS source_material
+        WHERE json_extract(source_material.value, '$.id') = ?) OR EXISTS (SELECT 1 FROM evaluations AS material_evaluation, json_each(material_evaluation.packet_json, '$.state.encounteredItems') AS encountered
+        WHERE material_evaluation.run_id = runs.run_id AND json_extract(encountered.value, '$.id') = ?))`);
+      params.push(query.materialId, query.materialId);
     }
     if (cursor) {
       clauses.push("(created_ms > ? OR (created_ms = ? AND run_id > ?))");
@@ -36489,6 +36742,84 @@ var SQLiteRunStore = class {
       items,
       ...hasMore && last ? { nextCursor: encodeCursor({ kind: "runs", createdMs: asNumber(last.created_ms, "created time"), runId: asText(last.run_id, "run ID"), filtersFingerprint }) } : {}
     };
+  }
+  resolveFollowOnSources(input2) {
+    this.ensureOpen();
+    const request = followOnRunRequestSchema.parse(input2);
+    return this.readTransaction(() => {
+      const run = this.database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
+      if (!run) throw this.notFound();
+      const stored = parseJson(run.request_json, "source run request");
+      const sourceRequest = runRequestSchema.safeParse(stored.request);
+      if (!sourceRequest.success) throw new RunStoreError("data_integrity_error", "Stored source run request is invalid.");
+      const sourceStatus = asText(run.status, "run status");
+      const usedCalls = asNumber(run.used_calls, "used calls");
+      const reservedCalls = asNumber(run.reserved_calls, "reserved calls");
+      const maxOrdinal = asNumber(this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(request.sourceRunId).maximum, "maximum evaluation ordinal");
+      const where = ["e.run_id = ?", "e.ordinal <= ?"];
+      const parameters = [request.sourceRunId, maxOrdinal];
+      if ("references" in request.selection) {
+        const terms = request.selection.references.map(() => "(e.evaluation_id = ? AND e.context_id = ?)");
+        where.push(`(${terms.join(" OR ")})`);
+        for (const reference of request.selection.references) parameters.push(reference.evaluationId, reference.contextId);
+      } else {
+        const criteria = request.selection.criteria;
+        if (criteria.respondentId !== void 0) {
+          where.push("e.respondent_id = ?");
+          parameters.push(criteria.respondentId);
+        }
+        if (criteria.status !== void 0) {
+          where.push("e.status = ?");
+          parameters.push(criteria.status);
+        }
+        if (criteria.questionId !== void 0) {
+          where.push("e.question_id = ?");
+          parameters.push(criteria.questionId);
+        }
+        if (criteria.materialId !== void 0) {
+          where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
+          parameters.push(criteria.materialId);
+        }
+        if (criteria.answer?.type === "choice") {
+          where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
+          parameters.push(criteria.answer.choiceId);
+        } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
+          const field = criteria.answer.type === "score" ? "score" : "noul";
+          const operator = criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">=";
+          where.push(`json_extract(e.result_json, '$.type') = '${field}' AND json_extract(e.result_json, '$.${field}') ${operator} ?`);
+          parameters.push(criteria.answer.value);
+        }
+        if (criteria.outcome !== void 0) {
+          where.push("jr.outcome = ?");
+          parameters.push(criteria.outcome);
+        }
+      }
+      const rows = this.database.prepare(`SELECT e.* FROM evaluations AS e
+        LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        WHERE ${where.join(" AND ")} ORDER BY e.ordinal LIMIT 10001`).all(...parameters);
+      if (rows.length > 1e4) throw new RunStoreError("follow_on_selection_too_large", "Follow-on selection matched more than 10,000 evaluations. Narrow the criteria or use explicit references.");
+      if ("references" in request.selection && rows.length !== request.selection.references.length) {
+        throw new RunStoreError("follow_on_reference_not_found", "One or more evaluation/context references were not found in the source run.");
+      }
+      const turns = rows.map((row) => {
+        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "source packet"));
+        const result = row.result_json === null ? void 0 : decisionResultSchema.parse(parseJson(row.result_json, "source answer"));
+        return {
+          evaluationId: asText(row.evaluation_id, "evaluation ID"),
+          contextId: asText(row.context_id, "context ID"),
+          respondentId: asText(row.respondent_id, "respondent ID"),
+          packet,
+          ...result ? { result } : {}
+        };
+      });
+      return {
+        sourceRunId: request.sourceRunId,
+        sourceStatus,
+        sourceComplete: sourceStatus === "completed",
+        version: { status: sourceStatus, usedCalls, reservedCalls, maxOrdinal },
+        turns
+      };
+    });
   }
   queryEvidence(input2) {
     this.ensureOpen();
@@ -36568,8 +36899,15 @@ var SQLiteRunStore = class {
       };
       let respondentCoverage = cursor?.coverage.respondents;
       if (!respondentCoverage) {
-        const total = parsedRequest.data.respondents.length;
-        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
+        const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
+        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+                SELECT respondent_id, CASE
+                  WHEN SUM(status = 'pending') > 0 THEN 'active'
+                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
+                  ELSE 'answered' END AS status
+                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
+              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
         const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, "respondent status"), asNumber(row.count, "respondent count")]));
         const completed = countByStatus.get(parsedRequest.data.kind === "journey" ? "completed" : "answered") ?? 0;
         const failed = countByStatus.get("failed") ?? 0;
@@ -36717,7 +37055,9 @@ var SQLiteRunStore = class {
         const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId)?.status, "run status");
         const evaluationCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId).count, "evaluation count");
         const attemptCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId).count, "attempt count");
-        return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running" };
+        const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId);
+        const retainedFollowOnRunIds = dependentRows.map((row) => asText(row.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
+        return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running", retainedFollowOnRunIds };
       });
       return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
     });
@@ -37023,6 +37363,20 @@ var SQLiteRunStore = class {
   }
   transaction(operation) {
     this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      this.database.exec("COMMIT");
+      return result;
+    } catch (error62) {
+      try {
+        this.database.exec("ROLLBACK");
+      } catch {
+      }
+      throw error62;
+    }
+  }
+  readTransaction(operation) {
+    this.database.exec("BEGIN");
     try {
       const result = operation();
       this.database.exec("COMMIT");
@@ -37825,8 +38179,7 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 }
 
 // src/entrypoints/mcp.ts
-var statusSchema = external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"]);
-var runListSchema = external_exports.object({ status: statusSchema.optional(), label: external_exports.string().optional(), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict();
+var runListSchema = runListQuerySchema;
 var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
 var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
@@ -37835,10 +38188,11 @@ var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
 ]);
 function createPollingServer(service = createDefaultRunService()) {
-  const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit a direct typed request or finite journey, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work." });
-  server.registerTool("run_inspect", { description: "Validate a direct typed request or finite respondent journey and measure context fit without inference, persistence, or worker launch.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
-  server.registerTool("run_start", { description: "Accept a direct respondent request or finite journey as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
-  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
+  const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit direct typed requests, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Inspect before starting. Reads never start or resume work." });
+  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure the exact packet context fit without inference or run creation.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
+  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
+  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
+  server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify exact source evaluations and contexts for follow-on requests. sourceComplete distinguishes a finished source from matches so far.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => service.queryEvidence(query)));
   server.registerTool("run_get", { description: "Retrieve one view of a run: status, frozen request, paginated answers, or reached journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
     if (input2.view === "status") return service.getStatus(input2.runId);
     if (input2.view === "request") return service.getRequest(input2.runId);

@@ -12,6 +12,10 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 
 type JourneyDetailTestShape = { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId: string }> } } } }> };
+type FollowOnRequestTestShape = {
+  evaluations: Array<{ packet: { state: { encounteredItems: Array<{ id: string }>; trajectory: { responses: unknown[] } } } }>;
+  lineage: { sourceAvailable: boolean };
+};
 
 test('a copied plugin launches its shipped MCP without checkout or node_modules', async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), 'polling-plugin-copy-'));
@@ -33,7 +37,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   await assertSkillLinksResolve(path.join(plugin, 'skills/stimulus-response-polling'), plugin);
   await assertSkillLinksResolve(path.join(plugin, 'skills/study-design'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
-  for (const contract of ['inline-run-request.schema.json', 'respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
+  for (const contract of ['run-request.schema.json', 'respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
     assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets', contract)), true);
   }
   assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets/reader-archetype.schema.json')), false);
@@ -356,6 +360,93 @@ test('a copied MCP runs a journey across connections and resumes its saved turn 
     if (workerPid) killPid(workerPid);
     throw error;
   }
+});
+
+test('a copied MCP queries a typed departure reason, reuses its context, and retains follow-on evidence after source deletion', async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-follow-on-package-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const dataRoot = path.join(sandbox, 'data');
+  const plugin = path.join(sandbox, 'plugin');
+  await mkdir(plugin, { recursive: true });
+  await cp(path.resolve('dist'), path.join(plugin, 'dist'), { recursive: true });
+  const tokenizerPath = path.resolve('test/fixtures/laya-tokenizer.json');
+  const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerPath)).digest('hex');
+  const inference = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { questions: Record<string, unknown> };
+    const questionId = Object.keys(body.questions)[0] ?? '';
+    const answer = questionId === 'interest'
+      ? { type: 'choice', choice: 'leave', probabilities: { continue: 0.1, leave: 0.9 } }
+      : { type: 'noul', noul: 0.82 };
+    response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+      model: 'fixture-checkpoint', routing: { model: 'fixture-checkpoint' }, usage: {}, answers: { [questionId]: answer },
+    }));
+  });
+  await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
+  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  const address = inference.address();
+  assert.ok(address && typeof address === 'object');
+  const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: dataRoot };
+  const localProvider = { kind: 'laya', baseUrl: `http://127.0.0.1:${address.port}`, checkpoint: 'fixture-checkpoint', contextLimit: 4096,
+    headLimit: 512, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 };
+  const journey = {
+    kind: 'journey', respondents: [{ id: 'reader-a', intent: 'Understand the article', context: 'New reader', desired_outcome: 'Decide whether to continue', engagement_cues: 'Specific examples', friction_cues: 'Repetition' }],
+    journey: { id: 'article', label: 'Section three interest', items: [
+      { id: 'section-one', text: 'First section.' }, { id: 'section-two', text: 'Second section.' }, { id: 'section-three', text: 'Third section.' },
+    ], tasks: [{ id: 'interest', type: 'choice', instructions: 'Would you continue after section three?', options: { continue: 'Continue', leave: 'Leave' } }],
+    presentation: { kind: 'graph', entryNodeId: 'expose-one', maxDecisions: 1, nodes: [
+      { id: 'expose-one', kind: 'expose', itemId: 'section-one' }, { id: 'expose-two', kind: 'expose', itemId: 'section-two' },
+      { id: 'expose-three', kind: 'expose', itemId: 'section-three' }, { id: 'ask-interest', kind: 'ask', taskId: 'interest' },
+      { id: 'left-lost-interest', kind: 'terminal', outcome: 'left-lost-interest' }, { id: 'continued', kind: 'terminal', outcome: 'continued' },
+    ], transitions: [
+      { fromNodeId: 'expose-one', toNodeId: 'expose-two' }, { fromNodeId: 'expose-two', toNodeId: 'expose-three' },
+      { fromNodeId: 'expose-three', toNodeId: 'ask-interest' }, { fromNodeId: 'ask-interest', optionId: 'leave', toNodeId: 'left-lost-interest' },
+      { fromNodeId: 'ask-interest', optionId: 'continue', toNodeId: 'continued' },
+    ] },
+    }, maxCalls: 1, provider: localProvider,
+  };
+  const client = new Client({ name: 'follow-on-package', version: '1.0.0' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+  await client.connect(transport);
+  try {
+    const started = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: journey } });
+    assert.equal(started.isError ?? false, false, JSON.stringify(started.structuredContent));
+    const sourceRunId = (started.structuredContent as { runId: string }).runId;
+    await waitForCompleted(dataRoot, sourceRunId);
+    const queried = await client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: {
+      materialId: 'section-three', answer: { type: 'choice', choiceId: 'leave' }, outcome: 'left-lost-interest',
+    } } });
+    assert.equal(queried.isError ?? false, false, JSON.stringify(queried.structuredContent));
+    const evidence = queried.structuredContent as { items: Array<{ evaluationId: string; contextId: string }>; sourceComplete: boolean };
+    assert.equal(evidence.sourceComplete, true);
+    assert.equal(evidence.items.length, 1);
+    const followOn = {
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
+      context: { mode: 'omit-history', materialIds: ['section-three'] },
+      questions: [{ type: 'noul', id: 'why-interest', instructions: 'What about section three lost your interest?' }],
+      provider: localProvider, maxCalls: 1,
+    };
+    const inspected = await client.callTool({ name: 'run_inspect', arguments: { request: followOn } });
+    assert.equal((inspected.structuredContent as { valid: boolean }).valid, true, JSON.stringify(inspected.structuredContent));
+    const accepted = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: followOn } });
+    assert.equal(accepted.isError ?? false, false, JSON.stringify(accepted.structuredContent));
+    const followOnRunId = (accepted.structuredContent as { runId: string }).runId;
+    await waitForCompleted(dataRoot, followOnRunId);
+    const beforeDelete = await client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'request' } });
+    const savedBeforeDelete = beforeDelete.structuredContent as FollowOnRequestTestShape;
+    assert.deepEqual(savedBeforeDelete.evaluations[0]?.packet.state.encounteredItems.map(({ id }) => id), ['section-three']);
+    assert.equal(savedBeforeDelete.evaluations[0]?.packet.state.trajectory.responses.length, 0);
+    assert.equal(savedBeforeDelete.lineage.sourceAvailable, true);
+    const deleted = await client.callTool({ name: 'run_delete', arguments: { runIds: [sourceRunId] } });
+    assert.equal(deleted.isError ?? false, false);
+    const afterDelete = await client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'request' } });
+    const savedAfterDelete = afterDelete.structuredContent as { lineage: { sourceAvailable: boolean; sourceRecordState: string } };
+    assert.equal(savedAfterDelete.lineage.sourceAvailable, false);
+    assert.equal(savedAfterDelete.lineage.sourceRecordState, 'historical');
+    const answer = await client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'answers' } });
+    assert.equal((answer.structuredContent as { items: Array<{ result?: { type: string; noul?: number } }> }).items[0]?.result?.noul, 0.82);
+  } finally { await killMcpConnection(client, transport); }
 });
 
 async function killMcpConnection(client: Client, transport: StdioClientTransport): Promise<void> {

@@ -153,6 +153,11 @@ test('follow-on requests select criteria or exact evaluation/context references 
   };
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: { questionId: 'lost-interest', answer: { type: 'choice', choiceId: 'yes' } } }, context: { mode: 'recorded' } }).success, true);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [{ evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174002' }] }, context: { mode: 'fresh-material' }, material: [{ id: 'section-three', text: 'Exact text.' }] }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'omit-history', materialIds: ['section-three'] } }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'omit-history' } }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'recorded' }, material: [{ id: 'changed', text: 'Not recorded.' }] }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'fresh-material', materialIds: ['section-three'] }, material: [{ id: 'section-three', text: 'Duplicate.' }] }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'recorded' } }).success, true);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [{ evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174002' }, { evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174003' }] }, context: { mode: 'recorded' } }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [] }, context: { mode: 'recorded' } }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'fresh-material' } }).success, false);

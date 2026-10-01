@@ -6,10 +6,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { prepareRun } from '../src/application/run-inspection.js';
+import { prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import type { DecisionResult } from '../src/domain/decision/decision.js';
-import { runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun } from '../src/domain/run/request.js';
+import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun } from '../src/domain/run/request.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
@@ -135,7 +135,9 @@ test('acceptance survives a second connection and matching submission retries sh
     assert.equal(accepted.created, true);
     assert.equal(retry.created, false);
     assert.equal(retry.run.runId, accepted.run.runId);
-    assert.equal(second.getRequest(accepted.run.runId).request.material[0]!.text, 'Exact authored section');
+    const saved = second.getRequest(accepted.run.runId);
+    assert.equal(saved.request.kind, 'poll');
+    if (saved.request.kind === 'poll') assert.equal(saved.request.material[0]!.text, 'Exact authored section');
   } finally {
     first.close();
     second.close();
@@ -337,7 +339,7 @@ test('unsupported pre-v1 datastore versions return explicit export or reset guid
   const root = await temporaryRoot();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   try {
-    database.exec('PRAGMA user_version = 1');
+    database.exec('PRAGMA user_version = 2');
   } finally { database.close(); }
   try {
     assert.throws(() => openRunStore(root), (error: unknown) => error instanceof RunStoreError &&
@@ -526,6 +528,7 @@ test('accepted JSON remains unchanged after caller objects mutate and the store 
   const submissionId = randomUUID();
   try {
     const accepted = store.accept(submissionId, request);
+    if (request.request.kind !== 'poll') throw new Error('Fixture request should be a poll.');
     request.request.material[0]!.text = 'mutated after acceptance';
     request.request.respondents[0]!.intent = 'mutated after acceptance';
     store.close();
@@ -534,8 +537,11 @@ test('accepted JSON remains unchanged after caller objects mutate and the store 
     const reopened = openRunStore(root);
     try {
       const saved = reopened.getRequest(accepted.run.runId);
-      assert.equal(saved.request.material[0]!.text, 'Exact authored section');
-      assert.equal(saved.request.respondents[0]!.intent, 'Understand the product');
+      assert.equal(saved.request.kind, 'poll');
+      if (saved.request.kind === 'poll') {
+        assert.equal(saved.request.material[0]!.text, 'Exact authored section');
+        assert.equal(saved.request.respondents[0]!.intent, 'Understand the product');
+      }
       assert.deepEqual(saved.evaluations[0]!.packet.state['encounteredItems'], [{ id: 'section-three', text: 'Exact authored section' }]);
     } finally { reopened.close(); }
   } finally {
@@ -714,6 +720,78 @@ test('evidence query matches typed answers and material while preserving distrib
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('follow-on source resolution freezes criteria matches and validates exact evaluation/context references', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourceRunId = await completedRun(store, input, (index) => index === 0
+      ? savedAnswer
+      : { ...savedAnswer, choice: 'leave', probabilities: { continue: 0.2, leave: 0.8 }, confidence: 0.81 });
+    const base = {
+      kind: 'follow-on' as const, sourceRunId,
+      questions: [{ type: 'noul' as const, id: 'why-leave', instructions: 'What caused you to leave?' }],
+      provider: input.provider, maxCalls: 1,
+    };
+    const criteriaRequest = followOnRunRequestSchema.parse({ ...base, selection: { criteria: { materialId: 'section-three', answer: { type: 'choice', choiceId: 'leave' } } }, context: { mode: 'recorded' } });
+    const criteria = store.resolveFollowOnSources(criteriaRequest);
+    assert.deepEqual(criteria.turns.map(({ respondentId }) => respondentId), ['reader-b']);
+    assert.equal(criteria.sourceComplete, true);
+    assert.equal(criteria.version.maxOrdinal, 1);
+    const selected = criteria.turns[0]!;
+    const refsRequest = followOnRunRequestSchema.parse({ ...base, selection: { references: [{ evaluationId: selected.evaluationId, contextId: selected.contextId }] }, context: { mode: 'recorded' } });
+    const exact = store.resolveFollowOnSources(refsRequest);
+    assert.deepEqual(exact.turns, criteria.turns);
+    assert.throws(() => store.resolveFollowOnSources(followOnRunRequestSchema.parse({ ...base, selection: { references: [{ evaluationId: randomUUID(), contextId: randomUUID() }] }, context: { mode: 'recorded' } })),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'follow_on_reference_not_found');
+    assert.throws(() => store.resolveFollowOnSources(followOnRunRequestSchema.parse({ ...base, selection: { references: [{ evaluationId: selected.evaluationId, contextId: randomUUID() }] }, context: { mode: 'recorded' } })),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'follow_on_reference_not_found');
+    assert.throws(() => store.resolveFollowOnSources(followOnRunRequestSchema.parse({ ...base, sourceRunId: randomUUID(), selection: { criteria: {} }, context: { mode: 'recorded' } })),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('follow-on resolution reuses an exact reached journey packet', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const journey = await preparedJourneyRun();
+    const sourceRun = store.acceptJourney(randomUUID(), journey).run;
+    const sourceRecord = store.getJourneyRun(sourceRun.runId);
+    const sourceEvaluation = sourceRecord.evaluations[0]!;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId: sourceRun.runId,
+      selection: { criteria: { respondentId: sourceEvaluation.respondentId } },
+      context: { mode: 'recorded' }, questions: [{ type: 'noul', id: 'journey-follow-up', instructions: 'Would you continue?' }],
+      provider: journey.request.provider, maxCalls: 1,
+    });
+    const resolved = store.resolveFollowOnSources(request);
+    assert.equal(resolved.turns.length, 1);
+    assert.deepEqual(resolved.turns[0]?.packet.state.encounteredItems, sourceEvaluation.packet.state.encounteredItems);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('follow-on acceptance rejects a source that changes after packet fit inspection', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourcePrepared = await preparedRun();
+    const sourceRun = store.accept(randomUUID(), sourcePrepared).run;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId: sourceRun.runId, selection: { criteria: {} }, context: { mode: 'recorded' },
+      questions: [{ type: 'noul', id: 'why', instructions: 'Why?' }], provider: input.provider, maxCalls: 2,
+    });
+    const source = store.resolveFollowOnSources(request);
+    const prepared = await prepareFollowOnRun(request, source, provider);
+    assert.equal(prepared.inspection.valid, true);
+    assert.equal(prepared.inspection.warnings?.[0]?.code, 'source_incomplete');
+    assert.equal(store.getStatus(sourceRun.runId).status, 'prepared');
+    const claim = store.claim(sourceRun.runId, Date.now(), 1234);
+    assert.ok(claim);
+    assert.throws(() => store.accept(randomUUID(), prepared.prepared),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'source_changed_during_acceptance');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('evidence query paginates deterministically and invalidates a cursor when its source changes', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
@@ -828,7 +906,7 @@ test('delete preview reports exact selected run counts without deleting evidence
     const runId = await completedRun(store);
     const preview = store.previewDelete([runId]);
     assert.deepEqual(preview, {
-      runs: [{ runId, status: 'completed', evaluationCount: 2, attemptCount: 2, blockedByActiveWork: false }],
+      runs: [{ runId, status: 'completed', evaluationCount: 2, attemptCount: 2, blockedByActiveWork: false, retainedFollowOnRunIds: [] }],
       blockedByActiveWork: false,
     });
     assert.equal(store.getStatus(runId).status, 'completed');

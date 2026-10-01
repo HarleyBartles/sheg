@@ -2,11 +2,11 @@ import path from 'node:path';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import type { AnswerRow, Page, RunStatusView } from '../domain/run/lifecycle.js';
 import type { PreparedRun, RunRequest } from '../domain/run/request.js';
-import { runRequestSchema } from '../domain/run/request.js';
+import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
 import type { DeletePreview, DeleteResult, RunStore, StorageInfo } from '../infrastructure/run-store.js';
 import { CredentialStoreError } from '../infrastructure/credentials/windows.js';
-import { fingerprintRunRequest, materializeJourneyRun, prepareRun } from './run-inspection.js';
+import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
 
 export class RunServiceError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -28,6 +28,7 @@ export interface RunService {
   storageInfo(): StorageInfo;
   optimizeStorage(): void;
   list(query: import('../infrastructure/run-store.js').RunListQuery): Page<RunStatusView>;
+  queryEvidence(query: import('../domain/run/request.js').RunEvidenceQuery): import('../domain/run/request.js').RunEvidencePage;
   getStatus(runId: string): RunStatusView;
   getRequest(runId: string): PreparedRun | ReturnType<RunStore['getJourneyRun']>;
   getJourneyRun(runId: string): ReturnType<RunStore['getJourneyRun']>;
@@ -69,6 +70,15 @@ export function createRunService(
     catch (error) {
       return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: 'invalid_request', message: error instanceof Error ? error.message : 'Request is invalid.' }], fits: [] };
     }
+    if (request.kind === 'follow-on') {
+      try {
+        const followOn = followOnRunRequestSchema.parse(request);
+        const source = store.resolveFollowOnSources(followOn);
+        return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
+      } catch (error) {
+        return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error instanceof Error && 'code' in error ? String(error.code) : 'follow_on_resolution_failed', message: error instanceof Error ? error.message : 'Follow-on request could not be resolved.' }], fits: [] };
+      }
+    }
     return (await prepareRun(request, providerFactory(request.provider))).inspection;
   }
 
@@ -81,13 +91,28 @@ export function createRunService(
     if (prior) return prior;
 
     await assertReady(request.provider);
-    const admission = await prepareRun(request, providerFactory(request.provider));
-    if ((!admission.prepared && !admission.journey) || !admission.inspection.valid) {
-      throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
+    let accepted: ReturnType<RunStore['accept']>;
+    if (request.kind === 'follow-on') {
+      try {
+        const followOn = followOnRunRequestSchema.parse(request);
+        const source = store.resolveFollowOnSources(followOn);
+        const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
+        if (!admission.inspection.valid) throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
+        accepted = store.accept(submissionId, admission.prepared);
+      } catch (error) {
+        if (error instanceof RunServiceError) throw error;
+        if (error instanceof Error && 'code' in error) throw new RunServiceError(String(error.code), error.message, { cause: error });
+        throw new RunServiceError('follow_on_resolution_failed', error instanceof Error ? error.message : 'Follow-on request could not be resolved.', { cause: error });
+      }
+    } else {
+      const admission = await prepareRun(request, providerFactory(request.provider));
+      if ((!admission.prepared && !admission.journey) || !admission.inspection.valid) {
+        throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
+      }
+      accepted = admission.prepared
+        ? store.accept(submissionId, admission.prepared)
+        : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey!));
     }
-    const accepted = admission.prepared
-      ? store.accept(submissionId, admission.prepared)
-      : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey!));
     if (!accepted.created) return accepted.run;
     try { await launcher.launch(dataRoot, accepted.run.runId); }
     catch { store.failLaunch(accepted.run.runId, 'worker_launch_failed'); }
@@ -123,6 +148,7 @@ export function createRunService(
     storageInfo: () => store.storageInfo(),
     optimizeStorage: () => store.optimizeStorage(),
     list: (query) => store.list(query),
+    queryEvidence: (query) => store.queryEvidence(runEvidenceQuerySchema.parse(query)),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequestKind(runId) === 'journey' ? store.getJourneyRun(runId) : store.getRequest(runId),
     getJourneyRun: (runId) => store.getJourneyRun(runId),

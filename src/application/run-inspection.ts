@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { compileDecisionRequest, emptyTrajectory, promptContractHash } from '../domain/decision/prompt.js';
+import { compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash } from '../domain/decision/prompt.js';
+import { decisionValueSchema } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
-import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest } from '../domain/run/request.js';
+import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import type { PreparedJourneyRun } from '../domain/run/request.js';
@@ -13,6 +14,73 @@ import { estimateRunDecisionCalls } from '../domain/journey/route-bounds.js';
 export type { Inspection } from '../domain/run/lifecycle.js';
 export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/run/request.js';
 export type PreparedJourneyAdmission = { request: ParsedInlineJourneyRequest; requestFingerprint: string; compilerFingerprint: string; minimumCalls: number; maximumCalls: number; packets: PreflightPacket[] };
+export type PreparedFollowOnAdmission = { prepared: PreparedRun; inspection: Inspection; sourceVersion: FollowOnSourceSet['version'] };
+
+export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, source: FollowOnSourceSet, provider: DecisionProvider): Promise<PreparedFollowOnAdmission> {
+  const compilerFingerprint = promptContractHash();
+  const question = request.questions[0];
+  const fits: Inspection['fits'] = [];
+  const problems: RunProblem[] = [];
+  const evaluations: FrozenEvaluation[] = [];
+  const selections: FollowOnLineage['selections'] = [];
+  for (const turn of source.turns) {
+    let selectedMaterial = [...(request.material ?? [])];
+    if (request.context.materialIds) {
+      const byId = new Map(turn.packet.state.encounteredItems.map((item) => [item.id, item]));
+      const referencedMaterial: Array<{ id: string; text: string }> = [];
+      for (const id of request.context.materialIds) {
+        const item = byId.get(id);
+        if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} was not encountered in evaluation ${turn.evaluationId}.`);
+        referencedMaterial.push({ ...item });
+      }
+      selectedMaterial = [...referencedMaterial, ...selectedMaterial];
+    }
+    const rawResult = turn.result ? decisionValueSchema.parse(turn.result.type === 'choice'
+      ? { type: turn.result.type, choice: turn.result.choice, probabilities: turn.result.probabilities, confidence: turn.result.confidence }
+      : turn.result.type === 'score'
+        ? { type: turn.result.type, score: turn.result.score, probabilities: turn.result.probabilities, legend: turn.result.legend, confidence: turn.result.confidence }
+        : { type: turn.result.type, noul: turn.result.noul }) : undefined;
+    let packet;
+    try {
+      packet = prepareFollowOnPacket({ source: turn.packet, mode: request.context.mode, question,
+        ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }), ...(rawResult ? { result: rawResult } : {}) });
+    } catch (error) {
+      throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
+    }
+    const modelIdentity = request.provider.kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+    let fit: ProviderContextFit;
+    if (!provider.measure) fit = missingMeasureFit(provider, request.provider.kind, modelIdentity);
+    else {
+      try { fit = await provider.measure(packet); }
+      catch { fit = { ...missingMeasureFit(provider, request.provider.kind, modelIdentity), reason: 'provider-measurement-failed' }; }
+    }
+    fits.push({ respondentId: turn.respondentId, fit });
+    const problem = problemForFit(turn.respondentId, fit);
+    if (problem) problems.push(problem);
+    const evaluationId = randomUUID(); const contextId = randomUUID();
+    evaluations.push({ evaluationId, contextId, respondentId: turn.respondentId, questionId: question.id,
+      packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }) });
+    selections.push({ sourceEvaluationId: turn.evaluationId, sourceContextId: turn.contextId, respondentId: turn.respondentId, evaluationId, contextId });
+  }
+  if (evaluations.length === 0) problems.push({ code: 'no_follow_on_matches', message: 'No source evaluations match this follow-on selection.' });
+  if (evaluations.length > request.maxCalls) problems.push({ code: 'insufficient_call_limit', message: `maxCalls (${request.maxCalls}) is below the selected evaluation count (${evaluations.length}).` });
+  const sourceWarning = source.sourceComplete ? undefined : {
+    code: 'source_incomplete',
+    message: ['prepared', 'running'].includes(source.sourceStatus)
+      ? `${evaluations.length} evaluations match so far. Source run is ${source.sourceStatus}; more may match after it completes.`
+      : `Source run is ${source.sourceStatus} and incomplete. This follow-on uses the evidence currently recorded.`,
+  };
+  const inspection: Inspection = { valid: problems.length === 0, respondentCount: evaluations.length, minimumCalls: evaluations.length, problems, fits,
+    ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
+  const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
+    sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections };
+  return { sourceVersion: source.version, inspection,
+    prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, lineage } };
+}
+
+class RunProblemError extends Error {
+  constructor(readonly code: string, message: string) { super(message); this.name = 'RunProblemError'; }
+}
 
 export function materializeJourneyRun(admission: PreparedJourneyAdmission): PreparedJourneyRun {
   const { request, requestFingerprint, compilerFingerprint, packets } = admission;
@@ -115,6 +183,10 @@ export async function prepareRun(
 
   const request = parsed.data;
   if (request.kind === 'journey') return prepareJourneyAdmission(request, provider);
+  if (request.kind === 'follow-on') {
+    return { inspection: { valid: false, respondentCount: 0, minimumCalls: 0,
+      problems: [{ code: 'follow_on_resolution_required', message: 'Follow-on requests must be resolved against their source run before provider fit inspection.' }], fits: [] } };
+  }
 
   const compilerFingerprint = promptContractHash();
   const evaluations: FrozenEvaluation[] = [];

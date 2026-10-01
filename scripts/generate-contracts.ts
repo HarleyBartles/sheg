@@ -10,11 +10,14 @@ import { studyManifestSchema } from '../src/domain/study/study.js';
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const schemaBaseUri = 'urn:sheg:schema:';
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
-  { filename: 'inline-run-request.schema.json', title: 'Inline run request', schema: runRequestSchema, validationRules: [
+  { filename: 'run-request.schema.json', title: 'Sheg run request', schema: runRequestSchema, validationRules: [
     'Use kind poll for exactly one Choice, Score, or Noul question, or kind journey for a finite sequence or terminating graph of typed asks.',
     'Respondent, material, item, task, and graph node IDs must be unique within their request scope.',
     'maxCalls must cover the minimum reachable journey path; a lower cap than the maximum can leave a run partial.',
     'Material text is preserved exactly as authored.',
+    'A follow-on selects one source run by explicit evidence criteria or exact evaluation/context references.',
+    'Fresh-material and omit-history follow-ons require explicit material; omit-history removes prior trajectory and exposure-order metadata.',
+    'Continue requires a selected completed answer and retains it in the next respondent trajectory.',
   ] },
   { filename: 'respondent-archetype.schema.json', title: 'Respondent archetype', schema: respondentArchetypeSchema },
   { filename: 'respondent-archetype-library.schema.json', title: 'Respondent archetype library', schema: respondentArchetypeLibrarySchema },
