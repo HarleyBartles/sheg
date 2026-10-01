@@ -27,10 +27,12 @@
 
 **Ruling from implementation:** `evaluationId` identifies a selectable answer;
 `contextId` identifies the shared model-visible respondent state. Several source
-answers can therefore point at the same context. Follow-on selection preserves
-the distinct evidence references, then composes one question group for each
-unique respondent/context pair. Sibling answers are never sent into that group's
-state.
+answers can therefore point at the same context. For recorded, fresh-material,
+and omit-history follow-ons, preserve each evidence reference but compose one
+question group per respondent/context pair. Continue adds the selected answer to
+the next trajectory, so each selected evaluation creates its own distinct input
+context. Each selected source reference links to every output question in its
+derived group. Sibling answers are never sent into another question's state.
 
 ## Execution context
 
@@ -88,17 +90,19 @@ state.
 
 **Files:**
 - Modify: `src/application/run-inspection.ts`, `src/application/packet-sizing.ts` only where the request inspection projection is shared, and `src/domain/decision/provider.ts`
+- Modify: `src/domain/run/lifecycle.ts`
 - Test: `test/run-inspection.test.ts`, `test/run-service.test.ts`, `test/packet-sizing.test.ts`
+- Regenerate: `dist/` through `npm run build`
 
 **Interfaces:**
 - Consumes: Task 1 ordered question sets, Task 2 provider batching/measurement capability, and the current inline/follow-on context resolver.
 - Produces: a deterministic `QuestionGroup` for each respondent/context and a deterministic list of physical batches per group. One selected follow-on source turn creates one context group even when several turns have the same respondent ID. `Inspection.minimumCalls` equals the total planned physical requests; fits identify each group and its batch question IDs. A single-question overflow/unavailable measurement rejects admission; a larger Jev batch may split into smaller fitting batches without changing state or question content.
 
-- [ ] Test that questions in a group receive byte-identical state; different respondents and different source contexts produce separate groups. Verify source selection rationale and source-run identifiers never enter provider packets.
-- [ ] Test stable greedy partitioning in original question order: all questions fit one batch, overflow splits into the largest fitting prefixes, a singleton overflow rejects, and an unavailable group is not incorrectly treated as fit. Test `maxCalls` against planned physical batches, including multiple recorded turns per respondent.
-- [ ] Implement a pure stable batch planner. Providers advertising batch support measure the exact candidate request; providers without that capability produce singleton batches. The planner never changes the frozen state, typed question definitions, or selected provider.
-- [ ] Update inspection projections so the agent can see the selected question IDs per measured physical packet and the honest minimum physical-call count. Keep inspection keyless and inference-free.
-- [ ] Run `node --import tsx --test test/run-inspection.test.ts test/run-service.test.ts test/packet-sizing.test.ts`; commit as `feat: plan provider batches against frozen contexts`.
+- [x] Test that questions in a group receive byte-identical state; different respondents and different source contexts produce separate groups. Verify source selection rationale and source-run identifiers never enter provider packets.
+- [x] Test stable greedy partitioning in original question order: all questions fit one batch, overflow splits into the largest fitting prefixes, a singleton overflow rejects, and an unavailable group is not incorrectly treated as fit. Test `maxCalls` against planned physical batches, including multiple recorded turns per respondent.
+- [x] Implement a pure stable batch planner. Providers advertising batch support measure the exact candidate request; providers without that capability produce singleton batches. The planner never changes the frozen state, typed question definitions, or selected provider.
+- [x] Update inspection projections so the agent can see the selected question IDs per measured physical packet and the honest minimum physical-call count. Keep inspection keyless and inference-free.
+- [ ] Run `node --import tsx --test test/run-inspection.test.ts test/run-service.test.ts test/packet-sizing.test.ts` and `npm run build`; commit as `feat: plan provider batches against frozen contexts`.
 
 ## Task 4: Add Jev multi-question transport and explicit local splitting
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash } from '../domain/decision/prompt.js';
 import { decisionValueSchema } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
+import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
 import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
@@ -15,15 +16,23 @@ export type { Inspection } from '../domain/run/lifecycle.js';
 export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/run/request.js';
 export type PreparedJourneyAdmission = { request: ParsedInlineJourneyRequest; requestFingerprint: string; compilerFingerprint: string; minimumCalls: number; maximumCalls: number; packets: PreflightPacket[] };
 export type PreparedFollowOnAdmission = { prepared: PreparedRun; inspection: Inspection; sourceVersion: FollowOnSourceSet['version'] };
+type QuestionGroup = { groupId: string; contextId: string; respondentId: string; state: DecisionBatchRequest['state']; questions: readonly DecisionQuestion[]; packets: readonly DecisionRequest[] };
 
 export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, source: FollowOnSourceSet, provider: DecisionProvider): Promise<PreparedFollowOnAdmission> {
   const compilerFingerprint = promptContractHash();
-  const question = request.questions[0]!;
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
   const evaluations: FrozenEvaluation[] = [];
-  const selections: FollowOnLineage['selections'] = [];
+  const groups = new Map<string, { representative: FollowOnSourceSet['turns'][number]; turns: FollowOnSourceSet['turns'] }>();
   for (const turn of source.turns) {
+    const groupKey = request.context.mode === 'continue' ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
+    const group = groups.get(groupKey) ?? { representative: turn, turns: [] };
+    group.turns.push(turn);
+    groups.set(groupKey, group);
+  }
+  const selections: FollowOnLineage['selections'] = [];
+  let minimumCalls = 0;
+  for (const { representative: turn, turns } of groups.values()) {
     let selectedMaterial = [...(request.material ?? [])];
     if (request.context.materialIds) {
       const byId = new Map(turn.packet.state.encounteredItems.map((item) => [item.id, item]));
@@ -40,37 +49,41 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       : turn.result.type === 'score'
         ? { type: turn.result.type, score: turn.result.score, probabilities: turn.result.probabilities, legend: turn.result.legend, confidence: turn.result.confidence }
         : { type: turn.result.type, noul: turn.result.noul }) : undefined;
-    let packet;
+    const packets: DecisionRequest[] = [];
     try {
-      packet = prepareFollowOnPacket({ source: turn.packet, mode: request.context.mode, question,
-        ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }), ...(rawResult ? { result: rawResult } : {}) });
+      for (const question of request.questions) {
+        packets.push(prepareFollowOnPacket({ source: turn.packet, mode: request.context.mode, question,
+          ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }), ...(rawResult ? { result: rawResult } : {}) }));
+      }
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
     }
     const modelIdentity = request.provider.kind === 'jev' ? request.provider.model : request.provider.checkpoint;
-    let fit: ProviderContextFit;
-    if (!provider.measure) fit = missingMeasureFit(provider, request.provider.kind, modelIdentity);
-    else {
-      try { fit = await provider.measure(packet); }
-      catch { fit = { ...missingMeasureFit(provider, request.provider.kind, modelIdentity), reason: 'provider-measurement-failed' }; }
+    const contextId = randomUUID(); const groupId = randomUUID();
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
+    minimumCalls += planned.batches.length;
+    fits.push(...planned.fits);
+    problems.push(...planned.problems);
+    const groupEvaluations: FrozenEvaluation[] = packets.map((packet) => {
+      const evaluation = { evaluationId: randomUUID(), contextId, respondentId: turn.respondentId,
+        questionId: packet.question.id, packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }) };
+      evaluations.push(evaluation);
+      return evaluation;
+    });
+    for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
+      selections.push({ sourceEvaluationId: sourceTurn.evaluationId, sourceContextId: sourceTurn.contextId,
+        respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId });
     }
-    fits.push({ respondentId: turn.respondentId, fit });
-    const problem = problemForFit(turn.respondentId, fit);
-    if (problem) problems.push(problem);
-    const evaluationId = randomUUID(); const contextId = randomUUID();
-    evaluations.push({ evaluationId, contextId, respondentId: turn.respondentId, questionId: question.id,
-      packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }) });
-    selections.push({ sourceEvaluationId: turn.evaluationId, sourceContextId: turn.contextId, respondentId: turn.respondentId, evaluationId, contextId });
   }
-  if (evaluations.length === 0) problems.push({ code: 'no_follow_on_matches', message: 'No source evaluations match this follow-on selection.' });
-  if (evaluations.length > request.maxCalls) problems.push({ code: 'insufficient_call_limit', message: `maxCalls (${request.maxCalls}) is below the selected evaluation count (${evaluations.length}).` });
+  if (groups.size === 0) problems.push({ code: 'no_follow_on_matches', message: 'No source evaluations match this follow-on selection.' });
+  if (minimumCalls > request.maxCalls) problems.push({ code: 'insufficient_call_limit', message: `maxCalls (${request.maxCalls}) is below the planned physical request minimum (${minimumCalls}).` });
   const sourceWarning = source.sourceComplete ? undefined : {
     code: 'source_incomplete',
     message: ['prepared', 'running'].includes(source.sourceStatus)
-      ? `${evaluations.length} evaluations match so far. Source run is ${source.sourceStatus}; more may match after it completes.`
+      ? `${groups.size} respondent contexts match so far. Source run is ${source.sourceStatus}; more may match after it completes.`
       : `Source run is ${source.sourceStatus} and incomplete. This follow-on uses the evidence currently recorded.`,
   };
-  const inspection: Inspection = { valid: problems.length === 0, respondentCount: evaluations.length, minimumCalls: evaluations.length, problems, fits,
+  const inspection: Inspection = { valid: problems.length === 0, respondentCount: groups.size, minimumCalls, problems, fits,
     ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
     sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections };
@@ -192,50 +205,43 @@ export async function prepareRun(
   const evaluations: FrozenEvaluation[] = [];
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
+  let minimumCalls = 0;
+  const kind = request.provider.kind;
+  const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
 
   for (const respondent of request.respondents) {
-    const packet = compileDecisionRequest({
-      respondentProfile: {
-        intent: respondent.intent,
-        context: respondent.context,
-        desired_outcome: respondent.desired_outcome,
-        engagement_cues: respondent.engagement_cues,
-        friction_cues: respondent.friction_cues,
-      },
-      encounteredItems: request.material,
-      trajectory: emptyTrajectory(),
-      question: request.questions[0]!,
-    });
-    let fit: ProviderContextFit;
-    const kind = request.provider.kind;
-    const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
-    if (!provider.measure) {
-      fit = missingMeasureFit(provider, kind, modelIdentity);
-    } else {
-      try {
-        fit = await provider.measure(packet);
-      } catch {
-        fit = { ...missingMeasureFit(provider, kind, modelIdentity), reason: 'provider-measurement-failed' };
-      }
+    const respondentProfile = {
+      intent: respondent.intent,
+      context: respondent.context,
+      desired_outcome: respondent.desired_outcome,
+      engagement_cues: respondent.engagement_cues,
+      friction_cues: respondent.friction_cues,
+    };
+    const packets = request.questions.map((question) => compileDecisionRequest({
+      respondentProfile, encounteredItems: request.material, trajectory: emptyTrajectory(), question,
+    }));
+    const contextId = randomUUID();
+    const groupId = randomUUID();
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: respondent.id, state: packets[0]!.state, questions: request.questions, packets }, provider, kind, modelIdentity);
+    minimumCalls += planned.batches.length;
+    fits.push(...planned.fits);
+    problems.push(...planned.problems);
+    for (const packet of packets) {
+      evaluations.push({
+        evaluationId: randomUUID(), contextId, respondentId: respondent.id,
+        questionId: packet.question.id, packet,
+        packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
+      });
     }
-    fits.push({ respondentId: respondent.id, fit });
-    const problem = problemForFit(respondent.id, fit);
-    if (problem) problems.push(problem);
-
-    evaluations.push({
-      evaluationId: randomUUID(),
-      contextId: randomUUID(),
-      respondentId: respondent.id,
-      questionId: request.questions[0]!.id,
-      packet,
-      packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
-    });
+  }
+  if (request.maxCalls < minimumCalls) {
+    problems.push({ code: 'insufficient_call_limit', message: `maxCalls (${request.maxCalls}) is below the planned physical request minimum (${minimumCalls}).` });
   }
 
   const inspection: Inspection = {
     valid: problems.length === 0,
     respondentCount: request.respondents.length,
-    minimumCalls: request.respondents.length,
+    minimumCalls,
     problems,
     fits,
   };
@@ -248,6 +254,72 @@ export async function prepareRun(
     evaluations,
   };
   return { inspection, prepared };
+}
+
+async function planQuestionBatches(
+  group: QuestionGroup,
+  provider: DecisionProvider,
+  kind: ProviderKind,
+  modelIdentity: string,
+): Promise<{ batches: DecisionBatchRequest[]; fits: Inspection['fits']; problems: RunProblem[] }> {
+  const { groupId, contextId, respondentId, state, questions, packets } = group;
+  const batches: DecisionBatchRequest[] = [];
+  const fits: Inspection['fits'] = [];
+  const problems: RunProblem[] = [];
+  const measureOne = async (index: number): Promise<ProviderContextFit> => {
+    if (!provider.measure) return missingMeasureFit(provider, kind, modelIdentity);
+    try { return await provider.measure(packets[index]!); }
+    catch { return { ...missingMeasureFit(provider, kind, modelIdentity), reason: 'provider-measurement-failed' }; }
+  };
+  const measureBatch = async (batchQuestions: readonly DecisionQuestion[]): Promise<ProviderContextFit> => {
+    if (!provider.measureBatch) return missingMeasureFit(provider, kind, modelIdentity);
+    try { return await provider.measureBatch({ state, questions: [...batchQuestions] }); }
+    catch { return { ...missingMeasureFit(provider, kind, modelIdentity), reason: 'provider-measurement-failed' }; }
+  };
+  const recordFit = (questionIds: string[], fit: ProviderContextFit) => {
+    fits.push({ respondentId, groupId, contextId, questionIds, fit });
+    const problem = problemForFit(respondentId, fit);
+    if (problem) problems.push(problem);
+  };
+
+  if (!provider.measureBatch) {
+    for (let index = 0; index < questions.length; index += 1) {
+      const question = questions[index]!;
+      const fit = await measureOne(index);
+      recordFit([question.id], fit);
+      batches.push({ state, questions: [question] });
+    }
+    return { batches, fits, problems };
+  }
+
+  let start = 0;
+  while (start < questions.length) {
+    let end = start + 1;
+    let lastFit: { end: number; fit: ProviderContextFit } | undefined;
+    while (end <= questions.length) {
+      const candidate = questions.slice(start, end);
+      const fit = await measureBatch(candidate);
+      if (fit.status === 'unavailable') {
+        recordFit(candidate.map(({ id }) => id), fit);
+        return { batches, fits, problems };
+      }
+      if (fit.status === 'overflow') {
+        if (!lastFit) recordFit(candidate.map(({ id }) => id), fit);
+        break;
+      }
+      lastFit = { end, fit };
+      end += 1;
+    }
+    if (lastFit) {
+      const selected = questions.slice(start, lastFit.end);
+      batches.push({ state, questions: [...selected] });
+      recordFit(selected.map(({ id }) => id), lastFit.fit);
+      start = lastFit.end;
+      continue;
+    }
+    return { batches, fits, problems };
+  }
+  return { batches, fits, problems };
 }
 
 async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, provider: DecisionProvider): Promise<{ inspection: Inspection; journey?: PreparedJourneyAdmission }> {

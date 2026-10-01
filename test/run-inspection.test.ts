@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { prepareRun } from '../src/application/run-inspection.js';
+import { prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
-import type { DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
-import type { InlineRunRequest } from '../src/domain/run/request.js';
+import { compileDecisionRequest, emptyTrajectory } from '../src/domain/decision/prompt.js';
+import type { DecisionBatchRequest, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
+import { followOnRunRequestSchema, type FollowOnSourceSet, type InlineRunRequest } from '../src/domain/run/request.js';
 
 const fit = (status: ProviderContextFit['status'] = 'fits'): ProviderContextFit => ({
   provider: 'laya', status, method: 'test-fixture', modelIdentity: 'test-model',
@@ -116,6 +117,154 @@ test('a provider without a context measurement cannot claim fit', async () => {
   assert.equal(result.inspection.fits[0]!.fit.provider, 'laya');
   assert.equal(result.prepared, undefined);
   assert.equal(decisions, 0);
+});
+
+test('batch admission measures ordered mixed questions over one exact context per respondent', async () => {
+  const measured: DecisionBatchRequest[] = [];
+  const provider: DecisionProvider = {
+    measureBatch(batch) { measured.push(batch); return fit(); },
+    async decide() { throw new Error('Inspection must not run inference.'); },
+  };
+  const questions = [
+    { type: 'choice' as const, id: 'interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } },
+    { type: 'score' as const, id: 'clarity', instructions: 'How clear?', rubric: ['unclear', 'clear'] },
+    { type: 'noul' as const, id: 'trust', instructions: 'Is it credible?' },
+  ];
+  const result = await prepareRun(request(questions), provider);
+
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 2);
+  assert.deepEqual(measured.map(({ questions: grouped }) => grouped.map(({ id }) => id)), [
+    ['interest'], ['interest', 'clarity'], ['interest', 'clarity', 'trust'],
+    ['interest'], ['interest', 'clarity'], ['interest', 'clarity', 'trust'],
+  ]);
+  assert.deepEqual(result.inspection.fits.map(({ questionIds }) => questionIds), [
+    ['interest', 'clarity', 'trust'], ['interest', 'clarity', 'trust'],
+  ]);
+  assert.deepEqual(result.prepared!.evaluations.map(({ respondentId, questionId }) => [respondentId, questionId]), [
+    ['reader-a', 'interest'], ['reader-a', 'clarity'], ['reader-a', 'trust'],
+    ['reader-b', 'interest'], ['reader-b', 'clarity'], ['reader-b', 'trust'],
+  ]);
+  assert.equal(new Set(result.prepared!.evaluations.slice(0, 3).map(({ contextId }) => contextId)).size, 1);
+  assert.equal(new Set(result.prepared!.evaluations.slice(3).map(({ contextId }) => contextId)).size, 1);
+  assert.equal(new Set(result.prepared!.evaluations.slice(0, 3).map(({ packet }) => JSON.stringify(packet.state))).size, 1);
+  assert.equal(new Set(result.prepared!.evaluations.slice(3).map(({ packet }) => JSON.stringify(packet.state))).size, 1);
+  assert.notEqual(result.prepared!.evaluations[0]!.contextId, result.prepared!.evaluations[3]!.contextId);
+  assert.ok(measured.every(({ state }) => JSON.stringify(state).includes('Exact text')));
+});
+
+test('batch admission greedily splits overflow into the largest fitting ordered prefixes and checks physical maxCalls', async () => {
+  const measured: DecisionBatchRequest[] = [];
+  const provider: DecisionProvider = {
+    measureBatch(batch) {
+      measured.push(batch);
+      return fit(batch.questions.length <= 2 ? 'fits' : 'overflow');
+    },
+    async decide() { throw new Error('Inspection must not run inference.'); },
+  };
+  const questions = ['q1', 'q2', 'q3'].map((id) => ({ type: 'noul' as const, id, instructions: `Question ${id}?` }));
+  const input = { ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 };
+  const result = await prepareRun(input, provider);
+
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 2);
+  assert.deepEqual(result.inspection.fits.map(({ questionIds }) => questionIds), [['q1', 'q2'], ['q3']]);
+  assert.deepEqual(measured.map(({ questions: grouped }) => grouped.map(({ id }) => id)), [['q1'], ['q1', 'q2'], ['q1', 'q2', 'q3'], ['q3']]);
+
+  const underfunded = await prepareRun({ ...input, maxCalls: 1 }, provider);
+  assert.equal(underfunded.inspection.valid, false);
+  assert.equal(underfunded.inspection.minimumCalls, 2);
+  assert.equal(underfunded.inspection.problems.some(({ code }) => code === 'insufficient_call_limit'), true);
+});
+
+test('an unavailable group or overflowing singleton never becomes admitted through splitting', async () => {
+  const questions = ['q1', 'q2'].map((id) => ({ type: 'noul' as const, id, instructions: `Question ${id}?` }));
+  for (const resultStatus of ['unavailable', 'overflow'] as const) {
+    const provider: DecisionProvider = {
+      measureBatch: () => fit(resultStatus),
+      async decide() { throw new Error('Inspection must not run inference.'); },
+    };
+    const result = await prepareRun({ ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 }, provider);
+    assert.equal(result.inspection.valid, false, resultStatus);
+    assert.equal(result.prepared, undefined, resultStatus);
+    assert.equal(result.inspection.fits.some(({ fit: item }) => item.status === resultStatus), true, resultStatus);
+  }
+});
+
+test('providers without batch measurement receive singleton questions over each respondent state', async () => {
+  const fixture = makeProvider();
+  const questions = ['first', 'second'].map((id) => ({ type: 'noul' as const, id, instructions: `Question ${id}?` }));
+  const result = await prepareRun({ ...request(questions), maxCalls: 4 }, fixture.provider);
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 4);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['first', 'second', 'first', 'second']);
+  assert.deepEqual(result.inspection.fits.map(({ questionIds }) => questionIds), [['first'], ['second'], ['first'], ['second']]);
+});
+
+test('follow-on batching groups distinct source contexts and never includes selection metadata in model state', async () => {
+  const questions = [
+    { type: 'choice' as const, id: 'why', instructions: 'Which part?', options: { opening: 'Opening', proof: 'Proof' } },
+    { type: 'noul' as const, id: 'severity', instructions: 'Was it frustrating?' },
+  ];
+  const followOn = followOnRunRequestSchema.parse({
+    kind: 'follow-on', sourceRunId: '123e4567-e89b-42d3-a456-426614174000',
+    selection: { criteria: { questionId: 'interest', answer: { type: 'choice', choiceId: 'leave' } } },
+    context: { mode: 'recorded' }, questions,
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 2,
+  });
+  const profile = { intent: 'Learn', context: 'New reader', desired_outcome: 'Understand', engagement_cues: 'Examples', friction_cues: 'Hype' };
+  const previousQuestion = { type: 'noul' as const, id: 'interest', instructions: 'Interested?' };
+  const sourcePacket = (text: string) => compileDecisionRequest({ respondentProfile: profile, encounteredItems: [{ id: 'section-three', text }], trajectory: emptyTrajectory(), question: previousQuestion });
+  const source: FollowOnSourceSet = {
+    sourceRunId: followOn.sourceRunId, sourceStatus: 'running', sourceComplete: false,
+    version: { status: 'running', usedCalls: 2, reservedCalls: 0, maxOrdinal: 3 },
+    turns: [
+      { evaluationId: '11111111-1111-4111-8111-111111111111', contextId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', respondentId: 'reader-a', packet: sourcePacket('First source context') },
+      { evaluationId: '22222222-2222-4222-8222-222222222222', contextId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', respondentId: 'reader-a', packet: sourcePacket('First source context') },
+      { evaluationId: '33333333-3333-4333-8333-333333333333', contextId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', respondentId: 'reader-a', packet: sourcePacket('Second source context') },
+    ],
+  };
+  const measured: DecisionBatchRequest[] = [];
+  const provider: DecisionProvider = {
+    measureBatch(batch) { measured.push(batch); return fit(); },
+    async decide() { throw new Error('Inspection must not run inference.'); },
+  };
+  const admission = await prepareFollowOnRun(followOn, source, provider);
+
+  assert.equal(admission.inspection.valid, true);
+  assert.equal(admission.inspection.respondentCount, 2);
+  assert.equal(admission.inspection.minimumCalls, 2);
+  assert.deepEqual(measured.map(({ questions: grouped }) => grouped.map(({ id }) => id)), [
+    ['why'], ['why', 'severity'], ['why'], ['why', 'severity'],
+  ]);
+  assert.deepEqual(measured.map(({ state }) => state.encounteredItems), [
+    [{ id: 'section-three', text: 'First source context' }],
+    [{ id: 'section-three', text: 'First source context' }],
+    [{ id: 'section-three', text: 'Second source context' }],
+    [{ id: 'section-three', text: 'Second source context' }],
+  ]);
+  assert.equal(JSON.stringify(measured).includes(followOn.sourceRunId), false);
+  assert.equal(JSON.stringify(measured).includes('selection'), false);
+  assert.equal(admission.prepared.evaluations.length, 4);
+  assert.equal(new Set(admission.prepared.evaluations.slice(0, 2).map(({ contextId }) => contextId)).size, 1);
+  assert.notEqual(admission.prepared.evaluations[0]!.contextId, admission.prepared.evaluations[2]!.contextId);
+
+  const continuationTurns = source.turns.map((turn, index) => ({
+    ...turn,
+    result: { type: 'noul' as const, noul: index / 2, attempts: 1, provider: 'jev' as const, model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+  }));
+  const continuationProviderCalls: DecisionBatchRequest[] = [];
+  const continuationProvider: DecisionProvider = {
+    measureBatch(batch) { continuationProviderCalls.push(batch); return fit(); },
+    async decide() { throw new Error('Inspection must not run inference.'); },
+  };
+  const continued = await prepareFollowOnRun({ ...followOn, context: { mode: 'continue' }, maxCalls: 3 }, { ...source, turns: continuationTurns }, continuationProvider);
+  assert.equal(continued.inspection.valid, true);
+  assert.equal(continued.inspection.respondentCount, 3);
+  assert.equal(continued.inspection.minimumCalls, 3);
+  assert.equal(continued.prepared.evaluations.length, 6);
+  assert.equal(new Set(continued.prepared.evaluations.map(({ contextId }) => contextId)).size, 3);
+  assert.deepEqual(continuationProviderCalls.map(({ state }) => (state.trajectory as { responses: Array<{ noul: number }> }).responses.at(-1)?.noul), [0, 0, 0.5, 0.5, 1, 1]);
 });
 
 function journeyRequest(maxCalls = 1, respondentCount = 1) {

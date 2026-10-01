@@ -50,7 +50,7 @@ export type Inspection = {
   maximumCalls?: number;
   problems: RunProblem[];
   warnings?: RunProblem[];
-  fits: Array<{ respondentId: string; nodeId?: string; pathId?: string; packetId?: string; fit: ProviderContextFit }>;
+  fits: Array<{ respondentId: string; groupId?: string; contextId?: string; questionIds?: string[]; nodeId?: string; pathId?: string; packetId?: string; fit: ProviderContextFit }>;
 };
 
 export type RunStatusView = {
