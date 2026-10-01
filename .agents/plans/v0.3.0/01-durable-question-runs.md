@@ -243,8 +243,8 @@ const packet = compileDecisionRequest({
 
 **Interfaces:** Consumes Task 1 `PreparedRun` and canonical fingerprints. Produces `RunStore`, lifecycle/projection types and `resolveDataRoot(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, home: string): string` with the rules above.
 
-- [ ] Write two-connection database tests: identical acceptance returns one identity; changed request under the same key conflicts; mutations of original arrays after acceptance do not change saved JSON; foreign-key errors roll back; stable paginated answers include pending entries. Test all data-root precedence/error/platform cases without modifying the user's actual data.
-- [ ] Add claim/reservation tests with injected timestamps: only one claimant; maxCalls cannot overspend; result and settlement are atomic; stale owner writes fail; repeated reconciliation consumes an uncertain reservation once and never creates an answer. Close/reopen the database to prove persistence rather than relying on live objects.
+- [x] Write two-connection database tests: identical acceptance returns one identity; changed request under the same key conflicts; mutations of original arrays after acceptance do not change saved JSON; foreign-key errors roll back; stable paginated answers include pending entries. Test all data-root precedence/error/platform cases without modifying the user's actual data.
+- [x] Add claim/reservation tests with injected timestamps: only one claimant; maxCalls cannot overspend; result and settlement are atomic; stale owner writes fail; repeated reconciliation consumes an uncertain reservation once and never creates an answer. Close/reopen the database to prove persistence rather than relying on live objects.
 
 ```ts
 const first = store.accept(submissionId, prepared);
@@ -253,8 +253,8 @@ assert.equal(repeated.created, false);
 assert.equal(repeated.run.runId, first.run.runId);
 ```
 
-- [ ] Run `node --import tsx --test test/data-root.test.ts test/run-store.test.ts`; confirm RED on the new transactional behavior.
-- [ ] Implement the stated schema and transactions with parameterized statements. Distinguish domain errors from SQLite busy/internal errors, sanitize public failures, and inject time for lifecycle tests rather than sleeping 30 seconds. Record the storage ADR and current-format reset boundary.
+- [x] Run `node --import tsx --test test/data-root.test.ts test/run-store.test.ts`; the initial RED reported the missing planned modules. A focused test then witnessed the behavioral RED when `finish` incorrectly accepted an in-flight attempt. Record both in the execution ledger.
+- [x] Implement the stated schema and transactions with parameterized statements. Distinguish domain errors from SQLite busy/internal errors, sanitize public failures, and inject time for lifecycle tests rather than sleeping 30 seconds. Record the storage ADR and current-format reset boundary.
 
 ```sql
 BEGIN IMMEDIATE;
@@ -263,7 +263,8 @@ BEGIN IMMEDIATE;
 COMMIT;
 ```
 
-- [ ] Run the focused tests and `npm run typecheck`. Commit `feat: persist durable run inputs attempts and answers` through the hook. Exit: restart-safe recall and concurrency/budget/ownership invariants hold without a worker process.
+- [x] Run the focused tests and `npm run typecheck`. Focused behavior tests (12) and typecheck pass.
+- [x] Commit `feat: persist durable run inputs attempts and answers` through the hook. Exit: restart-safe recall and concurrency/budget/ownership invariants hold without a worker process.
 
 ## Task 3: Execute independently and stop at explicit boundaries
 

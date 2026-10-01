@@ -27,6 +27,7 @@ alongside the code.
 | [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
 
 | [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
+| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Accepted |
 
 ## Writing and changing decisions
 
