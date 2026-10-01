@@ -25,6 +25,13 @@
 - Automated verification uses local fixtures and injected providers. The user has authorized one optional paid Jev smoke: at most one OpenRouter physical call for one synthetic respondent, one short synthetic material item, and one mixed three-question group, with `maxCalls: 1`; use an isolated temporary datastore and keep the credential and full response out of files and chat.
 - Preserve the pre-existing untracked design sketch.
 
+**Ruling from implementation:** `evaluationId` identifies a selectable answer;
+`contextId` identifies the shared model-visible respondent state. Several source
+answers can therefore point at the same context. Follow-on selection preserves
+the distinct evidence references, then composes one question group for each
+unique respondent/context pair. Sibling answers are never sent into that group's
+state.
+
 ## Execution context
 
 - Worktree: `Z:\_agent-worktrees\sheg\codex\v0.3.0-release-spec`
@@ -46,7 +53,6 @@
 
 **Files:**
 - Modify: `src/domain/run/request.ts`
-- Modify: `src/domain/run/lifecycle.ts`
 - Modify: `scripts/generate-contracts.ts`
 - Test: `test/run-request.test.ts`
 - Regenerate: schemas through `npm run contracts:build`; regenerate `dist/` through `npm run build`
@@ -55,12 +61,12 @@
 - Consumes: the current strict `DecisionQuestion` schemas, one-question `inlineRunRequestSchema`, and one-question `followOnRunRequestSchema`.
 - Produces: nonempty `questions: DecisionQuestion[]` for direct poll and follow-on requests; stable question IDs are unique within each set. `inlineJourneyRequestSchema` and authored journey tasks remain unchanged. Each resulting evaluation remains identified by its own `evaluationId`, `questionId`, and group `contextId`.
 
-- [ ] Write failing request-schema tests for one and several questions, mixed Choice/Score/Noul types, duplicate question IDs, empty sets, and follow-on requests with repeated source contexts. Assert that journey requests still accept one task per ask node and do not gain a sibling-answer field.
-- [ ] Run `node --import tsx --test test/run-request.test.ts`; verify the multi-question cases fail because the current schemas accept only one question.
-- [ ] Replace both one-element tuples with nonempty question arrays and add uniqueness validation. Remove the request-level check that equates `maxCalls` with respondent count; physical minimum belongs to provider-aware inspection in Task 3. Keep `maxCalls` a positive integer and retain the run fingerprint over the complete ordered question set.
-- [ ] Update inferred types and the generated request schema's validation rules to describe one or more independent typed questions. Do not add multiple legacy aliases or migration paths.
-- [ ] Run `node --import tsx --test test/run-request.test.ts`, `npm run contracts:build`, then `npm run build`; stage generated assets with their source.
-- [ ] Commit the request contract as `feat: accept independent typed question groups`.
+- [x] Write failing request-schema tests for one and several questions, mixed Choice/Score/Noul types, duplicate question IDs, empty sets, and follow-on requests with repeated source contexts. Assert that journey requests still accept one task per ask node and do not gain a sibling-answer field.
+- [x] Run `node --import tsx --test test/run-request.test.ts`; verify the multi-question cases fail because the current schemas accept only one question.
+- [x] Replace both one-element tuples with nonempty question arrays and add uniqueness validation. Remove the request-level check that equates `maxCalls` with respondent count; physical minimum belongs to provider-aware inspection in Task 3. Keep `maxCalls` a positive integer and retain the run fingerprint over the complete ordered question set.
+- [x] Update inferred types and the generated request schema's validation rules to describe one or more independent typed questions. Do not add multiple legacy aliases or migration paths.
+- [x] Run `node --import tsx --test test/run-request.test.ts`, `npm run contracts:build`, then `npm run build`; stage generated assets with their source.
+- [x] Commit the request contract as `feat: accept independent typed question groups`.
 
 ## Task 2: Define shared provider request and answer contracts
 

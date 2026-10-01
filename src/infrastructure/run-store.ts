@@ -288,7 +288,7 @@ function validatePrepared(prepared: PreparedRun): PreparedRun {
       const selection = lineage.selections[index]!;
       const packet = decisionRequestSchema.safeParse(evaluation.packet);
       if (!packet.success || selection.respondentId !== evaluation.respondentId || selection.evaluationId !== evaluation.evaluationId || selection.contextId !== evaluation.contextId ||
-          evaluation.questionId !== parsedRequest.data.questions[0].id || packet.data.question.id !== evaluation.questionId ||
+          evaluation.questionId !== parsedRequest.data.questions[0]!.id || packet.data.question.id !== evaluation.questionId ||
           hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint ||
           selectedIds.has(selection.sourceEvaluationId) || selectedContexts.has(selection.sourceContextId) || evaluationIds.has(evaluation.evaluationId) || contextIds.has(evaluation.contextId)) {
         throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on evaluation or source selection is inconsistent.');
@@ -308,7 +308,7 @@ function validatePrepared(prepared: PreparedRun): PreparedRun {
   for (const evaluation of prepared.evaluations) {
     const packet = decisionRequestSchema.safeParse(evaluation.packet);
     if (!packet.success || !respondentIds.has(evaluation.respondentId) || seenRespondents.has(evaluation.respondentId) || evaluationIds.has(evaluation.evaluationId) || contextIds.has(evaluation.contextId) ||
-        evaluation.questionId !== parsedRequest.data.questions[0].id || packet.data.question.id !== evaluation.questionId ||
+        evaluation.questionId !== parsedRequest.data.questions[0]!.id || packet.data.question.id !== evaluation.questionId ||
         hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
       throw new RunStoreError('invalid_prepared_run', 'Prepared run evaluation or packet fingerprint is invalid.');
     }

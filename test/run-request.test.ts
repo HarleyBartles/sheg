@@ -40,27 +40,34 @@ function validRequest(): InlineRunRequest {
   };
 }
 
-test('the direct request accepts one typed question and preserves exact authored material', () => {
+test('the direct request accepts one or more typed questions and preserves exact authored material', () => {
   const input = validRequest();
   const parsed = inlineRunRequestSchema.parse(input);
 
   assert.equal(parsed.material[0]!.text, input.material[0]!.text);
   assert.deepEqual(parsed.questions, [question]);
   assert.equal(parsed.respondents[0]!.id, 'reader-a');
+
+  const grouped = inlineRunRequestSchema.parse({ ...input, questions: [
+    question,
+    { type: 'score', id: 'clarity', instructions: 'How clear was the section?', rubric: ['Unclear', 'Clear'] },
+    { type: 'noul', id: 'trust', instructions: 'How credible was the section?' },
+  ] });
+  assert.deepEqual(grouped.questions.map(({ id }) => id), ['interest', 'clarity', 'trust']);
 });
 
-test('the direct request rejects missing, multiple, duplicate-identity and extra fields', () => {
+test('the direct request rejects empty or duplicate question sets, duplicate identities and extra fields', () => {
   const input = validRequest();
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, questions: [] }).success, false);
-  assert.equal(inlineRunRequestSchema.safeParse({ ...input, questions: [question, { ...question, id: 'second' }] }).success, false);
+  assert.equal(inlineRunRequestSchema.safeParse({ ...input, questions: [question, { ...question }] }).success, false);
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, respondents: [profile('reader-a', 'First'), profile('reader-a', 'Second')], maxCalls: 2 }).success, false);
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, material: [{ id: 'section-three', text: 'text' }, { id: 'section-three', text: 'text' }], maxCalls: 1 }).success, false);
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, rationale: 'chosen because they left' }).success, false);
 });
 
-test('the direct request requires enough physical call allowance for one answer per respondent', () => {
+test('the request schema leaves provider-aware physical call admission to inspection', () => {
   const input = validRequest();
-  assert.equal(inlineRunRequestSchema.safeParse({ ...input, respondents: [profile('a', 'First'), profile('b', 'Second')], maxCalls: 1 }).success, false);
+  assert.equal(inlineRunRequestSchema.safeParse({ ...input, respondents: [profile('a', 'First'), profile('b', 'Second')], maxCalls: 1 }).success, true);
 });
 
 test('a direct journey request accepts inline typed route definitions without study files', () => {
@@ -148,7 +155,7 @@ test('evidence criteria combine typed response, question, material, respondent, 
 test('follow-on requests select criteria or exact evaluation/context references and declare context intent', () => {
   const base = {
     kind: 'follow-on', sourceRunId: '123e4567-e89b-42d3-a456-426614174000',
-    questions: [{ ...question, id: 'what-lost-interest' }],
+    questions: [{ ...question, id: 'what-lost-interest' }, { type: 'score', id: 'severity', instructions: 'How strongly?', rubric: ['Low', 'High'] }],
     provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
   };
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: { questionId: 'lost-interest', answer: { type: 'choice', choiceId: 'yes' } } }, context: { mode: 'recorded' } }).success, true);
@@ -158,7 +165,9 @@ test('follow-on requests select criteria or exact evaluation/context references 
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'recorded' }, material: [{ id: 'changed', text: 'Not recorded.' }] }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'fresh-material', materialIds: ['section-three'] }, material: [{ id: 'section-three', text: 'Duplicate.' }] }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'recorded' } }).success, true);
-  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [{ evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174002' }, { evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174003' }] }, context: { mode: 'recorded' } }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [{ evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174002' }, { evaluationId: '123e4567-e89b-42d3-a456-426614174003', contextId: '123e4567-e89b-42d3-a456-426614174002' }] }, context: { mode: 'recorded' } }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, questions: [], selection: { criteria: {} }, context: { mode: 'recorded' } }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base, questions: [base.questions[0], { ...base.questions[0], id: 'what-lost-interest' }], selection: { criteria: {} }, context: { mode: 'recorded' } }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [] }, context: { mode: 'recorded' } }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'fresh-material' } }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'recorded' }, rationale: 'They lost interest.' }).success, false);

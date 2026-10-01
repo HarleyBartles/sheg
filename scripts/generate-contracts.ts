@@ -11,7 +11,7 @@ const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const schemaBaseUri = 'urn:sheg:schema:';
 const contracts: Array<{ filename: string; title: string; schema: z.ZodType; validationRules?: string[] }> = [
   { filename: 'run-request.schema.json', title: 'Sheg run request', schema: runRequestSchema, validationRules: [
-    'Use kind poll for exactly one Choice, Score, or Noul question, or kind journey for a finite sequence or terminating graph of typed asks.',
+    'Use kind poll or kind follow-on for one or more independent Choice, Score, or Noul questions over each shared respondent context. Use kind journey for a finite sequence or terminating graph of dependent typed asks.',
     'Respondent, material, item, task, and graph node IDs must be unique within their request scope.',
     'maxCalls must cover the minimum reachable journey path; a lower cap than the maximum can leave a run partial.',
     'Material text is preserved exactly as authored.',

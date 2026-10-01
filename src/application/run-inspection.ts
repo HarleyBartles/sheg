@@ -18,7 +18,7 @@ export type PreparedFollowOnAdmission = { prepared: PreparedRun; inspection: Ins
 
 export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, source: FollowOnSourceSet, provider: DecisionProvider): Promise<PreparedFollowOnAdmission> {
   const compilerFingerprint = promptContractHash();
-  const question = request.questions[0];
+  const question = request.questions[0]!;
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
   const evaluations: FrozenEvaluation[] = [];
@@ -204,7 +204,7 @@ export async function prepareRun(
       },
       encounteredItems: request.material,
       trajectory: emptyTrajectory(),
-      question: request.questions[0],
+      question: request.questions[0]!,
     });
     let fit: ProviderContextFit;
     const kind = request.provider.kind;
@@ -226,7 +226,7 @@ export async function prepareRun(
       evaluationId: randomUUID(),
       contextId: randomUUID(),
       respondentId: respondent.id,
-      questionId: request.questions[0].id,
+      questionId: request.questions[0]!.id,
       packet,
       packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
     });

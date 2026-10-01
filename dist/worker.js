@@ -21305,7 +21305,7 @@ var inlineRunRequestSchema = external_exports.object({
   label: external_exports.string().min(1).max(120).optional(),
   respondents: external_exports.array(respondentProfileSchema).min(1),
   material: external_exports.array(materialItemSchema).min(1),
-  questions: external_exports.tuple([decisionQuestionSchema]),
+  questions: external_exports.array(decisionQuestionSchema).min(1),
   provider: providerConfigSchema,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
@@ -21317,8 +21317,9 @@ var inlineRunRequestSchema = external_exports.object({
   if (new Set(materialIds).size !== materialIds.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a run." });
   }
-  if (request.maxCalls < request.respondents.length) {
-    context.addIssue({ code: "custom", path: ["maxCalls"], message: "maxCalls must allow at least one decision for each respondent." });
+  const questionIds = request.questions.map(({ id }) => id);
+  if (new Set(questionIds).size !== questionIds.length) {
+    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
   }
 });
 var inlineJourneyRequestSchema = external_exports.object({
@@ -21351,8 +21352,8 @@ var followOnReferenceSchema = external_exports.object({ evaluationId: external_e
 var followOnSelectionSchema = external_exports.union([
   external_exports.object({ criteria: evidenceCriteriaSchema }).strict(),
   external_exports.object({ references: external_exports.array(followOnReferenceSchema).min(1).max(1e4) }).strict().superRefine((selection, context) => {
-    if (new Set(selection.references.map(({ evaluationId }) => evaluationId)).size !== selection.references.length || new Set(selection.references.map(({ contextId }) => contextId)).size !== selection.references.length) {
-      context.addIssue({ code: "custom", path: ["references"], message: "Evaluation and context references must each be unique." });
+    if (new Set(selection.references.map(({ evaluationId }) => evaluationId)).size !== selection.references.length) {
+      context.addIssue({ code: "custom", path: ["references"], message: "Evaluation references must be unique." });
     }
   })
 ]);
@@ -21370,10 +21371,14 @@ var followOnRunRequestSchema = external_exports.object({
     }
   }),
   material: external_exports.array(materialItemSchema).min(1).optional(),
-  questions: external_exports.tuple([decisionQuestionSchema]),
+  questions: external_exports.array(decisionQuestionSchema).min(1),
   provider: providerConfigSchema,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
+  const questionIds = request.questions.map(({ id }) => id);
+  if (new Set(questionIds).size !== questionIds.length) {
+    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
+  }
   const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
   if ((request.context.mode === "fresh-material" || request.context.mode === "omit-history") && !hasMaterial) {
     context.addIssue({ code: "custom", path: ["context", "materialIds"], message: `${request.context.mode} context requires explicit material or material references.` });

@@ -16,7 +16,7 @@ export const inlineRunRequestSchema = z.object({
   label: z.string().min(1).max(120).optional(),
   respondents: z.array(respondentProfileSchema).min(1),
   material: z.array(materialItemSchema).min(1),
-  questions: z.tuple([decisionQuestionSchema]),
+  questions: z.array(decisionQuestionSchema).min(1),
   provider: providerConfigSchema,
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
@@ -30,8 +30,9 @@ export const inlineRunRequestSchema = z.object({
     context.addIssue({ code: 'custom', path: ['material'], message: 'Material IDs must be unique within a run.' });
   }
 
-  if (request.maxCalls < request.respondents.length) {
-    context.addIssue({ code: 'custom', path: ['maxCalls'], message: 'maxCalls must allow at least one decision for each respondent.' });
+  const questionIds = request.questions.map(({ id }) => id);
+  if (new Set(questionIds).size !== questionIds.length) {
+    context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a run.' });
   }
 });
 
@@ -68,9 +69,8 @@ const followOnReferenceSchema = z.object({ evaluationId: z.string().uuid(), cont
 const followOnSelectionSchema = z.union([
   z.object({ criteria: evidenceCriteriaSchema }).strict(),
   z.object({ references: z.array(followOnReferenceSchema).min(1).max(10_000) }).strict().superRefine((selection, context) => {
-    if (new Set(selection.references.map(({ evaluationId }) => evaluationId)).size !== selection.references.length ||
-        new Set(selection.references.map(({ contextId }) => contextId)).size !== selection.references.length) {
-      context.addIssue({ code: 'custom', path: ['references'], message: 'Evaluation and context references must each be unique.' });
+    if (new Set(selection.references.map(({ evaluationId }) => evaluationId)).size !== selection.references.length) {
+      context.addIssue({ code: 'custom', path: ['references'], message: 'Evaluation references must be unique.' });
     }
   }),
 ]);
@@ -89,10 +89,14 @@ export const followOnRunRequestSchema = z.object({
     }
   }),
   material: z.array(materialItemSchema).min(1).optional(),
-  questions: z.tuple([decisionQuestionSchema]),
+  questions: z.array(decisionQuestionSchema).min(1),
   provider: providerConfigSchema,
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
+  const questionIds = request.questions.map(({ id }) => id);
+  if (new Set(questionIds).size !== questionIds.length) {
+    context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a run.' });
+  }
   const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
   if ((request.context.mode === 'fresh-material' || request.context.mode === 'omit-history') && !hasMaterial) {
     context.addIssue({ code: 'custom', path: ['context', 'materialIds'], message: `${request.context.mode} context requires explicit material or material references.` });
