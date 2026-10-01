@@ -41,10 +41,10 @@ questions and response options from the user's question. Do not invent stages
 or add questions that do not help answer the requested question.
 
 Call `run_inspect` with the exact request. It validates the shape and measures
-fit without inference or persistence. Resolve invalid input, context overflow,
-and unavailable fit before calling `run_start`. Do not trim user material,
-switch providers, or weaken a question without explaining the proposed change
-and checking that it preserves the user's intent.
+fit without inference or creating a run. Resolve invalid input, context
+overflow, and unavailable fit before calling `run_start`. Do not trim user
+material, switch providers, or weaken a question without explaining the
+proposed change and checking that it preserves the user's intent.
 
 For a hosted Jev run, obtain explicit user authorization for the study and its
 maximum physical call count. Sheg does not set a spend limit or account for
@@ -61,13 +61,55 @@ second worker. A changed request needs a new submission ID.
 
 ## Discover and interpret results
 
+Use `run_query` to select recorded evidence from a source run. Criteria combine
+optional respondent ID, evaluation status, question ID, encountered material
+ID, typed Choice/Score/Noul answer, and journey route outcome. The tool returns
+exact `evaluationId` and `contextId` handles, answer distributions and
+provenance, match count, evaluation/respondent denominators, `sourceStatus`,
+and `sourceComplete`. When the source is still progressing, describe the
+matches as current results and say more may match after completion. Query
+again after completion if the user needs the final cohort. A route outcome and
+a typed answer are separate facts; for example, `left-lost-interest` does not
+prove the respondent selected a typed “lost interest” answer.
+
+Build a follow-on request yourself from the user's intended question and the
+evidence you selected. Sheg does not decide which result is relevant or what
+unit counts as a section, paragraph, or “bit.” Selection can repeat the query
+criteria for a live result set or pass exact `{evaluationId, contextId}` pairs
+returned by `run_query`. A user with a clear question can supply it directly;
+when their expectation is broader, first decide what answers would satisfy
+them, then choose the smallest evidence selection and typed question that can
+answer it. Use `run_inspect` on that exact follow-on to see the packets that
+will be measured before calling `run_start`.
+
+Choose a follow-on context explicitly:
+
+- `recorded` changes only the question. It preserves the selected turn's exact
+  respondent perspective, material, and trajectory.
+- `fresh-material` uses the saved perspective with explicitly supplied or
+  selected material and an empty trajectory.
+- `omit-history` uses explicitly selected material with the saved perspective
+  and an empty trajectory. Pass `context.materialIds` to select exact material
+  from that turn; this removes earlier exposure IDs and order from the model
+  input.
+- `continue` retains the selected turn and adds its completed typed answer to
+  the trajectory before asking the next question. Optional explicit material
+  is added for the next question. A pending turn has no answer to continue.
+
+Each accepted follow-on is its own durable run with its own ID, frozen packets,
+answers, and source lineage. The source material is copied into those packets,
+so a follow-on remains readable if its source run is deleted. `run_get` with
+`view: "request"` reports whether the source record is still live or historical.
+`run_delete` dry-run lists dependent follow-on run IDs that would be retained.
+
 Use `run_get` with `view: "status"` to inspect progress, `view: "request"` to
 recall frozen inputs and respondent packets, `view: "answers"` to retrieve
 typed answers and failures, or `view: "journey"` to retrieve respondent-local
 turns, exposures, response history, routes, and terminal states. Answer
-pagination uses the returned cursor and a limit from 1 to 200. `run_list`
-supports status and label filters when the run ID is not at hand. These reads
-never start or resume work.
+pagination uses the returned cursor and a limit from 1 to 200. `run_query`
+also paginates with a returned cursor. `run_list` supports status, label, time,
+and referenced-material filters when the run ID is not at hand. Discovery and
+query never start or resume work.
 
 Report completed, failed, pending, and total evaluation counts together with
 the run status. A completed run has an answer for each respondent; a partial
