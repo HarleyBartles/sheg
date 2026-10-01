@@ -20847,6 +20847,11 @@ function pageSize(limit) {
   }
   return size;
 }
+function validateRunIds(runIds) {
+  if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
+    throw new RunStoreError("invalid_run_selection", "Select between 1 and 200 unique run IDs.");
+  }
+}
 function initialize(database) {
   database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
   database.exec("BEGIN IMMEDIATE");
@@ -21177,6 +21182,49 @@ var SQLiteRunStore = class {
         WHERE run_id = ? AND status IN ('interrupted', 'failed')`).run(nowMs + LEASE_MS, runId2);
       return { started: true, run: this.statusInside(runId2) };
     });
+  }
+  previewDelete(runIds) {
+    this.ensureOpen();
+    validateRunIds(runIds);
+    return this.transaction(() => {
+      const nowMs = this.now();
+      const runs = runIds.map((runId2) => {
+        this.reconcileInside(runId2, nowMs);
+        const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId2)?.status, "run status");
+        const evaluationCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId2).count, "evaluation count");
+        const attemptCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId2).count, "attempt count");
+        return { runId: runId2, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running" };
+      });
+      return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
+    });
+  }
+  deleteRuns(runIds) {
+    this.ensureOpen();
+    validateRunIds(runIds);
+    const result = this.transaction(() => {
+      const nowMs = this.now();
+      const counts = runIds.map((runId2) => {
+        this.reconcileInside(runId2, nowMs);
+        const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId2)?.status, "run status");
+        if (status === "prepared" || status === "running") {
+          throw new RunStoreError("runs_active", "Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.");
+        }
+        return {
+          runId: runId2,
+          evaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId2).count, "evaluation count"),
+          attempts: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId2).count, "attempt count")
+        };
+      });
+      for (const { runId: runId2 } of counts) this.database.prepare("DELETE FROM runs WHERE run_id = ?").run(runId2);
+      const violations = this.database.prepare("PRAGMA foreign_key_check").all();
+      const integrity = this.database.prepare("PRAGMA integrity_check").all();
+      if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
+        throw new RunStoreError("storage_integrity_failed", "The datastore integrity check failed; no runs were deleted.");
+      }
+      return { deletedRunIds: counts.map(({ runId: runId2 }) => runId2), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
+    });
+    this.database.exec("PRAGMA optimize");
+    return result;
   }
   claim(runId2, nowMs, workerPid) {
     this.ensureOpen();

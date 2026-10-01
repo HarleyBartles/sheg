@@ -18,6 +18,8 @@ export type AttemptOutcome =
   | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run' };
 
 export type RunListQuery = { status?: RunStatus; label?: string; cursor?: string; limit?: number };
+export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean }>; blockedByActiveWork: boolean };
+export type DeleteResult = { deletedRunIds: string[]; removed: { runs: number; evaluations: number; attempts: number } };
 
 export class RunStoreError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -35,6 +37,8 @@ export interface RunStore {
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   requestCancel(runId: string): RunStatusView;
   resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
+  previewDelete(runIds: string[]): DeletePreview;
+  deleteRuns(runIds: string[]): DeleteResult;
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null;
   heartbeat(claim: WorkerClaim, nowMs: number): boolean;
   reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null;
@@ -89,6 +93,12 @@ function pageSize(limit: number | undefined): number {
     throw new RunStoreError('invalid_page_size', `Page size must be an integer from 1 to ${MAX_PAGE_SIZE}.`);
   }
   return size;
+}
+
+function validateRunIds(runIds: string[]): void {
+  if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
+    throw new RunStoreError('invalid_run_selection', 'Select between 1 and 200 unique run IDs.');
+  }
 }
 
 function initialize(database: DatabaseSync): void {
@@ -413,6 +423,51 @@ class SQLiteRunStore implements RunStore {
         .run(nowMs + LEASE_MS, runId);
       return { started: true, run: this.statusInside(runId) };
     });
+  }
+
+  previewDelete(runIds: string[]): DeletePreview {
+    this.ensureOpen();
+    validateRunIds(runIds);
+    return this.transaction(() => {
+      const nowMs = this.now();
+      const runs = runIds.map((runId) => {
+        this.reconcileInside(runId, nowMs);
+        const status = asText((this.database.prepare('SELECT status FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined)?.status, 'run status') as RunStatus;
+        const evaluationCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as DatabaseRow).count, 'evaluation count');
+        const attemptCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as DatabaseRow).count, 'attempt count');
+        return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === 'prepared' || status === 'running' };
+      });
+      return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
+    });
+  }
+
+  deleteRuns(runIds: string[]): DeleteResult {
+    this.ensureOpen();
+    validateRunIds(runIds);
+    const result = this.transaction(() => {
+      const nowMs = this.now();
+      const counts = runIds.map((runId) => {
+        this.reconcileInside(runId, nowMs);
+        const status = asText((this.database.prepare('SELECT status FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined)?.status, 'run status') as RunStatus;
+        if (status === 'prepared' || status === 'running') {
+          throw new RunStoreError('runs_active', 'Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.');
+        }
+        return {
+          runId,
+          evaluations: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as DatabaseRow).count, 'evaluation count'),
+          attempts: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as DatabaseRow).count, 'attempt count'),
+        };
+      });
+      for (const { runId } of counts) this.database.prepare('DELETE FROM runs WHERE run_id = ?').run(runId);
+      const violations = this.database.prepare('PRAGMA foreign_key_check').all() as DatabaseRow[];
+      const integrity = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
+      if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
+        throw new RunStoreError('storage_integrity_failed', 'The datastore integrity check failed; no runs were deleted.');
+      }
+      return { deletedRunIds: counts.map(({ runId }) => runId), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
+    });
+    this.database.exec('PRAGMA optimize');
+    return result;
   }
 
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null {

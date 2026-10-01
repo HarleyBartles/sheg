@@ -99,13 +99,13 @@ Read `docs/decisions/README.md` before implementation. Add one ADR and update it
 
 ## Task 3: Add dry-run and transactional run deletion
 
-- [ ] **Files:** `src/infrastructure/run-store.ts`, `src/application/run-service.ts`, `src/entrypoints/mcp.ts`, `test/run-store.test.ts`, `test/mcp.test.ts`. **Consumes:** existing cascade relationships and `run_cancel`; **produces:** `previewDelete(runIds)`, `deleteRuns(runIds)`, and `run_delete({runIds, dryRun?})` as typed above.
-- [ ] Add tests first for exact preview counts with no selected-row deletion; empty/duplicate/missing selections; active `prepared` and `running` rows blocking deletion; all-or-none behavior when one target is invalid; FK cascade of evaluations and attempts; and state change between preview and deletion being revalidated.
-- [ ] Run `node --import tsx --test test/run-store.test.ts test/mcp.test.ts`. Expected RED: absent API or deletion safety assertion fails.
-- [ ] Implement preview by reconciling stale ownership through normal store behavior, then return each selected run's status and exact cascade counts. Preview never cancels a live worker or deletes evidence.
-- [ ] Implement deletion in one `BEGIN IMMEDIATE` transaction. Validate all 1-200 IDs are unique, exist and terminal before deleting any. Run `PRAGMA foreign_key_check` and an integrity check before commit; roll back the entire request if validation fails. After commit run `PRAGMA optimize`; return per-run and aggregate removed counts. Never delete SQLite/WAL files manually.
-- [ ] Register strict MCP input with `runIds` as 1-200 unique UUIDs; `dryRun` defaults false so preview is optional. Dry run returns preview and active blockers. Actual deletion returns an actionable structured active-work error instructing the agent to cancel, poll to terminal, then submit the explicit selection again.
-- [ ] Rerun focused store/MCP tests. Expected GREEN: preview leaves records intact; actual delete is atomic and active work cannot be orphaned. Commit `feat: add controlled run deletion` through the tracked hook.
+- [x] **Files:** `src/infrastructure/run-store.ts`, `src/application/run-service.ts`, `src/entrypoints/mcp.ts`, `test/run-store.test.ts`, `test/mcp.test.ts`. **Consumes:** existing cascade relationships and `run_cancel`; **produces:** `previewDelete(runIds)`, `deleteRuns(runIds)`, and `run_delete({runIds, dryRun?})` as typed above.
+- [x] Add tests first for exact preview counts with no selected-row deletion; empty/duplicate/missing selections; active `prepared` and `running` rows blocking deletion; all-or-none behavior when one target is invalid; FK cascade of evaluations and attempts; and state change between preview and deletion being revalidated.
+- [x] Run `node --import tsx --test test/run-store.test.ts test/mcp.test.ts`. Expected RED: absent API or deletion safety assertion fails.
+- [x] Implement preview by reconciling stale ownership through normal store behavior, then return each selected run's status and exact cascade counts. Preview never cancels a live worker or deletes evidence.
+- [x] Implement deletion in one `BEGIN IMMEDIATE` transaction. Validate all 1-200 IDs are unique, exist and terminal before deleting any. Run `PRAGMA foreign_key_check` and an integrity check before commit; roll back the entire request if validation fails. After commit run `PRAGMA optimize`; return per-run and aggregate removed counts. Never delete SQLite/WAL files manually.
+- [x] Register strict MCP input with `runIds` as 1-200 unique UUIDs; `dryRun` defaults false so preview is optional. Dry run returns preview and active blockers. Actual deletion returns an actionable structured active-work error instructing the agent to cancel, poll to terminal, then submit the explicit selection again.
+- [x] Rerun focused store/MCP tests. Expected GREEN: preview leaves records intact; actual delete is atomic and active work cannot be orphaned. Commit `feat: add controlled run deletion` through the tracked hook. Focused store/MCP suite 24/24; `npm run build` passed.
 
 ## Task 4: Manage and expose datastore health
 

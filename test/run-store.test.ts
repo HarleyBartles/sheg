@@ -440,3 +440,79 @@ test('run discovery reconciles stale workers before applying status filters', as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+async function completedRun(store: ReturnType<typeof openRunStore>): Promise<string> {
+  const accepted = store.accept(randomUUID(), await preparedRun());
+  const claim = store.claim(accepted.run.runId, Date.now(), 1234);
+  assert.ok(claim);
+  for (;;) {
+    const reservation = store.reserveNext(claim, Date.now());
+    if (!reservation) break;
+    store.settle(claim, reservation.attemptId, { kind: 'answered', result: savedAnswer });
+  }
+  assert.equal(store.finish(claim).status, 'completed');
+  return accepted.run.runId;
+}
+
+test('delete preview reports exact selected run counts without deleting evidence', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const runId = await completedRun(store);
+    const preview = store.previewDelete([runId]);
+    assert.deepEqual(preview, {
+      runs: [{ runId, status: 'completed', evaluationCount: 2, attemptCount: 2, blockedByActiveWork: false }],
+      blockedByActiveWork: false,
+    });
+    assert.equal(store.getStatus(runId).status, 'completed');
+    assert.equal(store.answers(runId).items.filter(({ status }) => status === 'answered').length, 2);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('delete rejects empty, duplicate, missing, oversized, and active selections without partial deletion', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const completed = await completedRun(store);
+    const active = store.accept(randomUUID(), await preparedRun()).run.runId;
+    const running = store.accept(randomUUID(), await preparedRun()).run.runId;
+    assert.ok(store.claim(running, Date.now(), 2345));
+    assert.throws(() => store.previewDelete([]), (error: unknown) => error instanceof RunStoreError && error.code === 'invalid_run_selection');
+    assert.throws(() => store.previewDelete([completed, completed]), (error: unknown) => error instanceof RunStoreError && error.code === 'invalid_run_selection');
+    assert.throws(() => store.previewDelete(Array.from({ length: 201 }, () => randomUUID())), (error: unknown) => error instanceof RunStoreError && error.code === 'invalid_run_selection');
+    assert.throws(() => store.previewDelete([randomUUID()]), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
+    assert.throws(() => store.deleteRuns([completed, active]), (error: unknown) => error instanceof RunStoreError && error.code === 'runs_active');
+    assert.throws(() => store.deleteRuns([completed, running]), (error: unknown) => error instanceof RunStoreError && error.code === 'runs_active');
+    assert.throws(() => store.deleteRuns([completed, randomUUID()]), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
+    assert.equal(store.getStatus(completed).status, 'completed');
+    assert.equal(store.getStatus(active).status, 'prepared');
+    assert.equal(store.getStatus(running).status, 'running');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('delete revalidates state after preview and cascades evaluations and attempts atomically', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const runId = await completedRun(store);
+    const preview = store.previewDelete([runId]);
+    assert.equal(preview.blockedByActiveWork, false);
+    const db = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try { db.prepare("UPDATE runs SET status = 'prepared' WHERE run_id = ?").run(runId); }
+    finally { db.close(); }
+    assert.throws(() => store.deleteRuns([runId]), (error: unknown) => error instanceof RunStoreError && error.code === 'runs_active');
+    assert.equal(store.getStatus(runId).status, 'prepared');
+
+    const terminalDb = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try { terminalDb.prepare("UPDATE runs SET status = 'completed' WHERE run_id = ?").run(runId); }
+    finally { terminalDb.close(); }
+    const deleted = store.deleteRuns([runId]);
+    assert.deepEqual(deleted, { deletedRunIds: [runId], removed: { runs: 1, evaluations: 2, attempts: 2 } });
+    assert.throws(() => store.getStatus(runId), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
+    const verify = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try {
+      assert.equal((verify.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as { count: number }).count, 0);
+      assert.equal((verify.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as { count: number }).count, 0);
+    } finally { verify.close(); }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

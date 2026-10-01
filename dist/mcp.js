@@ -34975,6 +34975,8 @@ function createRunService(store, dataRoot, providerFactory, launcher, options = 
     inspect,
     start,
     resume,
+    previewDelete: (runIds) => store.previewDelete(runIds),
+    deleteRuns: (runIds) => store.deleteRuns(runIds),
     list: (query) => store.list(query),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequest(runId),
@@ -35135,6 +35137,11 @@ function pageSize(limit) {
     throw new RunStoreError("invalid_page_size", `Page size must be an integer from 1 to ${MAX_PAGE_SIZE}.`);
   }
   return size;
+}
+function validateRunIds(runIds) {
+  if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
+    throw new RunStoreError("invalid_run_selection", "Select between 1 and 200 unique run IDs.");
+  }
 }
 function initialize(database) {
   database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
@@ -35466,6 +35473,49 @@ var SQLiteRunStore = class {
         WHERE run_id = ? AND status IN ('interrupted', 'failed')`).run(nowMs + LEASE_MS, runId);
       return { started: true, run: this.statusInside(runId) };
     });
+  }
+  previewDelete(runIds) {
+    this.ensureOpen();
+    validateRunIds(runIds);
+    return this.transaction(() => {
+      const nowMs = this.now();
+      const runs = runIds.map((runId) => {
+        this.reconcileInside(runId, nowMs);
+        const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId)?.status, "run status");
+        const evaluationCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId).count, "evaluation count");
+        const attemptCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId).count, "attempt count");
+        return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running" };
+      });
+      return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
+    });
+  }
+  deleteRuns(runIds) {
+    this.ensureOpen();
+    validateRunIds(runIds);
+    const result = this.transaction(() => {
+      const nowMs = this.now();
+      const counts = runIds.map((runId) => {
+        this.reconcileInside(runId, nowMs);
+        const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId)?.status, "run status");
+        if (status === "prepared" || status === "running") {
+          throw new RunStoreError("runs_active", "Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.");
+        }
+        return {
+          runId,
+          evaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId).count, "evaluation count"),
+          attempts: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId).count, "attempt count")
+        };
+      });
+      for (const { runId } of counts) this.database.prepare("DELETE FROM runs WHERE run_id = ?").run(runId);
+      const violations = this.database.prepare("PRAGMA foreign_key_check").all();
+      const integrity = this.database.prepare("PRAGMA integrity_check").all();
+      if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
+        throw new RunStoreError("storage_integrity_failed", "The datastore integrity check failed; no runs were deleted.");
+      }
+      return { deletedRunIds: counts.map(({ runId }) => runId), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
+    });
+    this.database.exec("PRAGMA optimize");
+    return result;
   }
   claim(runId, nowMs, workerPid) {
     this.ensureOpen();
@@ -36390,6 +36440,7 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 // src/entrypoints/mcp.ts
 var statusSchema = external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"]);
 var runListSchema = external_exports.object({ status: statusSchema.optional(), label: external_exports.string().optional(), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict();
+var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
 var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
@@ -36407,6 +36458,7 @@ function createPollingServer(service = createDefaultRunService()) {
   }));
   server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched respondent call is allowed to settle and its answer is retained.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
   server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work under the same run ID, saved request, and remaining provider-call allowance. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
+  server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? service.previewDelete(runIds) : service.deleteRuns(runIds)));
   return server;
 }
 function createDefaultRunService() {

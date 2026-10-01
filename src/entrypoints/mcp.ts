@@ -14,6 +14,7 @@ import type { RunStatus } from '../domain/run/lifecycle.js';
 
 const statusSchema = z.enum(['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted']);
 const runListSchema = z.object({ status: statusSchema.optional(), label: z.string().optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict();
+const runDeleteSchema = z.object({ runIds: z.array(z.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, 'Run IDs must be unique.'), dryRun: z.boolean().default(false) }).strict();
 const runGetSchema = z.discriminatedUnion('view', [
   z.object({ runId: z.string().uuid(), view: z.literal('status') }).strict(),
   z.object({ runId: z.string().uuid(), view: z.literal('request') }).strict(),
@@ -32,6 +33,7 @@ export function createPollingServer(service: RunService = createDefaultRunServic
   }));
   server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched respondent call is allowed to settle and its answer is retained.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
   server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work under the same run ID, saved request, and remaining provider-call allowance. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
+  server.registerTool('run_delete', { description: 'Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.', inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? service.previewDelete(runIds) : service.deleteRuns(runIds)));
   return server;
 }
 

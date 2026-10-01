@@ -32,7 +32,7 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
   const f = await connectedFixture();
   try {
     const tools = await f.client.listTools();
-    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_get', 'run_inspect', 'run_list', 'run_resume', 'run_start']);
+    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_resume', 'run_start']);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
@@ -59,6 +59,25 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
     assert.equal((unknown.structuredContent as { error: { code: string } }).error.code, 'run_not_found');
     const extra = await f.client.callTool({ name: 'run_get', arguments: { runId: run.runId, view: 'status', cursor: 'ignored' } });
     assert.equal(extra.isError, true);
+  } finally { await f.close(); }
+});
+
+test('run_delete previews active blockers and deletes only after explicit cancellation', async () => {
+  const f = await connectedFixture();
+  try {
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: request() } });
+    const runId = (started.structuredContent as { runId: string }).runId;
+    const preview = await f.client.callTool({ name: 'run_delete', arguments: { runIds: [runId], dryRun: true } });
+    const previewData = preview.structuredContent as { blockedByActiveWork: boolean; runs: Array<{ runId: string; status: string }> };
+    assert.equal(previewData.blockedByActiveWork, true);
+    assert.equal(previewData.runs[0]?.status, 'prepared');
+    assert.equal(f.store.getStatus(runId).status, 'prepared');
+    await f.client.callTool({ name: 'run_cancel', arguments: { runId } });
+    const deleted = await f.client.callTool({ name: 'run_delete', arguments: { runIds: [runId] } });
+    assert.equal(deleted.isError ?? false, false);
+    assert.deepEqual((deleted.structuredContent as { deletedRunIds: string[] }).deletedRunIds, [runId]);
+    const missing = await f.client.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+    assert.equal(missing.isError, true);
   } finally { await f.close(); }
 });
 

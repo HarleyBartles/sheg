@@ -4,7 +4,7 @@ import type { AnswerRow, Page, RunStatusView } from '../domain/run/lifecycle.js'
 import type { InlineRunRequest, PreparedRun } from '../domain/run/request.js';
 import { inlineRunRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
-import type { RunStore } from '../infrastructure/run-store.js';
+import type { DeletePreview, DeleteResult, RunStore } from '../infrastructure/run-store.js';
 import { CredentialStoreError } from '../infrastructure/credentials/windows.js';
 import { fingerprintRunRequest, prepareRun } from './run-inspection.js';
 
@@ -23,6 +23,8 @@ export interface RunService {
   inspect(input: unknown): Promise<Awaited<ReturnType<typeof prepareRun>>['inspection']>;
   start(submissionId: string, input: InlineRunRequest): Promise<RunStatusView>;
   resume(runId: string): Promise<RunStatusView>;
+  previewDelete(runIds: string[]): DeletePreview;
+  deleteRuns(runIds: string[]): DeleteResult;
   list(query: import('../infrastructure/run-store.js').RunListQuery): Page<RunStatusView>;
   getStatus(runId: string): RunStatusView;
   getRequest(runId: string): PreparedRun;
@@ -109,6 +111,8 @@ export function createRunService(
     inspect,
     start,
     resume,
+    previewDelete: (runIds) => store.previewDelete(runIds),
+    deleteRuns: (runIds) => store.deleteRuns(runIds),
     list: (query) => store.list(query),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequest(runId),
