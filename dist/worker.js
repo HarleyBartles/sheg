@@ -20849,16 +20849,20 @@ function pageSize(limit) {
 }
 function initialize(database) {
   database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
-  const versionRow = database.prepare("PRAGMA user_version").get();
-  const version2 = asNumber(versionRow?.user_version, "schema version");
-  if (version2 === SCHEMA_VERSION) return;
-  if (version2 !== 0) throw new RunStoreError("unsupported_schema_version", `The Sheg database schema version ${version2} is not supported. Export or reset this pre-v1 datastore before continuing.`);
-  const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
-  if (asNumber(existing?.count, "table count") !== 0) {
-    throw new RunStoreError("unsupported_schema_version", "The datastore contains tables without a supported Sheg schema version. Export or reset this pre-v1 datastore before continuing.");
-  }
-  database.exec(`
-    BEGIN IMMEDIATE;
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const versionRow = database.prepare("PRAGMA user_version").get();
+    const version2 = asNumber(versionRow?.user_version, "schema version");
+    if (version2 === SCHEMA_VERSION) {
+      database.exec("COMMIT");
+      return;
+    }
+    if (version2 !== 0) throw new RunStoreError("unsupported_schema_version", `The Sheg database schema version ${version2} is not supported. Export or reset this pre-v1 datastore before continuing.`);
+    const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
+    if (asNumber(existing?.count, "table count") !== 0) {
+      throw new RunStoreError("unsupported_schema_version", "The datastore contains tables without a supported Sheg schema version. Export or reset this pre-v1 datastore before continuing.");
+    }
+    database.exec(`
     CREATE TABLE runs (
       run_id TEXT PRIMARY KEY,
       submission_id TEXT NOT NULL UNIQUE,
@@ -20914,8 +20918,15 @@ function initialize(database) {
     CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
     CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
     PRAGMA user_version = ${SCHEMA_VERSION};
-    COMMIT;
   `);
+    database.exec("COMMIT");
+  } catch (error62) {
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+    }
+    throw error62;
+  }
 }
 function validatePrepared(prepared) {
   const parsedRequest = inlineRunRequestSchema.safeParse(prepared.request);
@@ -21059,7 +21070,7 @@ var SQLiteRunStore = class {
     let cursor;
     if (query.cursor) {
       cursor = decodeCursor(query.cursor, "run list");
-      if (cursor.kind !== "runs" || JSON.stringify({ ...cursor.status === void 0 ? {} : { status: cursor.status }, ...cursor.label === void 0 ? {} : { label: cursor.label } }) !== filterKey) {
+      if (cursor.kind !== "runs" || !Number.isSafeInteger(cursor.createdMs) || cursor.createdMs < 0 || typeof cursor.runId !== "string" || cursor.runId.length === 0 || JSON.stringify({ ...cursor.status === void 0 ? {} : { status: cursor.status }, ...cursor.label === void 0 ? {} : { label: cursor.label } }) !== filterKey) {
         throw new RunStoreError("invalid_cursor", "The run list cursor does not match the requested filters.");
       }
     }

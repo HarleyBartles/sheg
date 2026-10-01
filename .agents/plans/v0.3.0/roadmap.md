@@ -1,6 +1,6 @@
 # Sheg v0.3.0 release roadmap
 
-Status: roadmap for review; implementation has not started.
+Status: approved roadmap; implementation is in progress on the v0.3.0 feature branch.
 Authority: [approved epic specification](../../specs/2026-10-01-v0.3.0-epic-spec.md).
 Linear: [release project](https://linear.app/harleys-workspace/project/sheg-v030-richer-studies-and-inspectable-evidence-6d11068a2761).
 
@@ -20,7 +20,7 @@ predecessor. A Linear issue may span more than one plan.
 
 | # | Title | Status | Plan File | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Submit one-question requests and recall durable results across chats | ready | [Plan 1](01-durable-question-runs.md) | - | - | - | SHEG-5; awaiting user review of the plan, not execution approval |
+| 1 | Submit one-question requests and recall durable results across chats | in progress | [Plan 1](01-durable-question-runs.md) | `fdc3f81` plus review fixes in progress | - | - | SHEG-5; includes the Credential Manager encoding diagnosis and safe malformed-credential response |
 | 2 | Recover, resume, delete and inspect storage through the MCP | pending | Written after Plan 1 | - | - | - | Complete SHEG-5 lifecycle and current-format integrity |
 | 3 | Execute authored journeys with durable respondent turn contexts | pending | Written after Plan 2 | - | - | - | SHEG-7 foundation; integrate finite journeys with the new run store |
 | 4 | Query recorded evidence and compose reusable follow-ons | pending | Written after Plan 3 | - | - | - | Complete SHEG-7; preserve uncertainty/disagreement evidence |

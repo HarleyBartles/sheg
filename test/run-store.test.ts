@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -63,6 +64,29 @@ test('acceptance survives a second connection and matching submission retries sh
   }
 });
 
+test('two processes can initialize the same fresh datastore concurrently', async () => {
+  const root = await temporaryRoot();
+  const moduleUrl = new URL('../src/infrastructure/run-store.ts', import.meta.url).href;
+  const script = `import { openRunStore } from ${JSON.stringify(moduleUrl)}; const store = openRunStore(process.env.SHEG_TEST_ROOT); store.close();`;
+  const launch = () => new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, SHEG_TEST_ROOT: root },
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.once('error', reject);
+    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`Initializer exited with ${code}.`)));
+  });
+  try {
+    await Promise.all([launch(), launch()]);
+    const store = openRunStore(root);
+    store.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('the same submission ID cannot be reused for changed request contents', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
@@ -119,6 +143,24 @@ test('answers paginate in stable evaluation order and identify pending work', as
     assert.notEqual(second.items[0]!.evaluationId, first.items[0]!.evaluationId);
     assert.equal(second.nextCursor, undefined);
     assert.throws(() => store.answers(accepted.run.runId, 'not-a-cursor', 1), RunStoreError);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('malformed run-list cursor fields return invalid_cursor', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    for (const cursor of [
+      { kind: 'runs' },
+      { kind: 'runs', createdMs: 'today', runId: 'run-1' },
+      { kind: 'runs', createdMs: 1, runId: 4 },
+    ]) {
+      const encoded = Buffer.from(JSON.stringify(cursor)).toString('base64url');
+      assert.throws(() => store.list({ cursor: encoded }), (error: unknown) => error instanceof RunStoreError && error.code === 'invalid_cursor');
+    }
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });
