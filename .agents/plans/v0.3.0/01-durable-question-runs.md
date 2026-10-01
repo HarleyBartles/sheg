@@ -1,5 +1,7 @@
 # Durable question runs Implementation Plan
 
+Status: completed-awaiting-retirement.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** An agent submits one typed question over inline material and respondents, closes its MCP connection, and discovers the completed run and answers from another connection.
@@ -314,11 +316,11 @@ Use discriminated `run_get` input variants, not ignored pagination fields on sta
 - [x] Wire service initialization to resolved persistent storage. Teach the skill to design the simplest supported request, inspect before dispatch, retain submission/run IDs, discover and query machine-readable evidence, interpret partial counts and state, and report the current explicit-resume boundary. Do not promise journey reuse or multi-question capability before later plans deliver them.
 - [x] Validate the selected Jev credential's readable format before accepting a run. Support UTF-8 generic credential blobs (including odd byte lengths) and Sheg's UTF-16LE setup format; report malformed values as `provider_credential_malformed` without exposing bytes or values. Document the earlier false-available/failed-read behavior and the v0.3 fix.
 - [x] Generate schemas and dist and run focused tests. The copied distributable passed the local Laya fixture after MCP A was terminated; MCP B retrieved the answer, and a second process test killed the worker and verified interrupted discovery with no relaunch. This proves detached lifetime in the current Windows test environment.
-- [ ] Commit `feat: expose durable request and recall tools through MCP` through the hook. Run a fresh whole-branch review using the review skill, fix substantiated defects, and rerun affected checks. Exit: another connection recalls durable answers after the originating MCP exits, using the distributable package and no paid model calls.
+- [x] Commit `feat: expose durable request and recall tools through MCP` through the hook. Run a fresh whole-branch review using the review skill, fix substantiated defects, and rerun affected checks. Exit: another connection recalls durable answers after the originating MCP exits, using the distributable package and no paid model calls. Final reviewed head: `3d683e4`; commits `8b0ccb2..3d683e4`. Review found and drove fixes for concurrent SQLite initialization, malformed run-list cursors, and Laya 401/403 scope. Final review found no outstanding issues.
 
 ## Completion evidence and custody
 
-Before marking Plan 1 delivered, record in the roadmap: implementation commit/PR identity when one exists, focused package/process evidence, full staged-snapshot gate result, review outcome and remaining Plan 2 lifecycle obligations. SHEG-5 remains open. Use `completing-planning-artifacts` to promote enduring decisions and mark this plan completed-awaiting-retirement through its completing PR. Publication or a draft PR requires the scope authorized at execution handoff; do not infer release/merge authority from this planning request. Later human approvals belong in handoff state, not unfinished implementation checkboxes.
+Plan 1 is delivered at `3d683e4`. The copied distributable survived termination of its originating MCP; another MCP connection retrieved the answer, retry reused the run ID, and a killed worker was discovered as interrupted without relaunch. The staged-snapshot gate passed with 219 tests, lint, typecheck, and generated consistency. A fresh final branch review found no outstanding issues. Plan 2 still owns explicit resume, controlled deletion/dry run, and datastore integrity/optimisation. SHEG-5 remains open. Keep this plan through the completing PR; the next substantive slice retires it in its first commit after verifying it arrived through the merged main base.
 
 ## Verified implementation references
 

@@ -20,8 +20,8 @@ predecessor. A Linear issue may span more than one plan.
 
 | # | Title | Status | Plan File | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Submit one-question requests and recall durable results across chats | in progress | [Plan 1](01-durable-question-runs.md) | `fdc3f81` plus review fixes in progress | - | - | SHEG-5; includes the Credential Manager encoding diagnosis and safe malformed-credential response |
-| 2 | Recover, resume, delete and inspect storage through the MCP | pending | Written after Plan 1 | - | - | - | Complete SHEG-5 lifecycle and current-format integrity |
+| 1 | Submit one-question requests and recall durable results across chats | completed-awaiting-retirement | [Plan 1](01-durable-question-runs.md) | `3d683e4` (`8b0ccb2..3d683e4`) | - | - | SHEG-5 remains open for Plan 2; Credential Manager encoding diagnosis and safe malformed-credential response included; full staged gate 219 tests; final review clean |
+| 2 | Recover, resume, delete and inspect storage through the MCP | ready | [Plan 2](02-resume-delete-storage.md) | - | - | - | SHEG-5; explicit same-run resume, transactional delete with optional dry run, Sheg-managed storage health and optimization |
 | 3 | Execute authored journeys with durable respondent turn contexts | pending | Written after Plan 2 | - | - | - | SHEG-7 foundation; integrate finite journeys with the new run store |
 | 4 | Query recorded evidence and compose reusable follow-ons | pending | Written after Plan 3 | - | - | - | Complete SHEG-7; preserve uncertainty/disagreement evidence |
 | 5 | Ask independent typed question groups at new or recorded contexts | pending | Written after Plan 4 | - | - | - | SHEG-6; provider-aware batching/splitting without sibling leakage |
@@ -44,9 +44,14 @@ originating MCP process. Another connection discovers the run, reads its status,
 request and answers, or requests cancellation. Identified submission retries do
 not duplicate work. Startup and reads never restart interrupted work.
 
-This is the first user-value demonstration, not completion of all SHEG-5 scope.
-Full resume and deletion are delivered by Plan 2 before reusable evidence adds
-cross-run dependencies. Skills and packaging accompany this first path.
+This first user-value demonstration is delivered at `3d683e4`, reviewed against
+`origin/develop`, and passed the full staged verification gate. The copied
+distributable survived termination of its originating MCP; another MCP
+connection retrieved the answer and an identical submission retry reused its
+run ID. A killed worker was discovered as interrupted without relaunch. The
+credential integration fix identifies malformed encodings and tells the agent
+how to repair them without exposing or rewriting the credential. Full resume,
+deletion and storage maintenance remain Plan 2 obligations under SHEG-5.
 
 Next plan uses the actual database schema, worker ownership, failure states,
 attempt records and cross-process evidence delivered here.
