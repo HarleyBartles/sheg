@@ -43,6 +43,15 @@ const noulQuestionSchema = z.object({
 
 export const decisionQuestionSchema = z.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
 
+export const decisionBatchRequestSchema = z.object({
+  state: z.record(z.string(), z.unknown()),
+  questions: z.array(decisionQuestionSchema).min(1),
+}).strict().superRefine((request, context) => {
+  if (new Set(request.questions.map(({ id }) => id)).size !== request.questions.length) {
+    context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a batch.' });
+  }
+});
+
 const requestStateSchema = z.object({ state: z.record(z.string(), z.unknown()) }).strict();
 const choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
@@ -83,7 +92,32 @@ export const decisionValueSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('noul'), noul: probability }).strict(),
 ]);
 
+export const providerExecutionEvidenceSchema = z.object({
+  attempts: z.number().int().positive(),
+  provider: z.enum(['jev', 'laya']),
+  model: z.string().min(1),
+  checkpoint: z.string().min(1).optional(),
+  latencyMs: z.number().finite().nonnegative(),
+  usage: z.object({ inputTokens: z.number().int().nonnegative().optional(), outputTokens: z.number().int().nonnegative().optional() }).strict(),
+  cost: costEvidenceSchema.optional(),
+}).strict();
+
+export const decisionBatchResultSchema = z.object({
+  answers: z.array(z.union([
+    z.object({ questionId: identifier, value: decisionValueSchema }).strict(),
+    z.object({ questionId: identifier, failure: z.object({ code: identifier, message: prose }).strict() }).strict(),
+  ])),
+  execution: providerExecutionEvidenceSchema,
+}).strict().superRefine((result, context) => {
+  if (new Set(result.answers.map(({ questionId }) => questionId)).size !== result.answers.length) {
+    context.addIssue({ code: 'custom', path: ['answers'], message: 'Batch result question IDs must be unique.' });
+  }
+});
+
 export type DecisionValue = z.infer<typeof decisionValueSchema>;
 export type DecisionQuestion = z.infer<typeof decisionQuestionSchema>;
+export type DecisionBatchRequest = z.infer<typeof decisionBatchRequestSchema>;
+export type ProviderExecutionEvidence = z.infer<typeof providerExecutionEvidenceSchema>;
+export type DecisionBatchResult = z.infer<typeof decisionBatchResultSchema>;
 export type DecisionRequest = z.infer<typeof decisionRequestSchema>;
 export type DecisionResult = z.infer<typeof decisionResultSchema>;

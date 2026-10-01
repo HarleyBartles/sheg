@@ -73,15 +73,16 @@ state.
 **Files:**
 - Modify: `src/domain/decision/decision.ts`, `src/domain/decision/provider.ts`, and `src/domain/decision/validate.ts`
 - Test: `test/decision.test.ts`, `test/jev.test.ts`, `test/laya.test.ts`
+- Regenerate: `dist/` through `npm run build`
 
 **Interfaces:**
 - Consumes: one frozen `state`, unique `DecisionQuestion` IDs, existing typed `DecisionValue` validation, and route/model identity.
 - Produces: `DecisionBatchRequest = { state, questions }`; `DecisionBatchResult = { answers: Array<{ questionId, value: DecisionValue } | { questionId, failure: { code, message } }>, execution: ProviderExecutionEvidence }`. One `ProviderExecutionEvidence` object carries physical attempts, provider/model/checkpoint, latency, usage, and optional cost exactly once. Add optional `DecisionProvider.measureBatch` and `decideBatch`; providers without multi-question support continue through `measure`/`decide` one question at a time. A provider batch answer is validated against only its corresponding question; group-level transport/auth/envelope failures remain provider errors.
 
-- [ ] Add contract tests for complete mixed typed answers, unknown/duplicate answer IDs, result type mismatches, missing answers, and shared execution metadata kept outside per-question `DecisionValue`.
-- [ ] Run the focused decision tests and confirm the new group contracts fail before implementation.
-- [ ] Add strict request/result schemas and pure validation helpers. Invalid or absent response entries become question-scoped failures; a malformed shared response envelope remains a whole-request failure. Do not synthesize a missing answer, confidence, distribution, cost, or provider identity.
-- [ ] Run `node --import tsx --test test/decision.test.ts`; commit as `feat: define independent provider batch contracts`.
+- [x] Add contract tests for complete mixed typed answers, unknown/duplicate answer IDs, result type mismatches, missing answers, and shared execution metadata kept outside per-question `DecisionValue`.
+- [x] Run the focused decision tests and confirm the new group contracts fail before implementation.
+- [x] Add strict request/result schemas and pure validation helpers. Invalid or absent response entries become question-scoped failures; a malformed shared response envelope remains a whole-request failure. Do not synthesize a missing answer, confidence, distribution, cost, or provider identity.
+- [x] Run `node --import tsx --test test/decision.test.ts test/jev.test.ts test/laya.test.ts` and `npm run build`; commit as `feat: define independent provider batch contracts`.
 
 ## Task 3: Pack exact provider requests and inspect physical call requirements
 

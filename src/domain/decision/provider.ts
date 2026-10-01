@@ -1,4 +1,4 @@
-import type { DecisionRequest, DecisionResult } from './decision.js';
+import type { DecisionBatchRequest, DecisionBatchResult, DecisionRequest, DecisionResult } from './decision.js';
 
 export type ProviderKind = 'jev' | 'laya';
 
@@ -19,4 +19,6 @@ export type ProviderContextFit = {
 export interface DecisionProvider {
   measure?(request: DecisionRequest): ProviderContextFit | Promise<ProviderContextFit>;
   decide(request: DecisionRequest, maxAttempts: number): Promise<DecisionResult>;
+  measureBatch?(request: DecisionBatchRequest): ProviderContextFit | Promise<ProviderContextFit>;
+  decideBatch?(request: DecisionBatchRequest, maxAttempts: number): Promise<DecisionBatchResult>;
 }

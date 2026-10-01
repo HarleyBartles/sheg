@@ -19717,6 +19717,14 @@ var noulQuestionSchema = external_exports.object({
   criteria: external_exports.object({ true: prose.optional(), false: prose.optional() }).strict().optional()
 }).strict();
 var decisionQuestionSchema = external_exports.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
+var decisionBatchRequestSchema = external_exports.object({
+  state: external_exports.record(external_exports.string(), external_exports.unknown()),
+  questions: external_exports.array(decisionQuestionSchema).min(1)
+}).strict().superRefine((request, context) => {
+  if (new Set(request.questions.map(({ id }) => id)).size !== request.questions.length) {
+    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a batch." });
+  }
+});
 var requestStateSchema = external_exports.object({ state: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict();
 var choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
@@ -19750,6 +19758,26 @@ var decisionValueSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string().regex(/^\d+$/), prose), probabilities: external_exports.record(external_exports.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
   external_exports.object({ type: external_exports.literal("noul"), noul: probability }).strict()
 ]);
+var providerExecutionEvidenceSchema = external_exports.object({
+  attempts: external_exports.number().int().positive(),
+  provider: external_exports.enum(["jev", "laya"]),
+  model: external_exports.string().min(1),
+  checkpoint: external_exports.string().min(1).optional(),
+  latencyMs: external_exports.number().finite().nonnegative(),
+  usage: external_exports.object({ inputTokens: external_exports.number().int().nonnegative().optional(), outputTokens: external_exports.number().int().nonnegative().optional() }).strict(),
+  cost: costEvidenceSchema.optional()
+}).strict();
+var decisionBatchResultSchema = external_exports.object({
+  answers: external_exports.array(external_exports.union([
+    external_exports.object({ questionId: identifier, value: decisionValueSchema }).strict(),
+    external_exports.object({ questionId: identifier, failure: external_exports.object({ code: identifier, message: prose }).strict() }).strict()
+  ])),
+  execution: providerExecutionEvidenceSchema
+}).strict().superRefine((result, context) => {
+  if (new Set(result.answers.map(({ questionId }) => questionId)).size !== result.answers.length) {
+    context.addIssue({ code: "custom", path: ["answers"], message: "Batch result question IDs must be unique." });
+  }
+});
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
@@ -21156,6 +21184,16 @@ function validateDecision(request, result, options2 = {}) {
   }
   return decision;
 }
+var batchEnvelopeSchema = external_exports.object({
+  answers: external_exports.array(external_exports.object({
+    questionId: external_exports.string().min(1),
+    value: external_exports.unknown().optional(),
+    failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional()
+  }).strict().superRefine((answer, context) => {
+    if ("value" in answer === Boolean(answer.failure)) context.addIssue({ code: "custom", message: "Each batch answer must contain exactly one value or failure." });
+  })),
+  execution: providerExecutionEvidenceSchema
+}).strict();
 function validateDistribution(distribution, expectedIds, label) {
   const ids = Object.keys(distribution);
   if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {

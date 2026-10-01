@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DecisionError, validateDecision } from '../src/domain/decision/validate.js';
-import type { DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
+import { DecisionError, validateDecision, validateDecisionBatch } from '../src/domain/decision/validate.js';
+import type { DecisionBatchRequest, DecisionBatchResult, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
 
 const request: DecisionRequest = {
   state: { respondent: { profile: 'Wants a concrete, accessible account.' }, visibleText: 'The repair began with a confusing symptom.' },
@@ -170,4 +170,63 @@ test('rejects out-of-domain typed values, incomplete evidence, and responses wit
       usage: {}, cost: { amountUsd: 0.0001, basis: 'provider-reported' },
     }), DecisionError);
   }
+});
+
+test('validates independent mixed answers while keeping one physical execution record shared', () => {
+  const batch: DecisionBatchRequest = {
+    state: request.state,
+    questions: [
+      request.question,
+      { type: 'score', id: 'clarity', instructions: 'How clear?', rubric: ['unclear', 'clear'] },
+      { type: 'noul', id: 'trust', instructions: 'Is it credible?' },
+    ],
+  };
+  const result: DecisionBatchResult = {
+    answers: [
+      { questionId: 'attention:symptom', value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.7, leave: 0.3 } } },
+      { questionId: 'clarity', value: { type: 'score', score: 1, legend: { '0': 'unclear', '1': 'clear' }, probabilities: { '0': 0.2, '1': 0.8 } } },
+      { questionId: 'trust', value: { type: 'noul', noul: 0.8 } },
+    ],
+    execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 120, usage: { inputTokens: 18, outputTokens: 9 } },
+  };
+
+  const validated = validateDecisionBatch(batch, result, { provider: 'jev', model: 'typesafe/jev-1.13' });
+  assert.deepEqual(validated.answers.map((answer) => [answer.questionId, 'value' in answer ? answer.value.type : 'failed']), [
+    ['attention:symptom', 'choice'], ['clarity', 'score'], ['trust', 'noul'],
+  ]);
+  assert.deepEqual(validated.execution, result.execution);
+  const firstAnswer = validated.answers[0]!;
+  assert.ok('value' in firstAnswer);
+  if ('value' in firstAnswer) assert.equal('attempts' in firstAnswer.value, false);
+});
+
+test('rejects unknown answer IDs because they cannot be assigned to a requested question', () => {
+  const batch: DecisionBatchRequest = { state: request.state, questions: [request.question] };
+  const response = {
+    answers: [{ questionId: 'unrequested', value: { type: 'choice', choice: 'continue' } }],
+    execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+  };
+  assert.throws(() => validateDecisionBatch(batch, response), /unknown question/i);
+  assert.throws(() => validateDecisionBatch(batch, { answers: [], execution: { attempts: 0, provider: 'jev', model: 'fixture', latencyMs: 1, usage: {} } }), /envelope is invalid/i);
+});
+
+test('isolates duplicate, missing, malformed and wrong-type batch answers by question', () => {
+  const batch: DecisionBatchRequest = {
+    state: request.state,
+    questions: [request.question, { type: 'noul', id: 'trust', instructions: 'Credible?' }],
+  };
+  const sharedExecution = { attempts: 1, provider: 'jev' as const, model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
+  const validated = validateDecisionBatch(batch, {
+    answers: [
+      { questionId: 'attention:symptom', value: { type: 'choice', choice: 'continue' } },
+      { questionId: 'attention:symptom', value: { type: 'choice', choice: 'leave' } },
+      { questionId: 'trust', value: { type: 'choice', choice: 'continue' } },
+    ], execution: sharedExecution,
+  });
+  assert.deepEqual(validated.answers.map(({ questionId, ...answer }) => [questionId, 'failure' in answer ? answer.failure.code : 'answered']), [
+    ['attention:symptom', 'duplicate_answer'], ['trust', 'answer_type_mismatch'],
+  ]);
+
+  const missing = validateDecisionBatch(batch, { answers: [], execution: sharedExecution });
+  assert.deepEqual(missing.answers.map((answer) => 'failure' in answer ? answer.failure.code : 'answered'), ['missing_answer', 'missing_answer']);
 });
