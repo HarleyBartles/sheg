@@ -32,6 +32,7 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 - `test/prompts.test.ts`, `test/journey.test.ts`, `test/journey-preview.test.ts`, `test/packet-walker.test.ts`, `test/application-preflight.test.ts`, `test/run-inspection.test.ts`, `test/run-store.test.ts`, `test/question-worker.test.ts`, and `test/package.test.ts` cover the relevant behavior and integration seams.
 - `skills/study-design/` and `skills/stimulus-response-polling/` teach journey setup and packet interpretation. Their `tests/behavior/` files hold scenario inputs and test results and remain excluded from the shipped plugin.
 - `docs/decisions/README.md` and a new ADR record the durable topology/context contract.
+- `.agents/playbooks/semver-version-alignment.md` and `docs/guides/releases.md` explain how the roadmap assigns deliberate candidate versions.
 - `package.json`, both root version fields in `package-lock.json`, `plugin.json`, and generated runtime output must agree on `0.3.0-dev.4`.
 
 ## Tasks
@@ -66,15 +67,15 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 Update the two shipped skills with a concise example that distinguishes topology from material context, explains cumulative previously exposed text, and makes answer-history inclusion explicit on a dependent follow-up. Clarify that sequence is shorthand for a linear graph and that a graph branch cannot expose unseen sibling material. Do not teach authors to edit internal compiler details.
 
-Version the relevant behavior scenario and evaluator under the owning skill. Preserve the prior successful baseline. Run at least five fresh-context guided trials against the candidate wording at the recorded model settings; inspect every failure or disputed result. The harness prompt must retain `toolUseAudit: "not-captured"`; tool isolation hooks and Devin tool-disabled profiles remain future expansion options only. Keep actor/evaluator traces under skill-owned test assets, outside the plugin package.
+Version the relevant behavior scenario and evaluator under the owning skill. Before editing the skill wording, run at least five fresh-context guided trials against the current wording; after editing, run at least five against the candidate wording with the same requests and controlled facts at the recorded model settings. Preserve both conditions' prompt digests and outputs, manually inspect every failure or disputed result, and retain the successful existing baseline criteria. The harness prompt must retain `toolUseAudit: "not-captured"`; tool isolation hooks and Devin tool-disabled profiles remain future expansion options only. Keep actor/evaluator traces under skill-owned test assets, outside the plugin package.
 
 **Verify:** Run deterministic scenario-harness tests, validate scenario/evaluator pairing and current guidance hashes, inspect trial inputs and outputs, and verify the candidate ZIP excludes all `tests/behavior/` data.
 
 ### 5. Set the dev.4 identity and complete the checkpoint
 
-Align `package.json`, both root version fields in `package-lock.json`, and `plugin.json` at `0.3.0-dev.4`. Regenerate derived MCP/runtime output from its source. Update the SemVer playbook's stale static dev.2 wording so it describes the roadmap's next intentional checkpoint generically. Record Plan 2's verified merge in the roadmap: PR #13 merged to `develop` at `1d758ceae6db1b7f8245120ddc252354747a5652`, from exact head `ba95909cc13ef82d876f864fcfc49304b3fb5188`; hosted `sheg-verify` passed on that head and the staged gate passed all 352 tests.
+Align `package.json`, both root version fields in `package-lock.json`, and `plugin.json` at `0.3.0-dev.4`. Regenerate derived MCP/runtime output from its source. Update stale static dev.2 wording in `.agents/playbooks/semver-version-alignment.md` and `docs/guides/releases.md` so they describe the roadmap's next intentional checkpoint generically. Record Plan 2's verified merge in the roadmap: PR #13 merged to `develop` at `1d758ceae6db1b7f8245120ddc252354747a5652`, from exact head `ba95909cc13ef82d876f864fcfc49304b3fb5188`; hosted `sheg-verify` passed on that head and the staged gate passed all 352 tests.
 
-**Verify:** Run generated-output checks, `npm run build`, the focused tests named above, `npm run plugin:package -- --validate-only`, and the tracked staged `npm run verify` gate before publication. Build a local no-tag `0.3.0-dev.4` candidate, record file count and SHA-256, and confirm behavior test assets are absent. Do not tag or publish it.
+**Verify:** Run generated-output checks, `npm run build`, the focused tests named above, `npm run plugin:package -- --validate-only`, and the tracked staged `npm run verify` gate before publication. Build a local no-tag candidate with `npm run plugin:package -- --output <scratch>/sheg-v0.3.0-dev.4.zip`, record file count and SHA-256, and confirm behavior test assets are absent. Do not tag or publish it.
 
 ## Readiness and handoff evidence
 
