@@ -4,7 +4,7 @@ The current MCP run shape is deliberately small. An agent supplies one or more d
 
 | Tool | Purpose | Side effect |
 | --- | --- | --- |
-| `run_inspect` | Validate the strict request, measure context fit for each compiled evaluation packet, and preview reachable journey paths. | Creates no new run and makes no inference call. Resolving a follow-on may reconcile an expired source-run lease; it never launches a worker. |
+| `run_inspect` | Validate the strict request, measure context fit for planned provider calls or batches, and preview reachable journey paths. | Creates no new run and makes no inference call. Resolving a follow-on may reconcile an expired source-run lease; it never launches a worker. |
 | `run_start` | Persist a validated request, return a durable run ID, and launch its worker. An identical submission ID plus request returns the same run. | Starts inference after credential and fit admission. |
 | `run_list` | Find durable runs by status or label and paginate. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: status` | Read lifecycle state and counts. | Reconcile expired ownership; never launch work. |

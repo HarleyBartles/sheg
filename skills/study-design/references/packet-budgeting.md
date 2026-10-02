@@ -51,7 +51,7 @@ For profiles, include only perspective details that could affect the answer. The
 
 ## Iterate from one task to the full study
 
-1. For a direct MCP request, optionally use `run_inspect` after choosing the exact material, profiles, questions, provider, and call limit when a fit preview would help. It measures context fit for each compiled respondent/question evaluation packet without inference.
+1. For a direct MCP request, optionally use `run_inspect` after choosing the exact material, profiles, questions, provider, and call limit when a fit preview would help. It measures context fit for each planned provider call group per respondent; batch-aware providers may measure several independent questions together.
 2. If using the file-backed journey CLI, use `preflight` to walk all respondents and possible choice paths at every task. It reports where a provider stops fitting, including the packet and route, or whether a provider measurement is unavailable.
 3. Use CLI `check` for deterministic minimum/maximum reachable decision-call bounds and whether the configured `maxCalls` covers the maximum. The call limit bounds physical provider attempts, including retries.
 
