@@ -29,7 +29,7 @@ Linear issue may span more than one plan.
 | 4 | Query recorded evidence and compose reusable follow-ons | completed-awaiting-retirement | [Plan 4](04-query-and-follow-on-reuse.md) | `e6eabe4`, `11495cc`, `9277057`, `1203e93` (`745094e..1203e93`) | - | - | SHEG-7 query and follow-on accepted and closed Done; exact typed criteria/references, four context modes, SQLite snapshot revalidation, retained lineage after source deletion, MCP `run_query`, and packaged section-three acceptance; full staged gate passed 279 tests, lint, typecheck, and generated consistency. User guidance explains relevance and incomplete-source decisions |
 | 5 | Ask independent typed question groups at new or recorded contexts | completed-awaiting-retirement | [Plan 5](05-independent-question-groups.md) | `8915f51`, `a4e9675`, `4ef8d09` (`1046419..4ef8d09`) | - | - | SHEG-6 implementation and authorized OpenRouter pilot delivered: one physical call returned separate Choice/Score/Noul answers under `maxCalls: 1`, with shared context; deletion and isolated-store integrity verified. Offline full gate passed 299 tests, lint, typecheck and generated consistency. SHEG-6 remains open for full release acceptance. |
 | 6 | Offer source-linked material choices and reuse their exact evidence | completed-awaiting-retirement | [Plan 6](06-source-linked-material-choices.md) | `fce1524`, `faabf39`, `e484226`, `7c31b2e`, `83d1c8a` (`0416cb5..83d1c8a`) | - | - | SHEG-8; exact authored Choice links, source and computed text digests, selection query projection, retained follow-on lineage, and provider-state privacy. Focused set: 96 tests. Final one-attempt OpenRouter confirmation selected `candidate-setup`, with exact text/source match and no provider-state provenance; source deletion/integrity yielded zero runs. `npm run verify`: 310 tests, lint, typecheck, generated consistency. The empty OS-temp SQLite file remains after safety-blocked cleanup. |
-| 7 | Integrate the release workflow and packaged agent guidance | executing | [Plan 7](07-release-integration-and-draft-pr.md) | - | - | - | Across active issues; complete section-three acceptance, reconcile project/issues, then prepare Draft PR; release preparation remains separate |
+| 7 | Integrate the release workflow and packaged agent guidance | blocked | [Plan 7](07-release-integration-and-draft-pr.md) | `b9824f8` plus planning evidence | - | - | Section-three acceptance and Linear evidence are complete; branch pushed. Draft PR creation connector returned 403 `Resource not accessible by integration`; no PR exists. Stop per connector-safety guidance. |
 
 Commit and PR columns record delivered implementation evidence, not this roadmap's
 own commit. Ratings are intentionally not persisted: the handoff-gates skill
@@ -184,6 +184,16 @@ tests; `npm run verify` passed 310 tests, lint, typecheck and generated consiste
 310-test gate for `b9824f8`. The verified zero-run pilot SQLite file remains in
 the OS temporary directory after safety-blocked filesystem cleanup; Sheg-level
 deletion and zero-run integrity checks succeeded.
+
+The user-authorized branch push succeeded at
+`aca87338e4ea3c89a83e888156134c9db6264569`. Draft PR creation returned GitHub API
+403 `Resource not accessible by integration`; a read-only PR search found no
+open PR. Connector-safety guidance requires stopping rather than retrying the
+same mutation through another surface. The PR form is
+https://github.com/HarleyBartles/sheg/pull/new/codex/v0.3.0-release-spec . Linear
+comments on the project and active SHEG-5, SHEG-6 and SHEG-8 record this state.
+Those issues remain In Progress, SHEG-7 remains Done, and SHEG-9/SHEG-10 remain
+Canceled.
 
 ## Planning and evidence rules
 
