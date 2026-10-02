@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -8,13 +8,41 @@ import { compileDecisionPacket } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
 import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
 import { decisionResultSchema, decisionValueSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
-import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput } from '../domain/run/request.js';
+import { followOnLineageSchema, followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput, type RunMaterialItem } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 
 const SCHEMA_VERSION = 4;
 const LEASE_MS = 30_000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
+
+function mergeMaterialCatalog(...collections: readonly (readonly RunMaterialItem[])[]): RunMaterialItem[] {
+  const merged = new Map<string, RunMaterialItem>();
+  for (const collection of collections) for (const item of collection) {
+    const previous = merged.get(item.id);
+    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256)) {
+      throw new RunStoreError('data_integrity_error', `Stored material ${item.id} has conflicting text or source provenance.`);
+    }
+    merged.set(item.id, previous ? { ...previous, ...(item.sourceId === undefined ? {} : { sourceId: item.sourceId }), ...(item.sourceSha256 === undefined ? {} : { sourceSha256: item.sourceSha256 }) } : { ...item });
+  }
+  return [...merged.values()];
+}
+
+function materialCatalogForRequest(request: import('../domain/run/request.js').ParsedRunRequest, lineage: FollowOnLineage | undefined, contextId: string, respondentId: string, encountered: readonly { id: string; text: string }[] = []): RunMaterialItem[] {
+  const source = request.kind === 'poll' ? request.material : request.kind === 'journey' ? request.journey.items : request.material ?? [];
+  const inherited = request.kind === 'follow-on'
+    ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? []
+    : [];
+  return mergeMaterialCatalog(source, inherited, encountered);
+}
+
+function encounteredMaterialsFromState(state: Record<string, unknown>): Array<{ id: string; text: string }> {
+  if (!Array.isArray(state.encounteredItems)) return [];
+  return state.encounteredItems.flatMap((item) => typeof item === 'object' && item !== null &&
+    'id' in item && typeof item.id === 'string' && 'text' in item && typeof item.text === 'string'
+    ? [{ id: item.id, text: item.text }]
+    : []);
+}
 
 export type AttemptOutcome =
   | { kind: 'answered'; result: import('../domain/decision/decision.js').DecisionResult }
@@ -310,7 +338,9 @@ function validatePrepared(prepared: PreparedRun): PreparedRun {
     throw new RunStoreError('invalid_prepared_run', 'Prepared run request or fingerprint is invalid.');
   }
   if (parsedRequest.data.kind === 'follow-on') {
-    const lineage = prepared.lineage;
+    const parsedLineage = followOnLineageSchema.safeParse(prepared.lineage);
+    if (!parsedLineage.success) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on material lineage is invalid.');
+    const lineage = parsedLineage.data;
     const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
     if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId ||
         lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === 'completed')) {
@@ -320,6 +350,14 @@ function validatePrepared(prepared: PreparedRun): PreparedRun {
     const questionIdsByGroup = new Map<string, string[]>();
     if (!prepared.groups || prepared.groups.length === 0 || new Set(prepared.groups.map(({ groupId }) => groupId)).size !== prepared.groups.length) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on groups are missing or duplicated.');
     for (const group of prepared.groups) groupIds.add(group.groupId);
+    const snapshotKeys = new Set<string>();
+    for (const snapshot of lineage.materialSnapshots) {
+      const key = `${snapshot.contextId}:${snapshot.respondentId}`;
+      if (snapshotKeys.has(key) || !prepared.groups.some((group) => group.contextId === snapshot.contextId && group.respondentId === snapshot.respondentId)) {
+        throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on material snapshots do not match an accepted respondent context.');
+      }
+      snapshotKeys.add(key);
+    }
     for (const evaluation of prepared.evaluations) {
       const packet = decisionRequestSchema.safeParse(evaluation.packet);
       if (!packet.success || !prepared.groups?.some((group) => group.groupId === evaluation.groupId && group.contextId === evaluation.contextId && group.respondentId === evaluation.respondentId && group.questionIds.includes(evaluation.questionId) && hashCanonical(group.state) === hashCanonical(packet.data.state)) ||
@@ -328,13 +366,22 @@ function validatePrepared(prepared: PreparedRun): PreparedRun {
           evaluationIds.has(evaluation.evaluationId) || !groupIds.has(evaluation.groupId ?? '')) {
         throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on evaluation or source selection is inconsistent.');
       }
+      if (packet.data.question.type === 'choice' && packet.data.question.materialOptions) {
+        const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
+        for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
+          const item = catalog.find(({ id }) => id === materialId);
+          if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
+            throw new RunStoreError('invalid_prepared_run', `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
+          }
+        }
+      }
       evaluationIds.add(evaluation.evaluationId);
       const ids = questionIdsByGroup.get(evaluation.groupId!) ?? []; ids.push(evaluation.questionId); questionIdsByGroup.set(evaluation.groupId!, ids);
     }
     if (!prepared.groups || prepared.groups.length === 0 || lineage.selections.some((selection) => !evaluationIds.has(selection.evaluationId)) ||
         prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) ||
           JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on group lineage is inconsistent.');
-    return { ...prepared, request: parsedRequest.data };
+    return { ...prepared, request: parsedRequest.data, lineage };
   }
   if (parsedRequest.data.kind !== 'poll') throw new RunStoreError('invalid_prepared_run', 'A journey must be accepted through journey preparation.');
   if (!prepared.groups || prepared.groups.length !== parsedRequest.data.respondents.length || prepared.evaluations.length !== parsedRequest.data.respondents.length * parsedRequest.data.questions.length) {
@@ -727,9 +774,15 @@ class SQLiteRunStore implements RunStore {
     return this.readTransaction(() => {
       const run = this.database.prepare('SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?').get(request.sourceRunId) as DatabaseRow | undefined;
       if (!run) throw this.notFound();
-      const stored = parseJson<{ request?: unknown }>(run.request_json, 'source run request');
+      const stored = parseJson<{ request?: unknown; lineage?: unknown }>(run.request_json, 'source run request');
       const sourceRequest = runRequestSchema.safeParse(stored.request);
       if (!sourceRequest.success) throw new RunStoreError('data_integrity_error', 'Stored source run request is invalid.');
+      let sourceLineage: FollowOnLineage | undefined;
+      if (sourceRequest.data.kind === 'follow-on') {
+        const parsedLineage = followOnLineageSchema.safeParse(stored.lineage);
+        if (!parsedLineage.success) throw new RunStoreError('data_integrity_error', 'Stored source follow-on material lineage is invalid.');
+        sourceLineage = parsedLineage.data;
+      }
       const sourceStatus = asText(run.status, 'run status') as RunStatus;
       const usedCalls = asNumber(run.used_calls, 'used calls');
       const reservedCalls = asNumber(run.reserved_calls, 'reserved calls');
@@ -771,9 +824,12 @@ class SQLiteRunStore implements RunStore {
       const turns: FollowOnSourceSet['turns'] = rows.map((row) => {
         const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'source packet')) as FollowOnSourceSet['turns'][number]['packet'];
         const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'source answer'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'source execution'));
+        const contextId = asText(row.context_id, 'context ID');
+        const respondentId = asText(row.respondent_id, 'respondent ID');
         return {
-          evaluationId: asText(row.evaluation_id, 'evaluation ID'), contextId: asText(row.context_id, 'context ID'),
-          respondentId: asText(row.respondent_id, 'respondent ID'), packet, ...(result ? { result } : {}),
+          evaluationId: asText(row.evaluation_id, 'evaluation ID'), contextId,
+          respondentId, packet, ...(result ? { result } : {}),
+          materials: materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems),
         };
       });
       return {
@@ -798,12 +854,18 @@ class SQLiteRunStore implements RunStore {
       const sourceStatus = asText(run.status, 'run status') as RunStatus;
       const usedCalls = asNumber(run.used_calls, 'used calls');
       const reservedCalls = asNumber(run.reserved_calls, 'reserved calls');
-      const runRecord = parseJson<{ request?: unknown; compilerFingerprint?: unknown }>(run.request_json, 'run request');
+      const runRecord = parseJson<{ request?: unknown; compilerFingerprint?: unknown; lineage?: unknown }>(run.request_json, 'run request');
       const parsedRequest = runRequestSchema.safeParse(runRecord.request);
       if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== 'string') {
         throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
       }
       const compilerFingerprint = runRecord.compilerFingerprint;
+      let lineage: FollowOnLineage | undefined;
+      if (parsedRequest.data.kind === 'follow-on') {
+        const parsedLineage = followOnLineageSchema.safeParse(runRecord.lineage);
+        if (!parsedLineage.success) throw new RunStoreError('data_integrity_error', 'Stored follow-on material lineage is invalid.');
+        lineage = parsedLineage.data;
+      }
 
       let cursor: EvidenceCursorPayload | undefined;
       if (query.cursor) {
@@ -894,27 +956,44 @@ class SQLiteRunStore implements RunStore {
       const model = parsedRequest.data.provider.kind === 'jev'
         ? parsedRequest.data.provider.model
         : parsedRequest.data.provider.checkpoint;
-      const items: RunEvidencePage['items'] = pageRows.map((row) => ({
-        sourceRunId: query.sourceRunId,
-        evaluationId: asText(row.evaluation_id, 'evaluation ID'),
-        contextId: asText(row.context_id, 'context ID'),
-        respondentId: asText(row.respondent_id, 'respondent ID'),
-        questionId: asText(row.question_id, 'question ID'),
-        status: asText(row.status, 'evaluation status') as RunEvidencePage['items'][number]['status'],
-        ...(row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution')) }),
-        ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
-        ...(row.turn_id === null ? {} : { turnId: asText(row.turn_id, 'turn ID') }),
-        ...(row.node_id === null ? {} : { nodeId: asText(row.node_id, 'node ID') }),
-        ...(row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, 'turn occurrence') }),
-        ...(row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, 'route outcome') }),
-        provenance: {
-          provider: parsedRequest.data.provider.kind,
-          model,
-          endpoint,
-          compilerFingerprint,
-          contextFingerprint: asText(row.packet_fingerprint, 'context fingerprint'),
-        },
-      }));
+      const items: RunEvidencePage['items'] = pageRows.map((row) => {
+        const contextId = asText(row.context_id, 'context ID');
+        const respondentId = asText(row.respondent_id, 'respondent ID');
+        const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution'));
+        let selectedMaterial: RunEvidencePage['items'][number]['selectedMaterial'];
+        if (result?.type === 'choice') {
+          const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'evidence packet'));
+          const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
+          if (materialId) {
+            const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
+            if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            selectedMaterial = { materialId, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
+              textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') };
+          }
+        }
+        return {
+          sourceRunId: query.sourceRunId,
+          evaluationId: asText(row.evaluation_id, 'evaluation ID'),
+          contextId,
+          respondentId,
+          questionId: asText(row.question_id, 'question ID'),
+          status: asText(row.status, 'evaluation status') as RunEvidencePage['items'][number]['status'],
+          ...(result === undefined ? {} : { result }),
+          ...(selectedMaterial === undefined ? {} : { selectedMaterial }),
+          ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
+          ...(row.turn_id === null ? {} : { turnId: asText(row.turn_id, 'turn ID') }),
+          ...(row.node_id === null ? {} : { nodeId: asText(row.node_id, 'node ID') }),
+          ...(row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, 'turn occurrence') }),
+          ...(row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, 'route outcome') }),
+          provenance: {
+            provider: parsedRequest.data.provider.kind,
+            model,
+            endpoint,
+            compilerFingerprint,
+            contextFingerprint: asText(row.packet_fingerprint, 'context fingerprint'),
+          },
+        };
+      });
       const last = pageRows.at(-1);
       const sourceComplete = cursor?.sourceComplete ?? sourceStatus === 'completed';
       return {

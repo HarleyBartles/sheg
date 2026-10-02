@@ -53,11 +53,11 @@ text digest.
 - A Choice question may carry `materialOptions: Record<optionId, materialId>`. Mappings are optional, may cover only some options, and may not map multiple options to one material.
 - Inspection resolves each mapped material against the frozen request catalog, whether or not the respondent encountered it, rejects missing or unprovenanced candidates and labels that differ from exact candidate text, and does not include mapping/provenance metadata in `PromptState` or provider-visible wire questions. Support the same explicit mapping in direct poll questions and journey Choice tasks.
 
-- [ ] Add failing domain/request tests for exact material IDs, source metadata, mapped Choice options, unlinked no-fit options, missing/duplicate references, malformed digests, and label/text mismatch.
-- [ ] Add inspection tests proving a candidate link resolves from the frozen catalog even when not encountered, and fails before provider inference when missing or out of scope. Cover direct poll and journey Choice mappings.
-- [ ] Implement schemas and cross-reference validation. Preserve all existing Choice/Score/Noul semantics.
-- [ ] Verify Jev and Laya wire builders send only Choice options/instructions and never source identity, digest, or mapping metadata. Add a provider behavior assertion for the actual outgoing payload.
-- [ ] Run `node --import tsx --test test/run-request.test.ts test/run-inspection.test.ts test/decision.test.ts test/jev.test.ts test/laya.test.ts`.
+- [x] Add failing domain/request tests for exact material IDs, source metadata, mapped Choice options, unlinked no-fit options, missing/duplicate references, malformed digests, and label/text mismatch.
+- [x] Add inspection tests proving a candidate link resolves from the frozen catalog even when not encountered, and fails before provider inference when missing or out of scope. Cover direct poll and journey Choice mappings.
+- [x] Implement schemas and cross-reference validation. Preserve all existing Choice/Score/Noul semantics.
+- [x] Verify Jev and Laya wire builders send only Choice options/instructions and never source identity, digest, or mapping metadata. Add a provider behavior assertion for the actual outgoing payload.
+- [x] Run `node --import tsx --test test/run-request.test.ts test/run-inspection.test.ts test/decision.test.ts test/jev.test.ts test/laya.test.ts test/journey.test.ts`.
 
 ## Task 2: Return selected material evidence and preserve it through follow-ons
 
@@ -70,11 +70,11 @@ text digest.
 - Existing `context.materialIds` consumes the returned material ID together with existing `{ evaluationId, contextId }` selection references; the exact frozen context is selected independently from the material.
 - Frozen follow-on lineage retains exact material snapshots and source metadata for selectable material IDs in each accepted respondent/context, outside provider-visible packet state, so offered-but-unencountered candidates and multi-run reuse still work after deletion of the original run. Resolve catalogs from poll material, journey items, follow-on inline material, and retained lineage snapshots.
 
-- [ ] Add store/service tests proving a mapped answer returns exactly its authored material, source metadata, and computed text digest; an unlinked choice returns no material projection.
-- [ ] Add a follow-on test that selects one answer/context and an offered-but-unencountered material ID, preserves the exact material in the accepted request/lineage, deletes the source run, and still retrieves the frozen source/material lineage from the follow-on.
-- [ ] Add a multi-hop test showing retained follow-on material can be referenced by another follow-on after the original source is gone, without copying provenance into `PromptState`.
-- [ ] Implement the derived query projection and immutable lineage snapshot. Keep lineage outside respondent-visible state and retain correct behavior for old runs with no material links.
-- [ ] Run `node --import tsx --test test/run-store.test.ts test/run-service.test.ts test/run-inspection.test.ts`.
+- [x] Add store/service tests proving a mapped answer returns exactly its authored material, source metadata, and computed text digest; an unlinked choice returns no material projection.
+- [x] Add a follow-on test that selects an offered-but-unencountered material ID, preserves the exact material in the accepted request/lineage, deletes the source run, and still retrieves the frozen source/material lineage from the follow-on.
+- [x] Add a multi-hop test showing retained follow-on material can be referenced by another follow-on after the original source is gone, without copying provenance into `PromptState`.
+- [x] Implement the derived query projection and immutable lineage snapshot. Keep lineage outside respondent-visible state and retain correct behavior for old runs with no material links.
+- [x] Run `node --import tsx --test test/run-store.test.ts test/run-service.test.ts test/run-inspection.test.ts`.
 
 ## Task 3: Teach agents when and how to use selected material
 

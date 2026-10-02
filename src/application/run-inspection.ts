@@ -4,7 +4,7 @@ import { decisionValueSchema } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
-import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage } from '../domain/run/request.js';
+import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage, type RunMaterialItem } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import type { PreparedJourneyRun } from '../domain/run/request.js';
@@ -17,6 +17,31 @@ export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/
 export type PreparedJourneyAdmission = { request: ParsedInlineJourneyRequest; requestFingerprint: string; compilerFingerprint: string; minimumCalls: number; maximumCalls: number; packets: PreflightPacket[] };
 export type PreparedFollowOnAdmission = { prepared: PreparedRun; inspection: Inspection; sourceVersion: FollowOnSourceSet['version'] };
 type QuestionGroup = { groupId: string; contextId: string; respondentId: string; state: DecisionBatchRequest['state']; questions: readonly DecisionQuestion[]; packets: readonly DecisionRequest[] };
+
+function mergeMaterials(...collections: readonly (readonly RunMaterialItem[])[]): RunMaterialItem[] {
+  const merged = new Map<string, RunMaterialItem>();
+  for (const collection of collections) for (const item of collection) {
+    const previous = merged.get(item.id);
+    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256)) {
+      throw new RunProblemError('follow_on_material_conflict', `Material ${item.id} has conflicting text or source provenance in the selected context.`);
+    }
+    merged.set(item.id, previous ? { ...previous, ...(item.sourceId === undefined ? {} : { sourceId: item.sourceId }), ...(item.sourceSha256 === undefined ? {} : { sourceSha256: item.sourceSha256 }) } : { ...item });
+  }
+  return [...merged.values()];
+}
+
+function validateFollowOnMaterialChoices(request: ParsedFollowOnRunRequest, materials: readonly RunMaterialItem[], evaluationId: string): void {
+  const byId = new Map(materials.map((item) => [item.id, item]));
+  for (const question of request.questions) {
+    if (question.type !== 'choice' || !question.materialOptions) continue;
+    for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
+      const candidate = byId.get(materialId);
+      if (!candidate) throw new RunProblemError('follow_on_material_not_found', `Material ${materialId} is not available in evaluation ${evaluationId}.`);
+      if (candidate.sourceId === undefined || candidate.sourceSha256 === undefined) throw new RunProblemError('follow_on_material_unprovenanced', `Material ${materialId} has no source identity and digest in evaluation ${evaluationId}.`);
+      if (question.options[optionId] !== candidate.text) throw new RunProblemError('follow_on_material_mismatch', `Choice option ${optionId} does not exactly match material ${materialId} in evaluation ${evaluationId}.`);
+    }
+  }
+}
 
 export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, source: FollowOnSourceSet, provider: DecisionProvider): Promise<PreparedFollowOnAdmission> {
   const compilerFingerprint = promptContractHash();
@@ -32,16 +57,19 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     groups.set(groupKey, group);
   }
   const selections: FollowOnLineage['selections'] = [];
+  const materialSnapshots: FollowOnLineage['materialSnapshots'] = [];
   let minimumCalls = 0;
   for (const { representative: turn, turns } of groups.values()) {
     let selectedMaterial = [...(request.material ?? [])];
+    const sourceMaterials = mergeMaterials(turn.materials ?? [], turn.packet.state.encounteredItems);
+    const catalog = mergeMaterials(sourceMaterials, request.material ?? []);
+    validateFollowOnMaterialChoices(request, catalog, turn.evaluationId);
     if (request.context.materialIds) {
-      const byId = new Map(turn.packet.state.encounteredItems.map((item) => [item.id, item]));
       const referencedMaterial: Array<{ id: string; text: string }> = [];
       for (const id of request.context.materialIds) {
-        const item = byId.get(id);
-        if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} was not encountered in evaluation ${turn.evaluationId}.`);
-        referencedMaterial.push({ ...item });
+        const item = catalog.find((candidate) => candidate.id === id);
+        if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
+        referencedMaterial.push({ id: item.id, text: item.text });
       }
       selectedMaterial = [...referencedMaterial, ...selectedMaterial];
     }
@@ -71,6 +99,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       evaluations.push(evaluation);
       return evaluation;
     });
+    materialSnapshots.push({ contextId, respondentId: turn.respondentId, materials: catalog });
     preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
       selections.push({ sourceEvaluationId: sourceTurn.evaluationId, sourceContextId: sourceTurn.contextId,
@@ -88,7 +117,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const inspection: Inspection = { valid: problems.length === 0, respondentCount: groups.size, minimumCalls, problems, fits,
     ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
-    sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections };
+    sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections, materialSnapshots };
   return { sourceVersion: source.version, inspection,
     prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, groups: preparedGroups, lineage } };
 }

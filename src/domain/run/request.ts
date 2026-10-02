@@ -8,7 +8,8 @@ import { decisionResultSchema } from '../decision/decision.js';
 import { providerExecutionEvidenceSchema } from '../decision/decision.js';
 import { stimulusItemSchema } from '../study/stimulus.js';
 
-const materialItemSchema = stimulusItemSchema;
+export const materialItemSchema = stimulusItemSchema;
+export type RunMaterialItem = z.infer<typeof materialItemSchema>;
 
 function validateMaterialChoices(questions: readonly { type?: string | undefined; id: string; options?: Record<string, string> | undefined; materialOptions?: Record<string, string> | undefined }[], material: readonly z.infer<typeof materialItemSchema>[], context: z.RefinementCtx): void {
   const materials = new Map(material.map((item) => [item.id, item]));
@@ -134,6 +135,17 @@ export const followOnRunRequestSchema = z.object({
 });
 
 const runStatuses = ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] as const;
+export const followOnLineageSchema = z.object({
+  sourceRunId: z.string().uuid(),
+  sourceStatusAtAcceptance: z.enum(runStatuses),
+  sourceCompleteAtAcceptance: z.boolean(),
+  sourceVersion: z.object({ status: z.enum(runStatuses), usedCalls: z.number().int().nonnegative(), reservedCalls: z.number().int().nonnegative(), maxOrdinal: z.number().int().min(-1) }).strict(),
+  sourceAvailable: z.boolean().optional(),
+  sourceRecordState: z.enum(['live', 'historical']).optional(),
+  selections: z.array(z.object({ sourceEvaluationId: z.string().uuid(), sourceContextId: z.string().uuid(), respondentId: z.string().min(1), evaluationId: z.string().uuid(), contextId: z.string().uuid() }).strict()),
+  materialSnapshots: z.array(z.object({ contextId: z.string().uuid(), respondentId: z.string().min(1), materials: z.array(materialItemSchema) }).strict()).default([]),
+}).strict();
+
 export const runListQuerySchema = z.object({
   status: z.enum(runStatuses).optional(),
   label: z.string().min(1).optional(),
@@ -163,6 +175,13 @@ export const runEvidenceItemSchema = z.object({
     questionId: z.string().min(1),
     status: z.enum(['pending', 'answered', 'failed', 'unreached']),
     result: decisionResultSchema.optional(),
+    selectedMaterial: z.object({
+      materialId: materialItemSchema.shape.id,
+      text: materialItemSchema.shape.text,
+      sourceId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+      sourceSha256: z.string().regex(/^[a-f\d]{64}$/i),
+      textSha256: z.string().regex(/^[a-f\d]{64}$/i),
+    }).strict().optional(),
     execution: providerExecutionEvidenceSchema.optional(),
     turnId: z.string().min(1).optional(),
     nodeId: z.string().min(1).optional(),
@@ -237,6 +256,7 @@ export type FollowOnSourceTurn = {
   respondentId: string;
   packet: import('../decision/decision.js').DecisionRequest & { state: import('../decision/prompt.js').PromptState };
   result?: import('../decision/decision.js').DecisionResult;
+  materials?: RunMaterialItem[];
 };
 export type FollowOnSourceSet = {
   sourceRunId: string;
@@ -245,15 +265,7 @@ export type FollowOnSourceSet = {
   version: FollowOnSourceVersion;
   turns: FollowOnSourceTurn[];
 };
-export type FollowOnLineage = {
-  sourceRunId: string;
-  sourceStatusAtAcceptance: import('./lifecycle.js').RunStatus;
-  sourceCompleteAtAcceptance: boolean;
-  sourceVersion: FollowOnSourceVersion;
-  sourceAvailable?: boolean;
-  sourceRecordState?: 'live' | 'historical';
-  selections: Array<{ sourceEvaluationId: string; sourceContextId: string; respondentId: string; evaluationId: string; contextId: string }>;
-};
+export type FollowOnLineage = z.infer<typeof followOnLineageSchema>;
 
 export type PreparedJourneyRun = {
   request: ParsedInlineJourneyRequest;

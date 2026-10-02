@@ -293,6 +293,29 @@ test('follow-on batching groups distinct source contexts and never includes sele
   assert.deepEqual(continuationProviderCalls.map(({ state }) => (state.trajectory as { responses: Array<{ noul: number }> }).responses.at(-1)?.noul), [0, 0, 0.5, 0.5, 1, 1]);
 });
 
+test('follow-on can select an offered catalog candidate that was not encountered', async () => {
+  const candidate = { id: 'later-section', text: 'Exact later section.', sourceId: 'article-v1', sourceSha256: 'd'.repeat(64) };
+  const profile = { intent: 'Learn', context: 'New reader', desired_outcome: 'Understand', engagement_cues: 'Examples', friction_cues: 'Hype' };
+  const sourcePacket = compileDecisionRequest({ respondentProfile: profile, encounteredItems: [], trajectory: emptyTrajectory(), question: {
+    type: 'choice', id: 'pick', instructions: 'Which section?', options: { later: candidate.text, 'no-fit': 'Neither' }, materialOptions: { later: candidate.id },
+  } });
+  const source = {
+    sourceRunId: '123e4567-e89b-42d3-a456-426614174000', sourceStatus: 'completed' as const, sourceComplete: true,
+    version: { status: 'completed' as const, usedCalls: 1, reservedCalls: 0, maxOrdinal: 0 },
+    turns: [{ evaluationId: '11111111-1111-4111-8111-111111111111', contextId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', respondentId: 'reader-a', packet: sourcePacket, materials: [candidate] }],
+  } as unknown as FollowOnSourceSet;
+  const followOn = followOnRunRequestSchema.parse({
+    kind: 'follow-on', sourceRunId: source.sourceRunId,
+    selection: { criteria: {} }, context: { mode: 'fresh-material', materialIds: [candidate.id] },
+    questions: [{ type: 'choice', id: 'ask-why', instructions: 'What loses your interest?', options: { candidate: candidate.text, 'no-fit': 'No fit' }, materialOptions: { candidate: candidate.id } }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  });
+  const result = await prepareFollowOnRun(followOn, source, makeProvider().provider);
+  assert.equal(result.inspection.valid, true);
+  assert.deepEqual(result.prepared.evaluations[0]!.packet.state.encounteredItems, [{ id: candidate.id, text: candidate.text }]);
+  assert.equal(JSON.stringify(result.prepared.evaluations[0]!.packet.state).includes(candidate.sourceSha256), false);
+});
+
 function journeyRequest(maxCalls = 1, respondentCount = 1) {
   const respondent = { id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' };
   return {

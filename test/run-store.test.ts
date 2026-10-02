@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
@@ -9,7 +9,7 @@ import test from 'node:test';
 import { prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import type { DecisionResult } from '../src/domain/decision/decision.js';
-import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun } from '../src/domain/run/request.js';
+import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedFollowOnRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun } from '../src/domain/run/request.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
@@ -785,6 +785,76 @@ test('evidence query matches typed answers and material while preserving distrib
     assert.equal(query.items[0]!.result?.type, 'choice');
     assert.equal(query.items[0]!.result?.type === 'choice' ? query.items[0]!.result.confidence : undefined, 0.81);
     assert.equal(query.items[0]!.provenance.contextFingerprint.length > 0, true);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('evidence query resolves a mapped Choice answer to exact source-linked material', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const text = '  Exact candidate, including its boundary.  ';
+  const candidate = { id: 'section-three', text, sourceId: 'article-v1', sourceSha256: 'c'.repeat(64) };
+  const mappedInput: InlineRunRequest = {
+    ...input,
+    material: [candidate],
+    questions: [{ type: 'choice', id: 'which-section', instructions: 'Which section lost your interest?', options: { candidate: text, 'no-fit': 'Neither section' }, materialOptions: { candidate: candidate.id } }],
+  };
+  try {
+    const runId = await completedRun(store, mappedInput, () => ({ ...savedAnswer, choice: 'candidate', probabilities: { candidate: 0.9, 'no-fit': 0.1 } }));
+    const query = store.queryEvidence({ sourceRunId: runId, criteria: { questionId: 'which-section', answer: { type: 'choice', choiceId: 'candidate' } } });
+    assert.deepEqual(query.items[0]!.selectedMaterial, {
+      materialId: candidate.id, text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
+      textSha256: createHash('sha256').update(text, 'utf8').digest('hex'),
+    });
+
+    const unlinkedRunId = await completedRun(store, input);
+    const unlinked = store.queryEvidence({ sourceRunId: unlinkedRunId, criteria: { answer: { type: 'choice', choiceId: 'continue' } } });
+    assert.equal(unlinked.items[0]!.selectedMaterial, undefined);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('follow-on snapshots source material for query and another follow-on after source deletion', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const text = 'Exact candidate text.';
+  const candidate = { id: 'section-three', text, sourceId: 'article-v1', sourceSha256: 'e'.repeat(64) };
+  const mappedInput: InlineRunRequest = {
+    ...input, material: [candidate],
+    questions: [{ type: 'choice', id: 'select-section', instructions: 'Which section?', options: { candidate: text, 'no-fit': 'Neither' }, materialOptions: { candidate: candidate.id } }],
+  };
+  const selectedAnswer = (): DecisionResult => ({ ...savedAnswer, choice: 'candidate', probabilities: { candidate: 0.9, 'no-fit': 0.1 } });
+  const followRequest = (sourceRunId: string, questionId: string, answerQuestionId: string): ParsedFollowOnRunRequest => followOnRunRequestSchema.parse({
+    kind: 'follow-on', sourceRunId, selection: { criteria: { questionId: answerQuestionId, answer: { type: 'choice', choiceId: 'candidate' } } },
+    context: { mode: 'fresh-material', materialIds: [candidate.id] },
+    questions: [{ type: 'choice', id: questionId, instructions: 'Which exact section loses interest?', options: { candidate: text, 'no-fit': 'Neither' }, materialOptions: { candidate: candidate.id } }],
+    provider: input.provider, maxCalls: 2,
+  });
+  try {
+    const originalRunId = await completedRun(store, mappedInput, selectedAnswer);
+    const firstRequest = followRequest(originalRunId, 'first-follow-up', 'select-section');
+    const firstPrepared = await prepareFollowOnRun(firstRequest, store.resolveFollowOnSources(firstRequest), provider);
+    const firstRun = store.accept(randomUUID(), firstPrepared.prepared).run;
+    const firstClaim = store.claim(firstRun.runId, Date.now(), 1234);
+    assert.ok(firstClaim);
+    for (;;) {
+      const reservation = store.reserveNext(firstClaim, Date.now());
+      if (!reservation) break;
+      store.settle(firstClaim, reservation.attemptId, { kind: 'answered', result: selectedAnswer() });
+    }
+    assert.equal(store.finish(firstClaim).status, 'completed');
+    store.deleteRuns([originalRunId]);
+
+    const selected = store.queryEvidence({ sourceRunId: firstRun.runId, criteria: { questionId: 'first-follow-up', answer: { type: 'choice', choiceId: 'candidate' } } });
+    assert.equal(selected.items[0]!.selectedMaterial?.text, text);
+    assert.equal(selected.items[0]!.selectedMaterial?.sourceId, candidate.sourceId);
+    assert.equal(selected.items[0]!.selectedMaterial?.sourceSha256, candidate.sourceSha256);
+
+    const secondRequest = followRequest(firstRun.runId, 'second-follow-up', 'first-follow-up');
+    const secondSource = store.resolveFollowOnSources(secondRequest);
+    assert.equal(secondSource.turns[0]!.materials?.find(({ id }) => id === candidate.id)?.sourceSha256, candidate.sourceSha256);
+    const secondPrepared = await prepareFollowOnRun(secondRequest, secondSource, provider);
+    assert.equal(secondPrepared.inspection.valid, true);
+    const secondRun = store.accept(randomUUID(), secondPrepared.prepared).run;
+    assert.equal(secondRun.status, 'prepared');
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
