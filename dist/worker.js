@@ -21779,7 +21779,7 @@ var runEvidencePageSchema = external_exports.object({
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
 // src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;
 var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
@@ -22013,6 +22013,11 @@ function initialize(database) {
       attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
       evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
       PRIMARY KEY (attempt_id, evaluation_id)
+    );
+    CREATE TABLE evaluation_answer_attempts (
+      evaluation_id TEXT PRIMARY KEY REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
+      attempt_id TEXT NOT NULL,
+      FOREIGN KEY (attempt_id, evaluation_id) REFERENCES attempt_evaluations(attempt_id, evaluation_id) ON DELETE CASCADE
     );
     CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
     CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
@@ -22567,8 +22572,8 @@ var SQLiteRunStore = class {
         }
       }
       const rows = this.database.prepare(`SELECT e.*,
-        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e
         LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
         WHERE ${where.join(" AND ")} ORDER BY e.ordinal LIMIT 10001`).all(...parameters);
@@ -22700,8 +22705,8 @@ var SQLiteRunStore = class {
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
       const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
-        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e ${join}
         WHERE ${whereSql} ${cursor ? "AND e.ordinal > ?" : ""} ORDER BY e.ordinal LIMIT ?`).all(...parameters, ...cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1]);
       const hasMore = rows.length > limit;
@@ -22776,6 +22781,33 @@ var SQLiteRunStore = class {
       };
     });
   }
+  getContext(runId2, evaluationId, contextId) {
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      const row = this.database.prepare(`SELECT e.*, r.request_json FROM evaluations e JOIN runs r USING (run_id)
+        WHERE e.run_id = ? AND e.evaluation_id = ? AND e.context_id = ?`).get(runId2, evaluationId, contextId);
+      if (!row) throw new RunStoreError("context_not_found", "The evaluation and context handles do not identify a context in this run.");
+      const stored = parseJson(row.request_json, "run request");
+      if (typeof stored.compilerFingerprint !== "string" || stored.compilerFingerprint.length === 0) throw new RunStoreError("data_integrity_error", "Stored compiler identity is invalid.");
+      const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet"));
+      const packetFingerprint = asText(row.packet_fingerprint, "packet fingerprint");
+      if (hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== packetFingerprint) throw new RunStoreError("data_integrity_error", "Stored context packet fingerprint does not match its frozen input.");
+      return {
+        runId: runId2,
+        evaluationId,
+        contextId,
+        respondentId: asText(row.respondent_id, "respondent ID"),
+        questionId: asText(row.question_id, "question ID"),
+        status: asText(row.status, "evaluation status"),
+        packet,
+        provenance: {
+          compilerFingerprint: stored.compilerFingerprint,
+          packetFingerprint,
+          contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint: stored.compilerFingerprint })
+        }
+      };
+    });
+  }
   answers(runId2, cursorText, requestedLimit) {
     this.getStatus(runId2);
     const limit = pageSize(requestedLimit);
@@ -22787,8 +22819,8 @@ var SQLiteRunStore = class {
       }
     }
     const rows = this.database.prepare(`SELECT e.*,
-      (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-        WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+      (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+        WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
       FROM evaluations e WHERE run_id = ? ${cursor ? "AND ordinal > ?" : ""} ORDER BY ordinal LIMIT ?`).all(...cursor ? [runId2, cursor.ordinal, limit + 1] : [runId2, limit + 1]);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
@@ -23094,7 +23126,10 @@ var SQLiteRunStore = class {
             } catch {
               this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'invalid_decision', failure_message = 'Provider returned an answer that does not match this question.' WHERE evaluation_id = ?").run(evaluationId);
             }
-            if (validated) this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+            if (validated) {
+              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+              this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
+            }
           }
         }
       }
@@ -23116,6 +23151,7 @@ var SQLiteRunStore = class {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
         this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
+        this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, evaluationId);
@@ -23180,6 +23216,7 @@ var SQLiteRunStore = class {
         }
         this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
+        this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         const sharedFailure = outcome.scope === "run";
         if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {

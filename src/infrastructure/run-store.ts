@@ -6,12 +6,12 @@ import { decisionRequestSchema } from '../domain/decision/decision.js';
 import { validateDecision } from '../domain/decision/validate.js';
 import { compileDecisionPacket } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunAttempt, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
+import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
 import { decisionResultSchema, decisionValueSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput, type RunMaterialItem } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const LEASE_MS = 30_000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -119,6 +119,7 @@ export interface RunStore {
   getJourneyRun(runId: string): JourneyRunRecord;
   list(query: RunListQuery): Page<RunStatusView>;
   queryEvidence(query: RunEvidenceQuery): RunEvidencePage;
+  getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail;
   resolveFollowOnSources(request: ParsedFollowOnRunRequest): FollowOnSourceSet;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   attempts(runId: string, cursor?: string, limit?: number): Page<RunAttempt>;
@@ -326,6 +327,11 @@ function initialize(database: DatabaseSync): void {
       attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
       evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
       PRIMARY KEY (attempt_id, evaluation_id)
+    );
+    CREATE TABLE evaluation_answer_attempts (
+      evaluation_id TEXT PRIMARY KEY REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
+      attempt_id TEXT NOT NULL,
+      FOREIGN KEY (attempt_id, evaluation_id) REFERENCES attempt_evaluations(attempt_id, evaluation_id) ON DELETE CASCADE
     );
     CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
     CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
@@ -835,8 +841,8 @@ class SQLiteRunStore implements RunStore {
         if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
       }
       const rows = this.database.prepare(`SELECT e.*,
-        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e
         LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
         WHERE ${where.join(' AND ')} ORDER BY e.ordinal LIMIT 10001`).all(...parameters) as DatabaseRow[];
@@ -966,8 +972,8 @@ class SQLiteRunStore implements RunStore {
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
       const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
-        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e ${join}
         WHERE ${whereSql} ${cursor ? 'AND e.ordinal > ?' : ''} ORDER BY e.ordinal LIMIT ?`)
         .all(...parameters, ...(cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1])) as DatabaseRow[];
@@ -1035,6 +1041,34 @@ class SQLiteRunStore implements RunStore {
     });
   }
 
+  getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail {
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      const row = this.database.prepare(`SELECT e.*, r.request_json FROM evaluations e JOIN runs r USING (run_id)
+        WHERE e.run_id = ? AND e.evaluation_id = ? AND e.context_id = ?`).get(runId, evaluationId, contextId) as DatabaseRow | undefined;
+      if (!row) throw new RunStoreError('context_not_found', 'The evaluation and context handles do not identify a context in this run.');
+      const stored = parseJson<{ compilerFingerprint?: unknown }>(row.request_json, 'run request');
+      if (typeof stored.compilerFingerprint !== 'string' || stored.compilerFingerprint.length === 0) throw new RunStoreError('data_integrity_error', 'Stored compiler identity is invalid.');
+      const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet')) as import('../domain/decision/decision.js').DecisionRequest & { state: import('../domain/decision/prompt.js').PromptState };
+      const packetFingerprint = asText(row.packet_fingerprint, 'packet fingerprint');
+      if (hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== packetFingerprint) throw new RunStoreError('data_integrity_error', 'Stored context packet fingerprint does not match its frozen input.');
+      return {
+        runId,
+        evaluationId,
+        contextId,
+        respondentId: asText(row.respondent_id, 'respondent ID'),
+        questionId: asText(row.question_id, 'question ID'),
+        status: asText(row.status, 'evaluation status') as RunContextDetail['status'],
+        packet,
+        provenance: {
+          compilerFingerprint: stored.compilerFingerprint,
+          packetFingerprint,
+          contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint: stored.compilerFingerprint }),
+        },
+      };
+    });
+  }
+
   answers(runId: string, cursorText?: string, requestedLimit?: number): Page<AnswerRow> {
     this.getStatus(runId);
     const limit = pageSize(requestedLimit);
@@ -1046,8 +1080,8 @@ class SQLiteRunStore implements RunStore {
       }
     }
     const rows = this.database.prepare(`SELECT e.*,
-      (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-        WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+      (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+        WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
       FROM evaluations e WHERE run_id = ? ${cursor ? 'AND ordinal > ?' : ''} ORDER BY ordinal LIMIT ?`)
       .all(...(cursor ? [runId, cursor.ordinal, limit + 1] : [runId, limit + 1])) as DatabaseRow[];
     const hasMore = rows.length > limit;
@@ -1375,7 +1409,10 @@ class SQLiteRunStore implements RunStore {
             } catch {
               this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'invalid_decision', failure_message = 'Provider returned an answer that does not match this question.' WHERE evaluation_id = ?").run(evaluationId);
             }
-            if (validated) this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+            if (validated) {
+              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+              this.database.prepare('INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)').run(evaluationId, attemptId);
+            }
           }
         }
       }
@@ -1403,6 +1440,7 @@ class SQLiteRunStore implements RunStore {
           .run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?")
           .run(JSON.stringify(result), evaluationId);
+        this.database.prepare('INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)').run(evaluationId, attemptId);
       } else {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
           .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
@@ -1485,6 +1523,7 @@ class SQLiteRunStore implements RunStore {
           .run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?")
           .run(JSON.stringify(result), evaluationId);
+        this.database.prepare('INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)').run(evaluationId, attemptId);
       } else {
         const sharedFailure = outcome.scope === 'run';
         if (transition.nextEvaluation || (sharedFailure

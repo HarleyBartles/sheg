@@ -29,6 +29,7 @@ export interface RunService {
   optimizeStorage(): void;
   list(query: import('../infrastructure/run-store.js').RunListQuery): Page<RunStatusView>;
   queryEvidence(query: import('../domain/run/request.js').RunEvidenceQuery): import('../domain/run/request.js').RunEvidencePage;
+  getContext(runId: string, evaluationId: string, contextId: string): ReturnType<RunStore['getContext']>;
   getStatus(runId: string): RunStatusView;
   getRequest(runId: string): PreparedRun | ReturnType<RunStore['getJourneyRun']>;
   getJourneyRun(runId: string): ReturnType<RunStore['getJourneyRun']>;
@@ -151,6 +152,7 @@ export function createRunService(
     optimizeStorage: () => store.optimizeStorage(),
     list: (query) => store.list(query),
     queryEvidence: (query) => store.queryEvidence(runEvidenceQuerySchema.parse(query)),
+    getContext: (runId, evaluationId, contextId) => store.getContext(runId, evaluationId, contextId),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequestKind(runId) === 'journey' ? store.getJourneyRun(runId) : store.getRequest(runId),
     getJourneyRun: (runId) => store.getJourneyRun(runId),

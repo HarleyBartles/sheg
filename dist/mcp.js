@@ -36249,6 +36249,7 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     optimizeStorage: () => store.optimizeStorage(),
     list: (query) => store.list(query),
     queryEvidence: (query) => store.queryEvidence(runEvidenceQuerySchema.parse(query)),
+    getContext: (runId, evaluationId, contextId) => store.getContext(runId, evaluationId, contextId),
     getStatus: (runId) => store.reconcile(runId, Date.now()),
     getRequest: (runId) => store.getRequestKind(runId) === "journey" ? store.getJourneyRun(runId) : store.getRequest(runId),
     getJourneyRun: (runId) => store.getJourneyRun(runId),
@@ -36430,7 +36431,7 @@ function validateDistribution(distribution, expectedIds, label) {
 }
 
 // src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;
 var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
@@ -36664,6 +36665,11 @@ function initialize(database) {
       attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
       evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
       PRIMARY KEY (attempt_id, evaluation_id)
+    );
+    CREATE TABLE evaluation_answer_attempts (
+      evaluation_id TEXT PRIMARY KEY REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
+      attempt_id TEXT NOT NULL,
+      FOREIGN KEY (attempt_id, evaluation_id) REFERENCES attempt_evaluations(attempt_id, evaluation_id) ON DELETE CASCADE
     );
     CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
     CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
@@ -37218,8 +37224,8 @@ var SQLiteRunStore = class {
         }
       }
       const rows = this.database.prepare(`SELECT e.*,
-        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e
         LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
         WHERE ${where.join(" AND ")} ORDER BY e.ordinal LIMIT 10001`).all(...parameters);
@@ -37351,8 +37357,8 @@ var SQLiteRunStore = class {
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
       const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
-        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e ${join}
         WHERE ${whereSql} ${cursor ? "AND e.ordinal > ?" : ""} ORDER BY e.ordinal LIMIT ?`).all(...parameters, ...cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1]);
       const hasMore = rows.length > limit;
@@ -37427,6 +37433,33 @@ var SQLiteRunStore = class {
       };
     });
   }
+  getContext(runId, evaluationId, contextId) {
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      const row = this.database.prepare(`SELECT e.*, r.request_json FROM evaluations e JOIN runs r USING (run_id)
+        WHERE e.run_id = ? AND e.evaluation_id = ? AND e.context_id = ?`).get(runId, evaluationId, contextId);
+      if (!row) throw new RunStoreError("context_not_found", "The evaluation and context handles do not identify a context in this run.");
+      const stored = parseJson(row.request_json, "run request");
+      if (typeof stored.compilerFingerprint !== "string" || stored.compilerFingerprint.length === 0) throw new RunStoreError("data_integrity_error", "Stored compiler identity is invalid.");
+      const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet"));
+      const packetFingerprint = asText(row.packet_fingerprint, "packet fingerprint");
+      if (hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== packetFingerprint) throw new RunStoreError("data_integrity_error", "Stored context packet fingerprint does not match its frozen input.");
+      return {
+        runId,
+        evaluationId,
+        contextId,
+        respondentId: asText(row.respondent_id, "respondent ID"),
+        questionId: asText(row.question_id, "question ID"),
+        status: asText(row.status, "evaluation status"),
+        packet,
+        provenance: {
+          compilerFingerprint: stored.compilerFingerprint,
+          packetFingerprint,
+          contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint: stored.compilerFingerprint })
+        }
+      };
+    });
+  }
   answers(runId, cursorText, requestedLimit) {
     this.getStatus(runId);
     const limit = pageSize(requestedLimit);
@@ -37438,8 +37471,8 @@ var SQLiteRunStore = class {
       }
     }
     const rows = this.database.prepare(`SELECT e.*,
-      (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
-        WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+      (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+        WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
       FROM evaluations e WHERE run_id = ? ${cursor ? "AND ordinal > ?" : ""} ORDER BY ordinal LIMIT ?`).all(...cursor ? [runId, cursor.ordinal, limit + 1] : [runId, limit + 1]);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
@@ -37745,7 +37778,10 @@ var SQLiteRunStore = class {
             } catch {
               this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'invalid_decision', failure_message = 'Provider returned an answer that does not match this question.' WHERE evaluation_id = ?").run(evaluationId);
             }
-            if (validated) this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+            if (validated) {
+              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+              this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
+            }
           }
         }
       }
@@ -37767,6 +37803,7 @@ var SQLiteRunStore = class {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
         this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
+        this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, evaluationId);
@@ -37831,6 +37868,7 @@ var SQLiteRunStore = class {
         }
         this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
+        this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         const sharedFailure = outcome.scope === "run";
         if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
@@ -38879,19 +38917,21 @@ var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("journey") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("context"), evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
 ]);
 function createPollingServer(service = createDefaultRunService()) {
-  const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Inspect before starting. Reads never start or resume work." });
+  const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
   server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
   server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
   server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete distinguishes a finished source from matches so far.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => service.queryEvidence(query)));
-  server.registerTool("run_get", { description: "Retrieve one view of a run: status, frozen request and question groups, paginated per-question answers, physical attempts including uncertain or failed calls, or reached journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
+  server.registerTool("run_get", { description: "Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
     if (input2.view === "status") return service.getStatus(input2.runId);
     if (input2.view === "request") return service.getRequest(input2.runId);
     if (input2.view === "journey") return service.getJourneyRun(input2.runId);
+    if (input2.view === "context") return service.getContext(input2.runId, input2.evaluationId, input2.contextId);
     if (input2.view === "answers") return service.answers(input2.runId, input2.cursor, input2.limit);
     return service.attempts(input2.runId, input2.cursor, input2.limit);
   }));

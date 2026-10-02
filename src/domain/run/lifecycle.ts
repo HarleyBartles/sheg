@@ -79,6 +79,17 @@ export type AnswerRow = {
   failure?: { code: string; message: string };
 };
 
+export type RunContextDetail = {
+  runId: string;
+  evaluationId: string;
+  contextId: string;
+  respondentId: string;
+  questionId: string;
+  status: AnswerRow['status'];
+  packet: DecisionRequest & { state: PromptState };
+  provenance: { compilerFingerprint: string; packetFingerprint: string; contextFingerprint: string };
+};
+
 export type RunAttempt = {
   attemptId: string;
   groupId: string;

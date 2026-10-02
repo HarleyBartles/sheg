@@ -31,9 +31,9 @@ function answer(): DecisionResult {
   return { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 }, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
 }
 
-async function fixture(input = request()) {
+async function fixture(input = request(), now = () => Date.now()) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-question-worker-'));
-  const store = openRunStore(root);
+  const store = openRunStore(root, { now });
   const prepared = await prepareRun(input, { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { return answer(); } });
   assert.ok(prepared.prepared);
   const accepted = store.accept(randomUUID(), prepared.prepared);
@@ -172,16 +172,17 @@ test('a grouped poll batches independent questions and resumes only the failed q
   input.maxCalls = 2;
   input.questions = [input.questions[0]!, { type: 'noul', id: 'interest-loss', instructions: 'Did anything reduce your interest?' },
     { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Mixed', 'Clear'] }];
-  const f = await fixture(input); const dispatched: Array<{ ids: string[]; state: unknown }> = [];
+  const settledAt = Date.now();
+  const f = await fixture(input, () => settledAt); const dispatched: Array<{ ids: string[]; state: unknown }> = [];
   try {
     const provider: DecisionProvider = { measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { throw new Error('Expected grouped request dispatch.'); }, async decideBatch(batch: DecisionBatchRequest) {
       dispatched.push({ ids: batch.questions.map(({ id }) => id), state: batch.state });
-      if (dispatched.length === 1) return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: [
+      if (dispatched.length === 1) return { execution: { attempts: 1, provider: 'jev', model: 'served-model-before-retry', latencyMs: 1, usage: {} }, answers: [
         { questionId: 'interest', value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } },
         { questionId: 'interest-loss', value: { type: 'noul', noul: 0.4 } },
         { questionId: 'clarity', failure: { code: 'invalid_score', message: 'The score did not match the rubric.' } },
       ] };
-      return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: [
+      return { execution: { attempts: 1, provider: 'jev', model: 'served-model-after-retry', latencyMs: 1, usage: {} }, answers: [
         { questionId: 'clarity', value: { type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 } } },
       ] };
     } };
@@ -198,6 +199,9 @@ test('a grouped poll batches independent questions and resumes only the failed q
     assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'answered']);
     assert.deepEqual(dispatched.map(({ ids }) => ids), [['interest', 'interest-loss', 'clarity'], ['clarity']]);
     assert.deepEqual(dispatched[0]!.state, dispatched[1]!.state);
+    assert.equal(f.store.answers(f.runId).items.find(({ questionId }) => questionId === 'clarity')!.execution?.model, 'served-model-after-retry');
+    const retriedEvidence = f.store.queryEvidence({ sourceRunId: f.runId, criteria: { questionId: 'clarity' }, limit: 1 });
+    assert.equal(retriedEvidence.items[0]!.execution?.model, 'served-model-after-retry');
     assert.equal(f.store.getStatus(f.runId).usedCalls, 2);
     assert.equal(f.store.getStatus(f.runId).status, 'completed');
   } finally { await f.close(); }
