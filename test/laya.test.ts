@@ -81,6 +81,22 @@ test('provider accepts the routed checkpoint while preserving Laya confidence se
   assert.equal(result.cost, undefined);
 });
 
+test('Laya receives linked candidate text as Choice options without Sheg material identifiers', async () => {
+  let body: Record<string, unknown> | undefined;
+  const linkedRequest: DecisionRequest = { ...request, question: { ...request.question, materialOptions: { continue: 'section-three' } } };
+  const provider = new LayaProvider(config, {
+    measureFit: async () => fit(20),
+    fetchRequest: async (_url, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({ model: 'laya-rl-agent', answers: { continue: { type: 'choice', choice: 'continue', probabilities: { continue: 0.8, stop: 0.2 } } }, usage: {}, routing: { model: config.checkpoint } });
+    },
+  });
+  await provider.decide(linkedRequest, 1);
+  const wireQuestions = body?.questions as Record<string, Record<string, unknown>>;
+  assert.deepEqual(wireQuestions.continue, { type: 'choice', instructions: request.question.instructions, criteria: request.question.options });
+  assert.equal(JSON.stringify(body).includes('section-three'), false);
+});
+
 test('encodes Score and Noul criteria and preserves their typed evidence', async () => {
   const measure: FitMeasurer = async () => fit(20);
   const bodies: Record<string, unknown>[] = [];

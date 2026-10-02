@@ -19701,6 +19701,7 @@ function date4(params) {
 // src/domain/decision/decision.ts
 var identifier = external_exports.string().min(1);
 var prose = external_exports.string().min(1);
+var choiceText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
 var probability = external_exports.number().finite().min(0).max(1);
 var probabilities = external_exports.record(external_exports.string(), probability);
 var costEvidenceSchema = external_exports.object({
@@ -19723,8 +19724,23 @@ var choiceQuestionSchema = external_exports.object({
   type: external_exports.literal("choice"),
   id: identifier,
   instructions: prose,
-  options: external_exports.record(identifier, prose).refine((value) => Object.keys(value).length > 0)
-}).strict();
+  options: external_exports.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
+  materialOptions: external_exports.record(identifier, identifier).optional()
+}).strict().superRefine((question, context) => {
+  if (question.materialOptions) {
+    const links = Object.entries(question.materialOptions);
+    const linkedOptionIds = links.map(([optionId]) => optionId);
+    const linkedMaterialIds = links.map(([, materialId]) => materialId);
+    for (const optionId of linkedOptionIds) {
+      if (!Object.hasOwn(question.options, optionId)) {
+        context.addIssue({ code: "custom", path: ["materialOptions", optionId], message: `Material link references unknown option ${optionId}.` });
+      }
+    }
+    if (new Set(linkedMaterialIds).size !== linkedMaterialIds.length) {
+      context.addIssue({ code: "custom", path: ["materialOptions"], message: "Each material may be linked from at most one option." });
+    }
+  }
+});
 var scoreQuestionSchema = external_exports.object({
   type: external_exports.literal("score"),
   id: identifier,
@@ -19802,7 +19818,7 @@ var decisionBatchResultSchema = external_exports.object({
 
 // src/domain/decision/prompt.ts
 function questionForTask(task) {
-  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options } };
+  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options }, ...task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {} };
   if ("rubric" in task) return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
   return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
 }
@@ -21298,64 +21314,93 @@ var presentationSchema = external_exports.discriminatedUnion("kind", [
 
 // src/domain/study/stimulus.ts
 var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose2 = external_exports.string().trim().min(1);
+var exactText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Material text must not be blank.");
+var materialOriginSchema = external_exports.object({
+  sourceId: identifier3,
+  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
 var sourceReferenceSchema = external_exports.object({
   path: external_exports.string().min(1),
   sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
 }).strict();
 var stimulusItemSchema = external_exports.object({
   id: identifier3,
-  text: prose2
-}).strict();
+  text: exactText,
+  sourceId: materialOriginSchema.shape.sourceId.optional(),
+  sourceSha256: materialOriginSchema.shape.sourceSha256.optional()
+}).strict().superRefine((item, context) => {
+  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) {
+    context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
+  }
+});
 
 // src/domain/study/task.ts
 var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose3 = external_exports.string().trim().min(1);
+var prose2 = external_exports.string().trim().min(1);
+var choiceText2 = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
 var taskFields = {
   id: identifier4,
-  instructions: prose3,
+  instructions: prose2,
   comparisonKey: identifier4.optional(),
   responseHistory: external_exports.enum(["include", "omit"]).optional()
 };
-var options = external_exports.record(identifier4, prose3).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+var options = external_exports.record(identifier4, choiceText2).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+var materialOptions = external_exports.record(identifier4, identifier4).optional();
 function validateChoiceTask(task, context) {
-  if (typeof task !== "object" || task === null || !("options" in task) || !("answerKeyOptionId" in task)) return;
-  const options2 = task.options;
-  const answerKeyOptionId = task.answerKeyOptionId;
-  if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in options2)) {
-    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+  if (typeof task !== "object" || task === null || !("options" in task)) return;
+  const optionsValue = task.options;
+  if (typeof optionsValue !== "object" || optionsValue === null || Array.isArray(optionsValue)) return;
+  const choiceOptions = optionsValue;
+  if ("answerKeyOptionId" in task) {
+    const answerKeyOptionId = task.answerKeyOptionId;
+    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in choiceOptions)) {
+      context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+    }
+  }
+  if ("materialOptions" in task && typeof task.materialOptions === "object" && task.materialOptions !== null && !Array.isArray(task.materialOptions)) {
+    const materialOptions2 = task.materialOptions;
+    for (const optionId of Object.keys(materialOptions2)) {
+      if (!Object.hasOwn(choiceOptions, optionId)) {
+        context.addIssue({ code: "custom", path: ["materialOptions", optionId], message: `Material link references unknown option ${optionId}.` });
+      }
+    }
+    if (new Set(Object.values(materialOptions2)).size !== Object.keys(materialOptions2).length) {
+      context.addIssue({ code: "custom", path: ["materialOptions"], message: "Each material may be linked from at most one option." });
+    }
   }
 }
 var legacyChoiceTaskSchema = external_exports.object({
   ...taskFields,
   options,
+  materialOptions,
   answerKeyOptionId: identifier4.optional()
 }).strict().superRefine(validateChoiceTask);
 var typedChoiceTaskSchema = external_exports.object({
   ...taskFields,
   type: external_exports.literal("choice"),
   options,
+  materialOptions,
   answerKeyOptionId: identifier4.optional()
 }).strict().superRefine(validateChoiceTask);
 var scoreTaskSchema = external_exports.object({
   ...taskFields,
   type: external_exports.literal("score"),
-  rubric: external_exports.array(prose3).min(2)
+  rubric: external_exports.array(prose2).min(2)
 }).strict();
 var noulTaskSchema = external_exports.object({
   ...taskFields,
   type: external_exports.literal("noul"),
-  criteria: external_exports.object({ true: prose3.optional(), false: prose3.optional() }).strict().optional()
+  criteria: external_exports.object({ true: prose2.optional(), false: prose2.optional() }).strict().optional()
 }).strict();
 var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
 var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
 
 // src/domain/study/arm.ts
 var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose4 = external_exports.string().trim().min(1);
+var prose3 = external_exports.string().trim().min(1);
 var journeyDefinitionFields = {
   id: identifier5,
-  label: prose4,
+  label: prose3,
   items: external_exports.array(stimulusItemSchema).min(1),
   tasks: external_exports.array(taskSchema).min(1),
   presentation: presentationSchema
@@ -21378,6 +21423,22 @@ function validateJourneyDefinition(arm, context) {
   const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
   if (new Set(comparisonKeys).size !== comparisonKeys.length) {
     context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
+  }
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (!("options" in task) || !task.materialOptions) continue;
+    for (const [optionId, materialId] of Object.entries(task.materialOptions)) {
+      const item = arm.items.find((candidate) => candidate.id === materialId);
+      if (!item) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
+        continue;
+      }
+      if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
+      }
+      if (task.options[optionId] !== item.text) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
+      }
+    }
   }
   if (presentation.kind === "sequence") return;
   const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
@@ -21533,10 +21594,27 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
 }
 
 // src/domain/run/request.ts
-var materialItemSchema = external_exports.object({
-  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  text: external_exports.string().min(1)
-}).strict();
+var materialItemSchema = stimulusItemSchema;
+function validateMaterialChoices(questions, material, context) {
+  const materials = new Map(material.map((item) => [item.id, item]));
+  questions.forEach((question, questionIndex) => {
+    if (question.type !== void 0 && question.type !== "choice" || !question.materialOptions || !question.options) return;
+    for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
+      const issuePath = ["questions", questionIndex, "materialOptions", optionId];
+      const candidate = materials.get(materialId);
+      if (!candidate) {
+        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} references unknown material ${materialId}.` });
+        continue;
+      }
+      if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
+        context.addIssue({ code: "custom", path: issuePath, message: `Material ${materialId} requires source identity and digest before it can be linked.` });
+      }
+      if (question.options[optionId] !== candidate.text) {
+        context.addIssue({ code: "custom", path: ["questions", questionIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
+      }
+    }
+  });
+}
 var inlineRunRequestSchema = external_exports.object({
   kind: external_exports.literal("poll"),
   label: external_exports.string().min(1).max(120).optional(),
@@ -21558,6 +21636,7 @@ var inlineRunRequestSchema = external_exports.object({
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
   }
+  validateMaterialChoices(request.questions, request.material, context);
 });
 var inlineJourneyRequestSchema = external_exports.object({
   kind: external_exports.literal("journey"),

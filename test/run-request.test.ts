@@ -65,6 +65,29 @@ test('the direct request rejects empty or duplicate question sets, duplicate ide
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, rationale: 'chosen because they left' }).success, false);
 });
 
+test('the direct request preserves exact source-linked Choice candidates and permits an unlinked no-fit option', () => {
+  const candidate = { id: 'section-three', text: '  Exact authored text.  ', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) };
+  const linkedQuestion = { ...question, options: { sectionThree: candidate.text, noFit: 'Neither candidate' }, materialOptions: { sectionThree: candidate.id } };
+  const parsed = inlineRunRequestSchema.safeParse({ ...validRequest(), material: [candidate], questions: [linkedQuestion] });
+  assert.equal(parsed.success, true, parsed.success ? undefined : JSON.stringify(parsed.error.issues));
+  if (parsed.success) {
+    assert.deepEqual(parsed.data.material[0], candidate);
+    assert.deepEqual(parsed.data.questions[0], linkedQuestion);
+  }
+});
+
+test('the direct request rejects malformed provenance, missing or duplicate material links, and non-exact labels', () => {
+  const candidate = { id: 'section-three', text: 'Exact authored text.', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) };
+  const linked = { ...question, options: { candidate: candidate.text, noFit: 'No fit' }, materialOptions: { candidate: candidate.id } };
+  const base = { ...validRequest(), material: [candidate], questions: [linked] };
+  assert.equal(inlineRunRequestSchema.safeParse({ ...base, material: [{ ...candidate, sourceSha256: 'not-a-digest' }] }).success, false);
+  assert.equal(inlineRunRequestSchema.safeParse({ ...base, material: [{ ...candidate, sourceId: undefined }] }).success, false);
+  assert.equal(inlineRunRequestSchema.safeParse({ ...base, questions: [{ ...linked, materialOptions: { candidate: 'missing' } }] }).success, false);
+  assert.equal(inlineRunRequestSchema.safeParse({ ...base, questions: [{ ...linked, materialOptions: { candidate: candidate.id, noFit: candidate.id } }] }).success, false);
+  assert.equal(inlineRunRequestSchema.safeParse({ ...base, questions: [{ ...linked, options: { ...linked.options, candidate: 'Edited text' } }] }).success, false);
+  assert.equal(inlineRunRequestSchema.safeParse({ ...base, questions: [{ ...linked, materialOptions: { notOffered: candidate.id } }] }).success, false);
+});
+
 test('the request schema leaves provider-aware physical call admission to inspection', () => {
   const input = validRequest();
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, respondents: [profile('a', 'First'), profile('b', 'Second')], maxCalls: 1 }).success, true);
@@ -98,10 +121,39 @@ test('a direct journey request accepts inline typed route definitions without st
     maxCalls: 1,
   };
   const parsed = runRequestSchema.safeParse(input);
-  assert.equal(parsed.success, true);
+  assert.equal(parsed.success, true, parsed.success ? undefined : JSON.stringify(parsed.error.issues));
   if (parsed.success) {
     assert.equal(parsed.data.kind, 'journey');
     assert.equal(parsed.data.journey.presentation.kind, 'graph');
+  }
+});
+
+test('a journey can link a Choice option to an exact candidate that is not exposed on its current path', () => {
+  const input = {
+    kind: 'journey', respondents: [profile('reader-a', 'First')],
+    journey: {
+      id: 'article', label: 'Article journey',
+      items: [
+        { id: 'opening', text: '  Exact opening.  ', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) },
+        { id: 'later', text: 'Later candidate.', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) },
+      ],
+      tasks: [{ id: 'pick', type: 'choice', instructions: 'Which section?', options: { opening: '  Exact opening.  ', later: 'Later candidate.', 'no-fit': 'Neither' }, materialOptions: { opening: 'opening', later: 'later' } }],
+      presentation: { kind: 'graph', entryNodeId: 'ask', maxDecisions: 1, nodes: [
+        { id: 'ask', kind: 'ask', taskId: 'pick' }, { id: 'done', kind: 'terminal', outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'ask', optionId: 'opening', toNodeId: 'done' },
+        { fromNodeId: 'ask', optionId: 'later', toNodeId: 'done' },
+        { fromNodeId: 'ask', optionId: 'no-fit', toNodeId: 'done' },
+      ] },
+    },
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  };
+  const parsed = runRequestSchema.safeParse(input);
+  assert.equal(parsed.success, true, parsed.success ? undefined : JSON.stringify(parsed.error.issues));
+  if (parsed.success && parsed.data.kind === 'journey') {
+    assert.equal(parsed.data.journey.items[0]!.text, '  Exact opening.  ');
+    const firstTask = parsed.data.journey.tasks[0]!;
+    assert.deepEqual('materialOptions' in firstTask ? firstTask.materialOptions : undefined, { opening: 'opening', later: 'later' });
   }
 });
 

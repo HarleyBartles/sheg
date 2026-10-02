@@ -124,6 +124,22 @@ test('sends one typed choice and preserves the served model, distribution, usage
   }
 });
 
+test('Jev receives linked candidate text as Choice options without Sheg material identifiers', async () => {
+  const restoreKey = installTestKey();
+  try {
+    let body: Record<string, unknown> | undefined;
+    const linkedRequest: DecisionRequest = { ...request, question: { ...request.question, materialOptions: { continue: 'section-three' } } };
+    const provider = makeJevProvider(fakeFetch(async (_url, init) => {
+      body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return response();
+    }));
+    await provider.decide(linkedRequest, 1);
+    const wireQuestions = body?.questions as Record<string, Record<string, unknown>>;
+    assert.deepEqual(wireQuestions['entry-response'], { type: 'choice', instructions: request.question.instructions, criteria: request.question.options });
+    assert.equal(JSON.stringify(body).includes('section-three'), false);
+  } finally { restoreKey(); }
+});
+
 test('sends mixed independent questions in one Jev request with one shared execution record', async () => {
   const batch: DecisionBatchRequest = {
     state: request.state,

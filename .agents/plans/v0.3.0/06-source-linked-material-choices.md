@@ -45,7 +45,7 @@ text digest.
 ## Task 1: Add explicit material origins and Choice links
 
 **Files:**
-- Modify: `src/domain/study/stimulus.ts`, `src/domain/study/task.ts`, `src/domain/decision/decision.ts`, `src/domain/decision/prompt.ts`, `src/domain/run/request.ts`, `src/application/run-inspection.ts`
+- Modify: `src/domain/study/stimulus.ts`, `src/domain/study/task.ts`, `src/domain/study/arm.ts`, `src/domain/decision/decision.ts`, `src/domain/decision/prompt.ts`, `src/domain/run/request.ts`, `src/application/run-inspection.ts`
 - Test: `test/run-request.test.ts`, `test/run-inspection.test.ts`, `test/decision.test.ts`, `test/journey.test.ts`
 
 **Interfaces:**

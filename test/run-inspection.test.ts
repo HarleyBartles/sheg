@@ -83,6 +83,32 @@ test('preparation supports all existing typed question meanings', async () => {
   }
 });
 
+test('journey admission preserves a catalog-only candidate link without adding it to respondent state', async () => {
+  const candidate = { id: 'later-section', text: 'Exact later section.', sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) };
+  const input = {
+    kind: 'journey',
+    respondents: [request().respondents[0]!],
+    journey: {
+      id: 'article', label: 'Article journey', items: [candidate],
+      tasks: [{ id: 'choose-section', type: 'choice', instructions: 'Which part?', options: { later: candidate.text, 'no-fit': 'Neither' }, materialOptions: { later: candidate.id } }],
+      presentation: { kind: 'graph', entryNodeId: 'ask', maxDecisions: 1, nodes: [
+        { id: 'ask', kind: 'ask', taskId: 'choose-section' }, { id: 'done', kind: 'terminal', outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'ask', optionId: 'later', toNodeId: 'done' },
+        { fromNodeId: 'ask', optionId: 'no-fit', toNodeId: 'done' },
+      ] },
+    },
+    provider: request().provider, maxCalls: 1,
+  };
+  const fixture = makeProvider();
+  const result = await prepareRun(input, fixture.provider);
+  assert.equal(result.inspection.valid, true);
+  assert.deepEqual(fixture.measured[0]!.state.encounteredItems, []);
+  assert.deepEqual(fixture.measured[0]!.question.type === 'choice' ? fixture.measured[0]!.question.materialOptions : undefined, { later: 'later-section' });
+  assert.equal(JSON.stringify(fixture.measured[0]!.state).includes(candidate.sourceSha256), false);
+  assert.equal(fixture.decisions, 0);
+});
+
 test('overflow and unavailable fits reject before any inference call', async () => {
   for (const status of ['overflow', 'unavailable'] as const) {
     const fixture = makeProvider([status, 'fits']);

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const identifier = z.string().min(1);
 const prose = z.string().min(1);
+const choiceText = z.string().min(1).refine((value) => value.trim().length > 0, 'Choice text must not be blank.');
 const probability = z.number().finite().min(0).max(1);
 const probabilities = z.record(z.string(), probability);
 export const costEvidenceSchema = z.object({
@@ -26,8 +27,23 @@ const choiceQuestionSchema = z.object({
   type: z.literal('choice'),
   id: identifier,
   instructions: prose,
-  options: z.record(identifier, prose).refine((value) => Object.keys(value).length > 0),
-}).strict();
+  options: z.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
+  materialOptions: z.record(identifier, identifier).optional(),
+}).strict().superRefine((question, context) => {
+  if (question.materialOptions) {
+    const links = Object.entries(question.materialOptions);
+    const linkedOptionIds = links.map(([optionId]) => optionId);
+    const linkedMaterialIds = links.map(([, materialId]) => materialId);
+    for (const optionId of linkedOptionIds) {
+      if (!Object.hasOwn(question.options, optionId)) {
+        context.addIssue({ code: 'custom', path: ['materialOptions', optionId], message: `Material link references unknown option ${optionId}.` });
+      }
+    }
+    if (new Set(linkedMaterialIds).size !== linkedMaterialIds.length) {
+      context.addIssue({ code: 'custom', path: ['materialOptions'], message: 'Each material may be linked from at most one option.' });
+    }
+  }
+});
 const scoreQuestionSchema = z.object({
   type: z.literal('score'),
   id: identifier,

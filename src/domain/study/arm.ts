@@ -38,6 +38,23 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
     context.addIssue({ code: 'custom', path: ['tasks'], message: 'Each comparisonKey must identify at most one task within an arm.' });
   }
 
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (!('options' in task) || !task.materialOptions) continue;
+    for (const [optionId, materialId] of Object.entries(task.materialOptions)) {
+      const item = arm.items.find((candidate) => candidate.id === materialId);
+      if (!item) {
+        context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'materialOptions', optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
+        continue;
+      }
+      if (item.sourceId === undefined || item.sourceSha256 === undefined) {
+        context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'materialOptions', optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
+      }
+      if (task.options[optionId] !== item.text) {
+        context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'options', optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
+      }
+    }
+  }
+
   if (presentation.kind === 'sequence') return;
 
   const nodesById = new Map(presentation.nodes.map((node) => [node.id, node]));

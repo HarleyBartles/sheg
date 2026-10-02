@@ -45,7 +45,7 @@ export type DecisionPacketParts = {
 };
 
 export function questionForTask(task: JourneyDefinition['tasks'][number]): DecisionRequest['question'] {
-  if ('options' in task) return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options } };
+  if ('options' in task) return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}) };
   if ('rubric' in task) return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
   return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }) };
 }

@@ -6,11 +6,30 @@ import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js
 import type { JourneyEvaluation, JourneyRespondentState } from './lifecycle.js';
 import { decisionResultSchema } from '../decision/decision.js';
 import { providerExecutionEvidenceSchema } from '../decision/decision.js';
+import { stimulusItemSchema } from '../study/stimulus.js';
 
-const materialItemSchema = z.object({
-  id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  text: z.string().min(1),
-}).strict();
+const materialItemSchema = stimulusItemSchema;
+
+function validateMaterialChoices(questions: readonly { type?: string | undefined; id: string; options?: Record<string, string> | undefined; materialOptions?: Record<string, string> | undefined }[], material: readonly z.infer<typeof materialItemSchema>[], context: z.RefinementCtx): void {
+  const materials = new Map(material.map((item) => [item.id, item]));
+  questions.forEach((question, questionIndex) => {
+    if (question.type !== undefined && question.type !== 'choice' || !question.materialOptions || !question.options) return;
+    for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
+      const issuePath = ['questions', questionIndex, 'materialOptions', optionId];
+      const candidate = materials.get(materialId);
+      if (!candidate) {
+        context.addIssue({ code: 'custom', path: issuePath, message: `Choice option ${optionId} references unknown material ${materialId}.` });
+        continue;
+      }
+      if (candidate.sourceId === undefined || candidate.sourceSha256 === undefined) {
+        context.addIssue({ code: 'custom', path: issuePath, message: `Material ${materialId} requires source identity and digest before it can be linked.` });
+      }
+      if (question.options[optionId] !== candidate.text) {
+        context.addIssue({ code: 'custom', path: ['questions', questionIndex, 'options', optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
+      }
+    }
+  });
+}
 
 export const inlineRunRequestSchema = z.object({
   kind: z.literal('poll'),
@@ -35,6 +54,7 @@ export const inlineRunRequestSchema = z.object({
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a run.' });
   }
+  validateMaterialChoices(request.questions, request.material, context);
 });
 
 export const inlineJourneyRequestSchema = z.object({

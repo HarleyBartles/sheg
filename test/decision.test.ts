@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DecisionError, validateDecision, validateDecisionBatch } from '../src/domain/decision/validate.js';
 import type { DecisionBatchRequest, DecisionBatchResult, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
+import { decisionQuestionSchema } from '../src/domain/decision/decision.js';
 
 const request: DecisionRequest = {
   state: { respondent: { profile: 'Wants a concrete, accessible account.' }, visibleText: 'The repair began with a confusing symptom.' },
@@ -13,6 +14,13 @@ const request: DecisionRequest = {
   },
   optionIds: ['continue', 'leave'],
 };
+
+test('choice questions preserve explicit material links and reject links to duplicate or missing options', () => {
+  const candidate = { type: 'choice', id: 'candidate', instructions: 'Choose a section.', options: { section: 'Exact section text.', 'no-fit': 'Neither' }, materialOptions: { section: 'section-three' } };
+  assert.deepEqual(decisionQuestionSchema.parse(candidate), candidate);
+  assert.equal(decisionQuestionSchema.safeParse({ ...candidate, materialOptions: { missing: 'section-three' } }).success, false);
+  assert.equal(decisionQuestionSchema.safeParse({ ...candidate, materialOptions: { section: 'section-three', 'no-fit': 'section-three' } }).success, false);
+});
 
 function result(overrides: Partial<Extract<DecisionResult, { type: 'choice' }>> = {}): Extract<DecisionResult, { type: 'choice' }> {
   return {
