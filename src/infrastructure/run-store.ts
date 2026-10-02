@@ -11,7 +11,7 @@ import { decisionResultSchema, decisionValueSchema, decisionBatchResultSchema, p
 import { followOnLineageSchema, followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput, type RunMaterialItem } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const LEASE_MS = 30_000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -146,7 +146,7 @@ export interface RunStore {
 type DatabaseRow = Record<string, SQLOutputValue>;
 type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; filtersFingerprint: string };
 type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
-type AttemptCursorPayload = { kind: 'attempts'; runId: string; startedMs: number; attemptId: string };
+type AttemptCursorPayload = { kind: 'attempts'; runId: string; sequence: number };
 type EvidenceCursorPayload = {
   kind: 'evidence'; sourceRunId: string; criteriaFingerprint: string; maxOrdinal: number; lastOrdinal: number;
   sourceStatus: RunStatus; sourceComplete: boolean; totalMatches: number;
@@ -295,7 +295,8 @@ function initialize(database: DatabaseSync): void {
              (status <> 'active' AND current_node_id IS NULL AND current_turn_id IS NULL AND current_context_id IS NULL))
     );
     CREATE TABLE attempts (
-      attempt_id TEXT PRIMARY KEY,
+      attempt_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempt_id TEXT NOT NULL UNIQUE,
       run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
       group_id TEXT NOT NULL,
       evaluation_id TEXT NOT NULL,
@@ -1106,15 +1107,15 @@ class SQLiteRunStore implements RunStore {
     let cursor: AttemptCursorPayload | undefined;
     if (cursorText) {
       cursor = decodeCursor<AttemptCursorPayload>(cursorText, 'attempts');
-      if (cursor.kind !== 'attempts' || cursor.runId !== runId || !Number.isSafeInteger(cursor.startedMs) || cursor.startedMs < 0 || !cursor.attemptId) {
+      if (cursor.kind !== 'attempts' || cursor.runId !== runId || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 1) {
         throw new RunStoreError('invalid_cursor', 'The attempt cursor does not match this run.');
       }
     }
     const rows = this.database.prepare(`SELECT a.*, GROUP_CONCAT(ae.evaluation_id) AS evaluation_ids
       FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
-      WHERE a.run_id = ? ${cursor ? 'AND (a.started_ms > ? OR (a.started_ms = ? AND a.attempt_id > ?))' : ''}
-      GROUP BY a.attempt_id ORDER BY a.started_ms, a.attempt_id LIMIT ?`)
-      .all(...(cursor ? [runId, cursor.startedMs, cursor.startedMs, cursor.attemptId, limit + 1] : [runId, limit + 1])) as DatabaseRow[];
+      WHERE a.run_id = ? ${cursor ? 'AND a.attempt_sequence > ?' : ''}
+      GROUP BY a.attempt_id ORDER BY a.attempt_sequence LIMIT ?`)
+      .all(...(cursor ? [runId, cursor.sequence, limit + 1] : [runId, limit + 1])) as DatabaseRow[];
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
     const items = pageRows.map((row): RunAttempt => ({
@@ -1133,7 +1134,7 @@ class SQLiteRunStore implements RunStore {
     }));
     const last = pageRows.at(-1);
     return { items, ...(hasMore && last ? { nextCursor: encodeCursor({
-      kind: 'attempts', runId, startedMs: asNumber(last.started_ms, 'attempt start time'), attemptId: asText(last.attempt_id, 'attempt ID'),
+      kind: 'attempts', runId, sequence: asNumber(last.attempt_sequence, 'attempt sequence'),
     } satisfies AttemptCursorPayload) } : {}) };
   }
 
@@ -1179,7 +1180,7 @@ class SQLiteRunStore implements RunStore {
 
       const pending = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'pending'").get(runId) as DatabaseRow;
       const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId) as DatabaseRow;
-      const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY started_ms DESC, attempt_id DESC LIMIT 1").get(runId) as DatabaseRow | undefined;
+      const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId) as DatabaseRow | undefined;
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, 'failed evaluation ID') : undefined;
       const failedEvaluation = failedRunEvaluationId
         ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId, failedRunEvaluationId) as DatabaseRow | undefined

@@ -494,6 +494,50 @@ test('resume reopens only a run-scoped failed evaluation and retains its failed 
   } finally { await f.close(); }
 });
 
+test('resume selects the newest run-scoped failure when attempt timestamps tie', async () => {
+  const f = await resumableFixture({ ...input, maxCalls: 4 });
+  try {
+    const claim = f.store.claim(f.runId, f.now(), 1234);
+    assert.ok(claim);
+    const olderFailure = f.store.reserveNext(claim, f.now());
+    assert.ok(olderFailure);
+    f.store.settle(claim, olderFailure.attemptId, { kind: 'failed', code: 'provider_unavailable', message: 'First provider failure.', scope: 'run' });
+    assert.equal(f.store.finish(claim).status, 'failed');
+
+    assert.equal(f.store.resume(f.runId, f.now()).started, true);
+    const resumedClaim = f.store.claim(f.runId, f.now(), 5678);
+    assert.ok(resumedClaim);
+    const retry = f.store.reserveNext(resumedClaim, f.now());
+    assert.ok(retry);
+    f.store.settle(resumedClaim, retry.attemptId, { kind: 'answered', result: savedAnswer });
+    const newerFailure = f.store.reserveNext(resumedClaim, f.now());
+    assert.ok(newerFailure);
+    f.store.settle(resumedClaim, newerFailure.attemptId, { kind: 'failed', code: 'provider_unavailable', message: 'Second provider failure.', scope: 'run' });
+    assert.equal(f.store.finish(resumedClaim).status, 'failed');
+
+    const history = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+    try {
+      history.exec('PRAGMA foreign_keys = OFF');
+      history.prepare('UPDATE attempts SET attempt_id = ? WHERE attempt_id = ?').run('ffffffff-ffff-4fff-8fff-ffffffffffff', olderFailure.attemptId);
+      history.prepare('UPDATE attempt_evaluations SET attempt_id = ? WHERE attempt_id = ?').run('ffffffff-ffff-4fff-8fff-ffffffffffff', olderFailure.attemptId);
+      history.prepare('UPDATE attempts SET attempt_id = ? WHERE attempt_id = ?').run('00000000-0000-4000-8000-000000000000', newerFailure.attemptId);
+      history.prepare('UPDATE attempt_evaluations SET attempt_id = ? WHERE attempt_id = ?').run('00000000-0000-4000-8000-000000000000', newerFailure.attemptId);
+    } finally { history.close(); }
+
+    const resumed = f.store.resume(f.runId, f.now());
+    assert.equal(resumed.started, true);
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'pending']);
+    const firstPage = f.store.attempts(f.runId, undefined, 1);
+    assert.equal(firstPage.items[0]?.failure?.message, 'First provider failure.');
+    assert.ok(firstPage.nextCursor);
+    const secondPage = f.store.attempts(f.runId, firstPage.nextCursor, 1);
+    assert.equal(secondPage.items[0]?.status, 'answered');
+    assert.ok(secondPage.nextCursor);
+    const thirdPage = f.store.attempts(f.runId, secondPage.nextCursor, 1);
+    assert.equal(thirdPage.items[0]?.failure?.message, 'Second provider failure.');
+  } finally { await f.close(); }
+});
+
 test('resume rejects a run-wide failure after the original call budget is exhausted', async () => {
   const f = await resumableFixture();
   try {

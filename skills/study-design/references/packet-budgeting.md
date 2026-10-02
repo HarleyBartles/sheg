@@ -1,6 +1,6 @@
 # Decision packet budgeting
 
-This guide describes decision packets and the file-backed journey CLI. The v0.3.0 MCP accepts a direct one-question request; optionally use `run_inspect` to measure that exact request. `run_start` validates the request itself. It does not expose draft variant batching or full-journey preflight.
+This guide describes decision packets and the file-backed journey CLI. The v0.3.0 MCP accepts direct polls and follow-ons with one or more independent questions, plus finite sequence or response-routed journey requests. Optionally use `run_inspect` to measure the exact request and preview journey paths. `run_start` validates the request itself. It does not expose draft variant batching.
 
 Use this guide when deciding whether a draft task or complete journey can fit the configured provider. Each respondent decision is a fresh, stateless model call, so Sheg sends the current decision packet again at every task.
 

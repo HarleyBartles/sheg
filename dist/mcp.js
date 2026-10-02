@@ -36431,7 +36431,7 @@ function validateDistribution(distribution, expectedIds, label) {
 }
 
 // src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 5;
+var SCHEMA_VERSION = 6;
 var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
@@ -36633,7 +36633,8 @@ function initialize(database) {
              (status <> 'active' AND current_node_id IS NULL AND current_turn_id IS NULL AND current_context_id IS NULL))
     );
     CREATE TABLE attempts (
-      attempt_id TEXT PRIMARY KEY,
+      attempt_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempt_id TEXT NOT NULL UNIQUE,
       run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
       group_id TEXT NOT NULL,
       evaluation_id TEXT NOT NULL,
@@ -37495,14 +37496,14 @@ var SQLiteRunStore = class {
     let cursor;
     if (cursorText) {
       cursor = decodeCursor(cursorText, "attempts");
-      if (cursor.kind !== "attempts" || cursor.runId !== runId || !Number.isSafeInteger(cursor.startedMs) || cursor.startedMs < 0 || !cursor.attemptId) {
+      if (cursor.kind !== "attempts" || cursor.runId !== runId || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 1) {
         throw new RunStoreError("invalid_cursor", "The attempt cursor does not match this run.");
       }
     }
     const rows = this.database.prepare(`SELECT a.*, GROUP_CONCAT(ae.evaluation_id) AS evaluation_ids
       FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
-      WHERE a.run_id = ? ${cursor ? "AND (a.started_ms > ? OR (a.started_ms = ? AND a.attempt_id > ?))" : ""}
-      GROUP BY a.attempt_id ORDER BY a.started_ms, a.attempt_id LIMIT ?`).all(...cursor ? [runId, cursor.startedMs, cursor.startedMs, cursor.attemptId, limit + 1] : [runId, limit + 1]);
+      WHERE a.run_id = ? ${cursor ? "AND a.attempt_sequence > ?" : ""}
+      GROUP BY a.attempt_id ORDER BY a.attempt_sequence LIMIT ?`).all(...cursor ? [runId, cursor.sequence, limit + 1] : [runId, limit + 1]);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
     const items = pageRows.map((row) => ({
@@ -37523,8 +37524,7 @@ var SQLiteRunStore = class {
     return { items, ...hasMore && last ? { nextCursor: encodeCursor({
       kind: "attempts",
       runId,
-      startedMs: asNumber(last.started_ms, "attempt start time"),
-      attemptId: asText(last.attempt_id, "attempt ID")
+      sequence: asNumber(last.attempt_sequence, "attempt sequence")
     }) } : {} };
   }
   requestCancel(runId) {
@@ -37567,7 +37567,7 @@ var SQLiteRunStore = class {
       }
       const pending = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'pending'").get(runId);
       const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId);
-      const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY started_ms DESC, attempt_id DESC LIMIT 1").get(runId);
+      const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId);
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
       const failedEvaluation = failedRunEvaluationId ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId, failedRunEvaluationId) : void 0;
       const canRetrySharedFailure = status === "failed" && asText(run.failure_scope, "failure scope") === "run" && failedEvaluation !== void 0 && asText(failedEvaluation.status, "evaluation status") === "failed";
