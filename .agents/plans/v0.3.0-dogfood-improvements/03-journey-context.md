@@ -37,7 +37,7 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 ## Tasks
 
-### 1. Normalize sequence and graph traversal
+### Task 1: Normalize sequence and graph traversal
 
 **Test first:** Add behavior tests proving that a sequence and its equivalent all-items-then-tasks linear graph produce the same ask order, stable node/task mapping, typed response routing, terminal outcome, and corresponding packets. Cover Choice, Score, and Noul routes. Add a linear graph with interleaved exposure and questions to prove that the shorthand does not constrain graph topology.
 
@@ -45,7 +45,7 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 **Verify:** Run the focused journey, preview, and packet-walker suites. Confirm equivalent topology tests fail before the implementation and pass afterward.
 
-### 2. Make encountered material cumulative and consistent
+### Task 2: Make encountered material cumulative and consistent
 
 **Test first:** Extend packet tests for a graph that exposes item A, asks, exposes B, asks, then re-exposes A. The later packet contains A then B once each; the exposure history still records both A occurrences. Add a branch test where sibling-only material never appears in another path. Compare corresponding sequence and linear-graph packet state. Verify `responseHistory: omit` removes prior responses while retaining all encountered material and exposure evidence.
 
@@ -53,7 +53,7 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 **Verify:** Confirm live packet compilation, preview route contexts, exhaustive preflight packets, and provider fit measurement use the same material ordering and text. Run `test/prompts.test.ts`, `test/journey-preview.test.ts`, `test/packet-walker.test.ts`, `test/application-preflight.test.ts`, and the relevant fit tests.
 
-### 3. Preserve frozen compiler semantics across resume
+### Task 3: Preserve frozen compiler semantics across resume
 
 **Test first:** Add durable-run coverage using a dev.3/v6 incomplete graph run. After opening it with the new runtime, resume it and verify its next packet keeps v6's prior exposure window, its earlier saved packets are unchanged, and its original compiler fingerprint remains attached. Add a new-admission assertion for the v7 compiler identity and cumulative packet. Check that run-store transition validation and worker continuation reject unsupported identity drift rather than stamping new packet meaning with an old fingerprint.
 
@@ -63,7 +63,7 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 **Verify:** Run focused run-inspection, run-store, question-worker, identity, resume, and copied-package tests. Confirm stored packet hashes and v6 identities are preserved.
 
-### 4. Teach and pressure-test the author guidance
+### Task 4: Teach and pressure-test the author guidance
 
 Update the two shipped skills with a concise example that distinguishes topology from material context, explains cumulative previously exposed text, and makes answer-history inclusion explicit on a dependent follow-up. Clarify that sequence is shorthand for a linear graph and that a graph branch cannot expose unseen sibling material. Do not teach authors to edit internal compiler details.
 
@@ -71,7 +71,7 @@ Version the relevant behavior scenario and evaluator under the owning skill. Bef
 
 **Verify:** Run deterministic scenario-harness tests, validate scenario/evaluator pairing and current guidance hashes, inspect trial inputs and outputs, and verify the candidate ZIP excludes all `tests/behavior/` data.
 
-### 5. Set the dev.4 identity and complete the checkpoint
+### Task 5: Set the dev.4 identity and complete the checkpoint
 
 Align `package.json`, both root version fields in `package-lock.json`, and `plugin.json` at `0.3.0-dev.4`. Regenerate derived MCP/runtime output from its source. Update stale static dev.2 wording in `.agents/playbooks/semver-version-alignment.md` and `docs/guides/releases.md` so they describe the roadmap's next intentional checkpoint generically. Record Plan 2's verified merge in the roadmap: PR #13 merged to `develop` at `1d758ceae6db1b7f8245120ddc252354747a5652`, from exact head `ba95909cc13ef82d876f864fcfc49304b3fb5188`; hosted `sheg-verify` passed on that head and the staged gate passed all 352 tests.
 
