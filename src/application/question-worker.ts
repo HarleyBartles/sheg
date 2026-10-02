@@ -7,6 +7,7 @@ import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import { JevCallError } from '../providers/jev.js';
 import { LayaCallError } from '../providers/laya.js';
 import type { ProviderFactory } from './run-service.js';
+import type { DecisionBatchRequest, DecisionBatchResult, DecisionResult, DecisionValue } from '../domain/decision/decision.js';
 
 const HEARTBEAT_MS = 2_000;
 export async function executeQuestionRun(store: RunStore, runId: string, providerFactory: ProviderFactory): Promise<void> {
@@ -35,19 +36,56 @@ export async function executeQuestionRun(store: RunStore, runId: string, provide
 async function executePoll(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
   const prepared = store.getRequest(runId);
   const provider = providerFactory(prepared.request.provider);
-  while (true) {
-    if (!store.heartbeat(claim, Date.now())) return;
-    const reservation = store.reserveNext(claim, Date.now());
-    if (!reservation) break;
-    try {
-      const result = await provider.decide(reservation.evaluation.packet, 1);
-      store.settle(claim, reservation.attemptId, { kind: 'answered', result });
-    } catch (error) {
-      const scope = failureScope(error);
-      store.settle(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope });
-      if (scope === 'run') break;
+  const answers = new Map(store.answers(runId).items.map((answer) => [answer.evaluationId, answer.status]));
+  for (const group of prepared.groups ?? []) {
+    const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
+    while (true) {
+      if (!store.heartbeat(claim, Date.now())) return;
+      const pending = evaluations.filter((evaluation) => answers.get(evaluation.evaluationId) === 'pending');
+      if (!pending.length) break;
+      let batchEvaluations = [pending[0]!];
+      if (provider.decideBatch && provider.measureBatch) {
+        let selected: typeof pending = [];
+        for (let size = pending.length; size >= 1; size -= 1) {
+          const candidate = pending.slice(0, size);
+          const fit = await provider.measureBatch({ state: group.state, questions: candidate.map(({ packet }) => packet.question) });
+          if (fit.status === 'fits') { selected = candidate; break; }
+          if (fit.status === 'unavailable') throw new Error('Provider could not confirm fit for the remaining question group.');
+        }
+        if (!selected.length) throw new Error('The remaining question does not fit the provider context.');
+        batchEvaluations = selected;
+      }
+      const reservation = store.reserveBatch(claim, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
+      if (!reservation) break;
+      const batch: DecisionBatchRequest = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
+      try {
+        let result: DecisionBatchResult;
+        if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
+        else {
+          const single = await provider.decide(reservation.evaluations[0]!.packet, 1);
+          result = { answers: [{ questionId: reservation.evaluations[0]!.questionId, value: valueOnly(single) }], execution: {
+            attempts: single.attempts, provider: single.provider, model: single.model,
+            ...(single.checkpoint ? { checkpoint: single.checkpoint } : {}), latencyMs: single.latencyMs, usage: single.usage,
+            ...(single.cost ? { cost: single.cost } : {}),
+          } };
+        }
+        store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result });
+      } catch (error) {
+        const scope = failureScope(error);
+        store.settleBatch(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope });
+        if (scope === 'run') return;
+      }
+      for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, 'answered');
+      const latest = new Map(store.answers(runId).items.map((answer) => [answer.evaluationId, answer.status]));
+      for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId)!);
     }
   }
+}
+
+function valueOnly(result: DecisionResult): DecisionValue {
+  if (result.type === 'choice') return { type: 'choice', choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+  if (result.type === 'score') return { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+  return { type: 'noul', noul: result.noul };
 }
 
 async function executeJourney(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {

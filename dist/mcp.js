@@ -36097,7 +36097,8 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
   async function resume(runId) {
     const current = store.getStatus(runId);
     if (current.status === "prepared") return current;
-    if (current.status !== "interrupted" && current.status !== "failed") {
+    const retryablePartial = current.status === "partial" && current.failedEvaluations > 0 && store.getRequestKind(runId) !== "journey";
+    if (current.status !== "interrupted" && current.status !== "failed" && !retryablePartial) {
       throw new RunServiceError("run_not_resumable", `A run in ${current.status} state cannot be resumed.`);
     }
     if (current.cancelRequested) throw new RunServiceError("run_not_resumable", "A run with a cancellation request cannot be resumed.");
@@ -37259,8 +37260,11 @@ var SQLiteRunStore = class {
       if (!run) throw this.notFound();
       const status = asText(run.status, "run status");
       if (status === "prepared") return { started: false, run: this.statusInside(runId) };
-      if (status !== "interrupted" && status !== "failed") {
+      if (status !== "interrupted" && status !== "failed" && status !== "partial") {
         throw new RunStoreError("run_not_resumable", `A run in ${status} state cannot be resumed.`);
+      }
+      if (status === "partial" && this.database.prepare("SELECT 1 FROM journey_respondents WHERE run_id = ? LIMIT 1").get(runId)) {
+        throw new RunStoreError("run_not_resumable", "A partial journey run cannot be resumed from this state.");
       }
       if (asNumber(run.cancel_requested, "cancel flag") === 1) {
         throw new RunStoreError("run_not_resumable", "A run with a cancellation request cannot be resumed.");
@@ -37272,21 +37276,25 @@ var SQLiteRunStore = class {
         throw new RunStoreError("run_not_resumable", "This run has no remaining provider-call allowance.");
       }
       const pending = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'pending'").get(runId);
-      const runFailure = this.database.prepare("SELECT evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY started_ms DESC, attempt_id DESC LIMIT 1").get(runId);
+      const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId);
+      const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY started_ms DESC, attempt_id DESC LIMIT 1").get(runId);
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
       const failedEvaluation = failedRunEvaluationId ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId, failedRunEvaluationId) : void 0;
       const canRetrySharedFailure = status === "failed" && asText(run.failure_scope, "failure scope") === "run" && failedEvaluation !== void 0 && asText(failedEvaluation.status, "evaluation status") === "failed";
       const hasPending = asNumber(pending.count, "pending count") > 0;
-      const hasUnfinished = hasPending || canRetrySharedFailure;
+      const canRetryQuestionFailures = status === "partial" && asNumber(failed.count, "failed evaluation count") > 0;
+      const hasUnfinished = hasPending || canRetrySharedFailure || canRetryQuestionFailures;
       if (!hasUnfinished || status === "failed" && asText(run.failure_scope, "failure scope") !== "run") {
         throw new RunStoreError("run_not_resumable", "This run has no resumable unfinished work.");
       }
-      if (canRetrySharedFailure && failedRunEvaluationId) {
-        this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL WHERE run_id = ? AND evaluation_id = ? AND status = 'failed'").run(runId, failedRunEvaluationId);
+      if (canRetrySharedFailure && runFailure) {
+        this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL
+          WHERE run_id = ? AND status = 'failed' AND evaluation_id IN (SELECT evaluation_id FROM attempt_evaluations WHERE attempt_id = ?)`).run(runId, asText(runFailure.attempt_id, "failed attempt ID"));
       }
+      if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL WHERE run_id = ? AND status = 'failed'").run(runId);
       this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
         failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
-        WHERE run_id = ? AND status IN ('interrupted', 'failed')`).run(nowMs + LEASE_MS, runId);
+        WHERE run_id = ? AND status IN ('interrupted', 'failed', 'partial')`).run(nowMs + LEASE_MS, runId);
       return { started: true, run: this.statusInside(runId) };
     });
   }

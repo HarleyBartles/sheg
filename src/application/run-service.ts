@@ -122,7 +122,8 @@ export function createRunService(
   async function resume(runId: string): Promise<RunStatusView> {
     const current = store.getStatus(runId);
     if (current.status === 'prepared') return current;
-    if (current.status !== 'interrupted' && current.status !== 'failed') {
+    const retryablePartial = current.status === 'partial' && current.failedEvaluations > 0 && store.getRequestKind(runId) !== 'journey';
+    if (current.status !== 'interrupted' && current.status !== 'failed' && !retryablePartial) {
       throw new RunServiceError('run_not_resumable', `A run in ${current.status} state cannot be resumed.`);
     }
     if (current.cancelRequested) throw new RunServiceError('run_not_resumable', 'A run with a cancellation request cannot be resumed.');

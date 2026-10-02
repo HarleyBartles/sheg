@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
-import type { DecisionResult } from '../src/domain/decision/decision.js';
+import type { DecisionBatchRequest, DecisionResult } from '../src/domain/decision/decision.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { runRequestSchema, type InlineRunRequest, type InlineJourneyRequest, type PreparedJourneyRun } from '../src/domain/run/request.js';
@@ -34,7 +34,7 @@ function answer(): DecisionResult {
 async function fixture(input = request()) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-question-worker-'));
   const store = openRunStore(root);
-  const prepared = await prepareRun(input, { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { return answer(); } });
+  const prepared = await prepareRun(input, { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { return answer(); } });
   assert.ok(prepared.prepared);
   const accepted = store.accept(randomUUID(), prepared.prepared);
   return { root, store, runId: accepted.run.runId, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
@@ -152,6 +152,123 @@ test('cancellation during an in-flight answer preserves it and stops the next re
     assert.equal(answers[0]?.status, 'answered');
     assert.equal(answers[1]?.status, 'pending');
     assert.equal(status.usedCalls, 1);
+  } finally { await f.close(); }
+});
+
+test('a grouped poll batches independent questions and resumes only the failed question in the same context', async () => {
+  const input = request(1);
+  input.maxCalls = 2;
+  input.questions = [input.questions[0]!, { type: 'noul', id: 'interest-loss', instructions: 'Did anything reduce your interest?' },
+    { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Mixed', 'Clear'] }];
+  const f = await fixture(input); const dispatched: Array<{ ids: string[]; state: unknown }> = [];
+  try {
+    const provider: DecisionProvider = { measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { throw new Error('Expected grouped request dispatch.'); }, async decideBatch(batch: DecisionBatchRequest) {
+      dispatched.push({ ids: batch.questions.map(({ id }) => id), state: batch.state });
+      if (dispatched.length === 1) return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: [
+        { questionId: 'interest', value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } },
+        { questionId: 'interest-loss', value: { type: 'noul', noul: 0.4 } },
+        { questionId: 'clarity', failure: { code: 'invalid_score', message: 'The score did not match the rubric.' } },
+      ] };
+      return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: [
+        { questionId: 'clarity', value: { type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 } } },
+      ] };
+    } };
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.equal(f.store.getStatus(f.runId).status, 'partial');
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 1);
+    const failedBefore = f.store.answers(f.runId).items.find(({ questionId }) => questionId === 'clarity')!;
+    assert.equal(failedBefore.status, 'failed');
+    const resumed = f.store.resume(f.runId, Date.now()); assert.equal(resumed.started, true);
+    assert.equal(f.store.getRequest(f.runId).groups?.length, 1);
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'pending']);
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.equal(f.store.getStatus(f.runId).status, 'completed', JSON.stringify(f.store.getStatus(f.runId)));
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'answered']);
+    assert.deepEqual(dispatched.map(({ ids }) => ids), [['interest', 'interest-loss', 'clarity'], ['clarity']]);
+    assert.deepEqual(dispatched[0]!.state, dispatched[1]!.state);
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 2);
+    assert.equal(f.store.getStatus(f.runId).status, 'completed');
+  } finally { await f.close(); }
+});
+
+test('cancellation during a grouped provider call settles every returned sibling and dispatches no later group', async () => {
+  const input = request(2); input.maxCalls = 2;
+  input.questions.push({ type: 'noul', id: 'interest-loss', instructions: 'Did anything reduce interest?' });
+  const f = await fixture(input); let calls = 0;
+  try {
+    const provider: DecisionProvider = {
+      measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }),
+      async decide() { throw new Error('Expected a batch call.'); },
+      async decideBatch(batch) {
+        calls += 1; f.store.requestCancel(f.runId);
+        return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => question.type === 'choice'
+          ? { questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }
+          : { questionId: question.id, value: { type: 'noul' as const, noul: 0.6 } }) };
+      },
+    };
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.equal(calls, 1);
+    assert.equal(f.store.getStatus(f.runId).status, 'cancelled');
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 1);
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'pending', 'pending']);
+  } finally { await f.close(); }
+});
+
+test('an interrupted grouped attempt consumes one call and resume dispatches only unresolved questions', async () => {
+  const input = request(1); input.maxCalls = 2;
+  input.questions.push({ type: 'noul', id: 'interest-loss', instructions: 'Did anything reduce interest?' },
+    { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Mixed', 'Clear'] });
+  const f = await fixture(input); let calls = 0;
+  try {
+    const prepared = f.store.getRequest(f.runId); const group = prepared.groups![0]!;
+    const claim = f.store.claim(f.runId, Date.now(), process.pid); assert.ok(claim);
+    const reservation = f.store.reserveBatch(claim, group.groupId, prepared.evaluations.map(({ evaluationId }) => evaluationId), Date.now()); assert.ok(reservation);
+    const interrupted = f.store.reconcile(f.runId, Date.now() + 31_000);
+    assert.equal(interrupted.status, 'interrupted'); assert.equal(interrupted.usedCalls, 1);
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['pending', 'pending', 'pending']);
+    const resumed = f.store.resume(f.runId, Date.now() + 31_001); assert.equal(resumed.started, true);
+    const provider: DecisionProvider = {
+      measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }),
+      async decide() { throw new Error('Expected a batch call.'); },
+      async decideBatch(batch) {
+        calls += 1;
+        assert.deepEqual(batch.questions.map(({ id }) => id), ['interest', 'interest-loss', 'clarity']);
+        return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => question.type === 'choice'
+          ? { questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }
+          : question.type === 'noul' ? { questionId: question.id, value: { type: 'noul' as const, noul: 0.6 } }
+            : { questionId: question.id, value: { type: 'score' as const, score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 } } }) };
+      },
+    };
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.equal(calls, 1); assert.equal(f.store.getStatus(f.runId).usedCalls, 2);
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'answered']);
+  } finally { await f.close(); }
+});
+
+test('a shared grouped authorization failure stops dispatch and explicit resume retries all reserved questions', async () => {
+  const input = request(1); input.maxCalls = 2;
+  input.questions.push({ type: 'noul', id: 'interest-loss', instructions: 'Did anything reduce interest?' });
+  const f = await fixture(input); let calls = 0; const dispatched: string[][] = [];
+  const provider: DecisionProvider = {
+    measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }),
+    async decide() { throw new Error('Expected grouped request.'); },
+    async decideBatch(batch) {
+      calls += 1; dispatched.push(batch.questions.map(({ id }) => id));
+      if (calls === 1) throw new JevCallError('credential unavailable', 0, undefined, undefined, 'run', 'credential_unavailable');
+      return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => question.type === 'choice'
+        ? { questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }
+        : { questionId: question.id, value: { type: 'noul' as const, noul: 0.6 } }) };
+    },
+  };
+  try {
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.equal(f.store.getStatus(f.runId).status, 'failed'); assert.equal(f.store.getStatus(f.runId).usedCalls, 1);
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['failed', 'failed']);
+    assert.equal(f.store.resume(f.runId, Date.now()).started, true);
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.deepEqual(dispatched, [['interest', 'interest-loss'], ['interest', 'interest-loss']]);
+    assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered']);
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 2);
   } finally { await f.close(); }
 });
 

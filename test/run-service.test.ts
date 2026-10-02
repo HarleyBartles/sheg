@@ -239,6 +239,32 @@ test('explicit resume returns the same run and launches it once', async () => {
   } finally { await fixture.close(); }
 });
 
+test('explicit resume reopens only failed questions in a partial grouped run', async () => {
+  const fixture = await setup();
+  const value = { ...request(), maxCalls: 2, questions: [request().questions[0]!, { type: 'noul' as const, id: 'interest-loss', instructions: 'Did anything reduce your interest?' }] };
+  const fit: ProviderContextFit = { provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
+  try {
+    const prepared = await prepareRun(value, { ...provider(), measureBatch: () => fit }); assert.ok(prepared.prepared);
+    const accepted = fixture.store.accept(randomUUID(), prepared.prepared);
+    const claim = fixture.store.claim(accepted.run.runId, Date.now(), 1234); assert.ok(claim);
+    const batch = fixture.store.reserveBatch(claim, prepared.prepared.groups![0]!.groupId, prepared.prepared.evaluations.map(({ evaluationId }) => evaluationId), Date.now()); assert.ok(batch);
+    fixture.store.settleBatch(claim, batch.attemptId, { kind: 'answered', result: {
+      execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+      answers: [
+        { questionId: 'interest', value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } },
+        { questionId: 'interest-loss', failure: { code: 'invalid_answer', message: 'Answer did not match the question.' } },
+      ],
+    } });
+    fixture.store.finish(claim);
+    assert.equal(fixture.store.getStatus(accepted.run.runId).status, 'partial');
+    let launches = 0;
+    const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() { launches += 1; } }, { assertProviderReady: async () => undefined });
+    const resumed = await service.resume(accepted.run.runId);
+    assert.equal(resumed.status, 'prepared'); assert.equal(launches, 1);
+    assert.deepEqual(fixture.store.answers(accepted.run.runId).items.map(({ status }) => status), ['answered', 'pending']);
+  } finally { await fixture.close(); }
+});
+
 test('simultaneous resume calls launch at most one worker', async () => {
   const fixture = await setup();
   const run = await interruptedRun(fixture);

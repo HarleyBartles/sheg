@@ -149,10 +149,10 @@ derived group. Sibling answers are never sent into another question's state.
 - Consumes: Task 3 batches, Task 4 provider group execution, and Task 5 store reservations/settlement.
 - Produces: a worker dispatches one physical request for an admitted batch and stores all returned answer rows independently. On explicit resume, it selects only unanswered evaluations and re-plans their remaining questions against the same frozen context; completed answers are never resent. An uncertain in-flight batch consumes one call and yields no invented answers.
 
-- [ ] Test a mixed three-question group where two answers succeed and one fails validation, then resume. Assert the next provider request contains only the failed question ID, preserves its original context, keeps both saved answers, and spends the original remaining `maxCalls`.
-- [ ] Test cancellation while a batch call is in flight: settle the call once, save all valid returned siblings, dispatch no later batch, and expose correct counts.
-- [ ] Test worker death with a reserved multi-question attempt: reconciliation marks one physical attempt uncertain, leaves all unsaved logical answers unresolved, and a read never starts work. Explicit resume uses only remaining allowance and does not repeat saved results.
-- [ ] Implement worker flow for poll and follow-on groups while leaving each journey turn as one question. Bound dispatch to the run-wide `maxCalls`, settle ownership transactionally, and stop on shared credential/service failures.
+- [x] Test a mixed three-question group where two answers succeed and one fails validation, then resume. Assert the next provider request contains only the failed question ID, preserves its original context, keeps both saved answers, and spends the original remaining `maxCalls`.
+- [x] Test cancellation while a batch call is in flight: settle the call once, save all valid returned siblings, dispatch no later batch, and expose correct counts.
+- [x] Test worker death with a reserved multi-question attempt: reconciliation marks one physical attempt uncertain, leaves all unsaved logical answers unresolved, and a read never starts work. Explicit resume uses only remaining allowance and does not repeat saved results.
+- [x] Implement worker flow for poll and follow-on groups while leaving each journey turn as one question. Bound dispatch to the run-wide `maxCalls`, settle ownership transactionally, and stop on shared credential/service failures.
 - [ ] Run `node --import tsx --test test/question-worker.test.ts test/run-service.test.ts test/package.test.ts`; commit as `feat: execute and resume independent question groups`.
 
 ## Task 7: Expose and teach grouped requests through the packaged MCP

@@ -21078,19 +21078,62 @@ async function executeQuestionRun(store2, runId2, providerFactory) {
 async function executePoll(store2, runId2, claim2, providerFactory) {
   const prepared = store2.getRequest(runId2);
   const provider = providerFactory(prepared.request.provider);
-  while (true) {
-    if (!store2.heartbeat(claim2, Date.now())) return;
-    const reservation = store2.reserveNext(claim2, Date.now());
-    if (!reservation) break;
-    try {
-      const result = await provider.decide(reservation.evaluation.packet, 1);
-      store2.settle(claim2, reservation.attemptId, { kind: "answered", result });
-    } catch (error62) {
-      const scope = failureScope(error62);
-      store2.settle(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope });
-      if (scope === "run") break;
+  const answers = new Map(store2.answers(runId2).items.map((answer) => [answer.evaluationId, answer.status]));
+  for (const group of prepared.groups ?? []) {
+    const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
+    while (true) {
+      if (!store2.heartbeat(claim2, Date.now())) return;
+      const pending = evaluations.filter((evaluation) => answers.get(evaluation.evaluationId) === "pending");
+      if (!pending.length) break;
+      let batchEvaluations = [pending[0]];
+      if (provider.decideBatch && provider.measureBatch) {
+        let selected = [];
+        for (let size = pending.length; size >= 1; size -= 1) {
+          const candidate = pending.slice(0, size);
+          const fit = await provider.measureBatch({ state: group.state, questions: candidate.map(({ packet }) => packet.question) });
+          if (fit.status === "fits") {
+            selected = candidate;
+            break;
+          }
+          if (fit.status === "unavailable") throw new Error("Provider could not confirm fit for the remaining question group.");
+        }
+        if (!selected.length) throw new Error("The remaining question does not fit the provider context.");
+        batchEvaluations = selected;
+      }
+      const reservation = store2.reserveBatch(claim2, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
+      if (!reservation) break;
+      const batch = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
+      try {
+        let result;
+        if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
+        else {
+          const single = await provider.decide(reservation.evaluations[0].packet, 1);
+          result = { answers: [{ questionId: reservation.evaluations[0].questionId, value: valueOnly(single) }], execution: {
+            attempts: single.attempts,
+            provider: single.provider,
+            model: single.model,
+            ...single.checkpoint ? { checkpoint: single.checkpoint } : {},
+            latencyMs: single.latencyMs,
+            usage: single.usage,
+            ...single.cost ? { cost: single.cost } : {}
+          } };
+        }
+        store2.settleBatch(claim2, reservation.attemptId, { kind: "answered", result });
+      } catch (error62) {
+        const scope = failureScope(error62);
+        store2.settleBatch(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope });
+        if (scope === "run") return;
+      }
+      for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, "answered");
+      const latest = new Map(store2.answers(runId2).items.map((answer) => [answer.evaluationId, answer.status]));
+      for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId));
     }
   }
+}
+function valueOnly(result) {
+  if (result.type === "choice") return { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+  if (result.type === "score") return { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+  return { type: "noul", noul: result.noul };
 }
 async function executeJourney(store2, runId2, claim2, providerFactory) {
   const accepted = store2.getJourneyRun(runId2);
@@ -22597,8 +22640,11 @@ var SQLiteRunStore = class {
       if (!run) throw this.notFound();
       const status = asText(run.status, "run status");
       if (status === "prepared") return { started: false, run: this.statusInside(runId2) };
-      if (status !== "interrupted" && status !== "failed") {
+      if (status !== "interrupted" && status !== "failed" && status !== "partial") {
         throw new RunStoreError("run_not_resumable", `A run in ${status} state cannot be resumed.`);
+      }
+      if (status === "partial" && this.database.prepare("SELECT 1 FROM journey_respondents WHERE run_id = ? LIMIT 1").get(runId2)) {
+        throw new RunStoreError("run_not_resumable", "A partial journey run cannot be resumed from this state.");
       }
       if (asNumber(run.cancel_requested, "cancel flag") === 1) {
         throw new RunStoreError("run_not_resumable", "A run with a cancellation request cannot be resumed.");
@@ -22610,21 +22656,25 @@ var SQLiteRunStore = class {
         throw new RunStoreError("run_not_resumable", "This run has no remaining provider-call allowance.");
       }
       const pending = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'pending'").get(runId2);
-      const runFailure = this.database.prepare("SELECT evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY started_ms DESC, attempt_id DESC LIMIT 1").get(runId2);
+      const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId2);
+      const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY started_ms DESC, attempt_id DESC LIMIT 1").get(runId2);
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
       const failedEvaluation = failedRunEvaluationId ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId2, failedRunEvaluationId) : void 0;
       const canRetrySharedFailure = status === "failed" && asText(run.failure_scope, "failure scope") === "run" && failedEvaluation !== void 0 && asText(failedEvaluation.status, "evaluation status") === "failed";
       const hasPending = asNumber(pending.count, "pending count") > 0;
-      const hasUnfinished = hasPending || canRetrySharedFailure;
+      const canRetryQuestionFailures = status === "partial" && asNumber(failed.count, "failed evaluation count") > 0;
+      const hasUnfinished = hasPending || canRetrySharedFailure || canRetryQuestionFailures;
       if (!hasUnfinished || status === "failed" && asText(run.failure_scope, "failure scope") !== "run") {
         throw new RunStoreError("run_not_resumable", "This run has no resumable unfinished work.");
       }
-      if (canRetrySharedFailure && failedRunEvaluationId) {
-        this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL WHERE run_id = ? AND evaluation_id = ? AND status = 'failed'").run(runId2, failedRunEvaluationId);
+      if (canRetrySharedFailure && runFailure) {
+        this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL
+          WHERE run_id = ? AND status = 'failed' AND evaluation_id IN (SELECT evaluation_id FROM attempt_evaluations WHERE attempt_id = ?)`).run(runId2, asText(runFailure.attempt_id, "failed attempt ID"));
       }
+      if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL WHERE run_id = ? AND status = 'failed'").run(runId2);
       this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
         failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
-        WHERE run_id = ? AND status IN ('interrupted', 'failed')`).run(nowMs + LEASE_MS, runId2);
+        WHERE run_id = ? AND status IN ('interrupted', 'failed', 'partial')`).run(nowMs + LEASE_MS, runId2);
       return { started: true, run: this.statusInside(runId2) };
     });
   }
