@@ -140,6 +140,22 @@ source identity and no-fit semantics. Selection, ordered Score position judgment
 and staged threshold crossing remain distinct. Do not add editorial-cut advice
 or a new scalar response primitive.
 
+Plan 6's final bounded OpenRouter pilot used one physical attempt, returned Choice
+`setup-excerpt` linked to `candidate-setup`, and preserved the exact text and
+source provenance. The confirming packet state contained no source metadata;
+the run was deleted and `run_storage` reported integrity `ok` with zero runs.
+Two pre-fix packaged-runtime pilots each used one physical attempt and returned
+`benefit-excerpt` linked to `candidate-benefit`; both exposed the direct-poll
+state leak and were deleted with healthy zero-run stores. The first bounded
+attempt's answer and physical-attempt count were not captured because its helper
+failed during temporary-directory cleanup.
+The pilot exposed a direct-poll compiler leak before the fix: material provenance
+was retained in the respondent state because the shared compiler copied extra
+runtime fields. The compiler now selects only material ID and text, covered by a
+direct-poll behavior test and the Jev wire contract test. The empty SQLite file
+remains in its OS temporary directory because the local safety layer blocked
+file deletion after Sheg verified the zero-run store.
+
 ### 7. Combined release acceptance
 
 Demonstrate the spec's full section-three investigation, including original-state

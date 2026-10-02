@@ -253,7 +253,7 @@ export function compileDecisionPacket(
 export function compileDecisionRequest(parts: DecisionPacketParts): DecisionRequest & { state: PromptState } {
   const state: PromptState = {
     respondent: { profile: { ...parts.respondentProfile } },
-    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    encounteredItems: parts.encounteredItems.map(({ id, text }) => ({ id, text })),
     trajectory: parts.trajectory,
   };
   const request = decisionRequestSchema.parse({

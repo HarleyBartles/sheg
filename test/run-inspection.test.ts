@@ -69,6 +69,21 @@ test('preparation compiles one frozen, metadata-free packet per respondent witho
   assert.equal(fixture.decisions, 0);
 });
 
+test('direct poll keeps source provenance in the run catalog but removes it from respondent provider state', async () => {
+  const candidate = { id: 'section-three', text: 'Third section.', sourceId: 'article-section-3', sourceSha256: 'c'.repeat(64) };
+  const fixture = makeProvider();
+  const input = { ...request([{ type: 'choice' as const, id: 'select-section', instructions: 'Which section?', options: { candidate: candidate.text, 'no-fit': 'Neither section' }, materialOptions: { candidate: candidate.id } }]), material: [candidate] };
+  const result = await prepareRun(input, fixture.provider);
+
+  assert.equal(result.inspection.valid, true);
+  assert.deepEqual(result.prepared!.request.kind === 'poll' ? result.prepared!.request.material[0] : undefined, candidate);
+  assert.deepEqual(fixture.measured[0]!.state.encounteredItems, [{ id: candidate.id, text: candidate.text }]);
+  assert.equal(JSON.stringify(fixture.measured[0]!.state).includes(candidate.sourceId), false);
+  assert.equal(JSON.stringify(fixture.measured[0]!.state).includes(candidate.sourceSha256), false);
+  assert.deepEqual(fixture.measured[0]!.question.type === 'choice' ? fixture.measured[0]!.question.materialOptions : undefined, { candidate: candidate.id });
+  assert.equal(fixture.decisions, 0);
+});
+
 test('preparation supports all existing typed question meanings', async () => {
   for (const typedQuestion of [
     { type: 'choice' as const, id: 'choice', instructions: 'Choose', options: { a: 'A' } },

@@ -111,13 +111,18 @@ text digest.
 ## Task 5: Verify the real Jev wire path and close the implementation slice
 
 **Files:**
+- Modify: `src/domain/decision/prompt.ts`, `test/run-inspection.test.ts`, this plan, and the v0.3.0 roadmap
+- Regenerate: packaged `dist/` from canonical sources
 - Inspect: all Task 1-4 changes, `docs/providers/jev.md`, generated contracts and copied plugin
 
-- [ ] Run the bounded synthetic OpenRouter pilot after fit inspection with one respondent, two offered candidate excerpts, one unlinked no-fit option, one mapped Choice question, and `maxCalls: 1`. Verify the returned option ID is accepted, a selected candidate maps to its exact text/source fields when chosen, one physical attempt is recorded, and no source metadata reaches the provider request except authored option text.
-- [ ] Use an isolated temporary `SHEG_DATA_DIR`; delete the run through `run_delete` and verify `run_storage.integrity` is `ok` with zero runs remaining. Remove the temporary directory only after Sheg deletion/integrity succeeds.
-- [ ] Report only route, request count, typed answer/selection IDs, safe failure codes, and deletion/integrity outcome. Never print credentials or provider headers.
-- [ ] Run the focused behavior set from Tasks 1-4 and `npm run verify`; the tracked hook remains authoritative for the staged snapshot.
-- [ ] Run `git diff --check`; stage only intended source, tests, skill/docs, ADR, plan, roadmap, and generated outputs; commit through the tracked hook as `feat: link Choice answers to exact source material`.
+- [x] Run the bounded synthetic OpenRouter pilot after fit inspection with one respondent, two offered candidate excerpts, one unlinked no-fit option, one mapped Choice question, and `maxCalls: 1`. The final confirming request used one physical attempt and returned Choice `setup-excerpt` linked to `candidate-setup`; exact text and source provenance matched, and the respondent state contained no source metadata. Two pre-fix packaged-runtime pilots used one physical attempt each and returned Choice `benefit-excerpt` linked to `candidate-benefit`, while exposing source metadata in direct-poll state; this drove the compiler-boundary correction below. The first pilot's attempt count and answer were not captured before its helper hit a local cleanup error.
+- [x] Use an isolated temporary `SHEG_DATA_DIR`; delete each pilot run through `run_delete` and verify `run_storage.integrity` is `ok` with zero runs remaining.
+- [x] Attempt temporary-directory cleanup only after Sheg deletion/integrity succeeds. Windows safety blocked both recursive cleanup and a narrower exact-file removal even after confirming the MCP process exited; readback shows only the verified zero-run SQLite database remains. Record this empty OS-temp residue as an environment exception and do not retry through another deletion surface.
+- [x] Record the final pilot's route, physical request count, typed answer/selection IDs, metadata-boundary result, and deletion/integrity outcome. Never print credentials or provider headers.
+- [x] Fix the direct-poll provenance leak at the shared prompt compiler boundary. Keep source fields in the durable request/catalog, but whitelist only material ID and exact text in respondent-facing state.
+- [x] Add a failing behavior test for direct-poll state provenance, then verify the Jev/Laya provider path and copied-package tests.
+- [x] Run the focused behavior set from Tasks 1-4 and `npm run verify`; the tracked hook remains authoritative for the staged snapshot.
+- [x] Run `git diff --check`; stage only intended source, tests, skill/docs, ADR, plan, roadmap, and generated outputs; commit through the tracked hook as `fix: exclude source provenance from respondent state`.
 
 ## Task 6: Review SHEG-8 and record the next JIT boundary
 

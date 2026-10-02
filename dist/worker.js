@@ -19903,7 +19903,7 @@ function compileDecisionPacket(arm, profile, taskId, history = []) {
 function compileDecisionRequest(parts) {
   const state = {
     respondent: { profile: { ...parts.respondentProfile } },
-    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    encounteredItems: parts.encounteredItems.map(({ id, text }) => ({ id, text })),
     trajectory: parts.trajectory
   };
   const request = decisionRequestSchema.parse({
