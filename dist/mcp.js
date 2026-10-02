@@ -34736,10 +34736,12 @@ var studyArmSchema = external_exports.object({
 function validateJourneyDefinition(arm, context) {
   const presentation = arm.presentation;
   const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
-  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
-  const itemIds = new Set(arm.items.map((item) => item.id));
+  const nodeIdValues = nodeValues.map((node2) => node2.id);
+  const itemIdValues = arm.items.map((item) => item.id);
+  const taskIdValues = arm.tasks.map((task) => task.id);
+  const itemIds = new Set(itemIdValues);
   const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
-  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
+  const allIds = [...itemIdValues, ...taskIdValues, ...nodeIdValues];
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
   }
@@ -36091,6 +36093,22 @@ async function prepareJourneyAdmission(request, provider) {
   });
   if (traversal.status !== "complete") {
     problems.push({ code: "journey_preflight_incomplete", message: traversal.incompleteReason ?? "Journey context traversal is incomplete." });
+  }
+  const respondentsWithoutInitialAsk = request.respondents.filter((respondent) => !packets.some((packet) => packet.respondentId === respondent.id && packet.decisionIndex === 1 && packet.pathId === "root"));
+  if (respondentsWithoutInitialAsk.length > 0) {
+    return { inspection: {
+      valid: false,
+      respondentCount: request.respondents.length,
+      minimumCalls: callBounds.minimumDecisionCalls,
+      maximumCalls: callBounds.maximumDecisionCalls,
+      problems: [...problems, ...respondentsWithoutInitialAsk.map((respondent) => ({
+        code: "invalid_journey",
+        respondentId: respondent.id,
+        message: `Journey has no initial ask packet for respondent ${respondent.id}.`
+      }))],
+      ...warnings.length === 0 ? {} : { warnings },
+      fits: []
+    } };
   }
   if (traversal.unverifiedReason) {
     warnings.push({ code: "context_fit_unverified", message: `${traversal.unverifiedReason} Each actual packet is checked by the selected provider before inference.` });

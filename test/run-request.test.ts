@@ -128,6 +128,27 @@ test('a direct journey request accepts inline typed route definitions without st
   }
 });
 
+test('a direct journey rejects duplicate item, task, and graph-node identifiers', () => {
+  const journey = {
+    kind: 'journey',
+    respondents: [profile('reader-a', 'First')],
+    journey: {
+      id: 'article', label: 'Article journey',
+      items: [{ id: 'section', text: 'Exact authored section.' }],
+      tasks: [{ id: 'interest', type: 'choice', instructions: 'Would you continue?', options: { yes: 'Yes', no: 'No' } }],
+      presentation: { kind: 'graph', entryNodeId: 'ask', maxDecisions: 1, nodes: [
+        { id: 'ask', kind: 'ask', taskId: 'interest' }, { id: 'done', kind: 'terminal', outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'ask', optionId: 'yes', toNodeId: 'done' }, { fromNodeId: 'ask', optionId: 'no', toNodeId: 'done' },
+      ] },
+    },
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  } as const;
+  assert.equal(runRequestSchema.safeParse({ ...journey, journey: { ...journey.journey, items: [...journey.journey.items, { id: 'section', text: 'Conflicting authored text.' }] } }).success, false);
+  assert.equal(runRequestSchema.safeParse({ ...journey, journey: { ...journey.journey, tasks: [...journey.journey.tasks, { ...journey.journey.tasks[0]!, instructions: 'Different question wording.' }] } }).success, false);
+  assert.equal(runRequestSchema.safeParse({ ...journey, journey: { ...journey.journey, presentation: { ...journey.journey.presentation, nodes: [...journey.journey.presentation.nodes, { id: 'done', kind: 'terminal', outcome: 'complete' }] } } }).success, false);
+});
+
 test('a journey can link a Choice option to an exact candidate that is not exposed on its current path', () => {
   const input = {
     kind: 'journey', respondents: [profile('reader-a', 'First')],

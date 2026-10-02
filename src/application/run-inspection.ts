@@ -378,6 +378,15 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
   if (traversal.status !== 'complete') {
     problems.push({ code: 'journey_preflight_incomplete', message: traversal.incompleteReason ?? 'Journey context traversal is incomplete.' });
   }
+  const respondentsWithoutInitialAsk = request.respondents.filter((respondent) =>
+    !packets.some((packet) => packet.respondentId === respondent.id && packet.decisionIndex === 1 && packet.pathId === 'root'));
+  if (respondentsWithoutInitialAsk.length > 0) {
+    return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
+      maximumCalls: callBounds.maximumDecisionCalls,
+      problems: [...problems, ...respondentsWithoutInitialAsk.map((respondent) => ({ code: 'invalid_journey', respondentId: respondent.id,
+        message: `Journey has no initial ask packet for respondent ${respondent.id}.` }))],
+      ...(warnings.length === 0 ? {} : { warnings }), fits: [] } };
+  }
   if (traversal.unverifiedReason) {
     warnings.push({ code: 'context_fit_unverified', message: `${traversal.unverifiedReason} Each actual packet is checked by the selected provider before inference.` });
   }

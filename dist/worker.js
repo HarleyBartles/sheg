@@ -21414,10 +21414,12 @@ var studyArmSchema = external_exports.object({
 function validateJourneyDefinition(arm, context) {
   const presentation = arm.presentation;
   const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
-  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
-  const itemIds = new Set(arm.items.map((item) => item.id));
+  const nodeIdValues = nodeValues.map((node2) => node2.id);
+  const itemIdValues = arm.items.map((item) => item.id);
+  const taskIdValues = arm.tasks.map((task) => task.id);
+  const itemIds = new Set(itemIdValues);
   const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
-  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
+  const allIds = [...itemIdValues, ...taskIdValues, ...nodeIdValues];
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
   }

@@ -378,6 +378,31 @@ test('journey admission measures each reachable context and reports bounded call
   assert.equal(fixture.decisions, 0);
 });
 
+test('journey admission rejects a terminal entry that cannot materialize an initial ask', async () => {
+  const base = journeyRequest();
+  const input = {
+    ...base,
+    journey: {
+      ...base.journey,
+      presentation: {
+        kind: 'graph',
+        entryNodeId: 'finished',
+        maxDecisions: 1,
+        nodes: [{ id: 'finished', kind: 'terminal', outcome: 'complete' }],
+        transitions: [],
+      },
+    },
+  };
+  const fixture = makeProvider();
+  const result = await prepareRun(input, fixture.provider);
+
+  assert.equal(result.inspection.valid, false);
+  assert.equal(result.inspection.problems.some(({ code }) => code === 'invalid_journey'), true);
+  assert.equal(result.journey, undefined);
+  assert.equal(fixture.measured.length, 0);
+  assert.equal(fixture.decisions, 0);
+});
+
 test('sequence admission measures each authored ask in order and applies the finite call bound', async () => {
   const base = journeyRequest(2);
   const request = { ...base, journey: { ...base.journey, presentation: { kind: 'sequence' } } };
