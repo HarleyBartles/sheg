@@ -107,6 +107,15 @@ test('evaluator prompts exclude any prior evaluation stored beside the actor tra
   assert.doesNotMatch(prompt, /old-judgment|Prior evaluator output/);
 });
 
+test('evaluator rejects malformed stored wrappers instead of treating them as raw actor output', () => {
+  assert.throws(() => renderEvaluatorPrompt('sequence-versus-linear-graph', {
+    scenarioId: 'sequence-versus-linear-graph',
+    scenarioVersion: 2,
+    guided: { actor: { finalResponse: 'Observed answer.' } },
+    controls: [null],
+  }), /Stored trace wrapper is malformed/);
+});
+
 test('evaluator prompts can select a stored no-guidance control without including the guided actor or prior judgment', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',

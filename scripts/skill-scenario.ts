@@ -195,6 +195,11 @@ export function renderEvaluatorPrompt(
     guided: z.object({ actor: z.unknown() }).passthrough().optional(),
     controls: z.array(z.object({ actor: z.unknown() }).passthrough()).optional(),
   }).passthrough().safeParse(actorTrace);
+  const wrapperShaped = typeof actorTrace === 'object' && actorTrace !== null &&
+    ('guided' in actorTrace || 'controls' in actorTrace);
+  if (!wrappedTrace.success && wrapperShaped) {
+    throw new Error('Stored trace wrapper is malformed.');
+  }
   if (wrappedTrace.success && (wrappedTrace.data.guided || wrappedTrace.data.controls)) {
     if (wrappedTrace.data.scenarioId !== scenario.id) {
       throw new Error(`Stored trace does not match scenario ${scenario.id}.`);
