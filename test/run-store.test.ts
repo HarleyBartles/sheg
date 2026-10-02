@@ -145,6 +145,74 @@ test('acceptance survives a second connection and matching submission retries sh
   }
 });
 
+test('a physical batch reserves and settles once while preserving one typed evaluation per question', async () => {
+  const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [
+    input.questions[0]!,
+    { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Clear'] },
+    { type: 'noul', id: 'appeal', instructions: 'Was it appealing?' },
+  ] };
+  const batchProvider: DecisionProvider = { ...provider, measureBatch: () => fit };
+  const prepared = await prepareRun(value, batchProvider);
+  assert.ok(prepared.prepared);
+  const root = await temporaryRoot(); const store = openRunStore(root, { now: () => 10_000 });
+  try {
+    const accepted = store.accept(randomUUID(), prepared.prepared);
+    const claim = store.claim(accepted.run.runId, 10_000, 1234); assert.ok(claim);
+    const group = prepared.prepared.groups![0]!;
+    const ids = prepared.prepared.evaluations.map(({ evaluationId }) => evaluationId);
+    const reservation = store.reserveBatch(claim, group.groupId, ids, 10_000); assert.ok(reservation);
+    assert.equal(store.getStatus(accepted.run.runId).reservedCalls, 1);
+    store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result: { execution: { attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 7, usage: {} }, answers: [
+      { questionId: 'interest', value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } },
+      { questionId: 'clarity', value: { type: 'score', score: 1, legend: { 0: 'Unclear', 1: 'Clear' }, probabilities: { 0: 0.1, 1: 0.9 } } },
+      { questionId: 'appeal', failure: { code: 'invalid_noul', message: 'The provider returned an invalid Noul value.' } },
+    ] } });
+    const answers = store.answers(accepted.run.runId).items;
+    assert.equal(store.getStatus(accepted.run.runId).usedCalls, 1);
+    assert.equal(new Set(answers.map(({ evaluationId }) => evaluationId)).size, 3);
+    assert.deepEqual(answers.map(({ status, result, failure }) => [status, result?.type, failure?.code]), [['answered', 'choice', undefined], ['answered', 'score', undefined], ['failed', undefined, 'invalid_noul']]);
+    assert.equal(answers[1]?.execution?.provider, 'laya');
+    const filtered = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'clarity' } });
+    assert.equal(filtered.items.length, 1);
+    assert.equal(filtered.items[0]?.questionId, 'clarity');
+    assert.equal(filtered.items[0]?.contextId, group.contextId);
+    assert.equal(filtered.items[0]?.execution?.model, 'test-model');
+    store.finish(claim);
+    const followRequest = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
+      selection: { criteria: { questionId: 'interest' } }, context: { mode: 'recorded' },
+      questions: [{ type: 'noul', id: 'why', instructions: 'Did anything reduce your interest?' },
+        { type: 'choice', id: 'continue-reading', instructions: 'Would you continue?', options: { yes: 'Yes', no: 'No' } }],
+      provider: value.provider, maxCalls: 1 });
+    const sources = store.resolveFollowOnSources(followRequest);
+    const follow = await prepareFollowOnRun(followRequest, sources, batchProvider);
+    assert.equal(follow.inspection.valid, true);
+    const followAccepted = store.accept(randomUUID(), follow.prepared);
+    assert.equal(followAccepted.run.totalEvaluations, 2);
+    assert.equal(store.getRequest(followAccepted.run.runId).groups?.length, 1);
+    const db = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try {
+      assert.equal((db.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(accepted.run.runId) as { count: number }).count, 1);
+      assert.equal((db.prepare('SELECT COUNT(*) AS count FROM attempt_evaluations').get() as { count: number }).count, 3);
+    } finally { db.close(); }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('a batch-wide provider failure records one physical call and fails every reserved evaluation together', async () => {
+  const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [input.questions[0]!,
+    { type: 'noul', id: 'interest-score', instructions: 'How interested are you?' }] };
+  const prepared = await prepareRun(value, { ...provider, measureBatch: () => fit }); assert.ok(prepared.prepared);
+  const root = await temporaryRoot(); const store = openRunStore(root, { now: () => 10_000 });
+  try {
+    const accepted = store.accept(randomUUID(), prepared.prepared); const claim = store.claim(accepted.run.runId, 10_000, 1234); assert.ok(claim);
+    const reservation = store.reserveBatch(claim, prepared.prepared.groups![0]!.groupId, prepared.prepared.evaluations.map(({ evaluationId }) => evaluationId), 10_000); assert.ok(reservation);
+    store.settleBatch(claim, reservation.attemptId, { kind: 'failed', code: 'provider_authentication_failed', message: 'Provider authentication failed.', scope: 'run' });
+    assert.equal(store.getStatus(accepted.run.runId).usedCalls, 1);
+    assert.deepEqual(store.answers(accepted.run.runId).items.map(({ status, failure }) => [status, failure?.code]), [
+      ['failed', 'provider_authentication_failed'], ['failed', 'provider_authentication_failed'],
+    ]);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('journey acceptance freezes exact reached packets and respondent state across reopen', async () => {
   const root = await temporaryRoot();
   const first = openRunStore(root);

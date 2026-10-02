@@ -32,6 +32,7 @@ export type JourneyRespondentState = {
 export type JourneyEvaluationRecord = JourneyEvaluation & {
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
+  execution?: import('../decision/decision.js').ProviderExecutionEvidence;
   failure?: { code: string; message: string };
 };
 
@@ -74,6 +75,7 @@ export type AnswerRow = {
   questionId: string;
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
+  execution?: import('../decision/decision.js').ProviderExecutionEvidence;
   failure?: { code: string; message: string };
 };
 

@@ -120,7 +120,7 @@ derived group. Sibling answers are never sent into another question's state.
 - [x] Add a Laya test showing a group is split into singleton requests without changing question or state. Preserve tokenizer/context fit on each actual singleton packet.
 - [x] Implement Jev group wire serialization, exact multi-answer validation, execution evidence parsing, and per-route batch support. Dispatch with `maxAttempts: 1` so each worker reservation bounds one physical request; use explicit resume for another call. Do not add SDK dependencies or change route inference rules.
 - [x] Document the published Jev parallel-question request shape and the local singleton boundary. Preserve the native context-limit admission restriction and existing OpenRouter fit evidence.
-- [ ] Run `node --import tsx --test test/jev.test.ts test/laya.test.ts test/jev-config.test.ts` and `npm run build`; commit as `feat: batch independent Jev questions`.
+- [x] Run `node --import tsx --test test/jev.test.ts test/laya.test.ts test/jev-config.test.ts` and `npm run build`; commit as `feat: batch independent Jev questions`.
 
 ## Task 5: Persist shared call evidence and settle per-question evaluations
 
@@ -132,12 +132,12 @@ derived group. Sibling answers are never sent into another question's state.
 - Consumes: accepted logical question groups, planned physical batches, and `DecisionBatchResult`.
 - Produces: schema version 4 with a logical question-group record, one physical-attempt record per dispatched HTTP request (including retries), and a join from each physical attempt to exactly the evaluations it served. Persist the shared request packet fingerprint and provider execution evidence once per physical attempt; keep typed result/failure/status on each evaluation. `AnswerRow` and evidence queries join the shared provider evidence for the exact answer attempt. Older schema versions return the explicit pre-v1 export/reset error; no migrations are added.
 
-- [ ] Add store tests proving one grouped physical attempt linked to N question evaluations increments `usedCalls` by one, while every answer retains a distinct evaluation ID and typed result. Verify query pages filter and return per-question evidence with the shared context and provider provenance.
-- [ ] Add atomic settlement tests for mixed valid/invalid response entries, request-wide auth failure, cancellation, and attempt settlement. A valid sibling remains answered when another question fails. Request-wide failure records one call and marks all members with the same safe failure scope.
-- [ ] Add an integration test showing a run with mixed question types can be inspected, accepted, queried by question ID, and reused in a follow-on without changing existing journey routing semantics.
-- [ ] Implement the group/attempt association and schema-v4 storage contract. Preserve WAL, ownership fencing, foreign-key checks, deletion integrity, pagination, source snapshot semantics, and one shared context ID per question group.
-- [ ] Update `run_get`, `run_query`, delete previews, and storage counts where their projections describe evaluations versus physical attempts. Keep physical attempt counts distinct from answer counts.
-- [ ] Run `node --import tsx --test test/run-store.test.ts test/run-service.test.ts`; commit as `feat: persist grouped answers and shared call evidence`.
+- [x] Add store tests proving one grouped physical attempt linked to N question evaluations increments `usedCalls` by one, while every answer retains a distinct evaluation ID and typed result. Verify query pages filter and return per-question evidence with the shared context and provider provenance.
+- [x] Add atomic settlement tests for mixed valid/invalid response entries, request-wide auth failure, cancellation, and attempt settlement. A valid sibling remains answered when another question fails. Request-wide failure records one call and marks all members with the same safe failure scope.
+- [x] Add an integration test showing a run with mixed question types can be inspected, accepted, queried by question ID, and reused in a follow-on without changing existing journey routing semantics.
+- [x] Implement the group/attempt association and schema-v4 storage contract. Preserve WAL, ownership fencing, foreign-key checks, deletion integrity, pagination, source snapshot semantics, and one shared context ID per question group.
+- [x] Update `run_get`, `run_query`, delete previews, and storage counts where their projections describe evaluations versus physical attempts. Keep physical attempt counts distinct from answer counts.
+- [x] Run `node --import tsx --test test/run-store.test.ts test/run-service.test.ts`; commit as `feat: persist grouped answers and shared call evidence`.
 
 ## Task 6: Execute, interrupt, and resume question groups safely
 

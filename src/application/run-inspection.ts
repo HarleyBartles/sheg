@@ -23,6 +23,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
   const evaluations: FrozenEvaluation[] = [];
+  const preparedGroups: NonNullable<PreparedRun['groups']> = [];
   const groups = new Map<string, { representative: FollowOnSourceSet['turns'][number]; turns: FollowOnSourceSet['turns'] }>();
   for (const turn of source.turns) {
     const groupKey = request.context.mode === 'continue' ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
@@ -65,11 +66,12 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     fits.push(...planned.fits);
     problems.push(...planned.problems);
     const groupEvaluations: FrozenEvaluation[] = packets.map((packet) => {
-      const evaluation = { evaluationId: randomUUID(), contextId, respondentId: turn.respondentId,
+      const evaluation = { groupId, evaluationId: randomUUID(), contextId, respondentId: turn.respondentId,
         questionId: packet.question.id, packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }) };
       evaluations.push(evaluation);
       return evaluation;
     });
+    preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
       selections.push({ sourceEvaluationId: sourceTurn.evaluationId, sourceContextId: sourceTurn.contextId,
         respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId });
@@ -88,7 +90,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
     sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections };
   return { sourceVersion: source.version, inspection,
-    prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, lineage } };
+    prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, groups: preparedGroups, lineage } };
 }
 
 class RunProblemError extends Error {
@@ -203,6 +205,7 @@ export async function prepareRun(
 
   const compilerFingerprint = promptContractHash();
   const evaluations: FrozenEvaluation[] = [];
+  const preparedGroups: NonNullable<PreparedRun['groups']> = [];
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
   let minimumCalls = 0;
@@ -222,13 +225,14 @@ export async function prepareRun(
     }));
     const contextId = randomUUID();
     const groupId = randomUUID();
+    preparedGroups.push({ groupId, contextId, respondentId: respondent.id, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
     const planned = await planQuestionBatches({ groupId, contextId, respondentId: respondent.id, state: packets[0]!.state, questions: request.questions, packets }, provider, kind, modelIdentity);
     minimumCalls += planned.batches.length;
     fits.push(...planned.fits);
     problems.push(...planned.problems);
     for (const packet of packets) {
       evaluations.push({
-        evaluationId: randomUUID(), contextId, respondentId: respondent.id,
+        groupId, evaluationId: randomUUID(), contextId, respondentId: respondent.id,
         questionId: packet.question.id, packet,
         packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
       });
@@ -252,6 +256,7 @@ export async function prepareRun(
     requestFingerprint: hashCanonical({ request, compilerFingerprint }),
     compilerFingerprint,
     evaluations,
+    groups: preparedGroups,
   };
   return { inspection, prepared };
 }

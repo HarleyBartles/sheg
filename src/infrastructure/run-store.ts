@@ -7,11 +7,11 @@ import { validateDecision } from '../domain/decision/validate.js';
 import { compileDecisionPacket } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
 import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
-import { decisionResultSchema } from '../domain/decision/decision.js';
+import { decisionResultSchema, decisionValueSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
 import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const LEASE_MS = 30_000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -97,6 +97,8 @@ export interface RunStore {
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null;
   heartbeat(claim: WorkerClaim, nowMs: number): boolean;
   reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null;
+  reserveBatch(claim: WorkerClaim, groupId: string, evaluationIds: string[], nowMs: number): { attemptId: string; evaluations: FrozenEvaluation[] } | null;
+  settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): void;
   settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void;
   settleJourney(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome, transition: JourneyTransition): void;
   finish(claim: WorkerClaim): RunStatusView;
@@ -130,6 +132,14 @@ function asNumber(value: SQLOutputValue | undefined, label: string): number {
   const number = Number(value);
   if (!Number.isSafeInteger(number)) throw new RunStoreError('data_integrity_error', `Stored ${label} is outside the safe integer range.`);
   return number;
+}
+
+function resultFromStorage(value: unknown, execution: unknown): import('../domain/decision/decision.js').DecisionResult {
+  const complete = decisionResultSchema.safeParse(value);
+  if (complete.success) return complete.data;
+  const typed = decisionValueSchema.parse(value);
+  const evidence = providerExecutionEvidenceSchema.parse(execution);
+  return decisionResultSchema.parse({ ...typed, ...evidence });
 }
 
 function parseJson<T>(value: SQLOutputValue | undefined, label: string): T {
@@ -214,6 +224,7 @@ function initialize(database: DatabaseSync): void {
       context_id TEXT NOT NULL,
       respondent_id TEXT NOT NULL,
       question_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
       turn_id TEXT,
       node_id TEXT,
       path_id TEXT,
@@ -226,6 +237,7 @@ function initialize(database: DatabaseSync): void {
       failure_message TEXT,
       UNIQUE (run_id, ordinal),
       UNIQUE (run_id, evaluation_id),
+      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE,
       UNIQUE (run_id, turn_id),
       UNIQUE (run_id, respondent_id, node_id, occurrence),
       CHECK ((turn_id IS NULL AND node_id IS NULL AND path_id IS NULL AND occurrence IS NULL) OR
@@ -249,16 +261,36 @@ function initialize(database: DatabaseSync): void {
     CREATE TABLE attempts (
       attempt_id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+      group_id TEXT NOT NULL,
       evaluation_id TEXT NOT NULL,
+      packet_fingerprint TEXT NOT NULL,
       owner_token TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('reserved', 'answered', 'failed', 'uncertain')),
       started_ms INTEGER NOT NULL,
       settled_ms INTEGER,
       result_json TEXT,
+      execution_json TEXT,
       failure_code TEXT,
       failure_message TEXT,
       failure_scope TEXT CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run')),
-      FOREIGN KEY (run_id, evaluation_id) REFERENCES evaluations(run_id, evaluation_id) ON DELETE CASCADE
+      FOREIGN KEY (run_id, evaluation_id) REFERENCES evaluations(run_id, evaluation_id) ON DELETE CASCADE,
+      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE
+    );
+    CREATE TABLE question_groups (
+      group_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL,
+      context_id TEXT NOT NULL,
+      respondent_id TEXT NOT NULL,
+      state_json TEXT NOT NULL,
+      question_ids_json TEXT NOT NULL,
+      UNIQUE (run_id, ordinal),
+      UNIQUE (run_id, group_id)
+    );
+    CREATE TABLE attempt_evaluations (
+      attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
+      evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
+      PRIMARY KEY (attempt_id, evaluation_id)
     );
     CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
     CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
@@ -279,44 +311,54 @@ function validatePrepared(prepared: PreparedRun): PreparedRun {
   }
   if (parsedRequest.data.kind === 'follow-on') {
     const lineage = prepared.lineage;
-    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId || lineage.selections.length !== prepared.evaluations.length ||
+    const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
+    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId ||
         lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === 'completed')) {
       throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on lineage does not match its request and frozen evaluations.');
     }
-    const selectedIds = new Set<string>(); const selectedContexts = new Set<string>(); const evaluationIds = new Set<string>(); const contextIds = new Set<string>();
-    for (const [index, evaluation] of prepared.evaluations.entries()) {
-      const selection = lineage.selections[index]!;
+    const evaluationIds = new Set<string>(); const groupIds = new Set<string>();
+    const questionIdsByGroup = new Map<string, string[]>();
+    if (!prepared.groups || prepared.groups.length === 0 || new Set(prepared.groups.map(({ groupId }) => groupId)).size !== prepared.groups.length) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on groups are missing or duplicated.');
+    for (const group of prepared.groups) groupIds.add(group.groupId);
+    for (const evaluation of prepared.evaluations) {
       const packet = decisionRequestSchema.safeParse(evaluation.packet);
-      if (!packet.success || selection.respondentId !== evaluation.respondentId || selection.evaluationId !== evaluation.evaluationId || selection.contextId !== evaluation.contextId ||
-          evaluation.questionId !== parsedRequest.data.questions[0]!.id || packet.data.question.id !== evaluation.questionId ||
+      if (!packet.success || !prepared.groups?.some((group) => group.groupId === evaluation.groupId && group.contextId === evaluation.contextId && group.respondentId === evaluation.respondentId && group.questionIds.includes(evaluation.questionId) && hashCanonical(group.state) === hashCanonical(packet.data.state)) ||
+          !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId ||
           hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint ||
-          selectedIds.has(selection.sourceEvaluationId) || selectedContexts.has(selection.sourceContextId) || evaluationIds.has(evaluation.evaluationId) || contextIds.has(evaluation.contextId)) {
+          evaluationIds.has(evaluation.evaluationId) || !groupIds.has(evaluation.groupId ?? '')) {
         throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on evaluation or source selection is inconsistent.');
       }
-      selectedIds.add(selection.sourceEvaluationId); selectedContexts.add(selection.sourceContextId); evaluationIds.add(evaluation.evaluationId); contextIds.add(evaluation.contextId);
+      evaluationIds.add(evaluation.evaluationId);
+      const ids = questionIdsByGroup.get(evaluation.groupId!) ?? []; ids.push(evaluation.questionId); questionIdsByGroup.set(evaluation.groupId!, ids);
     }
+    if (!prepared.groups || prepared.groups.length === 0 || lineage.selections.some((selection) => !evaluationIds.has(selection.evaluationId)) ||
+        prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) ||
+          JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on group lineage is inconsistent.');
     return { ...prepared, request: parsedRequest.data };
   }
   if (parsedRequest.data.kind !== 'poll') throw new RunStoreError('invalid_prepared_run', 'A journey must be accepted through journey preparation.');
-  if (prepared.evaluations.length !== parsedRequest.data.respondents.length) {
-    throw new RunStoreError('invalid_prepared_run', 'Prepared run evaluations do not match the respondent count.');
+  if (!prepared.groups || prepared.groups.length !== parsedRequest.data.respondents.length || prepared.evaluations.length !== parsedRequest.data.respondents.length * parsedRequest.data.questions.length) {
+    throw new RunStoreError('invalid_prepared_run', 'Prepared run question groups do not match respondents and questions.');
   }
   const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
+  const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
   const evaluationIds = new Set<string>();
-  const contextIds = new Set<string>();
   const seenRespondents = new Set<string>();
+  const questionIdsByGroup = new Map<string, string[]>();
   for (const evaluation of prepared.evaluations) {
     const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    if (!packet.success || !respondentIds.has(evaluation.respondentId) || seenRespondents.has(evaluation.respondentId) || evaluationIds.has(evaluation.evaluationId) || contextIds.has(evaluation.contextId) ||
-        evaluation.questionId !== parsedRequest.data.questions[0]!.id || packet.data.question.id !== evaluation.questionId ||
+    const group = prepared.groups.find(({ groupId }) => groupId === evaluation.groupId);
+    if (!packet.success || !group || group.respondentId !== evaluation.respondentId || group.contextId !== evaluation.contextId || hashCanonical(group.state) !== hashCanonical(packet.data.state) || !respondentIds.has(evaluation.respondentId) || evaluationIds.has(evaluation.evaluationId) ||
+        !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId ||
         hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
       throw new RunStoreError('invalid_prepared_run', 'Prepared run evaluation or packet fingerprint is invalid.');
     }
     evaluationIds.add(evaluation.evaluationId);
-    contextIds.add(evaluation.contextId);
     seenRespondents.add(evaluation.respondentId);
+    const ids = questionIdsByGroup.get(group.groupId) ?? []; ids.push(evaluation.questionId); questionIdsByGroup.set(group.groupId, ids);
   }
-  if (seenRespondents.size !== respondentIds.size) throw new RunStoreError('invalid_prepared_run', 'Every respondent must have exactly one prepared evaluation.');
+  if (seenRespondents.size !== respondentIds.size || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) ||
+      JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds) || !respondentIds.has(group.respondentId))) throw new RunStoreError('invalid_prepared_run', 'Every respondent must have one complete ordered question group.');
   return { ...prepared, request: parsedRequest.data };
 }
 
@@ -448,11 +490,14 @@ class SQLiteRunStore implements RunStore {
         .run(runId, submissionId, prepared.requestFingerprint, createdAt, nowMs, prepared.request.label ?? null,
           JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint, ...(prepared.lineage ? { lineage: prepared.lineage } : {}) }), prepared.evaluations.length, prepared.request.maxCalls);
       const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
-        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, packet_json, packet_fingerprint, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
+        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, packet_json, packet_fingerprint, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
+      const insertGroup = this.database.prepare(`INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      for (const [ordinal, group] of (prepared.groups ?? []).entries()) insertGroup.run(group.groupId, runId, ordinal, group.contextId, group.respondentId, JSON.stringify(group.state), JSON.stringify(group.questionIds));
       for (const [ordinal, evaluation] of prepared.evaluations.entries()) {
         insertEvaluation.run(evaluation.evaluationId, runId, ordinal, evaluation.contextId, evaluation.respondentId,
-          evaluation.questionId, JSON.stringify(evaluation.packet), evaluation.packetFingerprint);
+          evaluation.questionId, evaluation.groupId ?? null, JSON.stringify(evaluation.packet), evaluation.packetFingerprint);
       }
       return { created: true, run: this.statusInside(runId) };
     });
@@ -481,11 +526,15 @@ class SQLiteRunStore implements RunStore {
         .run(runId, submissionId, prepared.requestFingerprint, createdAt, nowMs, prepared.request.label ?? null,
           JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint }), prepared.evaluations.length, prepared.request.maxCalls);
       const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
-        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
+        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
       for (const evaluation of prepared.evaluations) {
+        const groupId = evaluation.contextId;
+        this.database.prepare(`INSERT OR IGNORE INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(groupId, runId, evaluation.ordinal, evaluation.contextId, evaluation.respondentId, JSON.stringify(evaluation.packet.state), JSON.stringify([evaluation.questionId]));
         insertEvaluation.run(evaluation.evaluationId, runId, evaluation.ordinal, evaluation.contextId, evaluation.respondentId,
-          evaluation.questionId, evaluation.turnId, evaluation.nodeId, evaluation.pathId, evaluation.occurrence,
+          evaluation.questionId, groupId, evaluation.turnId, evaluation.nodeId, evaluation.pathId, evaluation.occurrence,
           JSON.stringify(evaluation.packet), evaluation.packetFingerprint);
       }
       const insertState = this.database.prepare(`INSERT INTO journey_respondents
@@ -529,8 +578,13 @@ class SQLiteRunStore implements RunStore {
       throw new RunStoreError('data_integrity_error', 'Stored run request has an invalid shape.');
     }
     const evaluations = this.database.prepare('SELECT * FROM evaluations WHERE run_id = ? ORDER BY ordinal').all(runId) as DatabaseRow[];
+    const groups = this.database.prepare('SELECT * FROM question_groups WHERE run_id = ? ORDER BY ordinal').all(runId) as DatabaseRow[];
     const prepared = stored as Omit<PreparedRun, 'evaluations'>;
-    const parsed = validatePrepared({ ...prepared, evaluations: evaluations.map((row) => ({
+    const parsed = validatePrepared({ ...prepared, groups: groups.map((row) => ({
+      groupId: asText(row.group_id, 'group ID'), contextId: asText(row.context_id, 'context ID'), respondentId: asText(row.respondent_id, 'respondent ID'),
+      state: parseJson(row.state_json, 'group state'), questionIds: parseJson(row.question_ids_json, 'group question IDs'),
+    })), evaluations: evaluations.map((row) => ({
+      groupId: asText(row.group_id, 'group ID'),
       evaluationId: asText(row.evaluation_id, 'evaluation ID'),
       contextId: asText(row.context_id, 'context ID'),
       respondentId: asText(row.respondent_id, 'respondent ID'),
@@ -704,7 +758,10 @@ class SQLiteRunStore implements RunStore {
         }
         if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
       }
-      const rows = this.database.prepare(`SELECT e.* FROM evaluations AS e
+      const rows = this.database.prepare(`SELECT e.*,
+        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
+          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        FROM evaluations AS e
         LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
         WHERE ${where.join(' AND ')} ORDER BY e.ordinal LIMIT 10001`).all(...parameters) as DatabaseRow[];
       if (rows.length > 10_000) throw new RunStoreError('follow_on_selection_too_large', 'Follow-on selection matched more than 10,000 evaluations. Narrow the criteria or use explicit references.');
@@ -713,7 +770,7 @@ class SQLiteRunStore implements RunStore {
       }
       const turns: FollowOnSourceSet['turns'] = rows.map((row) => {
         const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'source packet')) as FollowOnSourceSet['turns'][number]['packet'];
-        const result = row.result_json === null ? undefined : decisionResultSchema.parse(parseJson(row.result_json, 'source answer'));
+        const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'source answer'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'source execution'));
         return {
           evaluationId: asText(row.evaluation_id, 'evaluation ID'), contextId: asText(row.context_id, 'context ID'),
           respondentId: asText(row.respondent_id, 'respondent ID'), packet, ...(result ? { result } : {}),
@@ -823,7 +880,10 @@ class SQLiteRunStore implements RunStore {
         respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-      const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome FROM evaluations AS e ${join}
+      const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
+        (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
+          WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+        FROM evaluations AS e ${join}
         WHERE ${whereSql} ${cursor ? 'AND e.ordinal > ?' : ''} ORDER BY e.ordinal LIMIT ?`)
         .all(...parameters, ...(cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1])) as DatabaseRow[];
       const hasMore = rows.length > limit;
@@ -841,7 +901,8 @@ class SQLiteRunStore implements RunStore {
         respondentId: asText(row.respondent_id, 'respondent ID'),
         questionId: asText(row.question_id, 'question ID'),
         status: asText(row.status, 'evaluation status') as RunEvidencePage['items'][number]['status'],
-        ...(row.result_json === null ? {} : { result: parseJson(row.result_json, 'decision result') }),
+        ...(row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution')) }),
+        ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
         ...(row.turn_id === null ? {} : { turnId: asText(row.turn_id, 'turn ID') }),
         ...(row.node_id === null ? {} : { nodeId: asText(row.node_id, 'node ID') }),
         ...(row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, 'turn occurrence') }),
@@ -882,7 +943,10 @@ class SQLiteRunStore implements RunStore {
         throw new RunStoreError('invalid_cursor', 'The answer cursor does not match this run.');
       }
     }
-    const rows = this.database.prepare(`SELECT * FROM evaluations WHERE run_id = ? ${cursor ? 'AND ordinal > ?' : ''} ORDER BY ordinal LIMIT ?`)
+    const rows = this.database.prepare(`SELECT e.*,
+      (SELECT a.execution_json FROM attempt_evaluations ae JOIN attempts a USING (attempt_id)
+        WHERE ae.evaluation_id = e.evaluation_id AND a.execution_json IS NOT NULL ORDER BY a.settled_ms DESC LIMIT 1) AS execution_json
+      FROM evaluations e WHERE run_id = ? ${cursor ? 'AND ordinal > ?' : ''} ORDER BY ordinal LIMIT ?`)
       .all(...(cursor ? [runId, cursor.ordinal, limit + 1] : [runId, limit + 1])) as DatabaseRow[];
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
@@ -892,7 +956,8 @@ class SQLiteRunStore implements RunStore {
       respondentId: asText(row.respondent_id, 'respondent ID'),
       questionId: asText(row.question_id, 'question ID'),
       status: asText(row.status, 'evaluation status') as AnswerRow['status'],
-      ...(row.result_json === null ? {} : { result: parseJson(row.result_json, 'decision result') }),
+      ...(row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution')) }),
+      ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
       ...(row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, 'failure code'), message: asText(row.failure_message, 'failure message') } }),
     }));
     const last = pageRows.at(-1);
@@ -1078,10 +1143,86 @@ class SQLiteRunStore implements RunStore {
       if (!row) return null;
       const attemptId = randomUUID();
       const evaluationId = asText(row.evaluation_id, 'evaluation ID');
-      this.database.prepare("INSERT INTO attempts (attempt_id, run_id, evaluation_id, owner_token, status, started_ms) VALUES (?, ?, ?, ?, 'reserved', ?)")
-        .run(attemptId, claim.runId, evaluationId, claim.ownerToken, nowMs);
+      this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)")
+        .run(attemptId, claim.runId, asText(row.group_id, 'group ID'), evaluationId, asText(row.packet_fingerprint, 'packet fingerprint'), claim.ownerToken, nowMs);
+      this.database.prepare('INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)').run(attemptId, evaluationId);
       this.database.prepare('UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?').run(claim.runId);
       return { attemptId, evaluation: this.evaluationFromRow(row) };
+    });
+  }
+
+  reserveBatch(claim: WorkerClaim, groupId: string, evaluationIds: string[], nowMs: number): { attemptId: string; evaluations: FrozenEvaluation[] } | null {
+    this.ensureOpen();
+    return this.transaction(() => {
+      const run = this.ownedRun(claim, nowMs);
+      if (!evaluationIds.length || new Set(evaluationIds).size !== evaluationIds.length || asNumber(run.cancel_requested, 'cancel flag') === 1 ||
+          asNumber(run.reserved_calls, 'reserved calls') !== 0 || asNumber(run.used_calls, 'used calls') >= asNumber(run.max_calls, 'maximum calls')) return null;
+      const group = this.database.prepare('SELECT * FROM question_groups WHERE run_id = ? AND group_id = ?').get(claim.runId, groupId) as DatabaseRow | undefined;
+      if (!group) throw new RunStoreError('question_group_not_found', 'The requested question group was not found in this run.');
+      const orderedIds = parseJson<string[]>(group.question_ids_json, 'group question IDs');
+      const rows = this.database.prepare(`SELECT * FROM evaluations WHERE run_id = ? AND group_id = ? AND status = 'pending'`).all(claim.runId, groupId) as DatabaseRow[];
+      const byId = new Map(rows.map((row) => [asText(row.evaluation_id, 'evaluation ID'), row]));
+      const selected = evaluationIds.map((id) => byId.get(id));
+      if (selected.some((row) => !row) || selected.some((row) => !orderedIds.includes(asText(row!.question_id, 'question ID')))) {
+        throw new RunStoreError('invalid_batch_reservation', 'A batch may reserve only pending evaluations from the requested group.');
+      }
+      const sorted = [...selected as DatabaseRow[]].sort((left, right) => orderedIds.indexOf(asText(left.question_id, 'question ID')) - orderedIds.indexOf(asText(right.question_id, 'question ID')));
+      const attemptId = randomUUID(); const anchorId = asText(sorted[0]!.evaluation_id, 'evaluation ID');
+      const state = parseJson(group.state_json, 'group state');
+      const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet')).question);
+      const packetFingerprint = hashCanonical({ state, questions: packetQuestions });
+      this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)")
+        .run(attemptId, claim.runId, groupId, anchorId, packetFingerprint, claim.ownerToken, nowMs);
+      const link = this.database.prepare('INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)');
+      for (const row of sorted) link.run(attemptId, asText(row.evaluation_id, 'evaluation ID'));
+      this.database.prepare('UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?').run(claim.runId);
+      return { attemptId, evaluations: sorted.map((row) => this.evaluationFromRow(row)) };
+    });
+  }
+
+  settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): void {
+    this.ensureOpen();
+    this.transaction(() => {
+      const nowMs = this.now(); this.ownedRun(claim, nowMs);
+      const attempt = this.database.prepare("SELECT * FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'")
+        .get(attemptId, claim.runId, claim.ownerToken) as DatabaseRow | undefined;
+      if (!attempt) throw new RunStoreError('attempt_not_reserved', 'The provider attempt is not reserved by this worker.');
+      const rows = this.database.prepare(`SELECT e.* FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id) WHERE ae.attempt_id = ? ORDER BY e.ordinal`).all(attemptId) as DatabaseRow[];
+      if (!rows.length) throw new RunStoreError('data_integrity_error', 'The provider attempt has no linked evaluations.');
+      if (outcome.kind === 'failed') {
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
+          .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        for (const row of rows) this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?")
+          .run(outcome.code, outcome.message, asText(row.evaluation_id, 'evaluation ID'));
+        if (outcome.scope === 'run') this.database.prepare('UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?').run(outcome.scope, outcome.code, outcome.message, claim.runId);
+      } else {
+        const result = decisionBatchResultSchema.safeParse(outcome.result);
+        if (!result.success) throw new RunStoreError('invalid_batch_result', 'The batch result envelope is invalid.');
+        const expected = new Map(rows.map((row) => [asText(row.question_id, 'question ID'), row]));
+        if (result.data.answers.some(({ questionId }) => !expected.has(questionId))) throw new RunStoreError('invalid_batch_result', 'The batch result contains an unknown question ID.');
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, execution_json = ? WHERE attempt_id = ?")
+          .run(nowMs, JSON.stringify(result.data.execution), attemptId);
+        for (const [questionId, row] of expected) {
+          const answer = result.data.answers.find((item) => item.questionId === questionId);
+          const evaluationId = asText(row.evaluation_id, 'evaluation ID');
+          if (!answer) {
+            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'missing_batch_answer', failure_message = 'Provider returned no answer for this question.' WHERE evaluation_id = ?").run(evaluationId);
+          } else if ('failure' in answer) {
+            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(answer.failure.code, answer.failure.message, evaluationId);
+          } else {
+            const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet'));
+            let validated: ReturnType<typeof validateDecision> | undefined;
+            try {
+              const typed = decisionResultSchema.parse({ ...answer.value, ...result.data.execution });
+              validated = validateDecision(packet, typed, { maxAttempts: 1 });
+            } catch {
+              this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'invalid_decision', failure_message = 'Provider returned an answer that does not match this question.' WHERE evaluation_id = ?").run(evaluationId);
+            }
+            if (validated) this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+          }
+        }
+      }
+      this.database.prepare('UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0').run(claim.runId);
     });
   }
 
@@ -1100,8 +1241,8 @@ class SQLiteRunStore implements RunStore {
 
       if (outcome.kind === 'answered') {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ? WHERE attempt_id = ?")
-          .run(nowMs, JSON.stringify(result), attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
+          .run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?")
           .run(JSON.stringify(result), evaluationId);
       } else {
@@ -1181,8 +1322,8 @@ class SQLiteRunStore implements RunStore {
         } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
           throw new RunStoreError('journey_transition_conflict', 'A terminal respondent state cannot have a next reached turn.');
         }
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ? WHERE attempt_id = ?")
-          .run(nowMs, JSON.stringify(result), attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
+          .run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?")
           .run(JSON.stringify(result), evaluationId);
       } else {
@@ -1213,11 +1354,14 @@ class SQLiteRunStore implements RunStore {
             hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
           throw new RunStoreError('invalid_journey_turn', 'Next journey turn is invalid or does not follow the persisted evaluation order.');
         }
+        this.database.prepare(`INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(next.contextId, claim.runId, next.ordinal, next.contextId, next.respondentId, JSON.stringify(next.packet.state), JSON.stringify([next.questionId]));
         this.database.prepare(`INSERT INTO evaluations
-          (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
+          (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
           .run(next.evaluationId, claim.runId, next.ordinal, next.contextId, next.respondentId, next.questionId,
-            next.turnId, next.nodeId, next.pathId, next.occurrence, JSON.stringify(next.packet), next.packetFingerprint);
+            next.contextId, next.turnId, next.nodeId, next.pathId, next.occurrence, JSON.stringify(next.packet), next.packetFingerprint);
         this.database.prepare('UPDATE runs SET evaluation_count = evaluation_count + 1 WHERE run_id = ?').run(claim.runId);
       }
       const updatedState = this.database.prepare(`UPDATE journey_respondents SET status = ?, current_node_id = ?, current_turn_id = ?, current_context_id = ?,

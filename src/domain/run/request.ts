@@ -5,6 +5,7 @@ import { providerConfigSchema } from '../../providers/config.js';
 import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js';
 import type { JourneyEvaluation, JourneyRespondentState } from './lifecycle.js';
 import { decisionResultSchema } from '../decision/decision.js';
+import { providerExecutionEvidenceSchema } from '../decision/decision.js';
 
 const materialItemSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
@@ -142,6 +143,7 @@ export const runEvidenceItemSchema = z.object({
     questionId: z.string().min(1),
     status: z.enum(['pending', 'answered', 'failed', 'unreached']),
     result: decisionResultSchema.optional(),
+    execution: providerExecutionEvidenceSchema.optional(),
     turnId: z.string().min(1).optional(),
     nodeId: z.string().min(1).optional(),
     occurrence: z.number().int().positive().optional(),
@@ -182,6 +184,7 @@ export type RunRequest = z.input<typeof runRequestSchema>;
 export type { JourneyDefinition };
 
 export type FrozenEvaluation = {
+  groupId?: string;
   evaluationId: string;
   contextId: string;
   respondentId: string;
@@ -190,11 +193,20 @@ export type FrozenEvaluation = {
   packetFingerprint: string;
 };
 
+export type PreparedQuestionGroup = {
+  groupId: string;
+  contextId: string;
+  respondentId: string;
+  state: Record<string, unknown>;
+  questionIds: string[];
+};
+
 export type PreparedRun = {
   request: ParsedInlineRunRequest | ParsedFollowOnRunRequest;
   requestFingerprint: string;
   compilerFingerprint: string;
   evaluations: FrozenEvaluation[];
+  groups?: PreparedQuestionGroup[];
   lineage?: FollowOnLineage;
 };
 
