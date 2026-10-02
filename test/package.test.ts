@@ -449,6 +449,108 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
   } finally { await killMcpConnection(client, transport); }
 });
 
+test('a copied MCP splits local independent questions and resumes without replaying a saved sibling', async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-question-group-package-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const dataRoot = path.join(sandbox, 'data');
+  const plugin = path.join(sandbox, 'plugin');
+  await mkdir(plugin, { recursive: true });
+  await cp(path.resolve('dist'), path.join(plugin, 'dist'), { recursive: true });
+  const tokenizerPath = path.resolve('test/fixtures/laya-tokenizer.json');
+  const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerPath)).digest('hex');
+  const calls: string[] = [];
+  let secondArrived: (() => void) | undefined;
+  let releaseSecond: (() => void) | undefined;
+  const arrived = new Promise<void>((resolve) => { secondArrived = resolve; });
+  const inference = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { questions: Record<string, unknown> };
+    const questionId = Object.keys(body.questions)[0] ?? '';
+    calls.push(questionId);
+    if (calls.length === 2) {
+      secondArrived?.();
+      await new Promise<void>((resolve) => { releaseSecond = resolve; });
+    }
+    const answer = questionId === 'interest'
+      ? { type: 'choice', choice: 'leave', probabilities: { continue: 0.1, leave: 0.9 } }
+      : questionId === 'severity'
+        ? { type: 'score', score: 1, legend: { '0': 'Not at all', '1': 'A lot' }, probabilities: { '0': 0.2, '1': 0.8 } }
+        : { type: 'noul', noul: 0.82 };
+    response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+      model: 'fixture-checkpoint', routing: { model: 'fixture-checkpoint' }, usage: {}, answers: { [questionId]: answer },
+    }));
+  });
+  await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
+  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  const address = inference.address();
+  assert.ok(address && typeof address === 'object');
+  const runRequest = {
+    kind: 'poll',
+    respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Decide', engagement_cues: 'Examples', friction_cues: 'Hype' }],
+    material: [{ id: 'section-three', text: 'The third section.' }],
+    questions: [
+      { type: 'choice', id: 'interest', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } },
+      { type: 'score', id: 'severity', instructions: 'How strongly did interest change?', rubric: ['Not at all', 'A lot'] },
+      { type: 'noul', id: 'why-interest', instructions: 'Did anything reduce your interest?' },
+    ],
+    maxCalls: 5,
+    provider: { kind: 'laya', baseUrl: `http://127.0.0.1:${address.port}`, checkpoint: 'fixture-checkpoint', contextLimit: 4096, headLimit: 512, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 },
+  };
+  const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: dataRoot };
+  const clientA = new Client({ name: 'question-group-package-a', version: '1.0.0' });
+  const transportA = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+  await clientA.connect(transportA);
+  let workerPid = 0;
+  try {
+    const inspected = await clientA.callTool({ name: 'run_inspect', arguments: { request: runRequest } });
+    assert.equal((inspected.structuredContent as { valid: boolean }).valid, true, JSON.stringify(inspected.structuredContent));
+    const started = await clientA.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: runRequest } });
+    const runId = (started.structuredContent as { runId: string }).runId;
+    await arrived;
+    const db = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
+    try {
+      const owner = db.prepare('SELECT owner_pid, owner_token FROM runs WHERE run_id = ?').get(runId) as { owner_pid?: number; owner_token?: string } | undefined;
+      assert.ok(owner?.owner_token);
+      workerPid = Number(owner.owner_pid);
+      assert.ok(Number.isInteger(workerPid) && workerPid > 0 && isPidAlive(workerPid));
+      const evaluations = db.prepare('SELECT question_id, status FROM evaluations WHERE run_id = ? ORDER BY question_id').all(runId) as Array<{ question_id: string; status: string }>;
+      assert.equal(evaluations.find(({ question_id }) => question_id === 'interest')?.status, 'answered');
+    } finally { db.close(); }
+    killPid(workerPid);
+    await waitForPidExit(workerPid);
+    const expire = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
+    try { expire.prepare('UPDATE runs SET lease_expires_ms = 0 WHERE run_id = ?').run(runId); }
+    finally { expire.close(); }
+    releaseSecond?.();
+    await killMcpConnection(clientA, transportA);
+
+    const clientB = new Client({ name: 'question-group-package-b', version: '1.0.0' });
+    const transportB = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+    try {
+      await clientB.connect(transportB);
+      const interrupted = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+      assert.equal((interrupted.structuredContent as { status: string; usedCalls: number }).status, 'interrupted');
+      assert.equal((interrupted.structuredContent as { usedCalls: number }).usedCalls, 2);
+      const resumed = await clientB.callTool({ name: 'run_resume', arguments: { runId } });
+      assert.equal(resumed.isError ?? false, false, JSON.stringify(resumed.structuredContent));
+      await waitForCompleted(dataRoot, runId);
+      assert.deepEqual(calls, ['interest', 'severity', 'severity', 'why-interest']);
+      const interest = await clientB.callTool({ name: 'run_query', arguments: { sourceRunId: runId, criteria: { questionId: 'interest' } } });
+      const severity = await clientB.callTool({ name: 'run_query', arguments: { sourceRunId: runId, criteria: { questionId: 'severity' } } });
+      assert.equal((interest.structuredContent as { items: unknown[] }).items.length, 1);
+      assert.equal((severity.structuredContent as { items: unknown[] }).items.length, 1);
+      const answers = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'answers' } });
+      const items = (answers.structuredContent as { items: Array<{ questionId: string; status: string }> }).items;
+      assert.equal(items.length, 3);
+      assert.ok(items.every(({ status }) => status === 'answered'));
+    } finally { await killMcpConnection(clientB, transportB); }
+  } finally {
+    releaseSecond?.();
+    if (workerPid) killPid(workerPid);
+  }
+});
+
 async function killMcpConnection(client: Client, transport: StdioClientTransport): Promise<void> {
   const pid = transport.pid;
   if (pid && isPidAlive(pid)) killPid(pid);
@@ -476,7 +578,7 @@ async function waitForCompleted(dataRoot: string, runId: string): Promise<void> 
       if (store.getStatus(runId).status === 'completed') return;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    assert.fail(`Run ${runId} did not complete after its requesting MCP exited.`);
+    assert.fail(`Run ${runId} did not complete after its requesting MCP exited: ${JSON.stringify({ status: store.getStatus(runId), answers: store.answers(runId) })}`);
   } finally { store.close(); }
 }
 

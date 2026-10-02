@@ -33,7 +33,8 @@ function journeyRequest() {
 async function connectedFixture(assertProviderReady: () => Promise<void> = async () => undefined) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-'));
   const store = openRunStore(root);
-  const provider: DecisionProvider = { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { throw new Error('MCP admission must not infer.'); } };
+  const fit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
+  const provider: DecisionProvider = { measure: () => fit, measureBatch: () => fit, async decide() { throw new Error('MCP admission must not infer.'); } };
   const service = createRunService(store, root, () => provider, { async launch() {} }, { assertProviderReady });
   const server = createPollingServer(service);
   const client = new Client({ name: 'sheg-mcp-test', version: '1.0.0' });
@@ -148,6 +149,53 @@ test('MCP queries typed evidence and starts a context-preserving follow-on', asy
     assert.equal(data.request.kind, 'follow-on');
     assert.equal(data.lineage.sourceRunId, sourceRunId);
     assert.equal(data.lineage.selections.length, 1);
+  } finally { await f.close(); }
+});
+
+test('MCP exposes mixed independent question groups and lets an agent continue from one explicitly selected answer', async () => {
+  const f = await connectedFixture();
+  try {
+    const sourceRequest = { ...request(), maxCalls: 1, questions: [request().questions[0]!,
+      { type: 'score' as const, id: 'clarity', instructions: 'How clear was the passage?', rubric: ['Unclear', 'Mixed', 'Clear'] },
+      { type: 'noul' as const, id: 'interest-loss', instructions: 'Did anything make you lose interest?' }] };
+    const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: sourceRequest } });
+    assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
+    const inspection = inspected.structuredContent as { minimumCalls: number; fits: Array<{ groupId?: string; contextId?: string; questionIds?: string[] }> };
+    assert.equal(inspection.minimumCalls, 1);
+    assert.deepEqual(inspection.fits[0]?.questionIds, ['interest', 'clarity', 'interest-loss']);
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: sourceRequest } });
+    const sourceRunId = (started.structuredContent as { runId: string }).runId;
+    const prepared = f.store.getRequest(sourceRunId); const group = prepared.groups![0]!;
+    const claim = f.store.claim(sourceRunId, Date.now(), 1234); assert.ok(claim);
+    const reservation = f.store.reserveBatch(claim, group.groupId, prepared.evaluations.map(({ evaluationId }) => evaluationId), Date.now()); assert.ok(reservation);
+    f.store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result: {
+      execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: [
+        { questionId: 'interest', value: { type: 'choice', choice: 'leave', probabilities: { continue: 0.1, leave: 0.9 } } },
+        { questionId: 'clarity', value: { type: 'score', score: 1, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.8, 2: 0.1 } } },
+        { questionId: 'interest-loss', value: { type: 'noul', noul: 0.7 } },
+      ],
+    } });
+    f.store.finish(claim);
+    const interest = await f.client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: { questionId: 'interest' } } });
+    const loss = await f.client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: { questionId: 'interest-loss' } } });
+    const interestItem = (interest.structuredContent as { items: Array<{ evaluationId: string; contextId: string }> }).items[0]!;
+    const lossItem = (loss.structuredContent as { items: Array<{ evaluationId: string; contextId: string; execution?: { provider: string } }> }).items[0]!;
+    assert.notEqual(interestItem.evaluationId, lossItem.evaluationId);
+    assert.equal(interestItem.contextId, lossItem.contextId);
+    assert.equal(lossItem.execution?.provider, 'jev');
+
+    const followOn = { kind: 'follow-on' as const, sourceRunId,
+      selection: { references: [{ evaluationId: lossItem.evaluationId, contextId: lossItem.contextId }] },
+      context: { mode: 'continue' as const }, questions: [{ type: 'choice' as const, id: 'continue-reading', instructions: 'Would you continue?', options: { yes: 'Yes', no: 'No' } }],
+      provider: sourceRequest.provider, maxCalls: 1 };
+    const accepted = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: followOn } });
+    const followRunId = (accepted.structuredContent as { runId: string }).runId;
+    const followRequest = f.store.getRequest(followRunId) as unknown as { evaluations: Array<{ contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId?: string; type?: string }> } } } }> };
+    const responses = followRequest.evaluations[0]!.packet.state.trajectory.responses;
+    assert.equal(responses.length, 1);
+    assert.equal(responses[0]?.taskId, 'interest-loss');
+    assert.equal(responses[0]?.type, 'noul');
+    assert.notEqual(followRequest.evaluations[0]!.contextId, lossItem.contextId);
   } finally { await f.close(); }
 });
 

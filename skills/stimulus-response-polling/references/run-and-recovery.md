@@ -36,7 +36,9 @@ from a missing key or an unavailable credential store.
 Build the simplest request that matches the user's goal: exact inline material,
 one or more distinct respondent profiles, one typed Choice, Score, or Noul
 question (or a finite sequence/response-routed graph when multiple stages are
-needed), one provider, and an adequate `maxCalls` limit. Choose material units,
+needed), one provider, and an adequate `maxCalls` limit. A direct poll or
+follow-on request may contain multiple independent questions over the same
+frozen respondent state. Choose material units,
 questions and response options from the user's question. Do not invent stages
 or add questions that do not help answer the requested question.
 
@@ -117,6 +119,18 @@ run may include both answers and respondent-local failures. A run-wide provider
 failure stops further dispatch. If cancellation is requested during an active
 provider call, let that call settle and preserve its answer; Sheg does not send
 the next respondent.
+
+Independent questions in one request share the exact frozen respondent state
+and are answered separately. Siblings do not see each other's answers. Jev may
+serve several questions in one physical request when its measured batch fits;
+Sheg can split a group while preserving each question and its shared context.
+Local Laya currently sends one question per physical request. `maxCalls`
+counts physical provider attempts, including uncertain attempts and retries,
+not question count. `run_inspect` reports the minimum physical calls after
+provider measurement; actual calls may be higher when a group is split or
+retried. Query by `questionId` to select one answer. A dependent question must
+be a follow-on that explicitly selects completed evaluation/context handles;
+do not place a question that depends on a sibling answer in the same group.
 
 Provider attempts are not new responses. An uncertain in-flight call consumes
 its reserved physical-call allowance because the provider may have received

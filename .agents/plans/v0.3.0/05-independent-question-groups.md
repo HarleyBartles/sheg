@@ -153,7 +153,7 @@ derived group. Sibling answers are never sent into another question's state.
 - [x] Test cancellation while a batch call is in flight: settle the call once, save all valid returned siblings, dispatch no later batch, and expose correct counts.
 - [x] Test worker death with a reserved multi-question attempt: reconciliation marks one physical attempt uncertain, leaves all unsaved logical answers unresolved, and a read never starts work. Explicit resume uses only remaining allowance and does not repeat saved results.
 - [x] Implement worker flow for poll and follow-on groups while leaving each journey turn as one question. Bound dispatch to the run-wide `maxCalls`, settle ownership transactionally, and stop on shared credential/service failures.
-- [ ] Run `node --import tsx --test test/question-worker.test.ts test/run-service.test.ts test/package.test.ts`; commit as `feat: execute and resume independent question groups`.
+- [x] Run `node --import tsx --test test/question-worker.test.ts test/run-service.test.ts test/package.test.ts`; commit as `feat: execute and resume independent question groups` (`a4e9675`). The complete repository gate passed after the Task 7 integration as well.
 
 ## Task 7: Expose and teach grouped requests through the packaged MCP
 
@@ -167,13 +167,13 @@ derived group. Sibling answers are never sent into another question's state.
 - Consumes: Tasks 1–6.
 - Produces: MCP request schemas for question arrays; machine-readable inspection of exact planned groups and physical call minimum; per-question answer/query IDs and shared attempt evidence; `run_start`/`run_inspect` follow-ons accepting several independent questions. The shipped skill distinguishes same-state independent questions from dependent later questions and tells agents to resume/query per-question evidence.
 
-- [ ] Add behavior tests for mixed question arrays at a new cohort and exact recorded turns; one query selects a specific question answer, and a later dependent follow-on includes only the explicitly selected completed answer.
-- [ ] Add a copied-package test using a local fixture and no paid calls: run a typed group through MCP, query two different question IDs, interrupt/resume with preserved results, and confirm the package needs no checkout or local dependency directory. Cover local singleton splitting separately from Jev batch adapter tests.
-- [ ] Update MCP descriptions, schemas, README and canonical skill text with the observed call semantics, physical-call `maxCalls`, source-context handling, incomplete/partial group reporting, and `run_resume` behavior. Do not add prose verdicts or claim multiple respondents share state.
-- [ ] Add ADR-0021 for the shared question-group and physical-attempt evidence boundary; index it. No ADR is needed for routine packing implementation details.
-- [ ] Run `npm run contracts:build`, `npm run build`, and `node --import tsx --test test/mcp.test.ts test/package.test.ts test/stimulus-response.test.ts`; inspect generated schemas and copied package contents.
-- [ ] After all offline gates pass, check only the selected credential's safe availability, then run the bounded synthetic OpenRouter pilot if that credential is available. Verify one physical provider request returned the three requested typed question IDs, stored `usedCalls: 1` under `maxCalls: 1`, and exposed separate answers. Use an isolated temporary `SHEG_DATA_DIR`, remove it after verifying run deletion/integrity, and report only route, request count, answer types, and success/failure codes. Skip with the exact safe reason if the OpenRouter credential or route is unavailable; do not use the native route while its fit guard is closed.
-- [ ] Commit MCP, skill, documentation, ADR, and generated outputs as `feat: expose independent question groups through MCP`.
+- [x] Add behavior tests for mixed question arrays at a new cohort and exact recorded turns; one query selects a specific question answer, and a later dependent follow-on includes only the explicitly selected completed answer.
+- [x] Add a copied-package test using a local fixture and no paid calls: run a typed group through MCP, query two different question IDs, interrupt/resume with preserved results, and confirm the package needs no checkout or local dependency directory. Cover local singleton splitting separately from Jev batch adapter tests.
+- [x] Update MCP descriptions, schemas, README and canonical skill text with the observed call semantics, physical-call `maxCalls`, source-context handling, incomplete/partial group reporting, and `run_resume` behavior. Do not add prose verdicts or claim multiple respondents share state.
+- [x] Add ADR-0021 for the shared question-group and physical-attempt evidence boundary; index it. No ADR is needed for routine packing implementation details.
+- [x] Run `npm run contracts:build`, `npm run build`, and `node --import tsx --test test/mcp.test.ts test/package.test.ts test/stimulus-response.test.ts`; inspect generated schemas and copied package contents. The focused run passed after fixture correction; final `npm run verify` passed all 299 tests and generated consistency.
+- [ ] Hosted OpenRouter pilot not run: this turn has no explicit authorization for a live inference call. Offline verification used only the local fixture; the pilot remains a release acceptance item.
+- [x] Commit MCP, skill, documentation, ADR, and generated outputs as `feat: expose independent question groups through MCP`.
 
 ## Task 8: Review Plan 5 against SHEG-6 and close its JIT record
 

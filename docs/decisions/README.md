@@ -30,6 +30,7 @@ alongside the code.
 | [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Accepted |
 | [0019](0019-own-execution-in-detached-workers.md) | Own accepted run execution in detached workers | Accepted |
 | [0020](0020-snapshot-follow-on-contexts.md) | Snapshot follow-on contexts with separate lineage | Accepted |
+| [0021](0021-independent-question-groups-and-batched-attempts.md) | Independent question groups share context and separate evidence | Accepted |
 
 ## Writing and changing decisions
 
