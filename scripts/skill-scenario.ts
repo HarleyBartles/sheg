@@ -165,21 +165,44 @@ export function renderActorPrompt(scenarioId: string): string {
   ].join('\n');
 }
 
-export function renderEvaluatorPrompt(scenarioId: string, actorTrace: unknown): string {
+export function renderEvaluatorPrompt(
+  scenarioId: string,
+  actorTrace: unknown,
+  options: { controlIndex?: number } = {},
+): string {
   const scenario = findScenario(scenarioId);
+  let observedActorTrace = actorTrace;
+  let traceSelection = 'raw actor output';
   const wrappedTrace = z.object({
-    guided: z.object({ actor: z.unknown() }).passthrough(),
+    guided: z.object({ actor: z.unknown() }).passthrough().optional(),
+    controls: z.array(z.object({ actor: z.unknown() }).passthrough()).optional(),
   }).passthrough().safeParse(actorTrace);
-  const observedActorTrace = wrappedTrace.success ? wrappedTrace.data.guided.actor : actorTrace;
-  const traceIdentity = z.object({ scenarioId: z.string() }).passthrough().parse(observedActorTrace);
-  if (traceIdentity.scenarioId !== scenario.id) {
+  if (options.controlIndex !== undefined) {
+    if (!Number.isInteger(options.controlIndex) || options.controlIndex < 1) {
+      throw new Error('Control index must be a positive one-based integer.');
+    }
+    if (!wrappedTrace.success) throw new Error('A control index requires a stored trace wrapper.');
+    const control = wrappedTrace.data.controls?.[options.controlIndex - 1];
+    if (!control) throw new Error(`Stored trace has no control at index ${options.controlIndex}.`);
+    observedActorTrace = control.actor;
+    traceSelection = `no-guidance control ${options.controlIndex}`;
+  } else if (wrappedTrace.success && wrappedTrace.data.guided) {
+    observedActorTrace = wrappedTrace.data.guided.actor;
+    traceSelection = 'guided actor';
+  }
+  const traceIdentity = z.object({ scenarioId: z.string().optional() }).passthrough().safeParse(observedActorTrace);
+  if (traceIdentity.success && traceIdentity.data.scenarioId && traceIdentity.data.scenarioId !== scenario.id) {
     throw new Error(`Actor trace does not match scenario ${scenario.id}.`);
+  }
+  if (!traceIdentity.success && typeof observedActorTrace === 'object' && observedActorTrace !== null && 'scenarioId' in observedActorTrace) {
+    throw new Error('Actor trace scenarioId must be a string when present.');
   }
   const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId)!;
   return [
     'Evaluate the observed actor trace against the supplied observable criteria. Judge claims and actions from evidence, not phrase matching.',
     'Return only JSON with scenarioId, criterionResults (criterionId, result: pass|fail|uncertain, evidence), and notes. Cite the trace for every criterion.',
     `scenarioId: ${scenario.id}`,
+    `trace selection: ${traceSelection}`,
     `\n## User request\n${scenario.userRequest}`,
     `\n## Controlled evidence (mock only)\n${JSON.stringify(scenario.controlledEvidence, null, 2)}`,
     `\n## Private evaluation criteria\n${JSON.stringify(evaluator.criteria, null, 2)}`,
@@ -199,10 +222,13 @@ function main(args: string[]): void {
   }
   if (args[0] === '--evaluator-prompt' && args[1] && args[2]) {
     const trace: unknown = JSON.parse(readFileSync(args[2], 'utf8'));
-    process.stdout.write(`${renderEvaluatorPrompt(args[1], trace)}\n`);
+    const controlIndex = args[3] === '--control' && args[4] ? Number(args[4]) : undefined;
+    if (args.length > 3 && controlIndex === undefined) throw new Error('Expected --control <one-based-index>.');
+    if (args.length > 5) throw new Error('Too many evaluator prompt arguments.');
+    process.stdout.write(`${renderEvaluatorPrompt(args[1], trace, controlIndex === undefined ? {} : { controlIndex })}\n`);
     return;
   }
-  throw new Error('Usage: npm run skill:scenario -- --list | --actor-prompt <id> | --evaluator-prompt <id> <trace.json>');
+  throw new Error('Usage: npm run skill:scenario -- --list | --actor-prompt <id> | --evaluator-prompt <id> <trace.json> [--control <one-based-index>]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

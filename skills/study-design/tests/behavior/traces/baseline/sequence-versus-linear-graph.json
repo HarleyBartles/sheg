@@ -39,7 +39,7 @@
           "evidence": "The actor actions array is empty and it asks for missing design inputs before preparing the request."
         }
       ],
-      "notes": "Fresh v2 actor trial; no live tool calls."
+      "notes": "Fresh v2 actor trial. Its actions array is empty, and its response does not report tool use. Tool use was instructed against but not independently audited (`toolUseAudit: not-captured`)."
     }
   },
   "controls": [],

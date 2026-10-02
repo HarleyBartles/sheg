@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -82,6 +83,57 @@ test('evaluator prompts exclude any prior evaluation stored beside the actor tra
   assert.doesNotMatch(prompt, /old-judgment|Prior evaluator output/);
 });
 
+test('evaluator prompts can select a stored no-guidance control without including the guided actor or prior judgment', () => {
+  const prompt = renderEvaluatorPrompt('typed-answer-failure', {
+    scenarioId: 'typed-answer-failure',
+    guided: { actor: { scenarioId: 'typed-answer-failure', finalResponse: 'Guided actor.' } },
+    controls: [{
+      actor: { answer: 'Control actor without a scenario ID.' },
+      evaluator: { notes: 'Prior control judgment.' },
+    }],
+  }, { controlIndex: 1 });
+
+  assert.match(prompt, /trace selection: no-guidance control 1/);
+  assert.match(prompt, /Control actor without a scenario ID/);
+  assert.doesNotMatch(prompt, /Guided actor|Prior control judgment/);
+});
+
+test('evaluator prompts accept a raw control output without an embedded scenario ID', () => {
+  const prompt = renderEvaluatorPrompt('typed-answer-failure', {
+    answer: 'The response failed with invalid_answer.',
+  });
+
+  assert.match(prompt, /scenarioId: typed-answer-failure/);
+  assert.match(prompt, /trace selection: raw actor output/);
+  assert.match(prompt, /The response failed with invalid_answer/);
+});
+
+test('scenario CLI replays a stored no-guidance control by one-based index', () => {
+  const tracePath = path.join(process.cwd(), 'skills/stimulus-response-polling/tests/behavior/traces/baseline/typed-answer-failure.json');
+  const prompt = execFileSync(process.execPath, [
+    '--import', 'tsx',
+    path.join(process.cwd(), 'scripts/skill-scenario.ts'),
+    '--evaluator-prompt', 'typed-answer-failure', tracePath, '--control', '1',
+  ], { encoding: 'utf8' });
+
+  assert.match(prompt, /trace selection: no-guidance control 1/);
+  assert.match(prompt, /The run is partial: one of two respondents answered/);
+  assert.doesNotMatch(prompt, /proposedFollowOns/);
+});
+
+test('evaluator refuses to replay a control whose observed scenario ID conflicts with the requested scenario', () => {
+  const tracePath = path.join(process.cwd(), 'skills/stimulus-response-polling/tests/behavior/traces/baseline/selected-material-isolation-no-fit.json');
+  const trace = JSON.parse(readFileSync(tracePath, 'utf8')) as unknown;
+
+  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', trace, { controlIndex: 1 }), /does not match scenario/);
+});
+
+test('evaluator prompt control selector validates the stored one-based index', () => {
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', { controls: [] }, { controlIndex: 1 }), /no control at index 1/);
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {}, { controlIndex: 0 }), /positive one-based integer/);
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', { scenarioId: 'another-scenario', finalResponse: 'Mismatch.' }), /does not match scenario/);
+});
+
 test('evaluator can inspect a JSON trace that violates the actor output schema', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
@@ -162,4 +214,8 @@ test('selected-material fixture matches the current run query contract and omits
   assert.deepEqual(queryResult.items.map((item) => item.selectedMaterial?.materialId), ['p2', undefined, 'p5']);
   assert.equal(queryResult.items[0]?.selectedMaterial?.text, 'Exact paragraph two.');
   assert.equal(queryResult.items[2]?.selectedMaterial?.text, 'Exact paragraph five.');
+  const choiceResults = queryResult.items.flatMap((item) => item.result?.type === 'choice' ? [item.result] : []);
+  assert.equal(choiceResults.length, queryResult.items.length);
+  const sharedOptions = Object.keys(choiceResults[0]!.probabilities);
+  for (const result of choiceResults) assert.deepEqual(Object.keys(result.probabilities), sharedOptions);
 });

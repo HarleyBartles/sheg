@@ -1,7 +1,7 @@
 [
   {
     "id": "selected-material-isolation-no-fit",
-    "version": 3,
+    "version": 4,
     "ownerSkill": "stimulus-response-polling",
     "referencePaths": [
       "references/run-and-recovery.md"
@@ -29,6 +29,7 @@
               "choice": "p2",
               "probabilities": {
                 "p2": 1,
+                "p5": 0,
                 "no-fit": 0
               },
               "attempts": 1,
@@ -63,6 +64,7 @@
               "choice": "no-fit",
               "probabilities": {
                 "p2": 0,
+                "p5": 0,
                 "no-fit": 1
               },
               "attempts": 1,
@@ -89,6 +91,7 @@
               "type": "choice",
               "choice": "p5",
               "probabilities": {
+                "p2": 0,
                 "p5": 1,
                 "no-fit": 0
               },
