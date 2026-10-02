@@ -12,7 +12,7 @@
 
 ## Contract
 
-- Treat `sequence` as shorthand for the existing all-items-then-tasks order, compiled into the same linear graph execution used by graph journeys. Explicit linear graphs may interleave expose and ask nodes.
+- Treat `sequence` as shorthand for the existing all-items-then-tasks order, compiled into the same linear graph execution used by graph journeys. Explicit linear graphs may interleave expose and ask nodes. The generated terminal outcome is `complete`, preserving the durable sequence-run value.
 - At each question, include the exact text of every distinct item exposed so far on that respondent's path, ordered by first exposure. A repeated exposure remains a separate history event but does not duplicate stimulus text in the packet. Do not include unexposed items or material from another branch.
 - Keep material scope separate from answer history. Preserve task-level `responseHistory: include | omit`; omitting responses does not erase exposure events or previously encountered material. New dependent-question examples state their response-history choice explicitly.
 - Preview, preflight/context measurement, first-turn admission, later execution, recall, and resume must agree on the packet for a route. Context overflow remains explicit; do not trim material or history.
@@ -39,11 +39,11 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 ### Task 1: Normalize sequence and graph traversal
 
-**Test first:** Add behavior tests proving that a sequence and its equivalent all-items-then-tasks linear graph produce the same ask order, stable node/task mapping, typed response routing, terminal outcome, and normalized preview nodes/routes. Cover Choice, Score, and Noul routes. Add a linear graph with interleaved exposure and questions to prove that the shorthand does not constrain graph topology. Packet equivalence belongs to Task 2 because that task changes the current sequence/graph context-window difference.
+**Test first:** Add behavior tests proving that a sequence and its equivalent all-items-then-tasks linear graph produce the same ask order, stable node/task mapping, typed response routing, terminal outcome `complete`, and normalized preview nodes/routes. Cover Choice, Score, and Noul routes. Add a linear graph with interleaved exposure and questions to prove that the shorthand does not constrain graph topology. Packet equivalence belongs to Task 2 because that task changes the current sequence/graph context-window difference.
 
-**Implement:** Add one pure journey-topology normalization boundary that compiles sequence shorthand to a deterministic linear graph while preserving graph requests as authored. Route `runJourney`, `advanceJourney`, preview, and preflight packet traversal through the normalized graph. Keep request schemas and serialized authored presentation readable as `sequence` or `graph`; normalization is an execution projection, not a rewrite of the accepted request.
+**Implement:** Add one pure journey-topology normalization boundary that compiles sequence shorthand to a deterministic linear graph while preserving graph requests as authored. Route `runJourney`, `advanceJourney`, preview, preflight packet traversal, durable initial exposure creation, and run-store next-target validation through the normalized graph. Keep request schemas and serialized authored presentation readable as `sequence` or `graph`; normalization is an execution projection, not a rewrite of the accepted request.
 
-**Verify:** Run the focused journey, preview, and packet-walker suites. Confirm equivalent topology tests fail before the implementation and pass afterward.
+**Verify:** Run the focused journey, preview, packet-walker, run-store, and durable worker suites. Confirm equivalent topology tests fail before the implementation and pass afterward.
 
 ### Task 2: Make encountered material cumulative and consistent
 
