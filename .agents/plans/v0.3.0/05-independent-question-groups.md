@@ -181,11 +181,11 @@ derived group. Sibling answers are never sent into another question's state.
 - Modify: `.agents/plans/v0.3.0/05-independent-question-groups.md`, `.agents/plans/v0.3.0/roadmap.md`
 - Inspect: `.agents/specs/2026-10-01-v0.3.0-epic-spec.md`, the full SHEG-6 issue and linked design, all changed files and generated package
 
-- [ ] Run focused behavior tests for the provider, question-group persistence/recovery, MCP, and copied package; record exact commands and results in this plan.
-- [ ] Review the final diff against SHEG-6 and epic sections 5, 6, 8, 10, 11, and 12. Resolve any defect and rerun affected checks. Confirm no model-determinism tests, cost cap, local-limit global restriction, sibling leakage, or stale answer replay.
-- [ ] Run `git diff --check`. Stage intended source, tests, canonical guidance, ADR, roadmap and generated projections; commit through the tracked hook. The hook runs full `npm run verify`; do not bypass it or immediately repeat its successful full gate.
-- [ ] Update the roadmap with the implementation commits, full gate evidence, SHEG-6 remaining status, and Plan 6 as the next JIT capability. Keep Plan 5 `completed-awaiting-retirement` through the eventual completing PR.
-- [ ] Record any remaining release obligations explicitly. Do not change product versions, publish, tag, merge, or close SHEG-6 until its full acceptance exit is delivered.
+- [x] Run `node --import tsx --test test/jev.test.ts test/laya.test.ts test/question-worker.test.ts test/run-store.test.ts test/run-service.test.ts test/mcp.test.ts test/package.test.ts test/stimulus-response.test.ts` (125 passed, 0 failed), `git diff --check`, and `npm run verify` (299 passed, lint, typecheck, generated consistency).
+- [x] Review the final diff against SHEG-6 and epic sections 5, 6, 8, 10, 11, and 12. The implementation uses published Jev batching behavior without a determinism workstream, adds no cost cap, preserves Laya's singleton boundary, keeps siblings isolated across split/recovery, and does not replay saved answers.
+- [x] Stage intended source, tests, canonical guidance, ADR, roadmap and generated projections; commit through the tracked hook. Task 7 commit `4ef8d09` passed the full hook gate.
+- [x] Update the roadmap with implementation commits, full gate evidence, SHEG-6 remaining status, and Plan 6 as the next JIT capability. Plan 5 is `completed-awaiting-retirement` for its eventual completing PR.
+- [x] Record remaining release obligations explicitly. The live OpenRouter pilot was not run because this turn did not authorize hosted inference. Product versions, publication, tagging, merging and SHEG-6 closure remain untouched.
 
 ## Plan 5 boundary
 
