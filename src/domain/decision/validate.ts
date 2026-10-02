@@ -1,4 +1,5 @@
-import { decisionRequestSchema, decisionResultSchema, type DecisionRequest, type DecisionResult } from './decision.js';
+import { z } from 'zod';
+import { decisionBatchRequestSchema, decisionBatchResultSchema, decisionRequestSchema, decisionResultSchema, decisionValueSchema, providerExecutionEvidenceSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionRequest, type DecisionResult, type DecisionValue } from './decision.js';
 import type { ProviderKind } from './provider.js';
 
 type ValidationOptions = {
@@ -67,6 +68,74 @@ export function validateDecision(
   }
   return decision;
 }
+
+export function validateDecisionBatch(
+  request: DecisionBatchRequest,
+  result: unknown,
+  options: ValidationOptions = {},
+): DecisionBatchResult {
+  const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision batch request is invalid: ${parsedRequest.error.issues.map((issue) => issue.message).join(' ')}`, { cause: parsedRequest.error });
+  }
+  const envelope = batchEnvelopeSchema.safeParse(result);
+  if (!envelope.success) {
+    throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue) => issue.message).join(' ')}`, { cause: envelope.error });
+  }
+  const execution = providerExecutionEvidenceSchema.parse(envelope.data.execution);
+  for (const answer of envelope.data.answers) {
+    if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
+      throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);
+    }
+  }
+
+  const answers = parsedRequest.data.questions.map((question) => {
+    const matches = envelope.data.answers.filter(({ questionId }) => questionId === question.id);
+    if (matches.length > 1) return { questionId: question.id, failure: { code: 'duplicate_answer', message: 'The provider returned this question more than once.' } };
+    const answer = matches[0];
+    if (!answer) return { questionId: question.id, failure: { code: 'missing_answer', message: 'The provider did not return an answer for this question.' } };
+    if (answer.failure) return { questionId: question.id, failure: answer.failure };
+    const value = decisionValueSchema.safeParse(answer.value);
+    if (!value.success) return { questionId: question.id, failure: { code: 'invalid_answer', message: 'The provider returned an invalid typed answer.' } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: 'answer_type_mismatch', message: 'The provider answer type does not match the question.' } };
+    if (question.type === 'choice' && (value.data.type !== 'choice' || !Object.hasOwn(question.options, value.data.choice))) {
+      return { questionId: question.id, failure: { code: 'invalid_answer', message: 'The provider selected an option that was not offered.' } };
+    }
+    try {
+      const enriched = { ...value.data, ...execution };
+      const checked = validateDecision({ state: parsedRequest.data.state, question, ...(question.type === 'choice' ? { optionIds: Object.keys(question.options) } : {}) } as DecisionRequest, enriched, options);
+      return { questionId: question.id, value: toDecisionValue(checked) };
+    } catch (error) {
+      if (!(error instanceof DecisionError)) throw error;
+      const typeMismatch = error.message.includes('does not match task type');
+      return { questionId: question.id, failure: { code: typeMismatch ? 'answer_type_mismatch' : 'invalid_answer', message: typeMismatch ? 'The provider answer type does not match the question.' : 'The provider returned an invalid answer for this question.' } };
+    }
+  });
+  return decisionBatchResultSchema.parse({ answers, execution });
+}
+
+function toDecisionValue(result: DecisionResult): DecisionValue {
+  if (result.type === 'choice') return {
+    type: 'choice', choice: result.choice, probabilities: result.probabilities,
+    ...(result.confidence === undefined ? {} : { confidence: result.confidence }),
+  };
+  if (result.type === 'score') return {
+    type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities,
+    ...(result.confidence === undefined ? {} : { confidence: result.confidence }),
+  };
+  return { type: 'noul', noul: result.noul };
+}
+
+const batchEnvelopeSchema = z.object({
+  answers: z.array(z.object({
+    questionId: z.string().min(1),
+    value: z.unknown().optional(),
+    failure: z.object({ code: z.string().min(1), message: z.string().min(1) }).strict().optional(),
+  }).strict().superRefine((answer, context) => {
+    if (('value' in answer) === Boolean(answer.failure)) context.addIssue({ code: 'custom', message: 'Each batch answer must contain exactly one value or failure.' });
+  })),
+  execution: providerExecutionEvidenceSchema,
+}).strict();
 
 function validateDistribution(distribution: Record<string, number>, expectedIds: readonly string[], label: string): void {
   const ids = Object.keys(distribution);

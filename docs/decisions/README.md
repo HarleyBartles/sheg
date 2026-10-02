@@ -1,9 +1,6 @@
 # Architecture Decision Records
 
-This directory records durable decisions for Sheg: the context in
-which each decision was made, the alternatives considered, and its consequences.
-The records are part of the repository so future contributors can read them
-alongside the code.
+This directory records durable decisions for Sheg: the context in which each decision was made, the alternatives considered, and its consequences. The records are part of the repository so future contributors can read them alongside the code.
 
 ## Records
 
@@ -27,16 +24,14 @@ alongside the code.
 | [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
 
 | [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
+| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Accepted |
+| [0019](0019-own-execution-in-detached-workers.md) | Own accepted run execution in detached workers | Accepted |
+| [0020](0020-snapshot-follow-on-contexts.md) | Snapshot follow-on contexts with separate lineage | Accepted |
+| [0021](0021-independent-question-groups-and-batched-attempts.md) | Independent question groups share context and separate evidence | Accepted |
+| [0022](0022-source-linked-material-choices.md) | Link offered Choice options to exact source material | Accepted |
 
 ## Writing and changing decisions
 
-Create one numbered record for each consequential decision. Include its status,
-context, considered options, decision, and consequences. Keep implementation
-plans as temporary working files; this directory records why the durable
-choices were made. Completed plans remain in Git history. When a decision
-changes, add a new record that supersedes the old one
-instead of rewriting history. Update this index in the same change.
+Create one numbered record for each consequential decision. Include its status, context, considered options, decision, and consequences. Keep implementation plans as temporary working files; this directory records why the durable choices were made. Completed plans remain in Git history. When a decision changes, add a new record that supersedes the old one instead of rewriting history. Update this index in the same change.
 
-Use [the template](template.md) for new records. Not every implementation choice
-needs an ADR; record choices that constrain future architecture, interfaces,
-distribution, or operations.
+Use [the template](template.md) for new records. Not every implementation choice needs an ADR; record choices that constrain future architecture, interfaces, distribution, or operations.

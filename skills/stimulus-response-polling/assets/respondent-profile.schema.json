@@ -61,5 +61,5 @@
   "x-validation-rules": [
     "Combined profile prose must not exceed 1,500 characters across intent, context, desired_outcome, engagement_cues, and friction_cues."
   ],
-  "description": "JSON Schema validators do not enforce the aggregate 1,500-character prose limit in x-validation-rules. Validate the profile with Sheg runtime validation (for example poll_check) before running a study."
+  "description": "JSON Schema validators do not enforce the aggregate 1,500-character prose limit in x-validation-rules. Include the profile in a direct request; optionally call run_inspect for a fit preview. run_start performs Sheg runtime validation."
 }

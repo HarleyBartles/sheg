@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { decisionRequestSchema, type DecisionRequest, type DecisionValue } from './decision.js';
 import type { RespondentPerspective, RespondentProfile } from '../respondents/profile.js';
-import type { StudyArm } from '../study/arm.js';
+import type { JourneyDefinition } from '../study/arm.js';
 
 export type PromptHistoryEvent =
   | { type: 'exposure'; sequence: number; nodeId: string; itemId: string }
@@ -44,8 +44,8 @@ export type DecisionPacketParts = {
   question: DecisionRequest['question'];
 };
 
-export function questionForTask(task: StudyArm['tasks'][number]): DecisionRequest['question'] {
-  if ('options' in task) return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options } };
+export function questionForTask(task: JourneyDefinition['tasks'][number]): DecisionRequest['question'] {
+  if ('options' in task) return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}) };
   if ('rubric' in task) return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
   return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }) };
 }
@@ -68,7 +68,104 @@ const promptContract = {
 
 export const legacyPromptContractHash = 'c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044';
 
-function compactTrajectory(arm: StudyArm, history: readonly PromptHistoryEvent[]): TrajectorySummary {
+function finishTrajectory(body: Omit<TrajectorySummary, 'payloadUtf8Bytes'>): TrajectorySummary {
+  let payloadUtf8Bytes = 0;
+  for (;;) {
+    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
+    if (nextSize === payloadUtf8Bytes) break;
+    payloadUtf8Bytes = nextSize;
+  }
+  return { ...body, payloadUtf8Bytes };
+}
+
+export function emptyTrajectory(): TrajectorySummary {
+  return finishTrajectory({
+    version: 1,
+    eventCount: 0,
+    exposureCount: 0,
+    decisionCount: 0,
+    eventRange: null,
+    choices: [],
+    responses: [],
+  });
+}
+
+export function appendTrajectoryResponse(
+  trajectory: TrajectorySummary,
+  question: DecisionRequest['question'],
+  result: DecisionValue,
+  exposedItemIds: readonly string[],
+): TrajectorySummary {
+  if (question.type !== result.type) throw new Error('Decision response type does not match the saved question.');
+  const exposed = [...exposedItemIds];
+  let response: TrajectoryResponse;
+  let choices = trajectory.choices;
+  if (result.type === 'choice' && question.type === 'choice') {
+    const choiceMeaning = question.options[result.choice];
+    if (choiceMeaning === undefined) throw new Error(`Saved answer choice ${result.choice} was not offered.`);
+    response = { type: 'choice', taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed,
+      ...(result.probabilities === undefined ? {} : { probabilities: { ...result.probabilities } }),
+      ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+    choices = [...trajectory.choices, { taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed }];
+  } else if (result.type === 'score' && question.type === 'score') {
+    if (result.score < 0 || result.score > question.rubric.length - 1) throw new Error('Saved Score answer is outside its question rubric.');
+    response = { type: 'score', taskId: question.id, score: result.score,
+      meaning: `Expected rubric level ${result.score}; rubric: ${question.rubric.join(' | ')}`,
+      probabilities: { ...result.probabilities }, legend: { ...result.legend },
+      ...(result.confidence === undefined ? {} : { confidence: result.confidence }), exposedItemIds: exposed };
+  } else if (result.type === 'noul' && question.type === 'noul') {
+    response = { type: 'noul', taskId: question.id, noul: result.noul, proposition: question.instructions, exposedItemIds: exposed };
+  } else throw new Error('Decision response type does not match the saved question.');
+
+  return finishTrajectory({
+    version: 1,
+    eventCount: trajectory.eventCount + 1,
+    exposureCount: trajectory.exposureCount,
+    decisionCount: trajectory.decisionCount + 1,
+    eventRange: trajectory.eventRange === null
+      ? { firstSequence: 0, lastSequence: 0 }
+      : { firstSequence: trajectory.eventRange.firstSequence, lastSequence: trajectory.eventCount },
+    choices,
+    responses: [...trajectory.responses, response],
+  });
+}
+
+export function prepareFollowOnPacket(input: {
+  source: DecisionRequest & { state: PromptState };
+  mode: 'recorded' | 'fresh-material' | 'omit-history' | 'continue';
+  question: DecisionRequest['question'];
+  material?: readonly { id: string; text: string }[];
+  result?: DecisionValue;
+}): DecisionRequest & { state: PromptState } {
+  const { source, mode, question } = input;
+  if (mode === 'recorded') return compileDecisionRequest({
+    respondentProfile: source.state.respondent.profile,
+    encounteredItems: source.state.encounteredItems,
+    trajectory: source.state.trajectory,
+    question,
+  }) as DecisionRequest & { state: PromptState };
+  const material = input.material ? input.material.map(({ id, text }) => ({ id, text })) : [];
+  let state: PromptState;
+  if (mode === 'continue') {
+    if (!input.result) throw new Error('Continue context requires the selected completed answer.');
+    const currentIds = source.state.encounteredItems.map(({ id }) => id);
+    state = {
+      respondent: { profile: { ...source.state.respondent.profile } },
+      encounteredItems: [...source.state.encounteredItems.map((item) => ({ ...item })), ...material],
+      trajectory: appendTrajectoryResponse(source.state.trajectory, source.question, input.result, currentIds),
+    };
+  } else {
+    if (material.length === 0) throw new Error(`${mode} context requires explicit material.`);
+    state = {
+      respondent: { profile: { ...source.state.respondent.profile } },
+      encounteredItems: material,
+      trajectory: emptyTrajectory(),
+    };
+  }
+  return compileDecisionRequest({ respondentProfile: state.respondent.profile, encounteredItems: state.encounteredItems, trajectory: state.trajectory, question }) as DecisionRequest & { state: PromptState };
+}
+
+function compactTrajectory(arm: JourneyDefinition, history: readonly PromptHistoryEvent[]): TrajectorySummary {
   const exposureIds: string[] = [];
   const choices: TrajectoryChoice[] = [];
   const responses: TrajectoryResponse[] = [];
@@ -106,17 +203,11 @@ function compactTrajectory(arm: StudyArm, history: readonly PromptHistoryEvent[]
     choices,
     responses,
   };
-  let payloadUtf8Bytes = 0;
-  for (;;) {
-    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
-    if (nextSize === payloadUtf8Bytes) break;
-    payloadUtf8Bytes = nextSize;
-  }
-  return { ...body, payloadUtf8Bytes };
+  return finishTrajectory(body);
 }
 
 export function compileDecisionPacket(
-  arm: StudyArm,
+  arm: JourneyDefinition,
   profile: RespondentProfile,
   taskId: string,
   history: readonly PromptHistoryEvent[] = [],
@@ -162,7 +253,7 @@ export function compileDecisionPacket(
 export function compileDecisionRequest(parts: DecisionPacketParts): DecisionRequest & { state: PromptState } {
   const state: PromptState = {
     respondent: { profile: { ...parts.respondentProfile } },
-    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    encounteredItems: parts.encounteredItems.map(({ id, text }) => ({ id, text })),
     trajectory: parts.trajectory,
   };
   const request = decisionRequestSchema.parse({

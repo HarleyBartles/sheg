@@ -1,12 +1,57 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { compileDecisionPacket, compileDecisionRequest } from '../src/domain/decision/prompt.js';
+import { appendTrajectoryResponse, compileDecisionPacket, compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket } from '../src/domain/decision/prompt.js';
+import type { DecisionValue } from '../src/domain/decision/decision.js';
 import { fileURLToPath } from 'node:url';
 import type { PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 
 const manifestPath = fileURLToPath(new URL('./fixtures/article.json', import.meta.url));
 const cohortPath = fileURLToPath(new URL('./fixtures/cohort.json', import.meta.url));
+
+test('continuation adds the selected typed answer and exact exposure IDs to the saved trajectory', () => {
+  const question = { type: 'choice' as const, id: 'interest', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } };
+  const answer: DecisionValue = { type: 'choice', choice: 'leave', probabilities: { continue: 0.2, leave: 0.8 }, confidence: 0.77 };
+  const continued = appendTrajectoryResponse(emptyTrajectory(), question, answer, ['section-three']);
+  assert.equal(continued.eventCount, 1);
+  assert.equal(continued.decisionCount, 1);
+  assert.deepEqual(continued.choices, [{ taskId: 'interest', choiceId: 'leave', choiceMeaning: 'Leave', exposedItemIds: ['section-three'] }]);
+  assert.deepEqual(continued.responses[0], { type: 'choice', taskId: 'interest', choiceId: 'leave', choiceMeaning: 'Leave', exposedItemIds: ['section-three'], probabilities: { continue: 0.2, leave: 0.8 }, confidence: 0.77 });
+  assert.ok(continued.payloadUtf8Bytes > 0);
+  assert.throws(() => appendTrajectoryResponse(emptyTrajectory(), question, { type: 'noul', noul: 0.5 }, []), /does not match/i);
+});
+
+test('follow-on context modes preserve or replace only the promised respondent state', () => {
+  const originalQuestion = { type: 'choice' as const, id: 'left-interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } };
+  const nextQuestion = { type: 'noul' as const, id: 'why-left', instructions: 'Did this section cause you to leave?' };
+  const source = compileDecisionRequest({
+    respondentProfile: { intent: 'Learn about this product.', context: 'Comparing options.', desired_outcome: 'Choose a tool.', engagement_cues: 'Specific benefits.', friction_cues: 'Confusing setup.' },
+    encounteredItems: [{ id: 'section-three', text: 'Section three.' }],
+    trajectory: appendTrajectoryResponse(emptyTrajectory(), originalQuestion, { type: 'choice', choice: 'no' }, ['section-one', 'section-two']),
+    question: originalQuestion,
+  });
+  const answer: DecisionValue = { type: 'choice', choice: 'no', probabilities: { yes: 0.1, no: 0.9 } };
+  const recorded = prepareFollowOnPacket({ source, mode: 'recorded', question: nextQuestion });
+  assert.deepEqual(recorded.state, source.state);
+  assert.deepEqual(recorded.question, nextQuestion);
+  recorded.state.respondent.profile.intent = 'Mutated copy.';
+  assert.equal(source.state.respondent.profile.intent, 'Learn about this product.');
+
+  const selected = [{ id: 'section-three', text: 'Section three.' }];
+  for (const mode of ['fresh-material', 'omit-history'] as const) {
+    const packet = prepareFollowOnPacket({ source, mode, question: nextQuestion, material: selected });
+    assert.deepEqual(packet.state.respondent, source.state.respondent);
+    assert.deepEqual(packet.state.encounteredItems, selected);
+    assert.deepEqual(packet.state.trajectory, emptyTrajectory());
+  }
+
+  const continued = prepareFollowOnPacket({ source, mode: 'continue', question: nextQuestion, result: answer, material: [{ id: 'appendix', text: 'An appendix.' }] });
+  assert.deepEqual(continued.state.encounteredItems, [...source.state.encounteredItems, { id: 'appendix', text: 'An appendix.' }]);
+  assert.equal(continued.state.trajectory.responses.at(-1)?.taskId, originalQuestion.id);
+  assert.deepEqual(continued.state.trajectory.responses.at(-1)?.exposedItemIds, ['section-three']);
+  assert.throws(() => prepareFollowOnPacket({ source, mode: 'continue', question: nextQuestion }), /completed answer/i);
+});
+
 test('graph packet retains compact prior choices but only current stimulus text', async () => {
   const study = await loadStudy(manifestPath, cohortPath);
   const arm = study.manifest.arms[0]!;

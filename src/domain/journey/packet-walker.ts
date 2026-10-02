@@ -3,7 +3,7 @@ import { compileDecisionPacket, type PromptHistoryEvent } from '../decision/prom
 import type { DecisionRequest } from '../decision/decision.js';
 import type { DecisionValue } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
-import { studyArmSchema, type StudyArm } from '../study/arm.js';
+import { journeyDefinitionSchema, studyArmSchema, type JourneyDefinition, type StudyArm } from '../study/arm.js';
 
 export const DEFAULT_MAX_PREFLIGHT_PACKETS = 100_000;
 export const DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
@@ -35,7 +35,7 @@ function pathIdentity(choices: readonly PathChoice[]): string {
 }
 
 export function walkStudyPackets(
-  arms: readonly StudyArm[],
+  arms: readonly (JourneyDefinition | StudyArm)[],
   respondents: readonly RespondentProfile[],
   visitPacket: PreflightPacketVisitor,
   options: JourneyWalkOptions = {},
@@ -64,7 +64,7 @@ export function walkStudyPackets(
     markIncomplete('Preflight requires at least one study arm and one respondent.');
   }
 
-  const emitPacket = (arm: StudyArm, respondent: RespondentProfile, taskId: string, nodeId: string, decisionIndex: number, choices: readonly PathChoice[], events: readonly PromptHistoryEvent[]): void => {
+  const emitPacket = (arm: JourneyDefinition, respondent: RespondentProfile, taskId: string, nodeId: string, decisionIndex: number, choices: readonly PathChoice[], events: readonly PromptHistoryEvent[]): void => {
     if (packetCount >= maxPackets) {
       markIncomplete(`Preflight packet limit (${maxPackets}) reached before traversal completed.`);
       return;
@@ -95,7 +95,7 @@ export function walkStudyPackets(
 
   for (const arm of arms) {
     if (stopped) break;
-    const validation = studyArmSchema.safeParse(arm);
+    const validation = ('sources' in arm ? studyArmSchema : journeyDefinitionSchema).safeParse(arm);
     if (!validation.success) {
       markIncomplete(`Study arm ${arm.id} is invalid: ${validation.error.issues.map((issue) => issue.message).join(' ')}`);
       break;
@@ -216,7 +216,7 @@ export function walkStudyPackets(
   };
 }
 
-function representativeResponses(task: StudyArm['tasks'][number], interval?: NonNullable<Extract<StudyArm['presentation'], { kind: 'graph' }>['transitions'][number]['when']>): DecisionValue[] {
+function representativeResponses(task: JourneyDefinition['tasks'][number], interval?: NonNullable<Extract<JourneyDefinition['presentation'], { kind: 'graph' }>['transitions'][number]['when']>): DecisionValue[] {
   if ('options' in task) return Object.keys(task.options).map((choice) => ({ type: 'choice', choice }));
   const values: number[] = [];
   if (interval) {

@@ -1,95 +1,35 @@
-# Sheg study primitives and tools
+# Current primitives and tool contracts
 
-Read this when composing a study or selecting a Sheg tool. The runtime schemas
-and registered MCP operations define what the current harness accepts; this
-guide explains how those pieces compose for study design.
+The current MCP run shape is deliberately small. An agent supplies one or more distinct respondent profiles, exact inline text and typed Choice, Score, or Noul questions, one provider configuration, and a bounded physical-call limit. A direct poll or follow-on can contain one or more independent questions over the same frozen respondent context; use a finite authored sequence or graph when questions depend on earlier answers.
 
-## Study building blocks
+| Tool | Purpose | Side effect |
+| --- | --- | --- |
+| `run_inspect` | Validate the strict request, measure context fit for planned provider calls or batches, and preview reachable journey paths. | Creates no new run and makes no inference call. Resolving a follow-on may reconcile an expired source-run lease; it never launches a worker. |
+| `run_start` | Persist a validated request, return a durable run ID, and launch its worker. An identical submission ID plus request returns the same run. | Starts inference after credential and fit admission. |
+| `run_list` | Find durable runs by status or label and paginate. | Reconcile expired ownership; never launch work. |
+| `run_get` with `view: status` | Read lifecycle state and counts. | Reconcile expired ownership; never launch work. |
+| `run_get` with `view: request` | Recall the frozen request, compiled packets, and their stable evaluation/context IDs. | Reconcile expired ownership; never launch work. |
+| `run_get` with `view: journey` | Recall reached turns, exact respondent packets, exposures, typed response history, route and terminal/failure state. | Reconcile expired ownership; never launch work. |
+| `run_get` with `view: answers` | Recall typed answers, failures, and pending evaluations with stable identifiers. | Reconcile expired ownership; never launch work. |
+| `run_query` | Reconcile expired ownership, then filter typed answers and journey outcomes; return evaluation/context handles and, for mapped Choice answers, selected material references. | Never launch work; a progressing source can gain more matches. |
+| `run_cancel` | Request that the worker stop before dispatching another respondent. | An in-flight call is allowed to settle. |
 
-| Primitive | Meaning in a study |
-| --- | --- |
-| Study | A title, purpose, and one or more arms. |
-| Arm | One version of the study: source references, ordered stimulus items, tasks, and a presentation. Matched arms use the same frozen cohort. |
-| Stimulus item | A bounded piece of authored text with a stable ID. A source reference records the source path and digest. |
-| Task | One model decision: instructions and a typed response contract. A task may include or omit earlier response history independently of which respondents are eligible to reach it. `unanswerable` is an ordinary Choice option when useful. Answer keys are scoring metadata and are not sent to the model. |
-| Typed response | Choice returns one stable option ID and its probabilities. Score returns an expected score on an ordered rubric, per-level probabilities, and rubric legend. Noul returns P(true) for the proposition. |
-| Respondent profile | One concrete perspective, with five prose fields: intent, context, desired outcome, engagement cues, and friction cues. The profile is stimulus-specific and bounded by the shared field and aggregate limits. |
-| Archetype | A reusable perspective pattern with invariants and optional variation dimensions. It is a way to propose profiles, not a respondent that the harness runs directly. |
-| Cohort | An ordered, frozen collection of concrete respondent profiles, optionally with snapshots of the archetypes used to create them. |
-| Presentation | A `sequence` or a finite `graph`. A sequence exposes the arm's items in order and asks its tasks in order. A graph uses `expose`, `ask`, and `terminal` nodes; Choice routes by option ID, Score/Noul routes by explicit exhaustive, exclusive intervals, and every path terminates. |
-| Journey | One respondent's path through one arm. Its event history records stimulus exposures and typed responses. The cohort is held fixed across matched arms. |
-| Decision packet | The input for one task. It contains the respondent perspective, stimulus text in scope, and current typed task. Prior response events are included by default and can be omitted per task; exposure context remains. |
+## Request design
 
-History is derived from journey events, not separately authored state variables. For each task, response-history inclusion is independent of respondent eligibility: a task may receive only respondents routed onward with their own earlier answers, or address the full cohort without prior answers. Later tasks never see another respondent's history. Choice, Score, and Noul are typed outputs end to end; typed threshold routes must declare full-domain, non-overlapping intervals.
+The agent owns the meaning and granularity of the user's question. If the user asks which part of a page loses their interest, the agent can define the choices as sections, paragraphs, or another explicit unit. Sheg receives that choice structure; it does not decide what constitutes a meaningful “part.” Exact material text is preserved as supplied.
 
-## MCP tools
+Choice option IDs are stable machine identifiers paired with user-meaningful labels. Score uses a typed ordered rubric. Noul represents probability. These types must match the information the user wants back; do not turn a probability or ranking request into a nominal Choice just because it is easy to encode. For Choice over authored material candidates, map option IDs to exact material IDs with `materialOptions`; linked labels must equal exact text and candidates must carry author-supplied source metadata. Keep no-fit options unlinked. Query returns the selected `materialId`, exact text, author source identity/digest, and Sheg-computed text digest. Pass the ID through follow-on `context.materialIds`.
 
-Static product facts belong in this guide. The tools below validate, measure,
-preview, execute, or report; there is no capability-list tool.
+Sheg compiles one frozen decision packet per respondent and question evaluation. Independent questions share the respondent-visible state but remain separate evaluations; Jev may batch a question group into one provider request when it fits, while local Laya sends one question per physical request. Input order, exact material, typed questions, provider configuration, and the prompt contract determine the accepted request fingerprint. The submission ID is an idempotency key for one exact request, not a study name. A changed request uses a new submission ID.
 
-| Tool | Accepted input | Result | Provider behavior |
-| --- | --- | --- | --- |
-| `poll_preview` | `manifestPath` | Each arm's presentation and stable ordered nodes, including stimulus/task wording, Choice options or typed threshold routes, destinations, and shared continuations. Every question includes one `routeContexts` entry per route reaching it, with Choice options or typed response intervals, prior response meanings/exposure IDs, and stimulus IDs currently in scope. Shared questions remain one node with multiple route contexts. A stimulus ID resolves to the authored text on its stimulus node. Rejects more than 10,000 route contexts with no partial preview. | No cohort, provider, or inference call. |
-| `poll_check` | `config`: manifest, cohort, output directory, call limit, and provider configuration. | Validation/fingerprints, respondent and arm counts, minimum/maximum reachable decision calls, and call-limit sufficiency. | No provider call. |
-| `poll_preflight` | `manifestPath`, optional `cohortPath`, provider list, optional mode and packet cap. | Per-provider fit, worst packet, overflow/unavailable details, measurement method, and whether traversal completed. | Measures every reachable packet; no inference call. |
-| `poll_trace` | Manifest/cohort paths, arm/respondent IDs, and exactly one of scripted `choices` or typed `responses`. | The deterministic route and outcome for those responses. | No provider call. |
-| `poll_measure_packets` | Provider configs; `combination`; non-empty `respondents`, `stimuli`, `tasks`, and `trajectories` arrays of `{ id, value }` variants. | Every compiled case with stable case ID, source variant IDs, per-provider token estimate/measurement, fit, headroom, reason, and provider-specific largest case. | Calls provider `measure` only; no inference endpoint. Jev estimates offline; Laya uses its pinned local tokenizer. |
-| `poll_start` | A complete run `config` with manifest/cohort, provider, output directory, and `maxCalls`. | A durable run ID and initial run status. | Starts respondent inference. |
-| `poll_status` | `outputDirectory`, `runId` | Current durable status; it can recover an abandoned running state. | No new inference call. |
-| `poll_cancel` | `outputDirectory`, `runId` | Cancellation request and settled run state. | Waits for already in-flight decisions to settle; does not start new ones. |
-| `poll_resume` | `outputDirectory`, `runId` | Resumed run state after frozen-input and execution-fingerprint validation. | Resumes respondent inference. |
-| `poll_report` | `outputDirectory`, `runId` | JSON-safe respondent/task/run report. | No provider inference call. |
-| `poll_compare` | `outputDirectory`, `runId`, `leftArmId`, `rightArmId` | Matched comparison of two arms in that run. | No provider inference call. |
-| `poll_compare_runs` | Two report identities and one arm ID from each run. | Compares explicitly aligned typed responses from separate runs, requiring the exact same frozen respondent cohort and matching task meanings. Returns source, stimulus, task, provider, run-status, completion, and declared-profile subgroup differences. | No provider inference call. |
+## Current follow-on boundary
 
-### Choosing the measurement operation
+`run_query` filters recorded typed answers and route outcomes in one run. The agent inspects those results, decides which respondents and answers matter, then submits a follow-on with explicit criteria or exact evaluation/context references. A follow-on's context mode determines whether the selected answer enters its trajectory and which saved or selected material is presented. Sheg does not decide relevance or compose the next question for the agent.
 
-Use `poll_measure_packets` for quick, bounded checks while drafting. Each
-dimension can vary independently:
+Likewise, run recall is not recovery. Reads discover expired workers as interrupted and do not resume them. Use `run_resume` explicitly to continue an eligible run under its original attempt allowance. Cancellation prevents the next dispatch, but does not discard an answer for a provider call that was already in flight.
 
-- In `paired` mode, multi-valued dimensions are combined by the same index.
-  Three profiles and three task drafts mean `(profile-1, task-1)`,
-  `(profile-2, task-2)`, and `(profile-3, task-3)`. This does not compare the
-  contents of variants.
-- A singleton dimension broadcasts. One profile and 30 task variants produce
-  30 packets; 30 profiles and one task also produce 30.
-- If two or more dimensions have multiple values, those dimensions must have
-  equal lengths. Three profiles and two tasks fail validation before
-  measurement; no variant is silently dropped or repeated.
-- In `cartesian` mode, every combination is explicit. Three profiles and two
-  tasks produce six packets.
+## Interpreting evidence
 
-Every variant dimension needs stable unique IDs. The tool caps one call at
-1,000 expanded cases and 16 MiB of serialized compiled packet inputs. It
-returns a complete batch or an error, never a partial batch labelled complete.
-Provider-specific `largestCase` values are based on that provider's measured
-or estimated tokens, with deterministic case-ID tie breaking.
+Use status and answer rows together. Completed, failed, pending, and total evaluation counts describe coverage. A respondent-local invalid or failed answer does not hide sibling results. A run-wide provider failure stops later dispatches. An uncertain in-flight call consumes the physical attempt allowance without inventing an answer.
 
-Use `poll_preflight` after the design and frozen cohort are settled. It walks
-every respondent, every possible choice, and each resulting decision packet
-through every route. A fit at one draft packet does not imply the complete
-branching study fits.
-
-## Study flow and approvals
-
-1. Discuss material, question, and useful respondent perspective; inspect
-   these documented capabilities before proposing unsupported response types.
-2. Co-design and get the human's approval of the human-language study design.
-3. Author and validate the manifest, then use `poll_preview` to show every
-   route before building the cohort. Inspect route-specific prior choices and
-   current stimulus scope at each question. These steps add no approval gate.
-4. Propose and expand a cohort with the human, validate exact run settings with
-   `poll_check`, then use incremental sizing and exhaustive preflight.
-5. Report reachable calls and the configured call limit; get approval to
-   run, then call `poll_start`.
-6. Report and interpret the typed outcomes against the original question and
-   source material.
-
-For a follow-up that changes a variable, create a new run. The same frozen
-cohort can be reused and compared with `poll_compare_runs`; a paired comparison
-does not require a two-arm execution. Keep task comparison keys stable only
-when the question's meaning is still aligned. Comparisons describe simulated
-responses.
-
-Optimization of a study's shared trajectory/context policy is a future seam.
-It is not an authoring prerequisite or a current tool.
+These are modeled respondent outputs for the supplied profiles, material, and question. They can help the user examine an artifact or compare possibilities; they are not claims about observed human behavior or population prevalence.

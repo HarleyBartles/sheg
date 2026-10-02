@@ -19680,6 +19680,7 @@ function date4(params) {
 // src/domain/decision/decision.ts
 var identifier = external_exports.string().min(1);
 var prose = external_exports.string().min(1);
+var choiceText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
 var probability = external_exports.number().finite().min(0).max(1);
 var probabilities = external_exports.record(external_exports.string(), probability);
 var costEvidenceSchema = external_exports.object({
@@ -19702,8 +19703,23 @@ var choiceQuestionSchema = external_exports.object({
   type: external_exports.literal("choice"),
   id: identifier,
   instructions: prose,
-  options: external_exports.record(identifier, prose).refine((value) => Object.keys(value).length > 0)
-}).strict();
+  options: external_exports.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
+  materialOptions: external_exports.record(identifier, identifier).optional()
+}).strict().superRefine((question, context) => {
+  if (question.materialOptions) {
+    const links = Object.entries(question.materialOptions);
+    const linkedOptionIds = links.map(([optionId]) => optionId);
+    const linkedMaterialIds = links.map(([, materialId]) => materialId);
+    for (const optionId of linkedOptionIds) {
+      if (!Object.hasOwn(question.options, optionId)) {
+        context.addIssue({ code: "custom", path: ["materialOptions", optionId], message: `Material link references unknown option ${optionId}.` });
+      }
+    }
+    if (new Set(linkedMaterialIds).size !== linkedMaterialIds.length) {
+      context.addIssue({ code: "custom", path: ["materialOptions"], message: "Each material may be linked from at most one option." });
+    }
+  }
+});
 var scoreQuestionSchema = external_exports.object({
   type: external_exports.literal("score"),
   id: identifier,
@@ -19716,6 +19732,15 @@ var noulQuestionSchema = external_exports.object({
   instructions: prose,
   criteria: external_exports.object({ true: prose.optional(), false: prose.optional() }).strict().optional()
 }).strict();
+var decisionQuestionSchema = external_exports.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
+var decisionBatchRequestSchema = external_exports.object({
+  state: external_exports.record(external_exports.string(), external_exports.unknown()),
+  questions: external_exports.array(decisionQuestionSchema).min(1)
+}).strict().superRefine((request, context) => {
+  if (new Set(request.questions.map(({ id }) => id)).size !== request.questions.length) {
+    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a batch." });
+  }
+});
 var requestStateSchema = external_exports.object({ state: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict();
 var choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
@@ -19749,11 +19774,31 @@ var decisionValueSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string().regex(/^\d+$/), prose), probabilities: external_exports.record(external_exports.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
   external_exports.object({ type: external_exports.literal("noul"), noul: probability }).strict()
 ]);
+var providerExecutionEvidenceSchema = external_exports.object({
+  attempts: external_exports.number().int().positive(),
+  provider: external_exports.enum(["jev", "laya"]),
+  model: external_exports.string().min(1),
+  checkpoint: external_exports.string().min(1).optional(),
+  latencyMs: external_exports.number().finite().nonnegative(),
+  usage: external_exports.object({ inputTokens: external_exports.number().int().nonnegative().optional(), outputTokens: external_exports.number().int().nonnegative().optional() }).strict(),
+  cost: costEvidenceSchema.optional()
+}).strict();
+var decisionBatchResultSchema = external_exports.object({
+  answers: external_exports.array(external_exports.union([
+    external_exports.object({ questionId: identifier, value: decisionValueSchema }).strict(),
+    external_exports.object({ questionId: identifier, failure: external_exports.object({ code: identifier, message: prose }).strict() }).strict()
+  ])),
+  execution: providerExecutionEvidenceSchema
+}).strict().superRefine((result, context) => {
+  if (new Set(result.answers.map(({ questionId }) => questionId)).size !== result.answers.length) {
+    context.addIssue({ code: "custom", path: ["answers"], message: "Batch result question IDs must be unique." });
+  }
+});
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
 function questionForTask(task) {
-  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options } };
+  if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options }, ...task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {} };
   if ("rubric" in task) return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
   return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
 }
@@ -19773,6 +19818,15 @@ var promptContract = {
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
 var legacyPromptContractHash = "c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044";
+function finishTrajectory(body) {
+  let payloadUtf8Bytes = 0;
+  for (; ; ) {
+    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
+    if (nextSize === payloadUtf8Bytes) break;
+    payloadUtf8Bytes = nextSize;
+  }
+  return { ...body, payloadUtf8Bytes };
+}
 function compactTrajectory(arm, history) {
   const exposureIds = [];
   const choices = [];
@@ -19808,13 +19862,7 @@ function compactTrajectory(arm, history) {
     choices,
     responses
   };
-  let payloadUtf8Bytes = 0;
-  for (; ; ) {
-    const nextSize = new TextEncoder().encode(JSON.stringify({ ...body, payloadUtf8Bytes })).length;
-    if (nextSize === payloadUtf8Bytes) break;
-    payloadUtf8Bytes = nextSize;
-  }
-  return { ...body, payloadUtf8Bytes };
+  return finishTrajectory(body);
 }
 function compileDecisionPacket(arm, profile, taskId, history = []) {
   const task = arm.tasks.find((candidate) => candidate.id === taskId);
@@ -19851,7 +19899,7 @@ function compileDecisionPacket(arm, profile, taskId, history = []) {
 function compileDecisionRequest(parts) {
   const state = {
     respondent: { profile: { ...parts.respondentProfile } },
-    encounteredItems: parts.encounteredItems.map((item) => ({ ...item })),
+    encounteredItems: parts.encounteredItems.map(({ id, text }) => ({ id, text })),
     trajectory: parts.trajectory
   };
   const request = decisionRequestSchema.parse({
@@ -19999,81 +20047,133 @@ var presentationSchema = external_exports.discriminatedUnion("kind", [
 
 // src/domain/study/stimulus.ts
 var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose2 = external_exports.string().trim().min(1);
+var exactText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Material text must not be blank.");
+var materialOriginSchema = external_exports.object({
+  sourceId: identifier3,
+  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
 var sourceReferenceSchema = external_exports.object({
   path: external_exports.string().min(1),
   sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
 }).strict();
 var stimulusItemSchema = external_exports.object({
   id: identifier3,
-  text: prose2
-}).strict();
+  text: exactText,
+  sourceId: materialOriginSchema.shape.sourceId.optional(),
+  sourceSha256: materialOriginSchema.shape.sourceSha256.optional()
+}).strict().superRefine((item, context) => {
+  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) {
+    context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
+  }
+});
 
 // src/domain/study/task.ts
 var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose3 = external_exports.string().trim().min(1);
+var prose2 = external_exports.string().trim().min(1);
+var choiceText2 = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
 var taskFields = {
   id: identifier4,
-  instructions: prose3,
+  instructions: prose2,
   comparisonKey: identifier4.optional(),
   responseHistory: external_exports.enum(["include", "omit"]).optional()
 };
-var options = external_exports.record(identifier4, prose3).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+var options = external_exports.record(identifier4, choiceText2).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+var materialOptions = external_exports.record(identifier4, identifier4).optional();
 function validateChoiceTask(task, context) {
-  if (typeof task !== "object" || task === null || !("options" in task) || !("answerKeyOptionId" in task)) return;
-  const options2 = task.options;
-  const answerKeyOptionId = task.answerKeyOptionId;
-  if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in options2)) {
-    context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+  if (typeof task !== "object" || task === null || !("options" in task)) return;
+  const optionsValue = task.options;
+  if (typeof optionsValue !== "object" || optionsValue === null || Array.isArray(optionsValue)) return;
+  const choiceOptions = optionsValue;
+  if ("answerKeyOptionId" in task) {
+    const answerKeyOptionId = task.answerKeyOptionId;
+    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in choiceOptions)) {
+      context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+    }
+  }
+  if ("materialOptions" in task && typeof task.materialOptions === "object" && task.materialOptions !== null && !Array.isArray(task.materialOptions)) {
+    const materialOptions2 = task.materialOptions;
+    for (const optionId of Object.keys(materialOptions2)) {
+      if (!Object.hasOwn(choiceOptions, optionId)) {
+        context.addIssue({ code: "custom", path: ["materialOptions", optionId], message: `Material link references unknown option ${optionId}.` });
+      }
+    }
+    if (new Set(Object.values(materialOptions2)).size !== Object.keys(materialOptions2).length) {
+      context.addIssue({ code: "custom", path: ["materialOptions"], message: "Each material may be linked from at most one option." });
+    }
   }
 }
 var legacyChoiceTaskSchema = external_exports.object({
   ...taskFields,
   options,
+  materialOptions,
   answerKeyOptionId: identifier4.optional()
 }).strict().superRefine(validateChoiceTask);
 var typedChoiceTaskSchema = external_exports.object({
   ...taskFields,
   type: external_exports.literal("choice"),
   options,
+  materialOptions,
   answerKeyOptionId: identifier4.optional()
 }).strict().superRefine(validateChoiceTask);
 var scoreTaskSchema = external_exports.object({
   ...taskFields,
   type: external_exports.literal("score"),
-  rubric: external_exports.array(prose3).min(2)
+  rubric: external_exports.array(prose2).min(2)
 }).strict();
 var noulTaskSchema = external_exports.object({
   ...taskFields,
   type: external_exports.literal("noul"),
-  criteria: external_exports.object({ true: prose3.optional(), false: prose3.optional() }).strict().optional()
+  criteria: external_exports.object({ true: prose2.optional(), false: prose2.optional() }).strict().optional()
 }).strict();
 var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
 var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
 
 // src/domain/study/arm.ts
 var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose4 = external_exports.string().trim().min(1);
-var studyArmSchema = external_exports.object({
+var prose3 = external_exports.string().trim().min(1);
+var journeyDefinitionFields = {
   id: identifier5,
-  label: prose4,
-  sources: external_exports.array(sourceReferenceSchema).min(1),
+  label: prose3,
   items: external_exports.array(stimulusItemSchema).min(1),
   tasks: external_exports.array(taskSchema).min(1),
   presentation: presentationSchema
-}).strict().superRefine((arm, context) => {
+};
+var journeyDefinitionSchema = external_exports.object(journeyDefinitionFields).strict().superRefine(validateJourneyDefinition);
+var studyArmSchema = external_exports.object({
+  ...journeyDefinitionFields,
+  sources: external_exports.array(sourceReferenceSchema).min(1)
+}).strict().superRefine(validateJourneyDefinition);
+function validateJourneyDefinition(arm, context) {
   const presentation = arm.presentation;
   const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
-  const nodeIds = new Set(nodeValues.map((node2) => node2.id));
-  const itemIds = new Set(arm.items.map((item) => item.id));
+  const nodeIdValues = nodeValues.map((node2) => node2.id);
+  const itemIdValues = arm.items.map((item) => item.id);
+  const taskIdValues = arm.tasks.map((task) => task.id);
+  const itemIds = new Set(itemIdValues);
   const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
-  const allIds = [...itemIds, ...taskById.keys(), ...nodeIds];
+  const allIds = [...itemIdValues, ...taskIdValues, ...nodeIdValues];
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
   }
   const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
   if (new Set(comparisonKeys).size !== comparisonKeys.length) {
     context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
+  }
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (!("options" in task) || !task.materialOptions) continue;
+    for (const [optionId, materialId] of Object.entries(task.materialOptions)) {
+      const item = arm.items.find((candidate) => candidate.id === materialId);
+      if (!item) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
+        continue;
+      }
+      if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
+      }
+      if (task.options[optionId] !== item.text) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
+      }
+    }
   }
   if (presentation.kind === "sequence") return;
   const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
@@ -20188,7 +20288,7 @@ var studyArmSchema = external_exports.object({
       });
     }
   }
-});
+}
 function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
   const issues = context;
   const ranges = edges.map((edge, index) => ({ edge, index, range: edge.when }));
@@ -20229,12 +20329,12 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
 }
 
 // src/domain/study/study.ts
-var prose5 = external_exports.string().trim().min(1);
+var prose4 = external_exports.string().trim().min(1);
 var studyManifestSchema = external_exports.object({
   version: external_exports.literal("2.0"),
   study: external_exports.object({
-    title: prose5,
-    purpose: prose5
+    title: prose4,
+    purpose: prose4
   }).strict(),
   arms: external_exports.array(studyArmSchema).min(1)
 }).strict().superRefine((study, context) => {
@@ -21147,6 +21247,71 @@ function validateDecision(request, result, options2 = {}) {
   }
   return decision;
 }
+function validateDecisionBatch(request, result, options2 = {}) {
+  const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision batch request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
+  }
+  const envelope = batchEnvelopeSchema.safeParse(result);
+  if (!envelope.success) {
+    throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: envelope.error });
+  }
+  const execution = providerExecutionEvidenceSchema.parse(envelope.data.execution);
+  for (const answer of envelope.data.answers) {
+    if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
+      throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);
+    }
+  }
+  const answers = parsedRequest.data.questions.map((question) => {
+    const matches = envelope.data.answers.filter(({ questionId }) => questionId === question.id);
+    if (matches.length > 1) return { questionId: question.id, failure: { code: "duplicate_answer", message: "The provider returned this question more than once." } };
+    const answer = matches[0];
+    if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
+    if (answer.failure) return { questionId: question.id, failure: answer.failure };
+    const value = decisionValueSchema.safeParse(answer.value);
+    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider returned an invalid typed answer." } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The provider answer type does not match the question." } };
+    if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
+      return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider selected an option that was not offered." } };
+    }
+    try {
+      const enriched = { ...value.data, ...execution };
+      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
+      return { questionId: question.id, value: toDecisionValue(checked) };
+    } catch (error62) {
+      if (!(error62 instanceof DecisionError)) throw error62;
+      const typeMismatch = error62.message.includes("does not match task type");
+      return { questionId: question.id, failure: { code: typeMismatch ? "answer_type_mismatch" : "invalid_answer", message: typeMismatch ? "The provider answer type does not match the question." : "The provider returned an invalid answer for this question." } };
+    }
+  });
+  return decisionBatchResultSchema.parse({ answers, execution });
+}
+function toDecisionValue(result) {
+  if (result.type === "choice") return {
+    type: "choice",
+    choice: result.choice,
+    probabilities: result.probabilities,
+    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
+  };
+  if (result.type === "score") return {
+    type: "score",
+    score: result.score,
+    legend: result.legend,
+    probabilities: result.probabilities,
+    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
+  };
+  return { type: "noul", noul: result.noul };
+}
+var batchEnvelopeSchema = external_exports.object({
+  answers: external_exports.array(external_exports.object({
+    questionId: external_exports.string().min(1),
+    value: external_exports.unknown().optional(),
+    failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional()
+  }).strict().superRefine((answer, context) => {
+    if ("value" in answer === Boolean(answer.failure)) context.addIssue({ code: "custom", message: "Each batch answer must contain exactly one value or failure." });
+  })),
+  execution: providerExecutionEvidenceSchema
+}).strict();
 function validateDistribution(distribution, expectedIds, label) {
   const ids = Object.keys(distribution);
   if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
@@ -21196,6 +21361,17 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path4 from "node:path";
 import { fileURLToPath } from "node:url";
+var CredentialStoreError = class extends Error {
+  constructor(code, route) {
+    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
+    super(message);
+    this.code = code;
+    this.route = route;
+    this.name = "CredentialStoreError";
+  }
+  code;
+  route;
+};
 var defaultTargets = {
   typesafe: "Sheg/Jev/TypeSafe",
   openrouter: "Sheg/Jev/OpenRouter"
@@ -21214,6 +21390,7 @@ var WindowsCredentialStore = class {
       const result = await this.run(this.arguments("Status", route));
       if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
       if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
+      if (result.code === 4 && result.stdout.trim() === "MALFORMED") return "malformed";
       return "unavailable";
     } catch {
       return "unavailable";
@@ -21224,10 +21401,11 @@ var WindowsCredentialStore = class {
     try {
       result = await this.run(this.arguments("Read", route));
     } catch {
-      throw new Error(`The ${route} secure credential could not be read.`);
+      throw new CredentialStoreError("credential_unavailable", route);
     }
     const key = result.stdout.replace(/\r?\n$/, "");
-    if (result.code !== 0 || !key) throw new Error(`The ${route} secure credential could not be read.`);
+    if (result.code === 4 && result.stdout.trim() === "MALFORMED") throw new CredentialStoreError("credential_malformed", route);
+    if (result.code !== 0 || !key) throw new CredentialStoreError("credential_unavailable", route);
     return key;
   }
   async setup(route) {
@@ -21299,16 +21477,20 @@ async function runPowerShell(helperPath, args, interactive = false) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable") {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
+    this.failureScope = failureScope;
+    this.failureCode = failureCode;
     this.name = "JevCallError";
   }
   attempts;
   contextFit;
   decisionId;
+  failureScope;
+  failureCode;
 };
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -21331,13 +21513,17 @@ var wireResponseSchema = external_exports.object({
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
-function requestBody(request, model) {
-  const { question } = request;
+function wireQuestion(question) {
   const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { model, state: request.state, questions: { [question.id]: { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } } } };
+  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
 }
-function measureJevContext(request, model, route = "openrouter") {
-  const serialized = JSON.stringify(requestBody(request, model));
+function requestBody(request, model) {
+  return { model, state: request.state, questions: { [request.question.id]: wireQuestion(request.question) } };
+}
+function batchRequestBody(request, model) {
+  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, wireQuestion(question)])) };
+}
+function measureRequestBody(serialized, model, route) {
   const bytes = Buffer.byteLength(serialized, "utf8");
   const tokens = Math.ceil(bytes / 3);
   const contextLimit = jevMetadata(route, model)?.contextLimit ?? null;
@@ -21358,17 +21544,25 @@ function measureJevContext(request, model, route = "openrouter") {
     ...status === "unavailable" ? { reason: route === "typesafe" ? TYPESAFE_CONTEXT_UNVERIFIED : "model-context-unknown" } : status === "overflow" ? { reason: "estimated-context-over-limit" } : {}
   };
 }
+function measureJevContext(request, model, route = "openrouter") {
+  return measureRequestBody(JSON.stringify(requestBody(request, model)), model, route);
+}
+function measureJevBatchContext(request, model, route = "openrouter") {
+  return measureRequestBody(JSON.stringify(batchRequestBody(request, model)), model, route);
+}
 var JevProvider = class {
   constructor(config2, fetchRequest = fetch, options2 = {}) {
     this.fetchRequest = fetchRequest;
     this.config = jevConfigSchema.parse(config2);
     this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
     this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
+    this.measureBatchContext = options2.measureBatchContext;
   }
   fetchRequest;
   config;
   credentialStore;
   measureContext;
+  measureBatchContext;
   async decide(request, maxAttempts) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       throw new JevCallError("Jev call limit must be a positive integer.", 0);
@@ -21382,8 +21576,9 @@ var JevProvider = class {
     let apiKey;
     try {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
-    } catch {
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0);
+    } catch (error62) {
+      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -21415,7 +21610,7 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts);
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
       }
       let payload;
       try {
@@ -21459,10 +21654,99 @@ var JevProvider = class {
     }
     throw new JevCallError("Jev call limit reached without a response.", attempts);
   }
+  measureBatch(request) {
+    const parsed = decisionBatchRequestSchema.safeParse(request);
+    if (!parsed.success) return { ...missingMeasureFit(this.config, "invalid-batch-request"), reason: "invalid-batch-request" };
+    return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
+  }
+  async decideBatch(request, maxAttempts) {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", 0);
+    const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", 0);
+    const normalizedRequest = parsedRequest.data;
+    const fit = this.measureBatch(normalizedRequest);
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit);
+    let apiKey;
+    try {
+      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+    } catch (error62) {
+      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
+    }
+    const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
+    const startedAt = performance.now();
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      attempts += 1;
+      let response;
+      try {
+        response = await this.fetchRequest(this.config.endpoint, {
+          method: "POST",
+          redirect: "error",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body,
+          signal: AbortSignal.timeout(this.config.timeoutMs)
+        });
+      } catch {
+        if (attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
+      }
+      if (!response.ok) {
+        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+      }
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new JevCallError("Jev returned an unreadable response.", attempts);
+      }
+      const parsedResponse = wireResponseSchema.safeParse(payload);
+      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
+      const cost = parsedResponse.data.usage.cost;
+      const inputTokens = parsedResponse.data.usage.input_tokens;
+      const outputTokens = parsedResponse.data.usage.output_tokens;
+      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
+      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
+      const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
+        const answer = answerSchema.safeParse(rawValue);
+        return { questionId, value: answer.success ? toDecisionValue2(answer.data) : rawValue };
+      });
+      const execution = {
+        attempts,
+        provider: "jev",
+        model: parsedResponse.data.model,
+        latencyMs: performance.now() - startedAt,
+        usage: { ...inputTokens === void 0 ? {} : { inputTokens }, ...outputTokens === void 0 ? {} : { outputTokens } },
+        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
+      };
+      try {
+        return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
+      } catch (error62) {
+        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts);
+        throw error62;
+      }
+    }
+    throw new JevCallError("Jev call limit reached without a response.", attempts);
+  }
   measure(request) {
     return this.measureContext(request, this.config);
   }
 };
+function toDecisionValue2(answer) {
+  if (answer.type === "choice") return { type: "choice", choice: answer.choice, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
+  if (answer.type === "score") return { type: "score", score: answer.score, legend: answer.legend, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
+  return { type: "noul", noul: answer.noul };
+}
+function missingMeasureFit(config2, reason) {
+  return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
+}
 function retryDelayMs(attempt) {
   return Math.min(50 * 2 ** (attempt - 1), 1e3);
 }
@@ -21799,16 +22083,18 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId) {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation") {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
+    this.failureScope = failureScope;
     this.name = "LayaCallError";
   }
   attempts;
   contextFit;
   decisionId;
+  failureScope;
 };
 var choiceAnswerSchema2 = external_exports.object({
   type: external_exports.literal("choice"),
@@ -21819,7 +22105,7 @@ var choiceAnswerSchema2 = external_exports.object({
 var scoreAnswerSchema2 = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
 var noulAnswerSchema2 = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
 var answerSchema2 = external_exports.discriminatedUnion("type", [choiceAnswerSchema2, scoreAnswerSchema2, noulAnswerSchema2]);
-function wireQuestion(question) {
+function wireQuestion2(question) {
   const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
   return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
 }
@@ -21884,7 +22170,7 @@ var LayaProvider = class {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: wireQuestion(question)
+            [question.id]: wireQuestion2(question)
           }
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs)
@@ -21892,7 +22178,7 @@ var LayaProvider = class {
     } catch {
       throw new LayaCallError("Laya local service request failed.", 1);
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1);
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
     let payload;
     try {
       payload = await response.json();
@@ -21933,6 +22219,23 @@ var LayaProvider = class {
 function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
 }
+
+// src/providers/config.ts
+var layaConfigSchema = external_exports.object({
+  kind: external_exports.literal("laya"),
+  baseUrl: external_exports.string().url(),
+  checkpoint: external_exports.string().min(1),
+  contextLimit: external_exports.number().int().positive(),
+  headLimit: external_exports.number().int().positive(),
+  tokenizerJsonPath: external_exports.string().min(1),
+  tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  precision: external_exports.string().optional(),
+  timeoutMs: external_exports.number().int().positive()
+}).strict();
+var providerConfigSchema2 = external_exports.union([
+  jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
+  layaConfigSchema
+]);
 
 // src/application/worker.ts
 import { createHash as createHash5 } from "node:crypto";
@@ -22125,7 +22428,7 @@ function estimateRunDecisionCalls(arms, respondents) {
   let minimumDecisionCalls = 0;
   let maximumDecisionCalls = 0;
   for (const rawArm of arms) {
-    const arm = studyArmSchema.parse(rawArm);
+    const arm = ("sources" in rawArm ? studyArmSchema : journeyDefinitionSchema).parse(rawArm);
     const range = arm.presentation.kind === "sequence" ? { minimum: arm.tasks.length, maximum: arm.tasks.length } : graphDecisionRange(arm);
     minimumDecisionCalls += range.minimum * respondents.length;
     maximumDecisionCalls += range.maximum * respondents.length;
@@ -22174,10 +22477,7 @@ function graphDecisionRange(arm) {
 var configSchema = external_exports.object({
   manifestPath: external_exports.string().min(1),
   cohortPath: external_exports.string().min(1),
-  provider: external_exports.union([
-    jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
-    external_exports.object({ kind: external_exports.literal("laya"), baseUrl: external_exports.string().url(), checkpoint: external_exports.string().min(1), contextLimit: external_exports.number().int().positive(), headLimit: external_exports.number().int().positive(), tokenizerJsonPath: external_exports.string().min(1), tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i), precision: external_exports.string().optional(), timeoutMs: external_exports.number().int().positive() }).strict()
-  ]),
+  provider: providerConfigSchema2,
   outputDirectory: external_exports.string().min(1),
   maxCalls: external_exports.number().int().positive(),
   concurrency: external_exports.number().int().min(1).max(64).default(1)
@@ -22305,6 +22605,7 @@ var RunManager = class {
 async function requireJevCredential(provider, credentialStore) {
   if (provider.kind !== "jev") return;
   const availability = await credentialStore.availability(provider.route);
+  if (availability === "malformed") throw new CredentialStoreError("credential_malformed", provider.route);
   if (availability !== "available") throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
 }
 function recoverInterruptedAttempts(checkpoint) {
@@ -22882,7 +23183,7 @@ function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
   };
   for (const arm of arms) {
     if (stopped) break;
-    const validation = studyArmSchema.safeParse(arm);
+    const validation = ("sources" in arm ? studyArmSchema : journeyDefinitionSchema).safeParse(arm);
     if (!validation.success) {
       markIncomplete(`Study arm ${arm.id} is invalid: ${validation.error.issues.map((issue2) => issue2.message).join(" ")}`);
       break;

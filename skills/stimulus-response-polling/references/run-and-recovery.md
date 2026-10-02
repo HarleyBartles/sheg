@@ -2,62 +2,59 @@
 
 ## Connect a Jev key or defer
 
-When installing Sheg or choosing Jev without a saved key, offer **Connect
-TypeSafe**, **Connect OpenRouter**, or **Skip for now**. The user may connect
-both by repeating setup. Skipping permits keyless study preparation and local
-Laya; it cannot authenticate a Jev run.
+When installing Sheg or choosing Jev without a saved key, offer **Connect TypeSafe**, **Connect OpenRouter**, or **Skip for now**. The user may connect both by repeating setup. Skipping permits keyless request design and local Laya; it cannot authenticate a Jev run.
 
-Resolve the installed plugin root from this skill's location. Give the user
-this PowerShell command with the actual absolute helper path, or open a visible
-interactive terminal, run the command there, and let the user type only the key
-into its hidden prompt:
+Resolve the installed plugin root from this skill's location. Give the user this PowerShell command with the actual absolute helper path, or open a visible interactive terminal, run the command there, and let the user type only the key into its hidden prompt:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\installed\sheg\dist\credentials\windows-credential.ps1" -Operation Setup -TargetName Sheg/Jev/TypeSafe
 ```
 
-Use `Sheg/Jev/OpenRouter` for OpenRouter. `Status` reports safe availability,
-`Setup` replaces the entry, and `Remove` deletes it. The helper writes directly
-to Windows Credential Manager. If secure storage fails, stop setup and explain
-the limitation. Never use chat, MCP parameters, environment variables, command
-arguments, or files to carry the key. macOS and Linux are not supported yet.
-Setup itself makes no paid request. Offer it again when a skipped route is
-needed; never fall back to the other route's credential.
+Use `Sheg/Jev/OpenRouter` for OpenRouter. `Status` reports safe availability, `Setup` replaces the entry, and `Remove` deletes it. The helper writes directly to Windows Credential Manager. If secure storage fails, stop setup and explain the limitation. Never use chat, MCP parameters, environment variables, command arguments, or files to carry the key. macOS and Linux are not supported yet. Setup itself makes no paid request. Offer it again when a skipped route is needed; never fall back to the other route's credential.
 
-## Run and recover
+Credential Manager stores generic values as bytes. Sheg can read UTF-8 tokens, including odd-length values, as well as the UTF-16LE format written by its setup helper. If an entry is present but uses another unreadable encoding, `run_start` returns `provider_credential_malformed` with a safe explanation and a setup instruction. The key itself is never included. This is distinct from a missing key or an unavailable credential store.
 
-For a new run, first read [prepare and trace](prepare-and-trace.md) and call
-`poll_check` with the exact manifest, frozen cohort, provider, and call limit.
-Resolve validation errors before considering `poll_start`. `poll_check` is
-keyless and makes no inference call.
+## Start and inspect a run
 
-Before `poll_start`, report the provider, arm count, distinct respondent
-count, respondent-arm cell count, output directory, and maximum calls. For
-hosted Jev, obtain explicit user authorization for the study and maximum call
-count. Sheg does not set a spend limit or account for provider billing.
+Build the simplest request that matches the user's goal: exact inline material, one or more distinct respondent profiles, one typed Choice, Score, or Noul question (or a finite sequence/response-routed graph when multiple stages are needed), one provider, and an adequate `maxCalls` limit. A direct poll or follow-on request may contain multiple independent questions over the same frozen respondent state. Choose material units, questions and response options from the user's question. Do not invent stages or add questions that do not help answer the requested question.
 
-- Keep one provider route for a run. Jev reads the selected route's key from
-  Windows Credential Manager. Never request a key in chat or store it in a
-  manifest. `poll_start` and `poll_resume` reject a missing secure credential;
-  `poll_check` remains keyless.
-- `maxCalls` bounds physical provider attempts, including retries. Failed and
-  interrupted requests consume calls because the provider may have received
-  them. A zero-attempt cancellation releases its reservation.
-- Laya requires a checkpoint-matched context fit measurer. If fit cannot be
-  verified, the adapter must return unsupported input without dispatching. Do
-  not trim content, change providers, or claim the inference ran.
+Use `run_inspect` with the exact request when a fit preview would help. It validates the shape and measures fit without inference or creating a run. `run_start` performs admission validation itself. Resolve invalid input, context overflow, and unavailable fit before starting. Do not trim user material, switch providers, or weaken a question without explaining the proposed change and checking that it preserves the user's intent.
 
-`poll_start` returns a run ID. Use `poll_status` to inspect progress. Call
-`poll_cancel` when cancellation is requested. Use `poll_resume` for a partial
-or failed run after checking the stored call allowance and unchanged study and
-provider settings.
+For a hosted Jev run, obtain explicit user authorization for the study and its maximum physical call count. Sheg does not set a spend limit or account for provider billing. Jev reads the selected route's key from Windows Credential Manager; never request a key in chat or store it in a request. Laya requires a checkpoint-matched context fit measurer and a running local service. If fit cannot be verified, the adapter rejects the request before inference.
 
-Provider-reported cost or a published-rate estimate may appear per decision
-when available. Cost evidence is optional and may differ by the user's API
-account. Sheg does not total it, treat it as an accounting record, or require
-billing reconciliation. Users can consult their provider dashboard for exact
-account usage.
+Call `run_start` with a fresh UUID `submissionId` and the inspected request. It returns a durable `runId` after persistence and worker launch. Preserve both identifiers. If the tool response is lost, retry the identical request with the same submission ID; that returns the existing run and does not dispatch a second worker. A changed request needs a new submission ID.
 
-Recovered interruptions are recorded with consumed attempts and candidate active
-cells at run level. Candidate cells do not establish which request reached the
-provider. Observed provider failures retain per-cell failed-attempt counts.
+## Discover and interpret results
+
+Use `run_query` to select recorded evidence from a source run. Criteria combine optional respondent ID, evaluation status, question ID, encountered material ID, typed Choice/Score/Noul answer, and journey route outcome. The tool returns exact `evaluationId` and `contextId` handles, answer distributions and provenance, match count, evaluation/respondent denominators, `sourceStatus`, and `sourceComplete`. Use `run_get` with `view: "context"`, the run ID and one returned handle pair to retrieve that exact frozen packet and respondent-visible state; the response contains one evaluation rather than every context in the run. When the source is still progressing, describe the matches as current results and say more may match after completion. Query again after completion if the user needs the final cohort. A route outcome and a typed answer are separate facts; for example, `left-lost-interest` does not prove the respondent selected a typed “lost interest” answer.
+
+For a Choice question that explicitly maps option IDs to exact material IDs with `materialOptions`, a matching answer also includes `selectedMaterial`: `materialId`, exact `text`, author-supplied `sourceId` and `sourceSha256`, and Sheg-computed `textSha256`. Unmapped options, including no-fit, have no material reference. The agent authors candidate boundaries and labels. Use the returned `materialId` in a follow-on request's `context.materialIds`, with the returned evaluation/context handles, to ask about the selected candidate in that respondent's chosen context.
+
+Build a follow-on request yourself from the user's intended question and the evidence you selected. Sheg does not decide which result is relevant or what unit counts as a section, paragraph, or “bit.” Selection can repeat the query criteria for a live result set or pass exact `{evaluationId, contextId}` pairs returned by `run_query`. A user with a clear question can supply it directly; when their expectation is broader, first decide what answers would satisfy them, then choose the smallest evidence selection and typed question that can answer it. Use `run_inspect` on that exact follow-on when a fit preview would help; `run_start` performs admission validation itself.
+
+Choose a follow-on context explicitly:
+
+- `recorded` changes only the question. It preserves the selected turn's exact respondent perspective, material, and trajectory.
+- `fresh-material` uses the saved perspective with explicitly supplied or selected material and an empty trajectory.
+- `omit-history` uses explicitly selected material with the saved perspective and an empty trajectory. Pass `context.materialIds` to select exact material from that turn; this removes earlier exposure IDs and order from the model input.
+- `continue` retains the selected turn and adds its completed typed answer to the trajectory before asking the next question. Optional explicit material is added for the next question. A pending turn has no answer to continue.
+
+Each accepted follow-on is its own durable run with its own ID, frozen packets, answers, and source lineage. The source material is copied into those packets, so a follow-on remains readable if its source run is deleted. `run_get` with `view: "request"` reports whether the source record is still live or historical. `run_delete` dry-run lists dependent follow-on run IDs that would be retained.
+
+Use `run_get` with `view: "status"` to inspect progress, `view: "request"` to recall frozen inputs and respondent packets, `view: "answers"` to retrieve typed answers and failures, or `view: "journey"` to retrieve respondent-local turns, exposures, response history, routes, and terminal states. Answer pagination uses the returned cursor and a limit from 1 to 200. Use `view: "attempts"` to inspect physical calls, their linked evaluation IDs, settlement status, and any provider failure. Attempt history also paginates with the returned cursor and a limit from 1 to 200. `run_query` also paginates with a returned cursor. `run_list` supports status, label, time, and referenced-material filters when the run ID is not at hand. Discovery and query never start or resume work.
+
+Report completed, failed, pending, and total evaluation counts together with the run status. A completed run has an answer for each respondent; a partial run may include both answers and respondent-local failures. A run-wide provider failure stops further dispatch. If cancellation is requested during an active provider call, let that call settle and preserve its answer; Sheg does not send the next respondent.
+
+Independent questions in one request share the exact frozen respondent state and are answered separately. Siblings do not see each other's answers. Jev may serve several questions in one physical request when its measured batch fits; Sheg can split a group while preserving each question and its shared context. Local Laya currently sends one question per physical request. `maxCalls` counts physical provider attempts, including uncertain attempts and retries, not question count. A confirmed failure before dispatch does not consume an allowance; fix its cause and explicitly resume the failed run. `run_inspect` reports the minimum physical calls after provider measurement; actual calls may be higher when a group is split or retried. Query by `questionId` to select one answer. A dependent question must be a follow-on that explicitly selects completed evaluation/context handles; do not place a question that depends on a sibling answer in the same group.
+
+Provider attempts are not new responses. An uncertain in-flight call consumes its reserved physical-call allowance because the provider may have received it. Expired workers appear as interrupted, and a read will not retry them. An interrupted run does not restart on its own. When the user wants it to continue, call `run_resume` with its run ID. The same ID, frozen request, completed answers, attempt history, and original `maxCalls` remain in force. An uncertain in-flight call is charged once because the provider may have received it. Only one concurrent resume request launches a worker. Prepared runs are returned as-is; running, completed, and cancelled runs are not resumable. Failed runs with a run-scoped failure and partial runs with retryable evaluation failures can resume when the original call allowance permits.
+
+## Delete selected runs
+
+Deletion is explicit and accepts 1 to 200 unique run IDs. Use `run_delete` with `dryRun: true` when a preview would help. The preview lists each selected run's status, evaluation and attempt counts, and whether active work blocks deletion. A preview does not remove data. The delete operation validates the whole selection itself, so the preview is not a reservation. If any run is missing or active, deletion is all-or-none. Cancel active work, poll until it is terminal, then submit the explicit selection again. Deletion removes the run and its associated evaluation and attempt records. The result distinguishes committed deletion from optimization maintenance: `maintenance.optimization` is `completed` or `failed`, and a failure includes `failureCode`. A maintenance failure does not undo the reported deletion; inspect or retry with `run_storage`. Never manipulate SQLite files or sidecars directly.
+
+## Inspect and optimize storage
+
+Call `run_storage` with `operation: "inspect"` for SQLite and foreign-key integrity status, database byte size, and run, evaluation, attempt, and active-run counts. The report contains no host path or SQL. Call `run_storage` with `operation: "optimize"` to ask Sheg to run SQLite optimization. Sheg refuses to optimize when its integrity check fails. Inspection reconciles expired worker leases before counting active runs, but never launches or resumes work. Successful deletion also triggers Sheg-managed optimization. Do not run maintenance at harness startup or manually alter datastore files.
+
+Provider-reported cost or a published-rate estimate may appear per decision when available. Cost evidence is optional and may differ by the user's API account. Sheg does not total it, treat it as an accounting record, or require billing reconciliation. Users can consult their provider dashboard for exact account usage.

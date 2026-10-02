@@ -9,18 +9,16 @@ import { AttemptLedger } from '../domain/attempt-ledger.js';
 import { CheckpointStore, emptyAttemptSnapshot, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 import { ProcessLock, ProcessLockError } from '../infrastructure/process-lock.js';
-import { JevProvider, jevConfigInputSchema, jevConfigSchema, type JevConfig } from '../providers/jev.js';
+import { JevProvider, type JevConfig } from '../providers/jev.js';
 import { LayaProvider, type FitMeasurer, type LayaConfig } from '../providers/laya.js';
-import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
+import { providerConfigSchema } from '../providers/config.js';
+import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import { runWorker } from './worker.js';
 import { estimateRunDecisionCalls, type RunDecisionCallBounds } from '../domain/journey/route-bounds.js';
 
 const configSchema = z.object({
   manifestPath: z.string().min(1), cohortPath: z.string().min(1),
-  provider: z.union([
-    jevConfigInputSchema.transform((input) => jevConfigSchema.parse(input)),
-    z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
-  ]),
+  provider: providerConfigSchema,
   outputDirectory: z.string().min(1), maxCalls: z.number().int().positive(),
   concurrency: z.number().int().min(1).max(64).default(1),
 }).strict();
@@ -136,6 +134,7 @@ export class RunManager {
 async function requireJevCredential(provider: ParsedConfig['provider'], credentialStore: Pick<WindowsCredentialStore, 'availability'>): Promise<void> {
   if (provider.kind !== 'jev') return;
   const availability = await credentialStore.availability(provider.route);
+  if (availability === 'malformed') throw new CredentialStoreError('credential_malformed', provider.route);
   if (availability !== 'available') throw new Error(`The ${provider.route} secure credential is ${availability}. Connect the key through Windows Credential Manager before starting or resuming a run.`);
 }
 

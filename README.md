@@ -8,15 +8,13 @@ A study combines a bounded text stimulus, one or more questions with explicit re
 
 The harness runs each respondent once per arm, checkpoints progress, and reports response counts, task reach and completion, optional answer-key scoring, and matched comparisons. Use a sequence for straightforward item-then-question studies, or a bounded graph when conditional exposure or branching is part of the study.
 
-The [study-design skill](skills/study-design/SKILL.md) helps an agent work with a person from their material and question through respondent perspectives, study design, and a reviewable journey. The [polling skill](skills/stimulus-response-polling/SKILL.md) covers the contracts and harness operations. The plugin ships reusable [respondent archetypes](dist/data/respondent-archetypes/), not ready-made profiles. You can use the shipped archetypes, add custom ones, mix them, or provide a frozen profile cohort directly.
+The MCP run tools accept a direct inline request with one or more independent typed questions, a finite sequence/graph journey, or a follow-on that selects exact recorded respondent contexts. Independent questions share one frozen respondent state, while each answer remains separate; Jev may batch them and local Laya currently sends one question per physical call. Each durable run ID supports later recall of frozen inputs, typed answers, exposures, routes, query evidence, and lineage. The [study-design skill](skills/study-design/SKILL.md) helps an agent shape the simplest request, and the [polling skill](skills/stimulus-response-polling/SKILL.md) covers querying and reusing recorded contexts. The repository also retains [respondent archetypes](dist/data/respondent-archetypes/) for file-backed cohort authoring.
 
 These are simulated responses. Repeating the same respondent, stimulus, and task does not create a more meaningful sample. Reports do not establish human readership, real-world accuracy, statistical significance, or causal lift.
 
 ## Supported harness
 
-Sheg currently supports the Codex plugin harness. Other agent harnesses are not
-included in this compatibility contract. Future harness adapters require their
-own compatibility statement, packaging, and validation.
+Sheg currently supports the Codex plugin harness. Other agent harnesses are not included in this compatibility contract. Future harness adapters require their own compatibility statement, packaging, and validation.
 
 ## Install the Codex plugin
 
@@ -29,24 +27,22 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
    ```
 
 2. Restart the Codex desktop app, open the Plugins Directory, select the **Sheg** marketplace, and install the plugin.
-3. Confirm the `poll_preview`, `poll_check`, `poll_preflight`, `poll_measure_packets`, `poll_trace`, `poll_start`, `poll_status`, `poll_cancel`, `poll_resume`, `poll_report`, and `poll_compare` tools are available.
+3. Confirm the `run_inspect`, `run_start`, `run_list`, `run_query`, `run_get`, `run_cancel`, `run_resume`, `run_delete`, and `run_storage` tools are available.
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).
 
-For the versioned GitHub Release, download the `sheg-v<version>.zip` asset and
-follow [the release and installation guide](docs/guides/releases.md). The
-existing Git-based marketplace route remains available.
+For the versioned GitHub Release, download the `sheg-v<version>.zip` asset and follow [the release and installation guide](docs/guides/releases.md). The existing Git-based marketplace route remains available.
 
 ## Prepare and run a study
 
-1. Start with the text and what you want to learn. The [study-design skill](skills/study-design/SKILL.md) helps an agent work with you on the question, useful respondent perspectives, and a study you can review before it is translated into Sheg's contracts.
+1. Start with the text and what you want to learn. The [study-design skill](skills/study-design/SKILL.md) helps an agent identify the question, choose the simplest useful material unit and respondent perspectives, and build a direct request without asking the user to author a study file.
 2. Configure one provider. Jev runs require a key in the selected Windows Credential Manager target and a `maxCalls` limit. Local Laya runs require a running service and the matching checkpoint tokenizer JSON and SHA-256 digest. See the [Jev setup and wire contract](docs/providers/jev.md) and [Laya capability notes](docs/providers/laya.md).
-3. Use `poll_preview` after manifest validation and before cohort construction to inspect every branch as one generic respondent journey, including route-specific prior choices and current stimulus scope at each question. Shared questions appear once with a context for each route. Preview needs no cohort or inference call and rejects more than 10,000 route contexts rather than returning partial output. Use `poll_measure_packets` to check draft respondent/task/stimulus/history combinations as you build the study. Call `poll_check` with the exact manifest, cohort, provider, and call limit; it validates and fingerprints inputs without a provider inference call. Use `poll_preflight` on the complete frozen cohort to measure every reachable request, and `poll_trace` to check a scripted route without inference.
-4. Review the proposed respondent-arm cell count and maximum physical calls, then start an authorized run with `poll_start`. Use `poll_status` and `poll_report` to follow and inspect it. Compare arms with `poll_compare` within that same run.
+3. Build the direct request, finite journey, or follow-on selection. Use `run_inspect` when a fit preview would help; it measures exact packet fit without inference or run creation, and `run_start` performs admission validation itself.
+4. Obtain authorization for hosted Jev inference and its `maxCalls` bound, then call `run_start` with a fresh UUID submission ID. Retain the returned run ID. Use `run_get` with status, request, journey, context, or answers views and `run_list` to discover runs. Call `run_query` to filter typed answers and journey outcomes; it returns exact evaluation/context IDs, provenance, denominators, and whether the source is complete. Use `run_get` with `view: "context"` and one returned evaluation/context pair to retrieve that exact frozen respondent-visible packet without fetching every run context. An agent may explicitly map Choice options to exact authored material items. A matched answer then includes `selectedMaterial` with `materialId`, exact `text`, author-supplied `sourceId` and `sourceSha256`, and Sheg-computed `textSha256`; use its `materialId` in a follow-on `context.materialIds`. Leave no-fit options unmapped. Choice selects among candidate meanings, Score records a position on an authored ordered rubric, and a journey records staged decisions. The agent chooses which evidence answers the user's question, then can submit those references or criteria in a follow-on request with an explicit context mode. Answers are machine-readable; the agent explains what they mean and reports incomplete or failed evaluations. `run_cancel` preserves any answer already in flight. An interrupted run can be resumed explicitly with `run_resume`; it keeps its original ID and call ceiling, and uncertain calls remain charged. Deletion accepts an explicit run selection; use `run_delete` with `dryRun: true` when a preview would help identify follow-on runs retained if a source is deleted. Active runs must be cancelled and polled to a terminal state. `run_storage` lets Sheg inspect datastore integrity/counts or run SQLite optimization. Discovery never starts or resumes work.
 
 In Codex, you can start with a request such as: “I have this article and want to know where readers lose interest. Help me decide what to ask and whose perspectives to include, then show me the proposed study journey.” The agent uses Sheg's design guidance to shape the human-language design, translates it into the harness, and checks fit before asking for approval to run.
 
-Jev is a hosted provider. Connect its key through the bundled Windows Credential Manager helper, never in a manifest or chat. The call limit bounds physical requests, including retries. `poll_check` and `poll_trace` do not make inference calls or require a key. `poll_start` and `poll_resume` reject a missing key before launching. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md).
+Jev is a hosted provider. Connect its key through the bundled Windows Credential Manager helper, never in a request or chat. The call limit bounds physical provider attempts. `run_inspect` does not make inference calls or require a key; `run_start` checks the selected credential before accepting a new request. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md).
 
 The local Laya adapter bundles a pinned tokenizer and sequence builder for a pre-inference context-fit check. It sends a request only when the configured tokenizer matches its digest and the complete request fits; otherwise it rejects the request before inference. The service and checkpoint must be configured separately, and the integration still needs an operator smoke test against that service. See the [Laya capability notes](docs/providers/laya.md).
 
@@ -103,9 +99,7 @@ npm test
 
 When changing contracts, update the TypeScript source of truth and regenerate the JSON Schemas. Include generated schemas and `dist/` changes with their source changes. Read [AGENTS.md](AGENTS.md) for repository surfaces and verification guidance, and [the decision log](docs/decisions/README.md) before changing an accepted architectural decision.
 
-Work from `develop` and target feature pull requests at `develop`. See the
-[runbook and playbook policy](.agents/doctrine/repo-runbook-policy.md) for
-release and urgent-fix routing.
+Work from `develop` and target feature pull requests at `develop`. See the [runbook and playbook policy](.agents/doctrine/repo-runbook-policy.md) for release and urgent-fix routing.
 
 ## Project links
 
