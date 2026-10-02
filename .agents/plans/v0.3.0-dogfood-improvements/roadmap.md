@@ -16,16 +16,16 @@ An author can ask an agent to stage a reading journey, select respondents' mater
 
 ## Consecutive implementation plans
 
-Write each next executable plan against the delivered code of its predecessor. Later rows define committed scope and acceptance, not imaginary completed plans. One develop-bound checkpoint can include several consecutive plans. Do not merge the planning artifacts alone under the old version.
+Write each next executable plan against the delivered code of its predecessor. Later rows define committed scope and acceptance, not imaginary completed plans. Each JIT plan gets a fresh canonical worktree and its own PR into develop. Every develop merge increments the development prerelease number: Plan 1 merges `0.3.0-dev.2`; Plans 2-6 merge `0.3.0-dev.3` through `0.3.0-dev.7`, respectively. Write the target version into each plan before executing it. Do not merge the planning artifacts alone under the old version.
 
 | # | Title | Status | Plan file | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Align development identity and candidate packaging | ready | [Plan 1](01-development-version-and-packaging.md) | - | - | - | All manifests and MCP advertise `0.3.0-dev.2`; local candidates package without tags; stable publication protections remain intact |
-| 2 | Establish skill behavior scenarios and baseline | pending | Not authored yet | - | - | - | Skill-owned scenarios, controlled tools, blinded actor/evaluator boundary, current-guidance traces and repeatable campaign procedure |
-| 3 | Unify journey context across sequence and graph | pending | Not authored yet | - | - | - | One graph execution model, cumulative exposed material, separate answer-history choice, identical preview/fit/runtime packets and protected frozen evidence |
-| 4 | Follow each selected stimulus in one run | pending | Not authored yet | - | - | - | Per-source-answer material mapping, optional shared stimulus, no-fit coverage, exact provenance, race protection and deletion-independent recall |
-| 5 | Expose precise failure and lifecycle evidence | pending | Not authored yet | - | - | - | Safe structured validation reasons, consistent execution/coverage/recovery, selected-question coverage and captured query-state semantics |
-| 6 | Reconcile guidance and verify the installed author journey | pending | Not authored yet | - | - | - | Comparative interpretation guidance, old/new scenario evidence, copied candidate integration, final source/generated agreement |
+| 1 | Align development identity and candidate packaging | ready | [Plan 1](01-development-version-and-packaging.md) | - | - | - | Merge version `0.3.0-dev.2`. All manifests and MCP advertise it; local candidates package without tags; stable publication protections remain intact |
+| 2 | Establish skill behavior scenarios and baseline | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.3`. Skill-owned scenarios, controlled tools, blinded actor/evaluator boundary, current-guidance traces and repeatable campaign procedure |
+| 3 | Unify journey context across sequence and graph | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.4`. One graph execution model, cumulative exposed material, separate answer-history choice, identical preview/fit/runtime packets and protected frozen evidence |
+| 4 | Follow each selected stimulus in one run | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.5`. Per-source-answer material mapping, optional shared stimulus, no-fit coverage, exact provenance, race protection and deletion-independent recall |
+| 5 | Expose precise failure and lifecycle evidence | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.6`. Safe structured validation reasons, consistent execution/coverage/recovery, selected-question coverage and captured query-state semantics |
+| 6 | Reconcile guidance and verify the installed author journey | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.7`. Comparative interpretation guidance, old/new scenario evidence, copied candidate integration, final source/generated agreement |
 
 ## Plan exits and likely source seams
 
@@ -59,4 +59,4 @@ Each executable plan supplies exact files, behavioral proof and commands. Regene
 
 Execution is sequential through `executing-plans`: the context, follow-on and lifecycle contracts share persisted packets, compiler identity, generated contracts and agent guidance. Fresh implementers per small seam would repeatedly reconstruct that shared state. Scenario actors are fresh by design; that is a test requirement, not permission to delegate implementation.
 
-Current authorization ends at the committed plan handoff. There is no push, PR, merge, tag or release in this planning turn. If implementation is later authorized, keep feature work targeting develop and request only genuinely missing permissions. Final implementation handoff records version alignment, copied-package proof, tests, skill campaign evidence, exact head and outstanding provider/human-reader limitations. No paid call budget transfers from the Portfolio pilot.
+The initial planning turn ended before implementation. This continuing objective authorizes implementation, a PR into develop and a merge after fresh review and required checks pass. It does not authorize a stable release tag, GitHub Release or paid inference. Final roadmap handoff records version alignment, copied-package proof, tests, skill campaign evidence, exact head and outstanding provider/human-reader limitations. No paid call budget transfers from the Portfolio pilot.
