@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,6 +12,8 @@ import { createRunService } from '../src/application/run-service.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
+
+const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
 function request(): InlineRunRequest {
   return { kind: 'poll', respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }], material: [{ id: 'opening', text: 'A short passage.' }], questions: [{ type: 'choice', id: 'interest', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } }], provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1 };
@@ -42,6 +45,15 @@ async function connectedFixture(assertProviderReady: () => Promise<void> = async
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   return { root, store, server, client, close: async () => { await client.close(); await server.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
+
+test('MCP advertises the package product version', async () => {
+  const f = await connectedFixture();
+  try {
+    assert.equal(f.client.getServerVersion()?.version, packageVersion);
+  } finally {
+    await f.close();
+  }
+});
 
 test('MCP accepts, discovers, reads, and cancels durable direct requests with structured errors', async () => {
   const f = await connectedFixture();

@@ -16,9 +16,7 @@ const isolatedGitEnv = Object.fromEntries(
 const packageManifest = JSON.parse(readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8')) as {
   version: string;
 };
-const releaseTag = `v${packageManifest.version}`;
-const [major, minor, patch] = packageManifest.version.split('.');
-const mismatchedTag = `v${major}.${minor}.${Number(patch) + 1}`;
+const stableVersion = packageManifest.version.split('-')[0]!;
 
 function runPackage(args: string[]): string {
   return execFileSync(process.execPath, [wrapper, ...args], { cwd: repositoryRoot, encoding: 'utf8' });
@@ -37,14 +35,87 @@ function listArchive(archivePath: string): string[] {
   return JSON.parse(result) as string[];
 }
 
-test('release package validates tags against private package and plugin versions', () => {
-  assert.match(runPackage(['--tag', releaseTag, '--validate-only']), new RegExp(`OK ${releaseTag}`));
-  const mismatch = runPackageResult(['--tag', mismatchedTag, '--validate-only']);
-  assert.notEqual(mismatch.status, 0);
-  assert.match(mismatch.stderr, new RegExp(`release tag version .* does not match manifest version ${packageManifest.version}`));
+function createManifestFixture(): { directory: string; setVersion(version: string, pluginVersion?: string, lockVersion?: string, lockPackageVersion?: string): void; run(args?: string[]): { status: number | null; stderr: string; stdout: string } } {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'sheg-release-manifest-'));
+  const scriptDirectory = path.join(directory, 'scripts');
+  mkdirSync(scriptDirectory);
+  copyFileSync(path.join(repositoryRoot, 'scripts/package-plugin.py'), path.join(scriptDirectory, 'package-plugin.py'));
+  const writeJson = (name: string, value: unknown) => writeFileSync(path.join(directory, name), JSON.stringify(value));
+  const setVersion = (version: string, pluginVersion = version, lockVersion = version, lockPackageVersion = version) => {
+    writeJson('package.json', { name: 'sheg', version, private: true });
+    writeJson('plugin.json', { version: pluginVersion });
+    writeJson('package-lock.json', {
+      name: 'sheg', version: lockVersion, lockfileVersion: 3, requires: true,
+      packages: { '': { name: 'sheg', version: lockPackageVersion } },
+    });
+  };
+  const run = (args: string[] = []) => {
+    const [command, prefix] = python;
+    return spawnSync(command, [...prefix, path.join(scriptDirectory, 'package-plugin.py'), ...args], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+  };
+  return { directory, setVersion, run };
+}
+
+test('candidate package validates without a tag and stable tags require the matching stable version', () => {
+  assert.match(runPackage(['--validate-only']), new RegExp(`OK v${packageManifest.version}`));
+  const stableTag = `v${stableVersion}`;
+  const stable = runPackageResult(['--tag', stableTag, '--validate-only']);
+  if (packageManifest.version === stableVersion) {
+    assert.equal(stable.status, 0);
+  } else {
+    assert.notEqual(stable.status, 0);
+    assert.match(stable.stderr, new RegExp(`release tag version .* does not match manifest version ${packageManifest.version}`));
+  }
   const malformed = runPackageResult(['--tag', 'v0.01.0', '--validate-only']);
   assert.notEqual(malformed.status, 0);
   assert.match(malformed.stderr, /invalid release tag/);
+});
+
+test('stable release tags do not accept a different stable manifest version', () => {
+  const mismatchedTag = `v${stableVersion === '0.3.0' ? '0.3.1' : '0.3.0'}`;
+  const mismatch = runPackageResult(['--tag', mismatchedTag, '--validate-only']);
+  assert.notEqual(mismatch.status, 0);
+  assert.match(mismatch.stderr, new RegExp(`release tag version .* does not match manifest version ${packageManifest.version}`));
+});
+
+test('candidate manifest versions validate without allowing prerelease release tags', () => {
+  const fixture = createManifestFixture();
+  try {
+    fixture.setVersion('0.3.0-dev.2');
+    assert.equal(fixture.run(['--validate-only']).status, 0);
+
+    fixture.setVersion('0.3.0-rc.1');
+    assert.equal(fixture.run(['--validate-only']).status, 0);
+
+    fixture.setVersion('0.3.0');
+    assert.equal(fixture.run(['--tag', 'v0.3.0', '--validate-only']).status, 0);
+
+    fixture.setVersion('0.3.0-dev.2');
+    const stableTagOnCandidate = fixture.run(['--tag', 'v0.3.0', '--validate-only']);
+    assert.notEqual(stableTagOnCandidate.status, 0);
+    assert.match(stableTagOnCandidate.stderr, /release tag version .* does not match manifest version 0\.3\.0-dev\.2/);
+
+    const candidateTag = fixture.run(['--tag', 'v0.3.0-dev.2', '--validate-only']);
+    assert.notEqual(candidateTag.status, 0);
+    assert.match(candidateTag.stderr, /invalid release tag/);
+
+    for (const malformed of ['0.03.0', '0.3.0-dev.02', '0.3.0-dev.0']) {
+      fixture.setVersion(malformed);
+      const result = fixture.run(['--validate-only']);
+      assert.notEqual(result.status, 0, malformed);
+      assert.match(result.stderr, /invalid manifest version/);
+    }
+
+    fixture.setVersion('0.3.0-dev.2', '0.3.0-dev.3');
+    const mismatchedPlugin = fixture.run(['--validate-only']);
+    assert.notEqual(mismatchedPlugin.status, 0);
+    assert.match(mismatchedPlugin.stderr, /manifest versions do not match/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
 });
 
 test('release validation rejects a stale npm lockfile root version', () => {
@@ -172,8 +243,8 @@ test('release package contains plugin runtime inputs and is byte-for-byte reprod
   try {
     const first = path.join(temporaryDirectory, 'first.zip');
     const second = path.join(temporaryDirectory, 'second.zip');
-    runPackage(['--tag', releaseTag, '--output', first]);
-    runPackage(['--tag', releaseTag, '--output', second]);
+    runPackage(['--output', first]);
+    runPackage(['--output', second]);
 
     const firstHash = createHash('sha256').update(readFileSync(first)).digest('hex');
     const secondHash = createHash('sha256').update(readFileSync(second)).digest('hex');

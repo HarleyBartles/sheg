@@ -29,7 +29,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   });
   const plugin = path.join(sandbox, 'installed', 'sheg');
   await mkdir(path.dirname(plugin), { recursive: true });
-  for (const item of ['plugin.json', 'mcp.json', 'dist']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
+  for (const item of ['package.json', 'plugin.json', 'mcp.json', 'dist']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
   await cp(path.resolve('skills/stimulus-response-polling/SKILL.md'), path.join(plugin, 'skills/stimulus-response-polling/SKILL.md'), { recursive: true });
   await cp(path.resolve('skills/stimulus-response-polling/references'), path.join(plugin, 'skills/stimulus-response-polling/references'), { recursive: true });
   await cp(path.resolve('skills/stimulus-response-polling/assets'), path.join(plugin, 'skills/stimulus-response-polling/assets'), { recursive: true });
@@ -44,9 +44,11 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets/reader-archetype-library.schema.json')), false);
   assert.equal(await exists(path.join(plugin, 'dist/skills/stimulus-response-polling/assets/respondent-archetypes')), false);
   assert.equal(await exists(path.join(plugin, 'node_modules')), false);
-  const manifest = JSON.parse(await readFile(path.join(plugin, 'plugin.json'), 'utf8')) as { name: string };
+  const manifest = JSON.parse(await readFile(path.join(plugin, 'plugin.json'), 'utf8')) as { name: string; version: string };
+  const packageManifest = JSON.parse(await readFile(path.join(plugin, 'package.json'), 'utf8')) as { version: string };
   const mcp = JSON.parse(await readFile(path.join(plugin, 'mcp.json'), 'utf8')) as { mcpServers: Record<string, { type: string; command: string; args: string[]; cwd: string }> };
   assert.equal(manifest.name, 'sheg');
+  assert.equal(manifest.version, packageManifest.version);
   assert.equal(mcp.mcpServers['sheg']?.type, 'stdio');
   assert.equal(mcp.mcpServers['sheg']?.args[0], '${PLUGIN_ROOT}/dist/mcp.js');
   assert.equal(mcp.mcpServers['sheg']?.cwd, '${PLUGIN_ROOT}');
@@ -63,6 +65,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
     }
   };
   await client.connect(transport);
+  assert.equal(client.getServerVersion()?.version, packageManifest.version);
   const tokenizerPath = path.resolve('test/fixtures/laya-tokenizer.json');
   const result = await client.callTool({ name: 'run_inspect', arguments: { request: {
     kind: 'poll', respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }],

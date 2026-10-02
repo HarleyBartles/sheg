@@ -57,12 +57,12 @@
 | Plugin or either lockfile field differs | Fail before archive creation |
 | Stable tag points away from triggering commit | Existing retargeting refusal remains |
 
-- [ ] Extend the isolated packaging fixture so it can write all manifest fields for a supplied identity and invoke `--validate-only` with or without a tag. Keep temp paths contained and isolated Git environment handling intact.
-- [ ] Add the candidate/stable distinction cases above. Run `node --import tsx --test test/release-package.test.ts` and capture the actual failure caused by the stable-only manifest parser. Do not claim RED from an unrelated fixture failure.
-- [ ] Implement the minimal separation of patterns. Keep stable tag syntax unchanged; add a supported manifest suffix pattern, validate equality first, and reuse the accepted manifest version for the no-tag archive name. For example, the manifest grammar is `MAJOR.MINOR.PATCH` followed optionally by `-(dev|rc).[1-9][0-9]*`, with existing leading-zero restrictions on core components.
-- [ ] Refactor tests that derive `releaseTag` and increment a patch from the repository version. Stable-tag tests use stable fixture versions, not a string split that turns `0-dev.2` into `NaN`. Repository archive tests invoke the no-tag path and still verify reproducibility, closure and executable CLI.
-- [ ] Set all four authoritative manifest fields to `0.3.0-dev.2` without running `npm version`, creating a tag or changing dependency versions. Preserve the lockfile dependency graph.
-- [ ] Run the focused release-package tests again. Resolve all failures before Task 2. Do not commit an intermediate tree whose manifests and MCP identity disagree.
+- [x] Extend the isolated packaging fixture so it can write all manifest fields for a supplied identity and invoke `--validate-only` with or without a tag. Keep temp paths contained and isolated Git environment handling intact.
+- [x] Add the candidate/stable distinction cases above. Run `node --import tsx --test test/release-package.test.ts` and capture the actual failure caused by the stable-only manifest parser. Do not claim RED from an unrelated fixture failure.
+- [x] Implement the minimal separation of patterns. Keep stable tag syntax unchanged; add a supported manifest suffix pattern, validate equality first, and reuse the accepted manifest version for the no-tag archive name. For example, the manifest grammar is `MAJOR.MINOR.PATCH` followed optionally by `-(dev|rc).[1-9][0-9]*`, with existing leading-zero restrictions on core components.
+- [x] Refactor tests that derive `releaseTag` and increment a patch from the repository version. Stable-tag tests use stable fixture versions, not a string split that turns `0-dev.2` into `NaN`. Repository archive tests invoke the no-tag path and still verify reproducibility, closure and executable CLI.
+- [x] Set all four authoritative manifest fields to `0.3.0-dev.2` without running `npm version`, creating a tag or changing dependency versions. Preserve the lockfile dependency graph.
+- [x] Run the focused release-package tests again. Resolve all failures before Task 2. Do not commit an intermediate tree whose manifests and MCP identity disagree.
 
 ## Task 2: Derive MCP product identity and prove the copied candidate
 
@@ -87,12 +87,12 @@ export const productVersion: string = packageManifest.version;
 
 Enable `resolveJsonModule` if needed for TypeScript NodeNext. esbuild must embed the JSON value; the extracted runtime must not resolve a source-relative JSON path at startup. Do not add a general configuration service or runtime Git lookup.
 
-- [ ] Extend the existing MCP initialization test to compare `f.client.getServerVersion()?.version` with the authoritative package version. Extend the copied-plugin initialization assertion to compare `client.getServerVersion()?.version` against the copied package manifest. The installed MCP SDK exposes this method. Capture the existing literal `0.3.0` mismatch under candidate manifests.
-- [ ] Implement `productVersion` and replace the MCP literal. Run `npm run typecheck` and `node --import tsx --test test/mcp.test.ts`.
-- [ ] Run `npm run build` before copied-package tests so they exercise the changed generated runtime, not the old committed bundle.
-- [ ] Run `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts`. The copied package must operate with no Git checkout and no dependency tree. Preserve existing worker, follow-on and deletion proofs.
-- [ ] Run `npm run plugin:package -- --validate-only`, then `npm run plugin:package -- --output Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`. Inspect archive names with `py -3 scripts/package-plugin.py --list Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`. Record its SHA-256 with `Get-FileHash`.
-- [ ] Confirm stable validation `npm run plugin:package -- --tag v0.3.0 --validate-only` fails against dev manifests, as a local validator check. This command does not create a Git tag.
+- [x] Extend the existing MCP initialization test to compare `f.client.getServerVersion()?.version` with the authoritative package version. Extend the copied-plugin initialization assertion to compare `client.getServerVersion()?.version` against the copied package manifest. The installed MCP SDK exposes this method. Capture the existing literal `0.3.0` mismatch under candidate manifests.
+- [x] Implement `productVersion` and replace the MCP literal. Run `npm run typecheck` and `node --import tsx --test test/mcp.test.ts`.
+- [x] Run `npm run build` before copied-package tests so they exercise the changed generated runtime, not the old committed bundle.
+- [x] Run `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts`. The copied package must operate with no Git checkout and no dependency tree. Preserve existing worker, follow-on and deletion proofs.
+- [x] Run `npm run plugin:package -- --validate-only`, then `npm run plugin:package -- --output Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`. Inspect archive names with `py -3 scripts/package-plugin.py --list Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`. Record its SHA-256 with `Get-FileHash`.
+- [x] Confirm stable validation `npm run plugin:package -- --tag v0.3.0 --validate-only` fails against dev manifests, as a local validator check. This command does not create a Git tag.
 
 ## Task 3: Record the policy, regenerate and commit a passing checkpoint
 
@@ -105,9 +105,9 @@ Enable `resolveJsonModule` if needed for TypeScript NodeNext. esbuild must embed
 - Consumes: passing validator, runtime and copied-package proof from Tasks 1-2.
 - Produces: one current versioning policy, a passing committed implementation checkpoint and evidence for roadmap Plan 2.
 
-- [ ] Write the version-policy ADR with status Accepted and partial supersession of ADR-0013's no-development-version-bump consequence. Retain Gitflow, stable tag identity, main ancestry and publication safeguards. Update the ADR index without rewriting the earlier decision text.
-- [ ] Update the release guide and playbooks: deliberate dev/rc checkpoints may update aligned identity on develop; no bump per arbitrary merge; the current checkpoint is `0.3.0-dev.2`; stable promotion removes the suffix on its release branch; no-tag local candidate packaging publishes nothing.
-- [ ] Document how dogfood evidence identifies the installed candidate using its package version and exact package digest or source evidence. Do not embed a guessed HEAD or timestamp in committed generated output. Skill-content provenance can use the archive digest until the later campaign work specifies its evidence format.
+- [x] Write the version-policy ADR with status Accepted and partial supersession of ADR-0013's no-development-version-bump consequence. Retain Gitflow, stable tag identity, main ancestry and publication safeguards. Update the ADR index without rewriting the earlier decision text.
+- [x] Update the release guide and playbooks: deliberate dev/rc checkpoints may update aligned identity on develop; no bump per arbitrary merge; the current checkpoint is `0.3.0-dev.2`; stable promotion removes the suffix on its release branch; no-tag local candidate packaging publishes nothing.
+- [x] Document how dogfood evidence identifies the installed candidate using its package version and exact package digest or source evidence. Do not embed a guessed HEAD or timestamp in committed generated output. Skill-content provenance can use the archive digest until the later campaign work specifies its evidence format.
 - [ ] Inspect the intentional diff with `git diff --check` and `git diff --stat`. Stage source, docs, manifests and regenerated outputs explicitly. Commit Tasks 1-3 as one passing checkpoint through `.githooks/pre-commit`; its staged `npm run verify` must pass. Do not run the same full gate immediately before or after a successful hooked commit without a new concern.
 - [ ] Record focused commands, archive identity, hook result and commit SHA in this plan and update the roadmap's first row only after the system proves completion. A later evidence-only commit also goes through the hook.
 - [ ] Re-read the agreed scope and check that no runtime semantic work or publication was smuggled into this slice. Prepare the next skill-scenario baseline plan from current source and existing guidance; do not mark later rows complete.
