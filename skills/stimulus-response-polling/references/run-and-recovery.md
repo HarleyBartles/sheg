@@ -74,6 +74,15 @@ again after completion if the user needs the final cohort. A route outcome and
 a typed answer are separate facts; for example, `left-lost-interest` does not
 prove the respondent selected a typed “lost interest” answer.
 
+For a Choice question that explicitly maps option IDs to exact material IDs
+with `materialOptions`, a matching answer also includes `selectedMaterial`:
+`materialId`, exact `text`, author-supplied `sourceId` and `sourceSha256`, and
+Sheg-computed `textSha256`. Unmapped options, including no-fit, have no material
+reference. The agent authors candidate boundaries and labels. Use the returned
+`materialId` in a follow-on request's `context.materialIds`, with the returned
+evaluation/context handles, to ask about the selected candidate in that
+respondent's chosen context.
+
 Build a follow-on request yourself from the user's intended question and the
 evidence you selected. Sheg does not decide which result is relevant or what
 unit counts as a section, paragraph, or “bit.” Selection can repeat the query

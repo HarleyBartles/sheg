@@ -31,6 +31,7 @@ alongside the code.
 | [0019](0019-own-execution-in-detached-workers.md) | Own accepted run execution in detached workers | Accepted |
 | [0020](0020-snapshot-follow-on-contexts.md) | Snapshot follow-on contexts with separate lineage | Accepted |
 | [0021](0021-independent-question-groups-and-batched-attempts.md) | Independent question groups share context and separate evidence | Accepted |
+| [0022](0022-source-linked-material-choices.md) | Link offered Choice options to exact source material | Accepted |
 
 ## Writing and changing decisions
 

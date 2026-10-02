@@ -15,6 +15,7 @@ one-question form of the same run contract.
 | `run_get` with `view: request` | Recall the frozen request, compiled packets, and their stable evaluation/context IDs. | Read only. |
 | `run_get` with `view: journey` | Recall reached turns, exact respondent packets, exposures, typed response history, route and terminal/failure state. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: answers` | Recall typed answers, failures, and pending evaluations with stable identifiers. | Reconcile expired ownership; never launch work. |
+| `run_query` | Filter typed answers and journey outcomes; return evaluation/context handles and, for mapped Choice answers, selected material references. | Read only; a progressing source can gain more matches. |
 | `run_cancel` | Request that the worker stop before dispatching another respondent. | An in-flight call is allowed to settle. |
 
 ## Request design
@@ -29,6 +30,11 @@ Choice option IDs are stable machine identifiers paired with user-meaningful
 labels. Score uses a typed ordered rubric. Noul represents probability. These
 types must match the information the user wants back; do not turn a probability
 or ranking request into a nominal Choice just because it is easy to encode.
+For Choice over authored material candidates, map option IDs to exact material
+IDs with `materialOptions`; linked labels must equal exact text and candidates
+must carry author-supplied source metadata. Keep no-fit options unlinked. Query
+returns the selected `materialId`, exact text, author source identity/digest,
+and Sheg-computed text digest. Pass the ID through follow-on `context.materialIds`.
 
 The same request is compiled into one frozen decision packet per respondent.
 Input order, exact material, typed question, provider configuration, and the
@@ -38,13 +44,12 @@ uses a new submission ID.
 
 ## Current follow-on boundary
 
-Run recall exposes the frozen input, per-respondent packet context, answers,
-and identifiers that an agent can inspect to design a later request. The agent
-can use those records to choose exact prior contexts and author a new request,
-but Sheg does not yet offer query predicates over prior answers, automatic
-respondent selection from a previous run, or a request selector that carries
-forward prior turn-choice history. Those are separate follow-on capabilities,
-not implicit behavior of `run_get`.
+`run_query` filters recorded typed answers and route outcomes in one run. The
+agent inspects those results, decides which respondents and answers matter,
+then submits a follow-on with explicit criteria or exact evaluation/context
+references. A follow-on's context mode determines whether the selected answer
+enters its trajectory and which saved or selected material is presented. Sheg
+does not decide relevance or compose the next question for the agent.
 
 Likewise, run recall is not recovery. Reads discover expired workers as
 interrupted and do not resume them. Use `run_resume` explicitly to continue an

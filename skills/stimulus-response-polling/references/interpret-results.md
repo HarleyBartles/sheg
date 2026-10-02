@@ -15,11 +15,12 @@ about human behavior or population prevalence.
 
 `run_get` with `view: "request"` returns the accepted request and frozen
 per-respondent packets. Answer rows carry evaluation, context, respondent, and
-question IDs. Journey details also carry turn IDs, node and path IDs, route
-responses, and packet state that can help an agent author a follow-on request.
-Sheg does not yet query prior answers to select a cohort or accept prior turn
-references as selectors in a new request. The agent must inspect the evidence
-and author the next request explicitly.
+question IDs. `run_query` filters prior typed answers and route outcomes and
+returns exact evaluation/context handles. For explicitly mapped Choice options,
+it also returns `selectedMaterial` with material ID, exact text, author-supplied
+source identity/digest, and Sheg-computed text digest. The agent decides which
+evidence matters and authors the next request, passing selected references and
+any `selectedMaterial.materialId` through the follow-on request's context.
 
 A terminal outcome such as `left` records how the authored journey ended. It
 does not establish that the respondent lost interest. Treat lost interest as

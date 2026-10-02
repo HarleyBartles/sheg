@@ -118,25 +118,27 @@ test('MCP inspects and accepts an inline journey, then exposes its initial durab
 test('MCP queries typed evidence and starts a context-preserving follow-on', async () => {
   const f = await connectedFixture();
   try {
-    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: request() } });
+    const sourceRequest = { ...request(), material: [{ id: 'candidate-leave', text: 'The exact section that lost interest.', sourceId: 'article-section-3', sourceSha256: 'a'.repeat(64) }], questions: [{ type: 'choice' as const, id: 'interest', instructions: 'Which section lost your interest?', options: { candidate: 'The exact section that lost interest.', no_fit: 'No section' }, materialOptions: { candidate: 'candidate-leave' } }] };
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: sourceRequest } });
     const sourceRunId = (started.structuredContent as { runId: string }).runId;
     const claim = f.store.claim(sourceRunId, Date.now(), 1234);
     assert.ok(claim);
     const attempt = f.store.reserveNext(claim, Date.now());
     assert.ok(attempt);
     f.store.settle(claim, attempt.attemptId, { kind: 'answered', result: {
-      type: 'choice', choice: 'leave', probabilities: { continue: 0.15, leave: 0.85 }, confidence: 0.85,
+      type: 'choice', choice: 'candidate', probabilities: { candidate: 0.85, no_fit: 0.15 }, confidence: 0.85,
       attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
     } });
     f.store.finish(claim);
-    const queried = await f.client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: { answer: { type: 'choice', choiceId: 'leave' } } } });
+    const queried = await f.client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: { answer: { type: 'choice', choiceId: 'candidate' } } } });
     assert.equal(queried.isError ?? false, false);
-    const evidence = queried.structuredContent as { items: Array<{ evaluationId: string; contextId: string }>; sourceComplete: boolean };
+    const evidence = queried.structuredContent as { items: Array<{ evaluationId: string; contextId: string; selectedMaterial?: { materialId: string; text: string; sourceId: string; sourceSha256: string; textSha256: string } }>; sourceComplete: boolean };
     assert.equal(evidence.items.length, 1);
     assert.equal(evidence.sourceComplete, true);
+    assert.deepEqual(evidence.items[0]?.selectedMaterial, { materialId: 'candidate-leave', text: 'The exact section that lost interest.', sourceId: 'article-section-3', sourceSha256: 'a'.repeat(64), textSha256: 'e57345e163461c497cd65d51f8a09f40f01329bfb31a181276f2fb1f3e408060' });
     const followOn = {
       kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
-      context: { mode: 'recorded' }, questions: [{ type: 'noul', id: 'why-left', instructions: 'What caused you to leave?' }],
+      context: { mode: 'continue', materialIds: [evidence.items[0]!.selectedMaterial!.materialId] }, questions: [{ type: 'noul', id: 'why-left', instructions: 'What caused you to leave?' }],
       provider: request().provider, maxCalls: 1,
     };
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: followOn } });
@@ -145,10 +147,12 @@ test('MCP queries typed evidence and starts a context-preserving follow-on', asy
     assert.equal(accepted.isError ?? false, false);
     const followOnRunId = (accepted.structuredContent as { runId: string }).runId;
     const saved = await f.client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'request' } });
-    const data = saved.structuredContent as { request: { kind: string }; lineage: { sourceRunId: string; selections: unknown[] } };
+    const data = saved.structuredContent as { request: { kind: string; context: { materialIds?: string[] } }; lineage: { sourceRunId: string; selections: Array<{ sourceContextId: string }> } };
     assert.equal(data.request.kind, 'follow-on');
+    assert.deepEqual(data.request.context.materialIds, ['candidate-leave']);
     assert.equal(data.lineage.sourceRunId, sourceRunId);
     assert.equal(data.lineage.selections.length, 1);
+    assert.equal(data.lineage.selections[0]?.sourceContextId, evidence.items[0]?.contextId);
   } finally { await f.close(); }
 });
 

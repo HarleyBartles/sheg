@@ -79,7 +79,7 @@ text digest.
 ## Task 3: Teach agents when and how to use selected material
 
 **Files:**
-- Modify: `src/entrypoints/mcp.ts`, `README.md`, `skills/study-design/SKILL.md`, `skills/stimulus-response-polling/SKILL.md`, `skills/stimulus-response-polling/references/run-and-recovery.md`, `docs/decisions/README.md`
+- Modify: `src/entrypoints/mcp.ts`, `README.md`, `skills/study-design/SKILL.md`, `skills/stimulus-response-polling/SKILL.md`, `skills/stimulus-response-polling/references/run-and-recovery.md`, `skills/study-design/references/primitives-and-tools.md`, `skills/stimulus-response-polling/references/interpret-results.md`, `docs/decisions/README.md`
 - Create: `docs/decisions/0022-source-linked-material-choices.md`
 - Regenerate: request contract assets and packaged `dist/` from canonical sources
 - Test: `test/mcp.test.ts`, `test/package.test.ts`
@@ -89,11 +89,11 @@ text digest.
 - Agent guidance distinguishes selecting among authored material candidates (Choice), an authored ordered position/severity judgment (Score), and recording a staged threshold crossing through an authored journey. It says to include a no-fit option when the question needs one, and that the agent authors exact candidate boundaries.
 - ADR-0022 records the explicit Choice-to-material identity link and the provenance boundary; index it in the same change.
 
-- [ ] Add an MCP behavior test showing query evidence contains an input-compatible selected material reference and that an explicitly constructed follow-on uses it.
-- [ ] Update study-design and polling skills with a short use pattern and a distinction among Choice selection, Score ordering, and staged journeys. Do not tell the agent to run a broader study when a direct Choice answers the user's question.
-- [ ] Update MCP descriptions and README with the exact output/input fields and no-fit behavior.
-- [ ] Add ADR-0022 and update the decision index.
-- [ ] Run `npm run contracts:build` and `npm run build`; inspect generated schema/package outputs.
+- [x] Add an MCP behavior test showing query evidence contains an input-compatible selected material reference and that an explicitly constructed follow-on uses it.
+- [x] Update study-design and polling skills with a short use pattern and a distinction among Choice selection, Score ordering, and staged journeys. Do not tell the agent to run a broader study when a direct Choice answers the user's question.
+- [x] Update MCP descriptions and README with the exact output/input fields and no-fit behavior.
+- [x] Add ADR-0022 and update the decision index.
+- [x] Run `npm run contracts:build` and `npm run build`; inspect generated schema/package outputs.
 
 ## Task 4: Verify the installed-package selection-to-follow-on path
 
