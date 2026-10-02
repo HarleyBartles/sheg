@@ -157,7 +157,7 @@ test('follow-on inspection fits frozen saved context and acceptance retains sour
       kind: 'follow-on', sourceRunId: source.runId,
       selection: { criteria: { answer: { type: 'choice', choiceId: 'leave' } } },
       context: { mode: 'recorded' },
-      questions: [{ type: 'noul', id: 'why-leave', instructions: 'What caused you to leave?' }],
+      questions: [{ type: 'noul', id: 'why-leave', instructions: 'Did this section cause you to leave?' }],
       provider: request().provider, maxCalls: 1,
     };
     const service = createRunService(fixture.store, fixture.root, () => provider('fits', counters), { async launch() { launches += 1; } }, { assertProviderReady: async () => undefined });

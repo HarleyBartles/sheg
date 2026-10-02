@@ -234,7 +234,7 @@ test('an unavailable group or overflowing singleton never becomes admitted throu
 
 test('providers without batch measurement receive singleton questions over each respondent state', async () => {
   const fixture = makeProvider();
-  const questions = ['first', 'second'].map((id) => ({ type: 'noul' as const, id, instructions: `Question ${id}?` }));
+  const questions = ['first', 'second'].map((id) => ({ type: 'noul' as const, id, instructions: `Is ${id} important?` }));
   const result = await prepareRun({ ...request(questions), maxCalls: 4 }, fixture.provider);
   assert.equal(result.inspection.valid, true);
   assert.equal(result.inspection.minimumCalls, 4);
@@ -254,7 +254,7 @@ test('follow-on batching groups distinct source contexts and never includes sele
     provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 2,
   });
   const profile = { intent: 'Learn', context: 'New reader', desired_outcome: 'Understand', engagement_cues: 'Examples', friction_cues: 'Hype' };
-  const previousQuestion = { type: 'noul' as const, id: 'interest', instructions: 'Interested?' };
+  const previousQuestion = { type: 'noul' as const, id: 'interest', instructions: 'Was the respondent interested?' };
   const sourcePacket = (text: string) => compileDecisionRequest({ respondentProfile: profile, encounteredItems: [{ id: 'section-three', text }], trajectory: emptyTrajectory(), question: previousQuestion });
   const source: FollowOnSourceSet = {
     sourceRunId: followOn.sourceRunId, sourceStatus: 'running', sourceComplete: false,

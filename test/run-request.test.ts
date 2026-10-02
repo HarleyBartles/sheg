@@ -51,7 +51,7 @@ test('the direct request accepts one or more typed questions and preserves exact
   const grouped = inlineRunRequestSchema.parse({ ...input, questions: [
     question,
     { type: 'score', id: 'clarity', instructions: 'How clear was the section?', rubric: ['Unclear', 'Clear'] },
-    { type: 'noul', id: 'trust', instructions: 'How credible was the section?' },
+    { type: 'noul', id: 'trust', instructions: 'Was the section credible?' },
   ] });
   assert.deepEqual(grouped.questions.map(({ id }) => id), ['interest', 'clarity', 'trust']);
 });

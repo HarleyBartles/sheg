@@ -152,7 +152,7 @@ test('MCP queries typed evidence and starts a context-preserving follow-on', asy
     assert.deepEqual(evidence.items[0]?.selectedMaterial, { materialId: 'candidate-leave', text: 'The exact section that lost interest.', sourceId: 'article-section-3', sourceSha256: 'a'.repeat(64), textSha256: 'e57345e163461c497cd65d51f8a09f40f01329bfb31a181276f2fb1f3e408060' });
     const followOn = {
       kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
-      context: { mode: 'continue', materialIds: [evidence.items[0]!.selectedMaterial!.materialId] }, questions: [{ type: 'noul', id: 'why-left', instructions: 'What caused you to leave?' }],
+      context: { mode: 'continue', materialIds: [evidence.items[0]!.selectedMaterial!.materialId] }, questions: [{ type: 'noul', id: 'why-left', instructions: 'Did the selected section cause you to leave?' }],
       provider: request().provider, maxCalls: 1,
     };
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: followOn } });

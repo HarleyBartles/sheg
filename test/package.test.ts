@@ -439,10 +439,10 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
       kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
       context: { mode: 'omit-history', materialIds: [evidence.items[0]!.selectedMaterial!.materialId] },
       questions: [
-        { type: 'noul', id: 'why-interest', instructions: 'What about section three lost your interest?' },
+        { type: 'noul', id: 'why-interest', instructions: 'Did the examples in section three reduce your interest?' },
         { type: 'choice', id: 'which-detail', instructions: 'Which aspect mattered most?', options: { example: 'The specific example', style: 'The writing style', 'no-fit': 'Neither' } },
         { type: 'score', id: 'strength', instructions: 'How strongly did this affect your interest?', rubric: ['Not at all', 'A little', 'A lot'] },
-        { type: 'noul', id: 'change', instructions: 'What would have kept your interest?' },
+        { type: 'noul', id: 'change', instructions: 'Would adding a concrete example have kept your interest?' },
         { type: 'noul', id: 'continue', instructions: 'Would a concrete example help?', criteria: { true: 'Yes', false: 'No' } },
       ],
       provider: localProvider, maxCalls: 5,

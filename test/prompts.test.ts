@@ -23,7 +23,7 @@ test('continuation adds the selected typed answer and exact exposure IDs to the 
 
 test('follow-on context modes preserve or replace only the promised respondent state', () => {
   const originalQuestion = { type: 'choice' as const, id: 'left-interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } };
-  const nextQuestion = { type: 'noul' as const, id: 'why-left', instructions: 'What caused you to leave?' };
+  const nextQuestion = { type: 'noul' as const, id: 'why-left', instructions: 'Did this section cause you to leave?' };
   const source = compileDecisionRequest({
     respondentProfile: { intent: 'Learn about this product.', context: 'Comparing options.', desired_outcome: 'Choose a tool.', engagement_cues: 'Specific benefits.', friction_cues: 'Confusing setup.' },
     encounteredItems: [{ id: 'section-three', text: 'Section three.' }],

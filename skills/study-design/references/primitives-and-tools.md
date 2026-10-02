@@ -1,17 +1,17 @@
 # Current primitives and tool contracts
 
-The current MCP run shape is deliberately small. An agent supplies one or more distinct respondent profiles, a finite authored sequence or graph of exact inline text and typed Choice, Score, or Noul questions, one provider configuration, and a bounded physical-call limit. A direct poll is the one-question form of the same run contract.
+The current MCP run shape is deliberately small. An agent supplies one or more distinct respondent profiles, exact inline text and typed Choice, Score, or Noul questions, one provider configuration, and a bounded physical-call limit. A direct poll or follow-on can contain one or more independent questions over the same frozen respondent context; use a finite authored sequence or graph when questions depend on earlier answers.
 
 | Tool | Purpose | Side effect |
 | --- | --- | --- |
-| `run_inspect` | Validate the strict request and measure context fit for each respondent. | No persistence, inference, or worker launch. |
+| `run_inspect` | Validate the strict request, measure context fit for each compiled evaluation packet, and preview reachable journey paths. | No persistence, inference, or worker launch. |
 | `run_start` | Persist a validated request, return a durable run ID, and launch its worker. An identical submission ID plus request returns the same run. | Starts inference after credential and fit admission. |
 | `run_list` | Find durable runs by status or label and paginate. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: status` | Read lifecycle state and counts. | Reconcile expired ownership; never launch work. |
-| `run_get` with `view: request` | Recall the frozen request, compiled packets, and their stable evaluation/context IDs. | Read only. |
+| `run_get` with `view: request` | Recall the frozen request, compiled packets, and their stable evaluation/context IDs. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: journey` | Recall reached turns, exact respondent packets, exposures, typed response history, route and terminal/failure state. | Reconcile expired ownership; never launch work. |
 | `run_get` with `view: answers` | Recall typed answers, failures, and pending evaluations with stable identifiers. | Reconcile expired ownership; never launch work. |
-| `run_query` | Filter typed answers and journey outcomes; return evaluation/context handles and, for mapped Choice answers, selected material references. | Read only; a progressing source can gain more matches. |
+| `run_query` | Reconcile expired ownership, then filter typed answers and journey outcomes; return evaluation/context handles and, for mapped Choice answers, selected material references. | Never launch work; a progressing source can gain more matches. |
 | `run_cancel` | Request that the worker stop before dispatching another respondent. | An in-flight call is allowed to settle. |
 
 ## Request design
@@ -20,7 +20,7 @@ The agent owns the meaning and granularity of the user's question. If the user a
 
 Choice option IDs are stable machine identifiers paired with user-meaningful labels. Score uses a typed ordered rubric. Noul represents probability. These types must match the information the user wants back; do not turn a probability or ranking request into a nominal Choice just because it is easy to encode. For Choice over authored material candidates, map option IDs to exact material IDs with `materialOptions`; linked labels must equal exact text and candidates must carry author-supplied source metadata. Keep no-fit options unlinked. Query returns the selected `materialId`, exact text, author source identity/digest, and Sheg-computed text digest. Pass the ID through follow-on `context.materialIds`.
 
-The same request is compiled into one frozen decision packet per respondent. Input order, exact material, typed question, provider configuration, and the prompt contract determine the accepted request fingerprint. The submission ID is an idempotency key for one exact request, not a study name. A changed request uses a new submission ID.
+Sheg compiles one frozen decision packet per respondent and question evaluation. Independent questions share the respondent-visible state but remain separate evaluations; Jev may batch a question group into one provider request when it fits, while local Laya sends one question per physical request. Input order, exact material, typed questions, provider configuration, and the prompt contract determine the accepted request fingerprint. The submission ID is an idempotency key for one exact request, not a study name. A changed request uses a new submission ID.
 
 ## Current follow-on boundary
 

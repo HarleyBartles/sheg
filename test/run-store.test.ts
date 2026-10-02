@@ -199,7 +199,7 @@ test('a physical batch reserves and settles once while preserving one typed eval
 
 test('a batch-wide provider failure records one physical call and fails every reserved evaluation together', async () => {
   const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [input.questions[0]!,
-    { type: 'noul', id: 'interest-score', instructions: 'How interested are you?' }] };
+    { type: 'noul', id: 'interest-score', instructions: 'Would you describe this material as interesting?' }] };
   const prepared = await prepareRun(value, { ...provider, measureBatch: () => fit }); assert.ok(prepared.prepared);
   const root = await temporaryRoot(); const store = openRunStore(root, { now: () => 10_000 });
   try {
@@ -870,7 +870,7 @@ test('independent questions over one frozen context share its provenance fingerp
     respondents: input.respondents.slice(0, 1),
     questions: [
       input.questions[0]!,
-      { type: 'noul', id: 'clarity', instructions: 'How clear is the section?' },
+      { type: 'noul', id: 'clarity', instructions: 'Would you describe this section as clear?' },
     ],
   };
   try {
@@ -999,7 +999,7 @@ test('follow-on source resolution freezes criteria matches and validates exact e
       : { ...savedAnswer, choice: 'leave', probabilities: { continue: 0.2, leave: 0.8 }, confidence: 0.81 });
     const base = {
       kind: 'follow-on' as const, sourceRunId,
-      questions: [{ type: 'noul' as const, id: 'why-leave', instructions: 'What caused you to leave?' }],
+      questions: [{ type: 'noul' as const, id: 'why-leave', instructions: 'Did this section cause you to leave?' }],
       provider: input.provider, maxCalls: 1,
     };
     const criteriaRequest = followOnRunRequestSchema.parse({ ...base, selection: { criteria: { materialId: 'section-three', answer: { type: 'choice', choiceId: 'leave' } } }, context: { mode: 'recorded' } });
@@ -1067,7 +1067,7 @@ test('follow-on acceptance rejects a source that changes after packet fit inspec
     const sourceRun = store.accept(randomUUID(), sourcePrepared).run;
     const request = followOnRunRequestSchema.parse({
       kind: 'follow-on', sourceRunId: sourceRun.runId, selection: { criteria: {} }, context: { mode: 'recorded' },
-      questions: [{ type: 'noul', id: 'why', instructions: 'Why?' }], provider: input.provider, maxCalls: 2,
+      questions: [{ type: 'noul', id: 'why', instructions: 'Did this section answer your question?' }], provider: input.provider, maxCalls: 2,
     });
     const source = store.resolveFollowOnSources(request);
     const prepared = await prepareFollowOnRun(request, source, provider);
