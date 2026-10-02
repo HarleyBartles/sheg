@@ -132,30 +132,27 @@
   },
   {
     "id": "partial-run-selected-question",
-    "version": 2,
+    "version": 3,
     "ownerSkill": "stimulus-response-polling",
     "referencePaths": [
       "references/interpret-results.md",
       "references/run-and-recovery.md"
     ],
-    "userRequest": "This run was cancelled partway through. I asked Q2, of the people who reached it, what option did they choose? Tell me what the partial evidence covers.",
+    "userRequest": "The run is partial because one Q1 evaluation failed, but both respondents have Q2 answers. I only need Q2: report every Q2 choice and tell me whether the Q2 evidence is complete even though the overall run is partial.",
     "controlledEvidence": {
       "queryResult": {
         "items": [
           {
             "sourceRunId": "00000000-0000-4000-8000-000000000017",
-            "evaluationId": "00000000-0000-4000-8000-000000000101",
+            "evaluationId": "00000000-0000-4000-8000-000000000111",
             "contextId": "00000000-0000-4000-8000-000000000201",
             "respondentId": "r1",
             "questionId": "Q2",
             "status": "answered",
             "result": {
               "type": "choice",
-              "choice": "B",
-              "probabilities": {
-                "A": 0,
-                "B": 1
-              },
+              "choice": "A",
+              "probabilities": { "A": 1, "B": 0 },
               "attempts": 1,
               "provider": "laya",
               "model": "fixture-model",
@@ -171,11 +168,21 @@
           },
           {
             "sourceRunId": "00000000-0000-4000-8000-000000000017",
-            "evaluationId": "00000000-0000-4000-8000-000000000102",
+            "evaluationId": "00000000-0000-4000-8000-000000000112",
             "contextId": "00000000-0000-4000-8000-000000000202",
             "respondentId": "r2",
             "questionId": "Q2",
-            "status": "unreached",
+            "status": "answered",
+            "result": {
+              "type": "choice",
+              "choice": "B",
+              "probabilities": { "A": 0, "B": 1 },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
             "provenance": {
               "provider": "laya",
               "model": "fixture-model",
@@ -186,32 +193,38 @@
         ],
         "totalMatches": 2,
         "sourceRunId": "00000000-0000-4000-8000-000000000017",
-        "sourceStatus": "cancelled",
+        "sourceStatus": "partial",
         "sourceComplete": false,
         "coverage": {
-          "totalEvaluations": 2,
-          "completedEvaluations": 1,
-          "failedEvaluations": 0,
+          "totalEvaluations": 3,
+          "completedEvaluations": 2,
+          "failedEvaluations": 1,
           "respondents": {
             "total": 2,
-            "active": 0,
+            "active": 1,
             "completed": 1,
             "failed": 0,
-            "unreached": 1
+            "unreached": 0
           }
         }
+      },
+      "siblingFailure": {
+        "respondentId": "r1",
+        "questionId": "Q1",
+        "status": "failed",
+        "failureCode": "invalid_answer"
       },
       "mockOnly": true
     }
   },
   {
     "id": "typed-answer-failure",
-    "version": 3,
+    "version": 4,
     "ownerSkill": "stimulus-response-polling",
     "referencePaths": [
       "references/interpret-results.md"
     ],
-    "userRequest": "Why didn't everyone answer the question? Please summarize these results.",
+    "userRequest": "One respondent's answer failed with invalid_answer. I need the reason and want to recover that response. Explain what happened, whether this run can resume, and what I should do next. Do not assume a specific provider cause.",
     "controlledEvidence": {
       "statusView": {
         "runId": "00000000-0000-4000-8000-000000000004",

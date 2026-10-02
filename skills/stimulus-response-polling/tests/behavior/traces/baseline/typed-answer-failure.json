@@ -1,7 +1,7 @@
 {
   "scenarioId": "typed-answer-failure",
-  "scenarioVersion": 3,
-  "trialId": "2026-10-02-gpt-6-sol-medium-typed-answer-failure-v3",
+  "scenarioVersion": 4,
+  "trialId": "2026-10-02-gpt-6-sol-medium-typed-answer-failure-v4",
   "mode": "guided",
   "model": "gpt-6-sol",
   "reasoning": "medium",
@@ -12,22 +12,48 @@
   "guided": {
     "actor": {
       "scenarioId": "typed-answer-failure",
-      "scenarioVersion": 3,
-      "actions": [],
-      "finalResponse": "The run is partial: 1 of 2 evaluations answered, and 1 failed. Respondent r1 selected “yes” for q1. Respondent r2 did not answer because the provider returned an invalid answer for that evaluation. That failure is not a “no” response. There are no pending or unreached evaluations in the supplied results. These are modeled responses, so they do not establish how people would answer.",
+      "scenarioVersion": 4,
+      "actions": [
+        { "tool": "run_get", "input": { "runId": "00000000-0000-4000-8000-000000000004", "view": "status" } },
+        { "tool": "run_get", "input": { "runId": "00000000-0000-4000-8000-000000000004", "view": "answers" } },
+        { "tool": "run_resume", "input": { "runId": "00000000-0000-4000-8000-000000000004", "proposed": true } }
+      ],
+      "finalResponse": "The run is partial: 1 of 2 evaluations answered and 1 failed. Respondent r2’s evaluation for q1 failed with invalid_answer, meaning the provider returned an answer that Sheg could not accept for the question. The recorded message gives no more specific cause, so I can’t attribute it to a particular provider issue. No valid response was recorded for r2.\n\nThis evidence does not establish that the failed evaluation is eligible for resumption. The run has also used its full 2-call limit, with no calls reserved. Check the run’s recovery eligibility before attempting run_resume; if it is not eligible, submit a new request to retry the unanswered evaluation with an appropriate call limit. Preserve the original run as partial evidence, and do not treat the failure as a “no” answer.",
       "uncertainties": [
-        "The supplied evidence does not explain why the provider produced an invalid answer.",
-        "The frozen question and respondent profiles were not supplied, so the meaning of “yes” cannot be interpreted further."
+        "The fixture does not show whether this partial run or its failed evaluation is eligible for resumption.",
+        "The fixture does not include a provider diagnostic beyond the generic invalid_answer message."
       ]
     },
     "evaluator": {
       "scenarioId": "typed-answer-failure",
       "criterionResults": [
-        { "criterionId": "failure-not-negative", "result": "pass", "evidence": "The response says r2 did not answer and explicitly states the failure is not a no response." },
-        { "criterionId": "reports-available-diagnostic", "result": "fail", "evidence": "It paraphrases the safe message meaning by saying the provider returned an invalid answer, but omits the supplied failure code invalid_answer, which the criterion requires." },
-        { "criterionId": "states-completeness", "result": "pass", "evidence": "It reports a partial run with 1 of 2 evaluations answered and 1 failed." }
+        {
+          "criterionId": "failure-not-negative",
+          "result": "pass",
+          "evidence": "It says no valid response was recorded and explicitly says not to treat the failure as a no answer."
+        },
+        {
+          "criterionId": "reports-available-diagnostic",
+          "result": "pass",
+          "evidence": "It reports invalid_answer and accurately paraphrases that the provider returned an answer Sheg could not accept."
+        },
+        {
+          "criterionId": "cause-bounded",
+          "result": "pass",
+          "evidence": "It says the recorded message gives no more specific cause and makes no specific provider attribution."
+        },
+        {
+          "criterionId": "recovery-respects-call-limit",
+          "result": "fail",
+          "evidence": "The actions include run_resume, and the final response recommends checking eligibility before attempting it despite stating that the two-call limit is exhausted."
+        },
+        {
+          "criterionId": "states-run-coverage",
+          "result": "pass",
+          "evidence": "It reports the run is partial with 1 of 2 evaluations answered and 1 failed."
+        }
       ],
-      "notes": "The accurate paraphrase does not satisfy the criterion's requirement to report the supplied failure code."
+      "notes": "The guided actor reports the failure accurately but does not use the exhausted original call allowance to rule out resuming this run."
     }
   },
   "controls": [
@@ -36,17 +62,47 @@
       "model": "gpt-6-sol",
       "reasoning": "medium",
       "skillReferenceHashes": {},
+      "inputPromptSha256": "742d1be43dd5a695105d76bb5901926e9c4a5caccee8edd2787f21e5335d3dad",
       "actor": {
-        "answer": "The run is partial: one of two respondents answered ‘yes,’ and the other did not produce a valid answer. The second response failed with invalid_answer: the provider returned an invalid answer for that question. The run has used its two-call limit, so no calls remain to retry."
+        "scenarioId": "typed-answer-failure",
+        "scenarioVersion": 4,
+        "actions": [],
+        "finalResponse": "Respondent r2's answer to q1 failed with invalid_answer: the provider returned an answer that was invalid for this question. The evidence does not identify a specific provider cause. The run is partial: one of two evaluations completed and one failed. It has used its two-call limit, with no calls reserved. The evidence does not establish whether this run can resume, so I can't confirm that it can. Next, check the run's recovery options and the failed evaluation details. If resuming or retrying that evaluation is supported, use that path; otherwise, start a new run for the response you need to recover.",
+        "uncertainties": [
+          "The evidence does not say whether this run supports resuming or retrying a failed evaluation.",
+          "The provider-specific cause of the invalid answer is unknown."
+        ]
       },
       "evaluator": {
         "scenarioId": "typed-answer-failure",
         "criterionResults": [
-          { "criterionId": "failure-not-negative", "result": "pass", "evidence": "The response distinguishes the valid yes answer from the other respondent's failed, invalid response." },
-          { "criterionId": "reports-available-diagnostic", "result": "pass", "evidence": "It reports the supplied invalid_answer code and accurately paraphrases the safe message meaning." },
-          { "criterionId": "states-completeness", "result": "pass", "evidence": "It reports a partial run with one of two respondents answering and the other evaluation failing." }
+          {
+            "criterionId": "failure-not-negative",
+            "result": "pass",
+            "evidence": "The final response separates r2's failed evaluation from the completed evaluation and does not turn it into a choice."
+          },
+          {
+            "criterionId": "reports-available-diagnostic",
+            "result": "pass",
+            "evidence": "It reports invalid_answer and says the provider returned an answer that was invalid for the question."
+          },
+          {
+            "criterionId": "cause-bounded",
+            "result": "pass",
+            "evidence": "It says the evidence does not identify a specific provider cause and does not guess."
+          },
+          {
+            "criterionId": "recovery-respects-call-limit",
+            "result": "fail",
+            "evidence": "It notes the two-call limit was used but recommends using the resume or retry path if supported."
+          },
+          {
+            "criterionId": "states-run-coverage",
+            "result": "pass",
+            "evidence": "It preserves partial status and reports one of two evaluations completed and one failed."
+          }
         ],
-        "notes": "The prior no-guidance actor output was evaluated in a separate fresh context against the v3 rubric. The retry-limit statement does not affect the criteria."
+        "notes": "The control also fails to infer from the exhausted allowance that this run cannot resume or retry."
       }
     }
   ],

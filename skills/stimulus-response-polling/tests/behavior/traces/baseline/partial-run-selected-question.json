@@ -1,7 +1,7 @@
 {
   "scenarioId": "partial-run-selected-question",
-  "scenarioVersion": 2,
-  "trialId": "2026-10-02-gpt-6-sol-medium-partial-run-selected-question-v2",
+  "scenarioVersion": 3,
+  "trialId": "2026-10-02-gpt-6-sol-medium-partial-run-selected-question-v3",
   "mode": "guided",
   "model": "gpt-6-sol",
   "reasoning": "medium",
@@ -13,33 +13,31 @@
   "guided": {
     "actor": {
       "scenarioId": "partial-run-selected-question",
-      "scenarioVersion": 2,
+      "scenarioVersion": 3,
       "actions": [],
-      "finalResponse": "One simulated respondent reached and answered Q2: r1 chose B. The other respondent, r2, did not reach Q2, so there is no Q2 choice for them. The run was cancelled and is incomplete. Across the two planned evaluations, 1 was completed, 0 failed, 0 are pending, and 1 was unreached. B is therefore the choice among the 1 recorded Q2 answer, not a result for both respondents.",
-      "uncertainties": [
-        "The unreached respondent provides no Q2 answer."
-      ]
+      "finalResponse": "Q2 choices: r1 selected A; r2 selected B. Both respondents have Q2 answers, so the Q2 evidence is complete for this run. The overall run remains partial: 2 of 3 evaluations completed and 1 failed, on r1's Q1 evaluation (invalid_answer).",
+      "uncertainties": []
     },
     "evaluator": {
       "scenarioId": "partial-run-selected-question",
       "criterionResults": [
         {
-          "criterionId": "partial-state-honest",
+          "criterionId": "selected-question-complete",
           "result": "pass",
-          "evidence": "The actor says the run was cancelled and incomplete and reports one completed plus one unreached among two evaluations."
+          "evidence": "The final response reports r1 selected A and r2 selected B and says both have Q2 answers."
         },
         {
-          "criterionId": "answers-with-scope",
+          "criterionId": "source-remains-partial",
           "result": "pass",
-          "evidence": "It reports r1 chose B and limits B to the one recorded Q2 answer."
+          "evidence": "The final response says the overall run remains partial with 2 of 3 evaluations completed and 1 failed."
         },
         {
-          "criterionId": "unreached-is-not-answer",
-          "result": "fail",
-          "evidence": "The actor says 0 are pending, although there is no explicit pending counter in the query page. However, the two returned Q2 items equal totalMatches=2 and have statuses answered and unreached, so manual review finds zero pending inferable for this exhaustive queried set."
+          "criterionId": "separates-sibling-failure",
+          "result": "pass",
+          "evidence": "It identifies the invalid_answer failure as r1's Q1 evaluation, separate from the Q2 choices."
         }
       ],
-      "notes": "The fresh evaluator treated the inferred zero-pending count as unsupported. Manual inspection disputes that judgment: both matching Q2 rows are present (totalMatches=2), and each has an explicit non-pending status. Preserve this as an evaluator disagreement and avoid generalizing it to overall run status."
+      "notes": "A fresh evaluator found the selected Q2 evidence complete while preserving the separate partial source status."
     }
   },
   "controls": [
@@ -48,29 +46,34 @@
       "model": "gpt-6-sol",
       "reasoning": "medium",
       "skillReferenceHashes": {},
+      "inputPromptSha256": "9ccc9b333f88fdef39b499f403cbba072bf5853df3ddfa2386c8f4b796c44bf9",
       "actor": {
-        "answer": "Of the people who reached Q2, one answered, choosing option B. The other respondent did not reach Q2. This is partial evidence from a cancelled run: 2 evaluations were planned, 1 completed, and the source is incomplete. It shows only the recorded Q2 answer, not a result for the full intended group."
+        "scenarioId": "partial-run-selected-question",
+        "scenarioVersion": 3,
+        "actions": [],
+        "finalResponse": "Q2 choices: r1 chose A; r2 chose B. The Q2 evidence is complete for both respondents. The overall run is still partial because r1's Q1 evaluation failed.",
+        "uncertainties": []
       },
       "evaluator": {
         "scenarioId": "partial-run-selected-question",
         "criterionResults": [
           {
-            "criterionId": "partial-state-honest",
+            "criterionId": "selected-question-complete",
             "result": "pass",
-            "evidence": "Reports a cancelled, incomplete run; two evaluations were planned and one completed."
+            "evidence": "The final response maps r1 to A and r2 to B and scopes complete coverage to both Q2 respondents."
           },
           {
-            "criterionId": "answers-with-scope",
+            "criterionId": "source-remains-partial",
             "result": "pass",
-            "evidence": "Reports B as the one recorded Q2 answer and scopes it to the respondent who reached Q2."
+            "evidence": "It says the overall run is still partial because r1's Q1 evaluation failed."
           },
           {
-            "criterionId": "unreached-is-not-answer",
+            "criterionId": "separates-sibling-failure",
             "result": "pass",
-            "evidence": "States the other respondent did not reach Q2 and assigns no answer or invented pending/failed result."
+            "evidence": "It identifies the failure as r1's Q1 evaluation, distinct from the Q2 choices."
           }
         ],
-        "notes": "The control returned an `answer` object rather than the requested JSON actor trace; content was evaluated and the wrapper violation is preserved."
+        "notes": "A fresh evaluator found the control scoped completeness to Q2 and retained the overall partial status."
       }
     }
   ],

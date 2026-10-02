@@ -56,22 +56,23 @@
 - Create: `skills/study-design/tests/behavior/scenarios.json` and `evaluators.json`.
 - Create: `skills/stimulus-response-polling/tests/behavior/scenarios.json` and `evaluators.json`.
 - Create: `skills/study-design/tests/behavior/README.md` with the campaign protocol.
-- Create: `scripts/skill-scenario.ts` with list, actor-prompt, and evaluator-prompt rendering.
+- Create: `scripts/skill-scenario.ts` with list, guided actor, no-guidance control, and evaluator prompt rendering.
 - Create: `test/skill-scenario-harness.test.ts`.
 - Modify: `package.json` only to expose `npm run skill:scenario -- ...`.
 
 **Interfaces:**
 - Scenario records contain `id`, `version`, `ownerSkill`, `referencePaths`, `userRequest`, and `controlledEvidence`. Evaluator records separately contain the same `scenarioId` and `version`, `criteria` with unique IDs and observable conditions, and `prohibitedClaims`.
 - `renderActorPrompt(scenarioId)` embeds the current owner `SKILL.md`, only the declared references, the realistic user request, controlled fixture evidence, and an output contract. It does not read or print evaluator files.
+- `renderControlPrompt(scenarioId)` provides the same versioned request and evidence without skill guidance and returns a prompt SHA-256 for the recorded control input.
 - Actor output is JSON with `scenarioId`, `scenarioVersion`, `actions` (proposed tool/input pairs, never executed), `finalResponse`, and `uncertainties`.
 - `renderEvaluatorPrompt(scenarioId, actorTrace)` loads the separate evaluator criteria and controlled evidence with the captured actor output. Evaluator output is JSON with `scenarioId`, `criterionResults` (`criterionId`, `result: pass|fail|uncertain`, and evidence), and `notes`. It requests evidence-cited judgments, not phrase matching.
-- Fresh actor execution remains a manual campaign using the generated prompt and Codex's fresh-context subagent route. The script never invokes a model or live tool.
+- Fresh actor execution remains a manual campaign using the generated prompt and Codex's fresh-context subagent route. The script never invokes a model or live tool. Evaluator replay rejects wrapped traces whose scenario identity or version differs from the selected rubric.
 
 - [x] Write harness tests first for unique scenario IDs, valid owner/reference paths, exact evaluator-to-scenario pairing, and prompts that include only the intended private/public material. Run `node --import tsx --test test/skill-scenario-harness.test.ts` and capture the expected missing-renderer failure.
 - [x] Implement the minimal fixture loader and prompt renderers with path containment, strict JSON shape checks, and clear errors for unknown IDs or missing references. Re-run the focused harness tests and confirm actor rendering cannot include evaluator criteria while evaluator rendering can include them.
 - [x] Add six scenarios with stable IDs: `sequence-versus-linear-graph` for staged/interleaved exposure and context expectations; `independent-dependent-questions`; `selected-material-isolation-no-fit`; `partial-run-selected-question`; `typed-answer-failure`; and `changed-rubric-comparison`.
 - [x] For current-baseline scoring, require truthful limits where the runtime does not yet support the future journey, per-selection mapping, or lifecycle contract. Define the comparison case as a positive preservation criterion: separate the changed task meaning from comparable evidence and do not claim causal improvement.
-- [x] Add deterministic test assertions over the six fixtures, evaluator separation, mock-only execution contract, and trace metadata schema. Run `npm run skill:scenario -- --list` and `node --import tsx --test test/skill-scenario-harness.test.ts test/release-package.test.ts`.
+- [x] Add deterministic test assertions over the six fixtures, evaluator separation, mock-only execution contract, version-safe replay, exact control prompt digests, and trace metadata schema. Run `npm run skill:scenario -- --list` and `node --import tsx --test test/skill-scenario-harness.test.ts test/release-package.test.ts`.
 
 ## Task 3: Run and retain the current-guidance baseline
 
@@ -84,9 +85,9 @@
 - Evaluation records cite actor actions or final-response evidence for each criterion and distinguish a scenario/guidance issue from a missing runtime feature.
 
 - [x] Render each actor prompt from the committed fixture and dispatch one fresh-context actor per scenario using `gpt-6-sol` at medium reasoning. Provide no evaluator criteria. Require the actor to return the structured trace contract and instruct against real tool calls; record that enforcement and auditing were unavailable.
-- [x] For any guided scenario that fails or makes an unsupported product claim, dispatch one matched fresh-context no-guidance control with the same user request and controlled facts. Preserve both outputs before assigning a guidance-specific cause.
+- [x] For any guided scenario that fails or makes an unsupported product claim, render a version-bound no-guidance prompt with the same user request and controlled facts, dispatch one fresh-context control, and store its prompt digest. Preserve both outputs before assigning a guidance-specific cause.
 - [x] Evaluate each result in a separate fresh context with only that case's evaluator criteria, controlled fixture and actor trace. Manually inspect every failed, disputed, or flagged judgment and record cited evidence plus any uncertain evaluator decisions.
-- [x] Store the six trace/evaluation records under the skill-owned test directories and summarize strengths, observed failures, limitations and later owning plans in the evidence report. Do not edit skill guidance based on a single run; record candidates for Plan 3, 4, 5, or 6.
+- [x] Store the six current trace/evaluation records under skill-owned test directories, archive the superseded partial-run and typed-failure trials, and summarize strengths, observed failures, limitations and later owning plans in the evidence report. Do not edit skill guidance based on a single run; record the exhausted-budget recovery miss for a later targeted iteration.
 - [x] Confirm the comparison-interpretation scenario's result explicitly, because the Portfolio pilot provides positive evidence for current interpretation guidance. Do not broaden an evidence limitation into a rewrite of all guidance.
 
 ## Task 4: Complete, validate, and hand off Plan 2
@@ -95,7 +96,7 @@
 - Modify: this plan and `roadmap.md` to record actual evidence, PR and merge state.
 
 - [ ] Run `git diff --check`, inspect the complete diff, and confirm no skill guidance, Portfolio content, external provider setting, or live study data changed.
-- [x] Record the exact dev.3 package digest, focus results, actor/evaluator trial settings, positive and failed outcomes, matched controls if any, and known limitations in the plan and evidence report.
+- [ ] Record the exact dev.3 package digest, focus results, actor/evaluator trial settings, positive and failed outcomes, matched controls if any, and known limitations in the plan and evidence report.
 - [ ] Commit all intended source, tests, fixtures, generated output, roadmap and evidence explicitly. The tracked `.githooks/pre-commit` must pass staged `npm run verify` with all scenario fixtures and package exclusion tests.
 - [ ] Prepare the whole-branch review package against `7e2943bf1daec403ae5e56e7166eb68f9d868474`; complete a fresh clean review before PR creation. Create this plan's PR into `develop`; after exact-head CI passes, merge it as `0.3.0-dev.3` using a guarded merge.
 - [ ] Record verified PR/merge evidence in the next fresh JIT plan, then clean this plan's worktree and local branch using the bundled retirement helper. Do not remove the unrelated prunable Laya spike without separate PR/head/integration proof.
@@ -110,22 +111,22 @@
 
 - The package exclusion test first failed because `private-evaluator.json` appeared in the stable fixture archive; after the file walk change, the test passed and the archive retained `skills/study-design/SKILL.md`.
 - Package, both lockfile root versions, and plugin version now agree at `0.3.0-dev.3`. `npm run build`, typecheck, MCP initialization (10 tests), copied-package/build/release tests (15 tests), and the candidate validator passed. Stable `v0.3.0` validation failed with the expected mismatch.
-- Local ZIP `Z:/_agent-scratch/sheg/codex-v0.3.0-skill-scenarios/sheg-v0.3.0-dev.3.zip` contains 27 files and no skill tests. Final SHA-256 after regenerating the bundle: `B03EC58273AF6B0C664D9B8A6043953133608B1045CDED515D143C54B4B69876`.
+- Local ZIP `Z:/_agent-scratch/sheg/codex-v0.3.0-skill-scenarios/sheg-v0.3.0-dev.3.zip` contains 27 files and no skill tests. Regeneration after the harness follow-ups produced the same SHA-256: `B03EC58273AF6B0C664D9B8A6043953133608B1045CDED515D143C54B4B69876`.
 
 ## Task 2 harness and scenario evidence
 
-- Added a fixture-only CLI at `scripts/skill-scenario.ts`. Actor rendering does not load evaluator catalogs. Evaluator rendering preserves a JSON actor trace that violates the output schema so a separate evaluator can still judge the observed behavior. The script itself makes no model or tool calls.
-- Added three public scenarios and three paired private evaluators to each skill. `npm run skill:scenario -- --list` returns all six stable IDs. The 15 focused harness and release-package tests pass, lint and typecheck pass, and the package exclusion test keeps `tests/` out while retaining shipped skill guidance. No shipped skill text was changed.
+- Added a fixture-only CLI at `scripts/skill-scenario.ts`. Guided and no-guidance renderers use the same scenario request/evidence; control input digests make matched inputs replayable. Actor rendering does not load evaluator catalogs. Evaluator rendering preserves a JSON actor trace that violates the output schema while rejecting mismatched scenario identity/version. The script itself makes no model or tool calls.
+- Added three public scenarios and three paired private evaluators to each skill. `npm run skill:scenario -- --list` returns all six stable IDs. The focused harness suite now has 21 passing tests. The previous full verification passed 343 tests before review follow-ups; rerun it with the 8 release-package tests after all changes. No shipped skill text was changed.
 
 ## Task 3 baseline results
 
 See [the evidence report](evidence/02-skill-scenario-baseline.md) for scenario-level results and limitations. Guided actors ran in fresh contexts using `gpt-6-sol` at medium reasoning, with no evaluator criteria. The prompts instructed actors not to call tools, but the current route does not expose tool disabling or an independent audit. Traces therefore use `toolUseAudit: "not-captured"`; do not claim that no tools were called. The user accepted this evidence level for dev.3; the immutable tool-use hook and Devin tool-disabled profile they identified are future harness-expansion options, not available methods used here. `simulationOnly: true` describes the controlled input evidence only.
 
-The selected-material v4 fixture now conforms to one fixed Choice option set and the current run query contract. Its guided actor preserves respondent-specific paragraphs and no-fit, but proposes unsupported per-selection contexts in one request. The no-guidance control describes two separate requests, though its abstract tool inputs are unchecked and its output mislabels the scenario ID. The typed-failure v3 rubric requires the supplied failure code and accurate diagnostic meaning while allowing paraphrase; the guided actor omits the code, while the matched control includes it and paraphrases the safe message. Earlier v2 results remain recorded in the evidence report, including the partial-run evaluator disagreement and positive changed-rubric interpretation case.
+The selected-material v4 fixture conforms to one fixed Choice option set and the current run query contract. Its guided actor preserves respondent-specific paragraphs and no-fit, but proposes unsupported per-selection contexts in one request. The refreshed no-guidance control describes individual per-respondent follow-ups and preserves no-fit. The partial-run v3 fixture now has two answered Q2 rows and a separate failed Q1 sibling; both guided and control actors correctly report complete Q2 evidence while keeping the source partial. The typed-failure v4 rubric includes the exhausted-call recovery boundary. Both guided and control actors report the failure code and meaning without guessing at a cause, but neither rules out resumption after the full call allowance has been used. This is a specific follow-up for later guidance work, not a guidance edit in this baseline plan. Earlier v2/v3 traces remain in the archive.
 
 ## Task 4 validation and handoff status
 
-- Final `npm run verify` passed lint, typecheck, all 343 tests, and generated-output checks. The focused harness suite passed all 15 tests; scenario listing and dev.3 package validation passed; `git diff --check` is clean.
+- The focused harness suite passes all 21 tests. `npm run verify` passes lint, typecheck, all 349 tests, and generated-output checks after the review follow-ups.
 - Rebuilt candidate ZIP contains 27 files, excludes all skill tests, and has SHA-256 `B03EC58273AF6B0C664D9B8A6043953133608B1045CDED515D143C54B4B69876`.
 - [x] Run `git diff --check`, inspect the complete diff, and confirm no skill guidance, Portfolio content, external provider setting, or live study data changed.
 - [x] Record the exact dev.3 package digest, focus results, actor/evaluator trial settings, positive and failed outcomes, matched controls if any, and known limitations in the plan and evidence report.

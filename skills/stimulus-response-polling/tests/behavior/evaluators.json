@@ -28,29 +28,29 @@
   },
   {
     "scenarioId": "partial-run-selected-question",
-    "version": 2,
+    "version": 3,
     "criteria": [
       {
-        "id": "partial-state-honest",
-        "condition": "Reports sourceStatus=cancelled and sourceComplete=false, and describes the available source coverage as one completed evaluation and one unreached respondent out of two."
+        "id": "selected-question-complete",
+        "condition": "Reports that both Q2 query matches are answered, maps r1 to A and r2 to B, and scopes completeness to the selected Q2 evidence."
       },
       {
-        "id": "answers-with-scope",
-        "condition": "Reports r1's Q2 answer B and scopes it to the one completed response, not all potential responses."
+        "id": "source-remains-partial",
+        "condition": "Reports the source run is partial and incomplete because a separate Q1 evaluation failed; does not call the overall run complete based on the Q2 query."
       },
       {
-        "id": "unreached-is-not-answer",
-        "condition": "Explains that r2 was unreached and has no Q2 answer; does not invent pending or failed results."
+        "id": "separates-sibling-failure",
+        "condition": "Keeps the Q1 invalid_answer failure separate from the two valid Q2 choices and does not treat failure as a Q2 answer."
       }
     ],
     "prohibitedClaims": [
-      "All respondents answered Q2.",
-      "The partial results are final or complete."
+      "The overall source run is complete because all Q2 rows are answered.",
+      "The failed Q1 evaluation is a Q2 response."
     ]
   },
   {
     "scenarioId": "typed-answer-failure",
-    "version": 3,
+    "version": 4,
     "criteria": [
       {
         "id": "failure-not-negative",
@@ -58,16 +58,25 @@
       },
       {
         "id": "reports-available-diagnostic",
-        "condition": "Reports the supplied failure code and accurately communicates the safe message meaning without inventing a more specific cause; exact wording is optional."
+        "condition": "Reports invalid_answer and accurately communicates that the provider returned an invalid answer, without inventing a more specific cause; exact wording is optional."
       },
       {
-        "id": "states-completeness",
-        "condition": "Uses the valid partial run status and counts to report one answered and one failed evaluation out of two."
+        "id": "cause-bounded",
+        "condition": "Says the supplied evidence does not identify why the provider returned an invalid answer; does not guess at a provider, prompt, or respondent cause."
+      },
+      {
+        "id": "recovery-respects-call-limit",
+        "condition": "Uses usedCalls=2 and maxCalls=2 to say this run has no allowance to resume or retry; does not claim automatic retry or recommend run_resume. If another attempt is suggested, identifies it as a separate new run with an explicit call allowance."
+      },
+      {
+        "id": "states-run-coverage",
+        "condition": "Reports one answered and one failed evaluation out of two and preserves the partial status."
       }
     ],
     "prohibitedClaims": [
       "The failed respondent chose no or a negative option.",
-      "The failure was caused by a specific provider or prompt issue not present in the evidence."
+      "The failure was caused by a specific provider or prompt issue not present in the evidence.",
+      "The existing run can resume after its original maxCalls allowance is exhausted."
     ]
   }
 ]

@@ -94,45 +94,13 @@
       "model": "gpt-6-sol",
       "reasoning": "medium",
       "skillReferenceHashes": {},
+      "inputPromptSha256": "5f6e4dfb2fccd64686c9fb0b5930125f3f527ff0f4167bc06afaa13dd3872db5",
       "actor": {
-        "scenarioId": "control_selected_material",
+        "scenarioId": "selected-material-isolation-no-fit",
         "scenarioVersion": 4,
-        "actions": [
-          {
-            "proposedTool": "Sheg follow-on request",
-            "input": {
-              "sourceRunId": "00000000-0000-4000-8000-000000000017",
-              "sourceEvaluationId": "00000000-0000-4000-8000-000000000101",
-              "respondentContextId": "00000000-0000-4000-8000-000000000201",
-              "stimulus": "Exact paragraph two.",
-              "question": "Does this paragraph express the pull quote “A city is a promise people keep making to each other”?",
-              "responseType": "Choice",
-              "options": [
-                "Yes",
-                "No"
-              ]
-            }
-          },
-          {
-            "proposedTool": "Sheg follow-on request",
-            "input": {
-              "sourceRunId": "00000000-0000-4000-8000-000000000017",
-              "sourceEvaluationId": "00000000-0000-4000-8000-000000000103",
-              "respondentContextId": "00000000-0000-4000-8000-000000000203",
-              "stimulus": "Exact paragraph five.",
-              "question": "Does this paragraph express the pull quote “A city is a promise people keep making to each other”?",
-              "responseType": "Choice",
-              "options": [
-                "Yes",
-                "No"
-              ]
-            }
-          }
-        ],
-        "finalResponse": "Send each respondent who selected a paragraph a follow-on question anchored to their original evaluation and context. Show r1 only “Exact paragraph two.” and r3 only “Exact paragraph five.”, then ask each whether that paragraph expresses the pull quote. Keep r2’s no-fit answer; r2 has no selected paragraph to show and should not receive this paragraph check. These are proposed requests only. No follow-on has been run.",
-        "uncertainties": [
-          "The exact Sheg tool name and input schema have not been checked."
-        ]
+        "actions": [],
+        "finalResponse": "Use the recorded answers to find respondents with a selected paragraph, then give each respondent only the paragraph they selected and ask whether it expresses the pull quote. Here, r1 would receive “Exact paragraph two.” by itself, and r3 would receive “Exact paragraph five.” by itself. r2 chose no-fit, so there is no selected paragraph to send; that respondent stays recorded as no-fit and is not included in this follow-up.",
+        "uncertainties": []
       },
       "evaluator": {
         "scenarioId": "selected-material-isolation-no-fit",
@@ -140,25 +108,25 @@
           {
             "criterionId": "per-respondent-selection",
             "result": "pass",
-            "evidence": "The response assigns paragraph two to r1 and paragraph five to r3 in separate proposed follow-on requests."
+            "evidence": "The response maps r1 to exact paragraph two and r3 to exact paragraph five, each based on that respondent's recorded selection."
           },
           {
             "criterionId": "honest-current-limit",
             "result": "pass",
-            "evidence": "It proposes separate requests, says no follow-on has been run, and does not claim automatic per-match expansion."
+            "evidence": "It describes a per-respondent follow-up and does not claim one request automatically expands a different material per match."
           },
           {
             "criterionId": "preserves-no-fit",
             "result": "pass",
-            "evidence": "It keeps r2’s no-fit answer visible and excludes r2 from the paragraph check."
+            "evidence": "It retains r2's no-fit selection and excludes r2 from the follow-up."
           },
           {
             "criterionId": "valid-proposed-actions",
-            "result": "uncertain",
-            "evidence": "The actor proposes abstract “Sheg follow-on request” objects and explicitly says the tool name and schema are unchecked; it does not present executable run_inspect or run_start inputs."
+            "result": "pass",
+            "evidence": "The actor proposes no executable tool actions, so there are no invented action inputs to assess."
           }
         ],
-        "notes": "A fresh evaluator judged the four behaviors. The raw actor output mislabels scenarioId as control_selected_material and uses proposedTool rather than the required tool/input JSON shape; those output-contract defects are preserved here. The evaluator returned not_applicable for the conditional action-shape criterion, represented as uncertain because the trace schema has no not-applicable value."
+        "notes": "A fresh evaluator found the matched control preserves each selected paragraph and the no-fit case."
       }
     }
   ],

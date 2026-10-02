@@ -13,6 +13,7 @@ import {
   loadEvaluatorCatalog,
   loadScenarioCatalog,
   renderActorPrompt,
+  renderControlPrompt,
   renderEvaluatorPrompt,
 } from '../scripts/skill-scenario.js';
 
@@ -53,6 +54,28 @@ test('actor prompts include only the owner skill, declared references, user requ
   assert.ok(!prompt.includes(JSON.stringify(evaluator.prohibitedClaims, null, 2)));
 });
 
+test('no-guidance control prompts preserve the scenario request and evidence without skill text', () => {
+  const scenario = loadScenarioCatalog().find((candidate) => candidate.id === 'typed-answer-failure')!;
+  const controlPrompt = renderControlPrompt(scenario.id);
+
+  assert.ok(controlPrompt.prompt.includes(scenario.userRequest));
+  assert.ok(controlPrompt.prompt.includes(JSON.stringify(scenario.controlledEvidence, null, 2)));
+  assert.doesNotMatch(controlPrompt.prompt, /Current skill and declared references|# Stimulus-response polling/);
+  assert.match(controlPrompt.sha256, /^[a-f0-9]{64}$/);
+});
+
+test('scenario CLI emits a reproducible no-guidance control prompt and digest', () => {
+  const output = execFileSync(process.execPath, [
+    '--import', 'tsx',
+    path.join(process.cwd(), 'scripts/skill-scenario.ts'),
+    '--control-prompt', 'typed-answer-failure',
+  ], { encoding: 'utf8' });
+  const control = JSON.parse(output) as { prompt: string; sha256: string };
+
+  assert.equal(control.sha256, renderControlPrompt('typed-answer-failure').sha256);
+  assert.ok(control.prompt.includes('One respondent\'s answer failed with invalid_answer'));
+});
+
 test('evaluator prompts pair the private rubric with the observed actor trace and same controlled evidence', () => {
   const scenario = loadScenarioCatalog().find((candidate) => candidate.id === 'typed-answer-failure')!;
   const evaluator = loadEvaluatorCatalog().find((candidate) => candidate.scenarioId === scenario.id)!;
@@ -73,6 +96,7 @@ test('evaluator prompts pair the private rubric with the observed actor trace an
 test('evaluator prompts exclude any prior evaluation stored beside the actor trace', () => {
   const prompt = renderEvaluatorPrompt('sequence-versus-linear-graph', {
     scenarioId: 'sequence-versus-linear-graph',
+    scenarioVersion: 2,
     guided: {
       actor: { scenarioId: 'sequence-versus-linear-graph', finalResponse: 'Observed answer.' },
       evaluator: { criterionResults: [{ criterionId: 'old-judgment', result: 'pass' }], notes: 'Prior evaluator output.' },
@@ -86,6 +110,7 @@ test('evaluator prompts exclude any prior evaluation stored beside the actor tra
 test('evaluator prompts can select a stored no-guidance control without including the guided actor or prior judgment', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
+    scenarioVersion: 4,
     guided: { actor: { scenarioId: 'typed-answer-failure', finalResponse: 'Guided actor.' } },
     controls: [{
       actor: { answer: 'Control actor without a scenario ID.' },
@@ -117,32 +142,59 @@ test('scenario CLI replays a stored no-guidance control by one-based index', () 
   ], { encoding: 'utf8' });
 
   assert.match(prompt, /trace selection: no-guidance control 1/);
-  assert.match(prompt, /The run is partial: one of two respondents answered/);
+  assert.match(prompt, /invalid_answer/);
   assert.doesNotMatch(prompt, /proposedFollowOns/);
 });
 
-test('evaluator refuses to replay a control whose observed scenario ID conflicts with the requested scenario', () => {
-  const tracePath = path.join(process.cwd(), 'skills/stimulus-response-polling/tests/behavior/traces/baseline/selected-material-isolation-no-fit.json');
-  const trace = JSON.parse(readFileSync(tracePath, 'utf8')) as unknown;
-
-  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', trace, { controlIndex: 1 }), /does not match scenario/);
+test('evaluator refuses to replay a control whose actor scenario ID conflicts with its wrapper', () => {
+  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', {
+    scenarioId: 'selected-material-isolation-no-fit',
+    scenarioVersion: 4,
+    controls: [{ actor: { scenarioId: 'control_selected_material', finalResponse: 'Wrong identity.' } }],
+  }, { controlIndex: 1 }), /Actor trace does not match scenario/);
 });
 
 test('evaluator prompt control selector validates the stored one-based index', () => {
-  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', { controls: [] }, { controlIndex: 1 }), /no control at index 1/);
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {
+    scenarioId: 'typed-answer-failure', scenarioVersion: 4, controls: [],
+  }, { controlIndex: 1 }), /no control at index 1/);
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {}, { controlIndex: 0 }), /positive one-based integer/);
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', { scenarioId: 'another-scenario', finalResponse: 'Mismatch.' }), /does not match scenario/);
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', { scenarioId: '', finalResponse: 'Empty identity.' }), /does not match scenario/);
+});
+
+test('evaluator rejects a wrapped trace from another scenario before selecting its actor', () => {
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {
+    scenarioId: 'independent-dependent-questions',
+    scenarioVersion: 1,
+    controls: [{ actor: { finalResponse: 'Wrong scenario control.' } }],
+  }, { controlIndex: 1 }), /Stored trace does not match scenario/);
+});
+
+test('evaluator rejects archived versions of a scenario before selecting an actor', () => {
+  const tracePath = path.join(process.cwd(), 'skills/stimulus-response-polling/tests/behavior/traces/archive/selected-material-isolation-no-fit-v3.json');
+  const trace = JSON.parse(readFileSync(tracePath, 'utf8')) as unknown;
+
+  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', trace), /version 3.*current version 4/);
+});
+
+test('evaluator rejects raw actors that declare a stale scenario version', () => {
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {
+    scenarioId: 'typed-answer-failure',
+    scenarioVersion: 2,
+    finalResponse: 'Stale actor output.',
+  }), /version 2.*current version 4/);
 });
 
 test('evaluator can inspect a JSON trace that violates the actor output schema', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
-    scenarioVersion: '1',
-    actions: [],
+    scenarioVersion: 4,
+    actions: [{ tool: 4 }],
     finalResponse: 'The failure was described.',
   });
 
-  assert.ok(prompt.includes('"scenarioVersion": "1"'));
+  assert.ok(prompt.includes('"tool": 4'));
   assert.ok(prompt.includes('including any contract violations'));
 });
 
@@ -191,18 +243,50 @@ test('baseline trace files carry valid trial metadata and explicitly mark simula
         createHash('sha256').update(readFileSync(path.join(process.cwd(), file))).digest('hex'),
       ]));
       assert.deepEqual(trace.skillReferenceHashes, currentHashes);
+      for (const control of trace.controls) {
+        assert.equal(control.inputPromptSha256, renderControlPrompt(trace.scenarioId).sha256);
+      }
     }
   }
 });
 
-test('partial selected-question fixture matches the current run query contract', () => {
+test('partial selected-question fixture separates complete Q2 evidence from a failed Q1 sibling', () => {
   const scenario = loadScenarioCatalog().find((item) => item.id === 'partial-run-selected-question')!;
-  const evidence = scenario.controlledEvidence as { queryResult: unknown };
+  const evidence = scenario.controlledEvidence as {
+    queryResult: unknown;
+    siblingFailure: { respondentId: string; questionId: string; status: string; failureCode: string };
+  };
   const queryResult = runEvidencePageSchema.parse(evidence.queryResult);
 
-  assert.equal(queryResult.sourceStatus, 'cancelled');
+  assert.equal(queryResult.sourceStatus, 'partial');
   assert.equal(queryResult.sourceComplete, false);
-  assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'unreached']);
+  assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'answered']);
+  assert.deepEqual(queryResult.items.map((item) => item.result?.type === 'choice' ? item.result.choice : undefined), ['A', 'B']);
+  assert.equal(queryResult.totalMatches, queryResult.items.length);
+  assert.deepEqual(queryResult.coverage, {
+    totalEvaluations: 3,
+    completedEvaluations: 2,
+    failedEvaluations: 1,
+    respondents: { total: 2, active: 1, completed: 1, failed: 0, unreached: 0 },
+  });
+  const siblingFailure = evidence.siblingFailure;
+  assert.deepEqual(siblingFailure, { respondentId: 'r1', questionId: 'Q1', status: 'failed', failureCode: 'invalid_answer' });
+});
+
+test('typed answer recovery fixture has a precise failure and an exhausted original call allowance', () => {
+  const scenario = loadScenarioCatalog().find((item) => item.id === 'typed-answer-failure')!;
+  const evidence = scenario.controlledEvidence as {
+    statusView: { status: string; usedCalls: number; maxCalls: number };
+    answersView: { items: Array<{ status: string; failure?: { code: string; message: string } }> };
+  };
+  const failedAnswer = evidence.answersView.items.find((item) => item.status === 'failed');
+
+  assert.equal(evidence.statusView.status, 'partial');
+  assert.equal(evidence.statusView.usedCalls, evidence.statusView.maxCalls);
+  assert.deepEqual(failedAnswer?.failure, {
+    code: 'invalid_answer',
+    message: 'The provider returned an invalid answer for this question.',
+  });
 });
 
 test('selected-material fixture matches the current run query contract and omits material for no-fit', () => {

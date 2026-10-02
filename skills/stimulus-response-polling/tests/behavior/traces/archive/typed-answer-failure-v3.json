@@ -1,0 +1,55 @@
+{
+  "scenarioId": "typed-answer-failure",
+  "scenarioVersion": 3,
+  "trialId": "2026-10-02-gpt-6-sol-medium-typed-answer-failure-v3",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/stimulus-response-polling/SKILL.md": "164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794",
+    "skills/stimulus-response-polling/references/interpret-results.md": "8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c"
+  },
+  "guided": {
+    "actor": {
+      "scenarioId": "typed-answer-failure",
+      "scenarioVersion": 3,
+      "actions": [],
+      "finalResponse": "The run is partial: 1 of 2 evaluations answered, and 1 failed. Respondent r1 selected “yes” for q1. Respondent r2 did not answer because the provider returned an invalid answer for that evaluation. That failure is not a “no” response. There are no pending or unreached evaluations in the supplied results. These are modeled responses, so they do not establish how people would answer.",
+      "uncertainties": [
+        "The supplied evidence does not explain why the provider produced an invalid answer.",
+        "The frozen question and respondent profiles were not supplied, so the meaning of “yes” cannot be interpreted further."
+      ]
+    },
+    "evaluator": {
+      "scenarioId": "typed-answer-failure",
+      "criterionResults": [
+        { "criterionId": "failure-not-negative", "result": "pass", "evidence": "The response says r2 did not answer and explicitly states the failure is not a no response." },
+        { "criterionId": "reports-available-diagnostic", "result": "fail", "evidence": "It paraphrases the safe message meaning by saying the provider returned an invalid answer, but omits the supplied failure code invalid_answer, which the criterion requires." },
+        { "criterionId": "states-completeness", "result": "pass", "evidence": "It reports a partial run with 1 of 2 evaluations answered and 1 failed." }
+      ],
+      "notes": "The accurate paraphrase does not satisfy the criterion's requirement to report the supplied failure code."
+    }
+  },
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "actor": {
+        "answer": "The run is partial: one of two respondents answered ‘yes,’ and the other did not produce a valid answer. The second response failed with invalid_answer: the provider returned an invalid answer for that question. The run has used its two-call limit, so no calls remain to retry."
+      },
+      "evaluator": {
+        "scenarioId": "typed-answer-failure",
+        "criterionResults": [
+          { "criterionId": "failure-not-negative", "result": "pass", "evidence": "The response distinguishes the valid yes answer from the other respondent's failed, invalid response." },
+          { "criterionId": "reports-available-diagnostic", "result": "pass", "evidence": "It reports the supplied invalid_answer code and accurately paraphrases the safe message meaning." },
+          { "criterionId": "states-completeness", "result": "pass", "evidence": "It reports a partial run with one of two respondents answering and the other evaluation failing." }
+        ],
+        "notes": "The prior no-guidance actor output was evaluated in a separate fresh context against the v3 rubric. The retry-limit statement does not affect the criteria."
+      }
+    }
+  ],
+  "simulationOnly": true,
+  "toolUseAudit": "not-captured"
+}

@@ -1,4 +1,5 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -53,6 +54,7 @@ export const baselineTraceSchema = z.object({
     model: z.string().min(1),
     reasoning: z.string().min(1),
     skillReferenceHashes: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
+    inputPromptSha256: z.string().regex(/^[a-f0-9]{64}$/),
     actor: z.record(z.string(), z.unknown()),
     evaluator: evaluatorResultSchema,
   }).strict()),
@@ -165,6 +167,20 @@ export function renderActorPrompt(scenarioId: string): string {
   ].join('\n');
 }
 
+export function renderControlPrompt(scenarioId: string): { prompt: string; sha256: string } {
+  const scenario = findScenario(scenarioId);
+  const prompt = [
+    'You are acting as a Sheg user-facing agent in a controlled skill behavior scenario without supplied skill guidance. Use only the mock evidence below to respond to the request.',
+    'Do not call tools, connectors, inference providers, or external services. If an action would help, describe it in the response rather than executing it.',
+    'Return only JSON with scenarioId, scenarioVersion, actions (objects with tool and input), finalResponse, and uncertainties.',
+    `scenarioId: ${scenario.id}`,
+    `scenarioVersion: ${scenario.version}`,
+    `\n## User request\n${scenario.userRequest}`,
+    `\n## Controlled evidence (mock only)\n${JSON.stringify(scenario.controlledEvidence, null, 2)}`,
+  ].join('\n');
+  return { prompt, sha256: createHash('sha256').update(prompt).digest('hex') };
+}
+
 export function renderEvaluatorPrompt(
   scenarioId: string,
   actorTrace: unknown,
@@ -174,9 +190,19 @@ export function renderEvaluatorPrompt(
   let observedActorTrace = actorTrace;
   let traceSelection = 'raw actor output';
   const wrappedTrace = z.object({
+    scenarioId: z.string().optional(),
+    scenarioVersion: z.number().int().positive().optional(),
     guided: z.object({ actor: z.unknown() }).passthrough().optional(),
     controls: z.array(z.object({ actor: z.unknown() }).passthrough()).optional(),
   }).passthrough().safeParse(actorTrace);
+  if (wrappedTrace.success && (wrappedTrace.data.guided || wrappedTrace.data.controls)) {
+    if (wrappedTrace.data.scenarioId !== scenario.id) {
+      throw new Error(`Stored trace does not match scenario ${scenario.id}.`);
+    }
+    if (wrappedTrace.data.scenarioVersion !== scenario.version) {
+      throw new Error(`Stored trace version ${String(wrappedTrace.data.scenarioVersion)} does not match current version ${scenario.version}.`);
+    }
+  }
   if (options.controlIndex !== undefined) {
     if (!Number.isInteger(options.controlIndex) || options.controlIndex < 1) {
       throw new Error('Control index must be a positive one-based integer.');
@@ -190,12 +216,21 @@ export function renderEvaluatorPrompt(
     observedActorTrace = wrappedTrace.data.guided.actor;
     traceSelection = 'guided actor';
   }
-  const traceIdentity = z.object({ scenarioId: z.string().optional() }).passthrough().safeParse(observedActorTrace);
-  if (traceIdentity.success && traceIdentity.data.scenarioId && traceIdentity.data.scenarioId !== scenario.id) {
-    throw new Error(`Actor trace does not match scenario ${scenario.id}.`);
+  const traceIdentity = z.object({
+    scenarioId: z.string().optional(),
+    scenarioVersion: z.number().int().positive().optional(),
+  }).passthrough().safeParse(observedActorTrace);
+  if (traceIdentity.success) {
+    if (traceIdentity.data.scenarioId !== undefined && traceIdentity.data.scenarioId !== scenario.id) {
+      throw new Error(`Actor trace does not match scenario ${scenario.id}.`);
+    }
+    if (traceIdentity.data.scenarioVersion !== undefined && traceIdentity.data.scenarioVersion !== scenario.version) {
+      throw new Error(`Actor trace version ${traceIdentity.data.scenarioVersion} does not match current version ${scenario.version}.`);
+    }
   }
-  if (!traceIdentity.success && typeof observedActorTrace === 'object' && observedActorTrace !== null && 'scenarioId' in observedActorTrace) {
-    throw new Error('Actor trace scenarioId must be a string when present.');
+  if (!traceIdentity.success && typeof observedActorTrace === 'object' && observedActorTrace !== null) {
+    if ('scenarioId' in observedActorTrace) throw new Error('Actor trace scenarioId must be a string when present.');
+    if ('scenarioVersion' in observedActorTrace) throw new Error('Actor trace scenarioVersion must be a positive integer when present.');
   }
   const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId)!;
   return [
@@ -220,6 +255,10 @@ function main(args: string[]): void {
     process.stdout.write(`${renderActorPrompt(args[1])}\n`);
     return;
   }
+  if (args[0] === '--control-prompt' && args[1]) {
+    process.stdout.write(`${JSON.stringify({ scenarioId: args[1], ...renderControlPrompt(args[1]) }, null, 2)}\n`);
+    return;
+  }
   if (args[0] === '--evaluator-prompt' && args[1] && args[2]) {
     const trace: unknown = JSON.parse(readFileSync(args[2], 'utf8'));
     const controlIndex = args[3] === '--control' && args[4] ? Number(args[4]) : undefined;
@@ -228,7 +267,7 @@ function main(args: string[]): void {
     process.stdout.write(`${renderEvaluatorPrompt(args[1], trace, controlIndex === undefined ? {} : { controlIndex })}\n`);
     return;
   }
-  throw new Error('Usage: npm run skill:scenario -- --list | --actor-prompt <id> | --evaluator-prompt <id> <trace.json> [--control <one-based-index>]');
+  throw new Error('Usage: npm run skill:scenario -- --list | --actor-prompt <id> | --control-prompt <id> | --evaluator-prompt <id> <trace.json> [--control <one-based-index>]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
