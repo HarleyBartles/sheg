@@ -117,8 +117,11 @@ Use `run_get` with `view: "status"` to inspect progress, `view: "request"` to
 recall frozen inputs and respondent packets, `view: "answers"` to retrieve
 typed answers and failures, or `view: "journey"` to retrieve respondent-local
 turns, exposures, response history, routes, and terminal states. Answer
-pagination uses the returned cursor and a limit from 1 to 200. `run_query`
-also paginates with a returned cursor. `run_list` supports status, label, time,
+pagination uses the returned cursor and a limit from 1 to 200. Use
+`view: "attempts"` to inspect physical calls, their linked evaluation IDs,
+settlement status, and any provider failure. Attempt history also paginates
+with the returned cursor and a limit from 1 to 200. `run_query` also paginates
+with a returned cursor. `run_list` supports status, label, time,
 and referenced-material filters when the run ID is not at hand. Discovery and
 query never start or resume work.
 

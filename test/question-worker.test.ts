@@ -155,6 +155,18 @@ test('cancellation during an in-flight answer preserves it and stops the next re
   } finally { await f.close(); }
 });
 
+test('poll worker processes evaluations beyond the default answer page', async () => {
+  const f = await fixture(request(51));
+  let calls = 0;
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide() { calls += 1; return answer(); } }));
+    const status = f.store.getStatus(f.runId);
+    assert.equal(calls, 51);
+    assert.equal(status.status, 'completed');
+    assert.equal(status.completedEvaluations, 51);
+  } finally { await f.close(); }
+});
+
 test('a grouped poll batches independent questions and resumes only the failed question in the same context', async () => {
   const input = request(1);
   input.maxCalls = 2;

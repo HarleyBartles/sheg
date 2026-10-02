@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { DecisionProvider } from '../domain/decision/provider.js';
-import type { AnswerRow, Page, RunStatusView } from '../domain/run/lifecycle.js';
+import type { AnswerRow, Page, RunAttempt, RunStatusView } from '../domain/run/lifecycle.js';
 import type { PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
@@ -33,6 +33,7 @@ export interface RunService {
   getRequest(runId: string): PreparedRun | ReturnType<RunStore['getJourneyRun']>;
   getJourneyRun(runId: string): ReturnType<RunStore['getJourneyRun']>;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
+  attempts(runId: string, cursor?: string, limit?: number): Page<RunAttempt>;
   cancel(runId: string): RunStatusView;
 }
 
@@ -154,6 +155,7 @@ export function createRunService(
     getRequest: (runId) => store.getRequestKind(runId) === 'journey' ? store.getJourneyRun(runId) : store.getRequest(runId),
     getJourneyRun: (runId) => store.getJourneyRun(runId),
     answers: (runId, cursor, limit) => { store.reconcile(runId, Date.now()); return store.answers(runId, cursor, limit); },
+    attempts: (runId, cursor, limit) => { store.reconcile(runId, Date.now()); return store.attempts(runId, cursor, limit); },
     cancel: (runId) => store.requestCancel(runId),
   };
 }

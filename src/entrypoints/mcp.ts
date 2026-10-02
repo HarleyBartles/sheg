@@ -18,6 +18,7 @@ const runGetSchema = z.discriminatedUnion('view', [
   z.object({ runId: z.string().uuid(), view: z.literal('request') }).strict(),
   z.object({ runId: z.string().uuid(), view: z.literal('journey') }).strict(),
   z.object({ runId: z.string().uuid(), view: z.literal('answers'), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
+  z.object({ runId: z.string().uuid(), view: z.literal('attempts'), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
 ]);
 
 export function createPollingServer(service: RunService = createDefaultRunService()): McpServer {
@@ -26,11 +27,12 @@ export function createPollingServer(service: RunService = createDefaultRunServic
   server.registerTool('run_start', { description: 'Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
   server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
   server.registerTool('run_query', { description: 'Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete distinguishes a finished source from matches so far.', inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => service.queryEvidence(query)));
-  server.registerTool('run_get', { description: 'Retrieve one view of a run: status, frozen request and question groups, paginated per-question answers with shared call evidence, or reached journey contexts and routes. Discovery never launches or resumes work.', inputSchema: runGetSchema }, async (input) => safeResult(() => {
+  server.registerTool('run_get', { description: 'Retrieve one view of a run: status, frozen request and question groups, paginated per-question answers, physical attempts including uncertain or failed calls, or reached journey contexts and routes. Discovery never launches or resumes work.', inputSchema: runGetSchema }, async (input) => safeResult(() => {
     if (input.view === 'status') return service.getStatus(input.runId);
     if (input.view === 'request') return service.getRequest(input.runId);
     if (input.view === 'journey') return service.getJourneyRun(input.runId);
-    return service.answers(input.runId, input.cursor, input.limit);
+    if (input.view === 'answers') return service.answers(input.runId, input.cursor, input.limit);
+    return service.attempts(input.runId, input.cursor, input.limit);
   }));
   server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
   server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work or retryable partial question failures under the same run ID, saved request, and remaining provider-call allowance. Completed answers are preserved and only unanswered questions are dispatched. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));

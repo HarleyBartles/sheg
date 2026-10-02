@@ -6,7 +6,7 @@ import { decisionRequestSchema } from '../domain/decision/decision.js';
 import { validateDecision } from '../domain/decision/validate.js';
 import { compileDecisionPacket } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
+import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, Page, RunAttempt, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
 import { decisionResultSchema, decisionValueSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput, type RunMaterialItem } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
@@ -109,6 +109,7 @@ export interface RunStore {
   accept(submissionId: string, prepared: PreparedRun): { created: boolean; run: RunStatusView };
   acceptJourney(submissionId: string, prepared: PreparedJourneyRun): { created: boolean; run: RunStatusView };
   getStatus(runId: string): RunStatusView;
+  evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }>;
   getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on';
   getRequest(runId: string): PreparedRun;
   getJourneyRun(runId: string): JourneyRunRecord;
@@ -116,6 +117,7 @@ export interface RunStore {
   queryEvidence(query: RunEvidenceQuery): RunEvidencePage;
   resolveFollowOnSources(request: ParsedFollowOnRunRequest): FollowOnSourceSet;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
+  attempts(runId: string, cursor?: string, limit?: number): Page<RunAttempt>;
   requestCancel(runId: string): RunStatusView;
   resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
   previewDelete(runIds: string[]): DeletePreview;
@@ -139,6 +141,7 @@ export interface RunStore {
 type DatabaseRow = Record<string, SQLOutputValue>;
 type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; filtersFingerprint: string };
 type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
+type AttemptCursorPayload = { kind: 'attempts'; runId: string; startedMs: number; attemptId: string };
 type EvidenceCursorPayload = {
   kind: 'evidence'; sourceRunId: string; criteriaFingerprint: string; maxOrdinal: number; lastOrdinal: number;
   sourceStatus: RunStatus; sourceComplete: boolean; totalMatches: number;
@@ -603,6 +606,16 @@ class SQLiteRunStore implements RunStore {
     });
   }
 
+  evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }> {
+    this.ensureOpen();
+    this.getStatus(runId);
+    const rows = this.database.prepare('SELECT evaluation_id, status FROM evaluations WHERE run_id = ? ORDER BY ordinal').all(runId) as DatabaseRow[];
+    return rows.map((row) => ({
+      evaluationId: asText(row.evaluation_id, 'evaluation ID'),
+      status: asText(row.status, 'evaluation status') as AnswerRow['status'],
+    }));
+  }
+
   getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on' {
     this.getStatus(runId);
     const row = this.database.prepare('SELECT request_json FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
@@ -790,9 +803,12 @@ class SQLiteRunStore implements RunStore {
       const where = ['e.run_id = ?', 'e.ordinal <= ?'];
       const parameters: Array<string | number> = [request.sourceRunId, maxOrdinal];
       if ('references' in request.selection) {
-        const terms = request.selection.references.map(() => '(e.evaluation_id = ? AND e.context_id = ?)');
-        where.push(`(${terms.join(' OR ')})`);
-        for (const reference of request.selection.references) parameters.push(reference.evaluationId, reference.contextId);
+        where.push(`EXISTS (
+          SELECT 1 FROM json_each(?) AS selected
+          WHERE json_extract(selected.value, '$.evaluationId') = e.evaluation_id
+            AND json_extract(selected.value, '$.contextId') = e.context_id
+        )`);
+        parameters.push(JSON.stringify(request.selection.references));
       } else {
         const criteria = request.selection.criteria;
         if (criteria.respondentId !== undefined) { where.push('e.respondent_id = ?'); parameters.push(criteria.respondentId); }
@@ -925,7 +941,7 @@ class SQLiteRunStore implements RunStore {
             : asNumber((this.database.prepare('SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'respondent denominator');
         const statusCounts = parsedRequest.data.kind === 'journey'
           ? this.database.prepare('SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status').all(query.sourceRunId) as DatabaseRow[]
-          : parsedRequest.data.kind === 'follow-on'
+          : parsedRequest.data.kind === 'follow-on' || parsedRequest.data.kind === 'poll'
             ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
                   WHEN SUM(status = 'pending') > 0 THEN 'active'
@@ -1043,6 +1059,43 @@ class SQLiteRunStore implements RunStore {
     return { items, ...(hasMore && last ? { nextCursor: encodeCursor({ kind: 'answers', runId, ordinal: asNumber(last.ordinal, 'evaluation ordinal') } satisfies AnswerCursorPayload) } : {}) };
   }
 
+  attempts(runId: string, cursorText?: string, requestedLimit?: number): Page<RunAttempt> {
+    this.getStatus(runId);
+    const limit = pageSize(requestedLimit);
+    let cursor: AttemptCursorPayload | undefined;
+    if (cursorText) {
+      cursor = decodeCursor<AttemptCursorPayload>(cursorText, 'attempts');
+      if (cursor.kind !== 'attempts' || cursor.runId !== runId || !Number.isSafeInteger(cursor.startedMs) || cursor.startedMs < 0 || !cursor.attemptId) {
+        throw new RunStoreError('invalid_cursor', 'The attempt cursor does not match this run.');
+      }
+    }
+    const rows = this.database.prepare(`SELECT a.*, GROUP_CONCAT(ae.evaluation_id) AS evaluation_ids
+      FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
+      WHERE a.run_id = ? ${cursor ? 'AND (a.started_ms > ? OR (a.started_ms = ? AND a.attempt_id > ?))' : ''}
+      GROUP BY a.attempt_id ORDER BY a.started_ms, a.attempt_id LIMIT ?`)
+      .all(...(cursor ? [runId, cursor.startedMs, cursor.startedMs, cursor.attemptId, limit + 1] : [runId, limit + 1])) as DatabaseRow[];
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const items = pageRows.map((row): RunAttempt => ({
+      attemptId: asText(row.attempt_id, 'attempt ID'),
+      groupId: asText(row.group_id, 'question group ID'),
+      evaluationIds: asText(row.evaluation_ids, 'attempt evaluation IDs').split(','),
+      status: asText(row.status, 'attempt status') as RunAttempt['status'],
+      startedAt: new Date(asNumber(row.started_ms, 'attempt start time')).toISOString(),
+      ...(row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, 'attempt settlement time')).toISOString() }),
+      ...(row.failure_code === null ? {} : { failure: {
+        code: asText(row.failure_code, 'attempt failure code'),
+        message: asText(row.failure_message, 'attempt failure message'),
+        ...(row.failure_scope === null ? {} : { scope: asText(row.failure_scope, 'attempt failure scope') as 'evaluation' | 'run' }),
+      } }),
+      ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'attempt execution')) }),
+    }));
+    const last = pageRows.at(-1);
+    return { items, ...(hasMore && last ? { nextCursor: encodeCursor({
+      kind: 'attempts', runId, startedMs: asNumber(last.started_ms, 'attempt start time'), attemptId: asText(last.attempt_id, 'attempt ID'),
+    } satisfies AttemptCursorPayload) } : {}) };
+  }
+
   requestCancel(runId: string): RunStatusView {
     this.ensureOpen();
     return this.transaction(() => {
@@ -1118,8 +1171,13 @@ class SQLiteRunStore implements RunStore {
     return this.transaction(() => {
       const nowMs = this.now();
       const runs = runIds.map((runId) => {
-        this.reconcileInside(runId, nowMs);
-        const status = asText((this.database.prepare('SELECT status FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined)?.status, 'run status') as RunStatus;
+        const row = this.database.prepare('SELECT status, created_ms, lease_expires_ms FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
+        if (!row) throw this.notFound();
+        const storedStatus = asText(row.status, 'run status') as RunStatus;
+        const leaseExpires = row.lease_expires_ms === null ? asNumber(row.created_ms, 'run creation time') + LEASE_MS : asNumber(row.lease_expires_ms, 'run lease expiry');
+        const expired = storedStatus === 'prepared' && leaseExpires <= nowMs ||
+          storedStatus === 'running' && row.lease_expires_ms !== null && leaseExpires <= nowMs;
+        const status: RunStatus = expired ? 'interrupted' : storedStatus;
         const evaluationCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as DatabaseRow).count, 'evaluation count');
         const attemptCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as DatabaseRow).count, 'attempt count');
         const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId) as DatabaseRow[];

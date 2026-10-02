@@ -79,6 +79,17 @@ export type AnswerRow = {
   failure?: { code: string; message: string };
 };
 
+export type RunAttempt = {
+  attemptId: string;
+  groupId: string;
+  evaluationIds: string[];
+  status: 'reserved' | 'answered' | 'failed' | 'uncertain';
+  startedAt: string;
+  settledAt?: string;
+  failure?: { code: string; message: string; scope?: 'evaluation' | 'run' };
+  execution?: import('../decision/decision.js').ProviderExecutionEvidence;
+};
+
 export type Page<T> = { items: T[]; nextCursor?: string };
 export type { EvidenceCriteria, RunEvidenceItem, RunEvidencePage, RunEvidenceQuery, RunListQueryInput };
 

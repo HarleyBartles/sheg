@@ -255,6 +255,30 @@ test('MCP exposes explicit run_resume with a strict run identity input', async (
   } finally { await f.close(); }
 });
 
+test('MCP exposes uncertain physical attempts with their linked evaluation IDs', async () => {
+  const f = await connectedFixture();
+  try {
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: request() } });
+    const runId = (started.structuredContent as { runId: string }).runId;
+    const now = Date.now();
+    const claim = f.store.claim(runId, now, 4567);
+    assert.ok(claim);
+    const prepared = f.store.getRequest(runId);
+    const reservation = f.store.reserveBatch(claim, prepared.groups![0]!.groupId, [prepared.evaluations[0]!.evaluationId], now);
+    assert.ok(reservation);
+    f.store.reconcile(runId, now + 31_000);
+
+    const result = await f.client.callTool({ name: 'run_get', arguments: { runId, view: 'attempts', limit: 1 } });
+    assert.equal(result.isError ?? false, false);
+    const page = result.structuredContent as { items: Array<{ attemptId: string; evaluationIds: string[]; status: string; failure: { code: string } }> };
+    assert.equal(page.items.length, 1);
+    assert.equal(page.items[0]?.attemptId, reservation.attemptId);
+    assert.deepEqual(page.items[0]?.evaluationIds, [prepared.evaluations[0]!.evaluationId]);
+    assert.equal(page.items[0]?.status, 'uncertain');
+    assert.equal(page.items[0]?.failure.code, 'worker_interrupted');
+  } finally { await f.close(); }
+});
+
 test('MCP explains an unsupported stored credential encoding without accepting the run', async () => {
   const f = await connectedFixture(async () => { throw new CredentialStoreError('credential_malformed', 'openrouter'); });
   try {

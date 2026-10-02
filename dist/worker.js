@@ -21094,7 +21094,7 @@ async function executeQuestionRun(store2, runId2, providerFactory) {
 async function executePoll(store2, runId2, claim2, providerFactory) {
   const prepared = store2.getRequest(runId2);
   const provider = providerFactory(prepared.request.provider);
-  const answers = new Map(store2.answers(runId2).items.map((answer) => [answer.evaluationId, answer.status]));
+  const answers = new Map(store2.evaluationStatuses(runId2).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
     while (true) {
@@ -21141,7 +21141,7 @@ async function executePoll(store2, runId2, claim2, providerFactory) {
         if (scope === "run") return;
       }
       for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, "answered");
-      const latest = new Map(store2.answers(runId2).items.map((answer) => [answer.evaluationId, answer.status]));
+      const latest = new Map(store2.evaluationStatuses(runId2).map((answer) => [answer.evaluationId, answer.status]));
       for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId));
     }
   }
@@ -22324,6 +22324,15 @@ var SQLiteRunStore = class {
       return this.statusInside(runId2);
     });
   }
+  evaluationStatuses(runId2) {
+    this.ensureOpen();
+    this.getStatus(runId2);
+    const rows = this.database.prepare("SELECT evaluation_id, status FROM evaluations WHERE run_id = ? ORDER BY ordinal").all(runId2);
+    return rows.map((row) => ({
+      evaluationId: asText(row.evaluation_id, "evaluation ID"),
+      status: asText(row.status, "evaluation status")
+    }));
+  }
   getRequestKind(runId2) {
     this.getStatus(runId2);
     const row = this.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(runId2);
@@ -22515,9 +22524,12 @@ var SQLiteRunStore = class {
       const where = ["e.run_id = ?", "e.ordinal <= ?"];
       const parameters = [request.sourceRunId, maxOrdinal];
       if ("references" in request.selection) {
-        const terms = request.selection.references.map(() => "(e.evaluation_id = ? AND e.context_id = ?)");
-        where.push(`(${terms.join(" OR ")})`);
-        for (const reference of request.selection.references) parameters.push(reference.evaluationId, reference.contextId);
+        where.push(`EXISTS (
+          SELECT 1 FROM json_each(?) AS selected
+          WHERE json_extract(selected.value, '$.evaluationId') = e.evaluation_id
+            AND json_extract(selected.value, '$.contextId') = e.context_id
+        )`);
+        parameters.push(JSON.stringify(request.selection.references));
       } else {
         const criteria = request.selection.criteria;
         if (criteria.respondentId !== void 0) {
@@ -22668,7 +22680,7 @@ var SQLiteRunStore = class {
       let respondentCoverage = cursor?.coverage.respondents;
       if (!respondentCoverage) {
         const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
-        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
                   WHEN SUM(status = 'pending') > 0 THEN 'active'
                   WHEN SUM(status = 'failed') > 0 THEN 'failed'
@@ -22789,6 +22801,44 @@ var SQLiteRunStore = class {
     const last = pageRows.at(-1);
     return { items, ...hasMore && last ? { nextCursor: encodeCursor({ kind: "answers", runId: runId2, ordinal: asNumber(last.ordinal, "evaluation ordinal") }) } : {} };
   }
+  attempts(runId2, cursorText, requestedLimit) {
+    this.getStatus(runId2);
+    const limit = pageSize(requestedLimit);
+    let cursor;
+    if (cursorText) {
+      cursor = decodeCursor(cursorText, "attempts");
+      if (cursor.kind !== "attempts" || cursor.runId !== runId2 || !Number.isSafeInteger(cursor.startedMs) || cursor.startedMs < 0 || !cursor.attemptId) {
+        throw new RunStoreError("invalid_cursor", "The attempt cursor does not match this run.");
+      }
+    }
+    const rows = this.database.prepare(`SELECT a.*, GROUP_CONCAT(ae.evaluation_id) AS evaluation_ids
+      FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
+      WHERE a.run_id = ? ${cursor ? "AND (a.started_ms > ? OR (a.started_ms = ? AND a.attempt_id > ?))" : ""}
+      GROUP BY a.attempt_id ORDER BY a.started_ms, a.attempt_id LIMIT ?`).all(...cursor ? [runId2, cursor.startedMs, cursor.startedMs, cursor.attemptId, limit + 1] : [runId2, limit + 1]);
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const items = pageRows.map((row) => ({
+      attemptId: asText(row.attempt_id, "attempt ID"),
+      groupId: asText(row.group_id, "question group ID"),
+      evaluationIds: asText(row.evaluation_ids, "attempt evaluation IDs").split(","),
+      status: asText(row.status, "attempt status"),
+      startedAt: new Date(asNumber(row.started_ms, "attempt start time")).toISOString(),
+      ...row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, "attempt settlement time")).toISOString() },
+      ...row.failure_code === null ? {} : { failure: {
+        code: asText(row.failure_code, "attempt failure code"),
+        message: asText(row.failure_message, "attempt failure message"),
+        ...row.failure_scope === null ? {} : { scope: asText(row.failure_scope, "attempt failure scope") }
+      } },
+      ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "attempt execution")) }
+    }));
+    const last = pageRows.at(-1);
+    return { items, ...hasMore && last ? { nextCursor: encodeCursor({
+      kind: "attempts",
+      runId: runId2,
+      startedMs: asNumber(last.started_ms, "attempt start time"),
+      attemptId: asText(last.attempt_id, "attempt ID")
+    }) } : {} };
+  }
   requestCancel(runId2) {
     this.ensureOpen();
     return this.transaction(() => {
@@ -22856,12 +22906,16 @@ var SQLiteRunStore = class {
     return this.transaction(() => {
       const nowMs = this.now();
       const runs = runIds.map((runId2) => {
-        this.reconcileInside(runId2, nowMs);
-        const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId2)?.status, "run status");
+        const row = this.database.prepare("SELECT status, created_ms, lease_expires_ms FROM runs WHERE run_id = ?").get(runId2);
+        if (!row) throw this.notFound();
+        const storedStatus = asText(row.status, "run status");
+        const leaseExpires = row.lease_expires_ms === null ? asNumber(row.created_ms, "run creation time") + LEASE_MS : asNumber(row.lease_expires_ms, "run lease expiry");
+        const expired = storedStatus === "prepared" && leaseExpires <= nowMs || storedStatus === "running" && row.lease_expires_ms !== null && leaseExpires <= nowMs;
+        const status = expired ? "interrupted" : storedStatus;
         const evaluationCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId2).count, "evaluation count");
         const attemptCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId2).count, "attempt count");
         const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId2);
-        const retainedFollowOnRunIds = dependentRows.map((row) => asText(row.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
+        const retainedFollowOnRunIds = dependentRows.map((row2) => asText(row2.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
         return { runId: runId2, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running", retainedFollowOnRunIds };
       });
       return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };

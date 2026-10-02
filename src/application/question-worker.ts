@@ -36,7 +36,7 @@ export async function executeQuestionRun(store: RunStore, runId: string, provide
 async function executePoll(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
   const prepared = store.getRequest(runId);
   const provider = providerFactory(prepared.request.provider);
-  const answers = new Map(store.answers(runId).items.map((answer) => [answer.evaluationId, answer.status]));
+  const answers = new Map(store.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
     while (true) {
@@ -76,7 +76,7 @@ async function executePoll(store: RunStore, runId: string, claim: import('../dom
         if (scope === 'run') return;
       }
       for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, 'answered');
-      const latest = new Map(store.answers(runId).items.map((answer) => [answer.evaluationId, answer.status]));
+      const latest = new Map(store.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
       for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId)!);
     }
   }

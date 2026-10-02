@@ -36256,6 +36256,10 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
       store.reconcile(runId, Date.now());
       return store.answers(runId, cursor, limit);
     },
+    attempts: (runId, cursor, limit) => {
+      store.reconcile(runId, Date.now());
+      return store.attempts(runId, cursor, limit);
+    },
     cancel: (runId) => store.requestCancel(runId)
   };
 }
@@ -36972,6 +36976,15 @@ var SQLiteRunStore = class {
       return this.statusInside(runId);
     });
   }
+  evaluationStatuses(runId) {
+    this.ensureOpen();
+    this.getStatus(runId);
+    const rows = this.database.prepare("SELECT evaluation_id, status FROM evaluations WHERE run_id = ? ORDER BY ordinal").all(runId);
+    return rows.map((row) => ({
+      evaluationId: asText(row.evaluation_id, "evaluation ID"),
+      status: asText(row.status, "evaluation status")
+    }));
+  }
   getRequestKind(runId) {
     this.getStatus(runId);
     const row = this.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(runId);
@@ -37163,9 +37176,12 @@ var SQLiteRunStore = class {
       const where = ["e.run_id = ?", "e.ordinal <= ?"];
       const parameters = [request.sourceRunId, maxOrdinal];
       if ("references" in request.selection) {
-        const terms = request.selection.references.map(() => "(e.evaluation_id = ? AND e.context_id = ?)");
-        where.push(`(${terms.join(" OR ")})`);
-        for (const reference of request.selection.references) parameters.push(reference.evaluationId, reference.contextId);
+        where.push(`EXISTS (
+          SELECT 1 FROM json_each(?) AS selected
+          WHERE json_extract(selected.value, '$.evaluationId') = e.evaluation_id
+            AND json_extract(selected.value, '$.contextId') = e.context_id
+        )`);
+        parameters.push(JSON.stringify(request.selection.references));
       } else {
         const criteria = request.selection.criteria;
         if (criteria.respondentId !== void 0) {
@@ -37316,7 +37332,7 @@ var SQLiteRunStore = class {
       let respondentCoverage = cursor?.coverage.respondents;
       if (!respondentCoverage) {
         const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
-        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
                   WHEN SUM(status = 'pending') > 0 THEN 'active'
                   WHEN SUM(status = 'failed') > 0 THEN 'failed'
@@ -37437,6 +37453,44 @@ var SQLiteRunStore = class {
     const last = pageRows.at(-1);
     return { items, ...hasMore && last ? { nextCursor: encodeCursor({ kind: "answers", runId, ordinal: asNumber(last.ordinal, "evaluation ordinal") }) } : {} };
   }
+  attempts(runId, cursorText, requestedLimit) {
+    this.getStatus(runId);
+    const limit = pageSize(requestedLimit);
+    let cursor;
+    if (cursorText) {
+      cursor = decodeCursor(cursorText, "attempts");
+      if (cursor.kind !== "attempts" || cursor.runId !== runId || !Number.isSafeInteger(cursor.startedMs) || cursor.startedMs < 0 || !cursor.attemptId) {
+        throw new RunStoreError("invalid_cursor", "The attempt cursor does not match this run.");
+      }
+    }
+    const rows = this.database.prepare(`SELECT a.*, GROUP_CONCAT(ae.evaluation_id) AS evaluation_ids
+      FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
+      WHERE a.run_id = ? ${cursor ? "AND (a.started_ms > ? OR (a.started_ms = ? AND a.attempt_id > ?))" : ""}
+      GROUP BY a.attempt_id ORDER BY a.started_ms, a.attempt_id LIMIT ?`).all(...cursor ? [runId, cursor.startedMs, cursor.startedMs, cursor.attemptId, limit + 1] : [runId, limit + 1]);
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const items = pageRows.map((row) => ({
+      attemptId: asText(row.attempt_id, "attempt ID"),
+      groupId: asText(row.group_id, "question group ID"),
+      evaluationIds: asText(row.evaluation_ids, "attempt evaluation IDs").split(","),
+      status: asText(row.status, "attempt status"),
+      startedAt: new Date(asNumber(row.started_ms, "attempt start time")).toISOString(),
+      ...row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, "attempt settlement time")).toISOString() },
+      ...row.failure_code === null ? {} : { failure: {
+        code: asText(row.failure_code, "attempt failure code"),
+        message: asText(row.failure_message, "attempt failure message"),
+        ...row.failure_scope === null ? {} : { scope: asText(row.failure_scope, "attempt failure scope") }
+      } },
+      ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "attempt execution")) }
+    }));
+    const last = pageRows.at(-1);
+    return { items, ...hasMore && last ? { nextCursor: encodeCursor({
+      kind: "attempts",
+      runId,
+      startedMs: asNumber(last.started_ms, "attempt start time"),
+      attemptId: asText(last.attempt_id, "attempt ID")
+    }) } : {} };
+  }
   requestCancel(runId) {
     this.ensureOpen();
     return this.transaction(() => {
@@ -37504,12 +37558,16 @@ var SQLiteRunStore = class {
     return this.transaction(() => {
       const nowMs = this.now();
       const runs = runIds.map((runId) => {
-        this.reconcileInside(runId, nowMs);
-        const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId)?.status, "run status");
+        const row = this.database.prepare("SELECT status, created_ms, lease_expires_ms FROM runs WHERE run_id = ?").get(runId);
+        if (!row) throw this.notFound();
+        const storedStatus = asText(row.status, "run status");
+        const leaseExpires = row.lease_expires_ms === null ? asNumber(row.created_ms, "run creation time") + LEASE_MS : asNumber(row.lease_expires_ms, "run lease expiry");
+        const expired = storedStatus === "prepared" && leaseExpires <= nowMs || storedStatus === "running" && row.lease_expires_ms !== null && leaseExpires <= nowMs;
+        const status = expired ? "interrupted" : storedStatus;
         const evaluationCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId).count, "evaluation count");
         const attemptCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId).count, "attempt count");
         const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId);
-        const retainedFollowOnRunIds = dependentRows.map((row) => asText(row.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
+        const retainedFollowOnRunIds = dependentRows.map((row2) => asText(row2.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
         return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running", retainedFollowOnRunIds };
       });
       return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
@@ -38812,7 +38870,8 @@ var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("journey") }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
 ]);
 function createPollingServer(service = createDefaultRunService()) {
   const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Inspect before starting. Reads never start or resume work." });
@@ -38820,11 +38879,12 @@ function createPollingServer(service = createDefaultRunService()) {
   server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
   server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete distinguishes a finished source from matches so far.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => service.queryEvidence(query)));
-  server.registerTool("run_get", { description: "Retrieve one view of a run: status, frozen request and question groups, paginated per-question answers with shared call evidence, or reached journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
+  server.registerTool("run_get", { description: "Retrieve one view of a run: status, frozen request and question groups, paginated per-question answers, physical attempts including uncertain or failed calls, or reached journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
     if (input2.view === "status") return service.getStatus(input2.runId);
     if (input2.view === "request") return service.getRequest(input2.runId);
     if (input2.view === "journey") return service.getJourneyRun(input2.runId);
-    return service.answers(input2.runId, input2.cursor, input2.limit);
+    if (input2.view === "answers") return service.answers(input2.runId, input2.cursor, input2.limit);
+    return service.attempts(input2.runId, input2.cursor, input2.limit);
   }));
   server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
   server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work or retryable partial question failures under the same run ID, saved request, and remaining provider-call allowance. Completed answers are preserved and only unanswered questions are dispatched. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));

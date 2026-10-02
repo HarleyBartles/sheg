@@ -888,6 +888,25 @@ test('follow-on source resolution freezes criteria matches and validates exact e
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('follow-on resolves the full supported explicit-reference selection', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const respondents = Array.from({ length: 1001 }, (_, index) => ({ ...input.respondents[0]!, id: `reader-${index}` }));
+    const prepared = await prepareRun({ ...input, respondents, maxCalls: respondents.length }, provider);
+    assert.ok(prepared.prepared);
+    const runId = store.accept(randomUUID(), prepared.prepared).run.runId;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId: runId,
+      selection: { references: prepared.prepared.evaluations.map(({ evaluationId, contextId }) => ({ evaluationId, contextId })) },
+      context: { mode: 'recorded' }, questions: [{ type: 'noul', id: 'follow-up', instructions: 'Did this answer the question?' }],
+      provider: input.provider, maxCalls: respondents.length,
+    });
+    const sources = store.resolveFollowOnSources(request);
+    assert.equal(sources.turns.length, 1001);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('follow-on resolution reuses an exact reached journey packet', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
@@ -991,6 +1010,33 @@ test('stopped but incomplete run states never claim complete evidence', async ()
   } finally { fixture.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('respondent coverage keeps partially completed polls active', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const value: InlineRunRequest = {
+      ...input,
+      questions: [input.questions[0]!, { type: 'noul', id: 'interest-loss', instructions: 'Did anything reduce your interest?' }],
+      maxCalls: 4,
+    };
+    const prepared = await prepareRun(value, provider);
+    assert.ok(prepared.prepared);
+    const runId = store.accept(randomUUID(), prepared.prepared).run.runId;
+    const claim = store.claim(runId, Date.now(), 3456);
+    assert.ok(claim);
+    const first = prepared.prepared.evaluations[0]!;
+    const reservation = store.reserveBatch(claim, first.groupId!, [first.evaluationId], Date.now());
+    assert.ok(reservation);
+    store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result: {
+      execution: { attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} },
+      answers: [{ questionId: first.questionId, value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }],
+    } });
+
+    const page = store.queryEvidence({ sourceRunId: runId, criteria: {} });
+    assert.deepEqual(page.coverage.respondents, { total: 2, completed: 0, failed: 0, unreached: 0, active: 2 });
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('evidence query applies numeric Score and Noul criteria without converting their meanings', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
@@ -1049,6 +1095,39 @@ test('delete preview reports exact selected run counts without deleting evidence
     });
     assert.equal(store.getStatus(runId).status, 'completed');
     assert.equal(store.answers(runId).items.filter(({ status }) => status === 'answered').length, 2);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('delete preview does not reconcile or mutate expired worker state', async () => {
+  const root = await temporaryRoot();
+  let now = Date.now();
+  const store = openRunStore(root, { now: () => now });
+  try {
+    const prepared = await preparedRun();
+    const runId = store.accept(randomUUID(), prepared).run.runId;
+    const claim = store.claim(runId, now, 9876);
+    assert.ok(claim);
+    const evaluation = prepared.evaluations[0]!;
+    const reservation = store.reserveBatch(claim, evaluation.groupId!, [evaluation.evaluationId], now);
+    assert.ok(reservation);
+    now += 31_000;
+
+    const db = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    let beforeRun: unknown;
+    let beforeAttempt: unknown;
+    try {
+      beforeRun = db.prepare('SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?').get(runId);
+      beforeAttempt = db.prepare('SELECT status FROM attempts WHERE attempt_id = ?').get(reservation.attemptId);
+    } finally { db.close(); }
+
+    const preview = store.previewDelete([runId]);
+    assert.equal(preview.runs[0]?.status, 'interrupted');
+    assert.equal(preview.runs[0]?.blockedByActiveWork, false);
+    const afterDb = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try {
+      assert.deepEqual(afterDb.prepare('SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?').get(runId), beforeRun);
+      assert.deepEqual(afterDb.prepare('SELECT status FROM attempts WHERE attempt_id = ?').get(reservation.attemptId), beforeAttempt);
+    } finally { afterDb.close(); }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
