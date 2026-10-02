@@ -20,7 +20,7 @@
 - Source edits precede generated build changes. Do not hand-edit `dist/` or generated schema assets.
 - This slice changes version policy and packaging only. Journey defaults, selected material reuse, failure diagnostics, lifecycle fields and skill interpretation changes belong to later roadmap plans.
 - Do not touch Portfolio articles, pilot evidence, saved study databases, credentials or the shared repository's staged snapshot.
-- No paid inference, remote push, PR, merge, release branch, tag or GitHub Release is authorized by this plan-writing request. Implementation requires the next user instruction.
+- Paid inference is not authorized. The user has explicitly authorized a feature PR into `develop` and merge after a fresh clean review and required checks pass. This plan does not authorize a release branch, stable tag or GitHub Release.
 - No emoji, em-dashes, arbitrary Markdown wrapping, tautological tests or wording change-detector tests.
 - Record consequential policy changes in one new ADR and the ADR index; preserve accepted historical records.
 
