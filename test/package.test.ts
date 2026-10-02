@@ -13,7 +13,7 @@ import { openRunStore } from '../src/infrastructure/run-store.js';
 
 type JourneyDetailTestShape = { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId: string }> } } } }> };
 type FollowOnRequestTestShape = {
-  evaluations: Array<{ packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } } } }>;
+  evaluations: Array<{ questionId: string; contextId: string; packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } } } }>;
   lineage: { sourceAvailable: boolean; selections: Array<{ sourceContextId: string }>; materialSnapshots: Array<{ materials: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> }> };
 };
 
@@ -381,7 +381,11 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     const questionId = Object.keys(body.questions)[0] ?? '';
     const answer = questionId === 'interest'
       ? { type: 'choice', choice: 'candidate-three', probabilities: { 'candidate-one': 0.05, 'candidate-two': 0.05, 'candidate-three': 0.85, 'no-fit': 0.05 } }
-      : { type: 'noul', noul: 0.82 };
+      : questionId === 'which-detail'
+        ? { type: 'choice', choice: 'example', probabilities: { example: 0.7, style: 0.2, 'no-fit': 0.1 } }
+        : questionId === 'strength'
+          ? { type: 'score', score: 2, legend: { '0': 'Not at all', '1': 'A little', '2': 'A lot' }, probabilities: { '0': 0.05, '1': 0.15, '2': 0.8 } }
+          : { type: 'noul', noul: questionId === 'why-interest' ? 0.82 : questionId === 'change' ? 0.65 : 0.4 };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
       model: 'fixture-checkpoint', routing: { model: 'fixture-checkpoint' }, usage: {}, answers: { [questionId]: answer },
     }));
@@ -434,8 +438,14 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     const followOn = {
       kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
       context: { mode: 'omit-history', materialIds: [evidence.items[0]!.selectedMaterial!.materialId] },
-      questions: [{ type: 'noul', id: 'why-interest', instructions: 'What about section three lost your interest?' }],
-      provider: localProvider, maxCalls: 1,
+      questions: [
+        { type: 'noul', id: 'why-interest', instructions: 'What about section three lost your interest?' },
+        { type: 'choice', id: 'which-detail', instructions: 'Which aspect mattered most?', options: { example: 'The specific example', style: 'The writing style', 'no-fit': 'Neither' } },
+        { type: 'score', id: 'strength', instructions: 'How strongly did this affect your interest?', rubric: ['Not at all', 'A little', 'A lot'] },
+        { type: 'noul', id: 'change', instructions: 'What would have kept your interest?' },
+        { type: 'noul', id: 'continue', instructions: 'Would a concrete example help?', criteria: { true: 'Yes', false: 'No' } },
+      ],
+      provider: localProvider, maxCalls: 5,
     };
     const inspected = await client.callTool({ name: 'run_inspect', arguments: { request: followOn } });
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true, JSON.stringify(inspected.structuredContent));
@@ -445,8 +455,11 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     await waitForCompleted(dataRoot, followOnRunId);
     const beforeDelete = await client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'request' } });
     const savedBeforeDelete = beforeDelete.structuredContent as FollowOnRequestTestShape;
-    assert.deepEqual(savedBeforeDelete.evaluations[0]?.packet.state.encounteredItems, [{ id: 'section-three', text: 'Third section.' }]);
-    assert.equal(savedBeforeDelete.evaluations[0]?.packet.state.trajectory.responses.length, 0);
+    assert.equal(savedBeforeDelete.evaluations.length, 5);
+    assert.deepEqual(savedBeforeDelete.evaluations.map(({ questionId }) => questionId), ['why-interest', 'which-detail', 'strength', 'change', 'continue']);
+    assert.equal(new Set(savedBeforeDelete.evaluations.map(({ contextId }) => contextId)).size, 1);
+    assert.ok(savedBeforeDelete.evaluations.every(({ packet }) => JSON.stringify(packet.state.encounteredItems) === JSON.stringify([{ id: 'section-three', text: 'Third section.' }])));
+    assert.ok(savedBeforeDelete.evaluations.every(({ packet }) => packet.state.trajectory.responses.length === 0));
     assert.equal(savedBeforeDelete.lineage.sourceAvailable, true);
     assert.deepEqual(savedBeforeDelete.lineage.selections[0]?.sourceContextId, evidence.items[0]?.contextId);
     assert.deepEqual(savedBeforeDelete.lineage.materialSnapshots[0]?.materials, [
@@ -454,7 +467,7 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
       { id: 'section-two', text: 'Second section.', sourceId: 'article-section-2', sourceSha256: '2'.repeat(64) },
       { id: 'section-three', text: 'Third section.', sourceId: 'article-section-3', sourceSha256: '3'.repeat(64) },
     ]);
-    assert.equal(providerPayloads.length, 2);
+    assert.equal(providerPayloads.length, 6);
     assert.ok(providerPayloads.every((payload) => !/materialOptions|article-section-[123]|sourceSha256|[123]{64}/.test(payload)));
     const deleted = await client.callTool({ name: 'run_delete', arguments: { runIds: [sourceRunId] } });
     assert.equal(deleted.isError ?? false, false);
@@ -463,7 +476,16 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     assert.equal(savedAfterDelete.lineage.sourceAvailable, false);
     assert.equal(savedAfterDelete.lineage.sourceRecordState, 'historical');
     const answer = await client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'answers' } });
-    assert.equal((answer.structuredContent as { items: Array<{ result?: { type: string; noul?: number } }> }).items[0]?.result?.noul, 0.82);
+    const answerItems = (answer.structuredContent as { items: Array<{ questionId: string; status: string; result?: { type: string; noul?: number; choice?: string; score?: number } }> }).items;
+    assert.equal(answerItems.length, 5);
+    assert.ok(answerItems.every(({ status }) => status === 'answered'));
+    assert.deepEqual(answerItems.map(({ questionId, result }) => [questionId, result?.type]), [
+      ['why-interest', 'noul'], ['which-detail', 'choice'], ['strength', 'score'], ['change', 'noul'], ['continue', 'noul'],
+    ]);
+    assert.deepEqual(answerItems.map(({ result }) => result?.type === 'noul' ? result.noul : result?.type === 'choice' ? result.choice : result?.score), [0.82, 'example', 2, 0.65, 0.4]);
+    const followOnPayloads = providerPayloads.slice(1).map((payload) => JSON.parse(payload) as { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } }; questions: Record<string, unknown> });
+    assert.deepEqual(followOnPayloads.map(({ questions }) => Object.keys(questions)), [['why-interest'], ['which-detail'], ['strength'], ['change'], ['continue']]);
+    assert.ok(followOnPayloads.every(({ state }) => JSON.stringify(state.encounteredItems) === JSON.stringify([{ id: 'section-three', text: 'Third section.' }]) && state.trajectory.responses.length === 0));
   } finally { await killMcpConnection(client, transport); }
 });
 

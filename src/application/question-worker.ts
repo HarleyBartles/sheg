@@ -159,4 +159,3 @@ function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: st
     : scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
   return { code, message };
 }
-
