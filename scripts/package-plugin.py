@@ -14,6 +14,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATTERN = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+MANIFEST_VERSION_PATTERN = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:dev|rc)\.[1-9][0-9]*)?$"
+)
 
 
 def plugin_files() -> list[Path]:
@@ -102,8 +105,7 @@ def validate_manifests() -> tuple[str, str]:
             f"package.json={package_version!r}, package-lock.json={lock_root_version!r}, "
             f"package-lock.json packages['']={lock_package_version!r}"
         )
-    version_pattern = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    if not isinstance(package_version, str) or not re.fullmatch(version_pattern, package_version):
+    if not isinstance(package_version, str) or not MANIFEST_VERSION_PATTERN.fullmatch(package_version):
         raise ValueError(f"invalid manifest version: {package_version!r}")
     return package_version, plugin_version
 

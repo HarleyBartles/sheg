@@ -38929,6 +38929,45 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
   if (state === "unavailable") throw new CredentialStoreError("credential_unavailable", route);
 }
 
+// package.json
+var package_default = {
+  name: "sheg",
+  version: "0.3.0-dev.2",
+  description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
+  scripts: {
+    test: 'node --import tsx --test "test/**/*.test.ts"',
+    typecheck: "tsc --noEmit",
+    lint: "eslint src test scripts",
+    verify: "npm run lint && npm run typecheck && npm test && node --import tsx scripts/check-generated.ts",
+    "contracts:build": "node --import tsx scripts/generate-contracts.ts",
+    build: "node --import tsx scripts/build.ts",
+    "plugin:package": "node scripts/package-plugin.mjs",
+    start: "node dist/mcp.js"
+  },
+  type: "module",
+  private: true,
+  engines: {
+    node: ">=24 <25"
+  },
+  dependencies: {
+    "@modelcontextprotocol/server": "2.1.0",
+    zod: "4.6.5"
+  },
+  devDependencies: {
+    "@eslint/js": "10.0.1",
+    "@modelcontextprotocol/client": "2.1.0",
+    "@types/node": "24.19.0",
+    esbuild: "0.28.2",
+    eslint: "10.11.0",
+    tsx: "4.23.15",
+    typescript: "5.9.3",
+    "typescript-eslint": "8.70.1"
+  }
+};
+
+// src/infrastructure/product-identity.ts
+var productVersion = package_default.version;
+
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
 var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
@@ -38941,7 +38980,7 @@ var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
 ]);
 function createPollingServer(service = createDefaultRunService()) {
-  const server = new McpServer({ name: "sheg", version: "0.3.0" }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
+  const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
   server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
   server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));

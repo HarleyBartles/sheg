@@ -10,6 +10,8 @@ Keep `package.json`, both root version fields in `package-lock.json`, and
 `plugin.json` on the same version. Do not change them on ordinary feature
 merges to `develop`.
 
+The root `package.json` version is the product-version authority, and the MCP initialization version must agree with it. Deliberate dogfood checkpoints on `develop` may use `MAJOR.MINOR.PATCH-dev.N`; prepared release candidates may use `MAJOR.MINOR.PATCH-rc.N`. Increment only at intentional checkpoints, not every merge. The current dogfood roadmap assigns `0.3.0-dev.2` to its next develop merge. See [ADR-0023](../decisions/0023-identify-development-and-candidate-builds.md).
+
 Before `1.0.0`:
 
 - Increment the patch for compatible fixes.
@@ -73,6 +75,8 @@ verify an identity without creating an archive, use:
 ```sh
 python3 scripts/package-plugin.py --tag v0.1.0 --validate-only
 ```
+
+For local candidate inspection, omit the release tag and use an explicit candidate filename. This creates a local ZIP and does not publish it. Record the candidate version and SHA-256 digest with dogfood evidence. Stable publication accepts only `vMAJOR.MINOR.PATCH` tags with matching stable manifests; prerelease tags do not publish. Promote a candidate by removing its suffix on the release branch and aligning all version surfaces before tagging.
 
 On Windows, the npm wrapper uses the Python launcher (`py -3`). By default the
 ZIP is written to `release-artifacts/sheg-v<version>.zip`.
