@@ -130,6 +130,7 @@ test('baseline trace files carry valid trial metadata and explicitly mark simula
       assert.equal(trace.guided.evaluator.scenarioId, trace.scenarioId);
       assert.equal(trace.guided.actor.scenarioVersion, trace.scenarioVersion);
       assert.equal(trace.simulationOnly, true);
+      assert.equal(trace.toolUseAudit, 'not-captured');
       const scenario = loadScenarioCatalog().find((item) => item.id === trace.scenarioId)!;
       assert.equal(trace.scenarioVersion, scenario.version);
       const suppliedFiles = [`skills/${skill}/SKILL.md`, ...scenario.referencePaths.map((reference) => `skills/${skill}/${reference}`)];
@@ -150,4 +151,15 @@ test('partial selected-question fixture matches the current run query contract',
   assert.equal(queryResult.sourceStatus, 'cancelled');
   assert.equal(queryResult.sourceComplete, false);
   assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'unreached']);
+});
+
+test('selected-material fixture matches the current run query contract and omits material for no-fit', () => {
+  const scenario = loadScenarioCatalog().find((item) => item.id === 'selected-material-isolation-no-fit')!;
+  const evidence = scenario.controlledEvidence as { queryResult: unknown };
+  const queryResult = runEvidencePageSchema.parse(evidence.queryResult);
+
+  assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'answered', 'answered']);
+  assert.deepEqual(queryResult.items.map((item) => item.selectedMaterial?.materialId), ['p2', undefined, 'p5']);
+  assert.equal(queryResult.items[0]?.selectedMaterial?.text, 'Exact paragraph two.');
+  assert.equal(queryResult.items[2]?.selectedMaterial?.text, 'Exact paragraph five.');
 });

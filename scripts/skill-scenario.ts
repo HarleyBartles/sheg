@@ -57,6 +57,7 @@ export const baselineTraceSchema = z.object({
     evaluator: evaluatorResultSchema,
   }).strict()),
   simulationOnly: z.literal(true),
+  toolUseAudit: z.literal('not-captured'),
 }).strict();
 
 export type Scenario = z.infer<typeof scenarioSchema>;
