@@ -8,33 +8,19 @@ This repository root is both an Agent Plugin package and a local repo marketplac
 2. Register the repo marketplace once with `codex plugin marketplace add <repository-root>`.
 3. Restart Codex and install or enable **Sheg** in the Plugins Directory.
 4. Verify `run_inspect`, `run_start`, `run_list`, `run_get`, and `run_cancel` appear. `run_inspect` is keyless; hosted runs need the selected Jev key and explicit authorization.
-5. Offer **Connect TypeSafe**, **Connect OpenRouter**, or **Skip for now**.
-   Users can connect both keys by repeating setup. Skipping completes installation
-   and keeps local Laya available; a Jev run needs its selected route's key later.
+5. Offer **Connect TypeSafe**, **Connect OpenRouter**, or **Skip for now**. Users can connect both keys by repeating setup. Skipping completes installation and keeps local Laya available; a Jev run needs its selected route's key later.
 
 ## Secure key setup on Windows
 
-An installation agent offers the choices above before concluding onboarding.
-For the selected route, resolve the actual repository or installed plugin root
-and give the user the command below with that absolute path. If an interactive
-terminal tool is available, the agent can open a visible terminal and run the
-command for the user to paste into the local hidden prompt. Never ask for a key
-in chat, an MCP argument, a command argument, a file, or an environment variable.
+An installation agent offers the choices above before concluding onboarding. For the selected route, resolve the actual repository or installed plugin root and give the user the command below with that absolute path. If an interactive terminal tool is available, the agent can open a visible terminal and run the command for the user to paste into the local hidden prompt. Never ask for a key in chat, an MCP argument, a command argument, a file, or an environment variable.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\sheg\dist\credentials\windows-credential.ps1" -Operation Setup -TargetName Sheg/Jev/TypeSafe
 ```
 
-For OpenRouter, use `-TargetName Sheg/Jev/OpenRouter`. The helper writes directly
-to the current user's Windows Credential Manager. Run `Status` to check safely,
-`Setup` again to replace, or `Remove` to delete the selected entry. If secure
-storage is unavailable or rejects setup, explain the failure and stop key setup.
-There is no plaintext fallback. macOS and Linux backends are future work.
+For OpenRouter, use `-TargetName Sheg/Jev/OpenRouter`. The helper writes directly to the current user's Windows Credential Manager. Run `Status` to check safely, `Setup` again to replace, or `Remove` to delete the selected entry. If secure storage is unavailable or rejects setup, explain the failure and stop key setup. There is no plaintext fallback. macOS and Linux backends are future work.
 
-Credential setup makes no inference request and does not authorize a paid study.
-The installed plugin has no generic installer secret dialog. When a user who
-skipped setup later selects Jev, offer this local prompt again for the selected
-route. Having both keys never chooses or switches routes automatically.
+Credential setup makes no inference request and does not authorize a paid study. The installed plugin has no generic installer secret dialog. When a user who skipped setup later selects Jev, offer this local prompt again for the selected route. Having both keys never chooses or switches routes automatically.
 
 The marketplace entry points to the repository root (`./`), where `plugin.json`, `mcp.json`, `skills/`, and `dist/` live. Codex installs a cached copy, so source edits require refreshing the marketplace and restarting Codex. Follow the current [Codex plugin installation guide](https://developers.openai.com/plugins/build/plugins) for local marketplace behavior.
 

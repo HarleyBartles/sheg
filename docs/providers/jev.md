@@ -1,102 +1,41 @@
 # Jev provider routes
 
-Sheg supports two explicit Jev routes. A missing route in an existing config
-continues to mean OpenRouter. New configs should select a route deliberately;
-the presence of a saved key never selects or switches routes.
+Sheg supports two explicit Jev routes. A missing route in an existing config continues to mean OpenRouter. New configs should select a route deliberately; the presence of a saved key never selects or switches routes.
 
 | Route | Default model | Default endpoint | Windows Credential Manager target |
 | --- | --- | --- | --- |
 | `openrouter` | `typesafe/jev-1.13` | `https://openrouter.ai/api/alpha/decisions` | `Sheg/Jev/OpenRouter` |
 | `typesafe` | `jev-latest` | `https://api.typesafe.ai/v1/systemone` | `Sheg/Jev/TypeSafe` |
 
-Every Jev key is read from the selected target in the current user's Windows
-Credential Manager. Sheg does not read environment variables or accept a key
-source in configuration. To connect a key, use the bundled local helper:
+Every Jev key is read from the selected target in the current user's Windows Credential Manager. Sheg does not read environment variables or accept a key source in configuration. To connect a key, use the bundled local helper:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\dist\credentials\windows-credential.ps1 -Operation Setup -TargetName Sheg/Jev/TypeSafe
 ```
 
-Use `Sheg/Jev/OpenRouter` to connect OpenRouter. The helper prompts without
-echoing the key and writes directly to Credential Manager. Run `Status` to
-check an entry, `Setup` again to replace it, or `Remove` to delete it. The
-setup prompt is local and interactive; never paste a key into chat or an MCP
-tool argument. An agent setting up Sheg can give the user this command or open
-a user-visible terminal and ask them to paste the key into the helper's hidden
-prompt. Connecting a key is optional until a Jev run starts; users can defer
-setup and use local Laya. Windows Credential Manager is the only secure-store
-backend in this implementation. macOS Keychain and Linux Secret Service
-support are future work.
+Use `Sheg/Jev/OpenRouter` to connect OpenRouter. The helper prompts without echoing the key and writes directly to Credential Manager. Run `Status` to check an entry, `Setup` again to replace it, or `Remove` to delete it. The setup prompt is local and interactive; never paste a key into chat or an MCP tool argument. An agent setting up Sheg can give the user this command or open a user-visible terminal and ask them to paste the key into the helper's hidden prompt. Connecting a key is optional until a Jev run starts; users can defer setup and use local Laya. Windows Credential Manager is the only secure-store backend in this implementation. macOS Keychain and Linux Secret Service support are future work.
 
-Credential Manager's generic credential blob is opaque bytes, so existing
-entries may contain a UTF-8 token or the UTF-16LE representation Sheg writes
-during setup. Sheg reads both formats. Earlier Sheg versions treated every
-blob as UTF-16LE: a valid odd-length UTF-8 OpenRouter token could therefore be
-reported as present by the status check but rejected before authentication
-when its byte length was odd. v0.3 validates readability as part of status and
-acceptance. If a stored value is present but neither supported text encoding,
-`run_start` returns the structured error `provider_credential_malformed` and a
-safe message to re-enter the key with Sheg's setup helper. The token and its
-bytes are never included in the error. `run_inspect` remains keyless.
+Credential Manager's generic credential blob is opaque bytes, so existing entries may contain a UTF-8 token or the UTF-16LE representation Sheg writes during setup. Sheg reads both formats. Earlier Sheg versions treated every blob as UTF-16LE: a valid odd-length UTF-8 OpenRouter token could therefore be reported as present by the status check but rejected before authentication when its byte length was odd. v0.3 validates readability as part of status and acceptance. If a stored value is present but neither supported text encoding, `run_start` returns the structured error `provider_credential_malformed` and a safe message to re-enter the key with Sheg's setup helper. The token and its bytes are never included in the error. `run_inspect` remains keyless.
 
 ## Provider evidence
 
-The adapter uses Node `fetch` for both routes. It sends the configured model,
-state, and typed question set to the selected endpoint with bearer authentication.
-Endpoint overrides must stay on the selected provider's HTTPS origin:
-`https://openrouter.ai` or `https://api.typesafe.ai`. Saved paths on that origin
-remain supported. URL credentials, other origins, and redirects are rejected
-before any key can be forwarded to a different destination.
+The adapter uses Node `fetch` for both routes. It sends the configured model, state, and typed question set to the selected endpoint with bearer authentication. Endpoint overrides must stay on the selected provider's HTTPS origin: `https://openrouter.ai` or `https://api.typesafe.ai`. Saved paths on that origin remain supported. URL credentials, other origins, and redirects are rejected before any key can be forwarded to a different destination.
 
-Choice, Score, and Noul answers are validated at the adapter boundary and
-normalized into the same domain result. Missing cost evidence does not make a
-valid answer invalid.
+Choice, Score, and Noul answers are validated at the adapter boundary and normalized into the same domain result. Missing cost evidence does not make a valid answer invalid.
 
-The Jev wire request is `{ model, state, questions }`; `questions` maps each
-stable question ID to its typed instructions and criteria. Each answer is
-validated against its matching question. Invalid, missing, or duplicate answers
-are scoped to that question; malformed shared response data and authorization
-failures apply to the whole provider request. Provider model, usage, latency,
-and cost are stored once for the physical request, not copied onto each answer.
+The Jev wire request is `{ model, state, questions }`; `questions` maps each stable question ID to its typed instructions and criteria. Each answer is validated against its matching question. Invalid, missing, or duplicate answers are scoped to that question; malformed shared response data and authorization failures apply to the whole provider request. Provider model, usage, latency, and cost are stored once for the physical request, not copied onto each answer.
 
-TypeSafe documents parallel independent questions in one System One request.
-Sheg uses that published request shape through the configured Jev route. Its
-JavaScript SDK has its own retries, so Sheg does not add the SDK and keeps
-physical request counting in the fetch adapter. The local Laya route remains
-singleton: Sheg measures and sends one question at a time against the same
-frozen respondent state.
+TypeSafe documents parallel independent questions in one System One request. Sheg uses that published request shape through the configured Jev route. Its JavaScript SDK has its own retries, so Sheg does not add the SDK and keeps physical request counting in the fetch adapter. The local Laya route remains singleton: Sheg measures and sends one question at a time against the same frozen respondent state.
 
-OpenRouter's Decisions endpoint is an alpha API. Its response may include
-`usage.cost`; when present, Sheg records that as provider-reported evidence.
-TypeSafe's published rate is $0.042 per million input tokens, with output
-tokens listed as free. Sheg may estimate per-decision cost from complete
-response token counts using a rate recorded for the served model and label it as a published-rate
-estimate. Account-specific billing remains visible in the selected provider's
-dashboard. Sheg does not present a cumulative bill or spend ceiling.
+OpenRouter's Decisions endpoint is an alpha API. Its response may include `usage.cost`; when present, Sheg records that as provider-reported evidence. TypeSafe's published rate is $0.042 per million input tokens, with output tokens listed as free. Sheg may estimate per-decision cost from complete response token counts using a rate recorded for the served model and label it as a published-rate estimate. Account-specific billing remains visible in the selected provider's dashboard. Sheg does not present a cumulative bill or spend ceiling.
 
-Context fit is model-specific. OpenRouter's pinned `typesafe/jev-1.13` path
-retains the existing 32,768-token context assumption and estimates request
-tokens as serialized UTF-8 bytes divided by three, rounded up, with a 20%
-reserve. TypeSafe's native docs and model metadata do not publish a context
-limit, so native preflight reports fit as unverified and a paid request is
-blocked until that evidence exists. The OpenRouter limit is not transferred to
-the native route by analogy.
+Context fit is model-specific. OpenRouter's pinned `typesafe/jev-1.13` path retains the existing 32,768-token context assumption and estimates request tokens as serialized UTF-8 bytes divided by three, rounded up, with a 20% reserve. TypeSafe's native docs and model metadata do not publish a context limit, so native preflight reports fit as unverified and a paid request is blocked until that evidence exists. The OpenRouter limit is not transferred to the native route by analogy.
 
 ## Attempts and recovery
 
-`maxCalls` bounds physical provider attempts, including retries. It is
-independent of the study's per-respondent `maxDecisions` journey limit. A
-failed or interrupted request consumes its attempt allowance because the
-provider may have received it. Unknown billing does not block resume and does
-not require reconciliation. Per-decision cost evidence is optional and is not
-summed into a run total. Status and reports expose the maximum, used,
-reserved, and remaining call allowance. Reports identify the route and endpoint,
-and preserve failed physical-attempt counts per respondent cell. Unknown
-provider errors conservatively consume the reserved attempt.
+`maxCalls` bounds physical provider attempts, including retries. It is independent of the study's per-respondent `maxDecisions` journey limit. A failed or interrupted request consumes its attempt allowance because the provider may have received it. Unknown billing does not block resume and does not require reconciliation. Per-decision cost evidence is optional and is not summed into a run total. Status and reports expose the maximum, used, reserved, and remaining call allowance. Reports identify the route and endpoint, and preserve failed physical-attempt counts per respondent cell. Unknown provider errors conservatively consume the reserved attempt.
 
-Route, model, and effective endpoint are part of execution identity. Changing
-any of these prevents resuming a run with different provider behavior.
-Credential rotation does not change execution identity.
+Route, model, and effective endpoint are part of execution identity. Changing any of these prevents resuming a run with different provider behavior. Credential rotation does not change execution identity.
 
 ## References
 

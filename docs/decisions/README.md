@@ -1,9 +1,6 @@
 # Architecture Decision Records
 
-This directory records durable decisions for Sheg: the context in
-which each decision was made, the alternatives considered, and its consequences.
-The records are part of the repository so future contributors can read them
-alongside the code.
+This directory records durable decisions for Sheg: the context in which each decision was made, the alternatives considered, and its consequences. The records are part of the repository so future contributors can read them alongside the code.
 
 ## Records
 
@@ -35,13 +32,6 @@ alongside the code.
 
 ## Writing and changing decisions
 
-Create one numbered record for each consequential decision. Include its status,
-context, considered options, decision, and consequences. Keep implementation
-plans as temporary working files; this directory records why the durable
-choices were made. Completed plans remain in Git history. When a decision
-changes, add a new record that supersedes the old one
-instead of rewriting history. Update this index in the same change.
+Create one numbered record for each consequential decision. Include its status, context, considered options, decision, and consequences. Keep implementation plans as temporary working files; this directory records why the durable choices were made. Completed plans remain in Git history. When a decision changes, add a new record that supersedes the old one instead of rewriting history. Update this index in the same change.
 
-Use [the template](template.md) for new records. Not every implementation choice
-needs an ADR; record choices that constrain future architecture, interfaces,
-distribution, or operations.
+Use [the template](template.md) for new records. Not every implementation choice needs an ADR; record choices that constrain future architecture, interfaces, distribution, or operations.

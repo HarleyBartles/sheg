@@ -25,14 +25,7 @@
 - Automated verification uses local fixtures and injected providers. The user has authorized one optional paid Jev smoke: at most one OpenRouter physical call for one synthetic respondent, one short synthetic material item, and one mixed three-question group, with `maxCalls: 1`; use an isolated temporary datastore and keep the credential and full response out of files and chat.
 - Preserve the pre-existing untracked design sketch.
 
-**Ruling from implementation:** `evaluationId` identifies a selectable answer;
-`contextId` identifies the shared model-visible respondent state. Several source
-answers can therefore point at the same context. For recorded, fresh-material,
-and omit-history follow-ons, preserve each evidence reference but compose one
-question group per respondent/context pair. Continue adds the selected answer to
-the next trajectory, so each selected evaluation creates its own distinct input
-context. Each selected source reference links to every output question in its
-derived group. Sibling answers are never sent into another question's state.
+**Ruling from implementation:** `evaluationId` identifies a selectable answer; `contextId` identifies the shared model-visible respondent state. Several source answers can therefore point at the same context. For recorded, fresh-material, and omit-history follow-ons, preserve each evidence reference but compose one question group per respondent/context pair. Continue adds the selected answer to the next trajectory, so each selected evaluation creates its own distinct input context. Each selected source reference links to every output question in its derived group. Sibling answers are never sent into another question's state.
 
 ## Execution context
 

@@ -14,23 +14,8 @@ Runtime validators in `src/domain/respondents/archetype.ts`, `src/domain/respond
 
 Standard JSON Schema validation alone does not enforce `x-validation-rules`. In particular, a profile can satisfy each field's 500-character limit while exceeding the combined 1,500-character prose limit. For the direct MCP request, include the profiles in `run_inspect` so Sheg applies runtime validation before `run_start`. The file-backed CLI journey flow uses `sheg check`.
 
-Jev run configuration chooses a route with `provider.route`; configuration
-never contains key material or an environment-variable name. The selected
-credential is read from Windows Credential Manager. Durable run checkpoints
-use format 4 and retain the maximum physical-call allowance, used calls, and
-remaining calls. Decision results may contain per-decision `cost` evidence
-with a `provider-reported` or `published-rate-estimate` basis. Cost is optional
-and is not aggregated into a run bill.
+Jev run configuration chooses a route with `provider.route`; configuration never contains key material or an environment-variable name. The selected credential is read from Windows Credential Manager. Durable run checkpoints use format 4 and retain the maximum physical-call allowance, used calls, and remaining calls. Decision results may contain per-decision `cost` evidence with a `provider-reported` or `published-rate-estimate` basis. Cost is optional and is not aggregated into a run bill.
 
-Reports retain the selected Jev route and endpoint beside the model, and expose
-`providerEvidence.maxCalls`, `attempts`, `reservedCalls`, and `remainingCalls`.
-Each journey also exposes `failedAttempts`; failures do not require billing
-reconciliation. Published-rate estimates require metadata for the served model,
-not just the requested alias.
+Reports retain the selected Jev route and endpoint beside the model, and expose `providerEvidence.maxCalls`, `attempts`, `reservedCalls`, and `remainingCalls`. Each journey also exposes `failedAttempts`; failures do not require billing reconciliation. Published-rate estimates require metadata for the served model, not just the requested alias.
 
-Preflight identifies Jev `route` and `endpoint` and returns exact
-`credentialAvailability` independently of inference reachability. `availability`
-remains unverified because preflight performs no network probe. Checkpoints and
-reports preserve interruption records with consumed attempts, recovery time,
-and `candidateCellIds`. Those cells span ongoing journeys, so they are candidates,
-not evidence of which cell owned a request when the process stopped.
+Preflight identifies Jev `route` and `endpoint` and returns exact `credentialAvailability` independently of inference reachability. `availability` remains unverified because preflight performs no network probe. Checkpoints and reports preserve interruption records with consumed attempts, recovery time, and `candidateCellIds`. Those cells span ongoing journeys, so they are candidates, not evidence of which cell owned a request when the process stopped.

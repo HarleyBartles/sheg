@@ -6,8 +6,7 @@
 
 **Architecture:** Reuse durable run, query, follow-on and typed question-set contracts. Extend the existing package-level section-three behavior test so one local fixture execution proves the combined workflow; do not add another product primitive or change route semantics. Keep authored source lineage out of provider-visible state. The agent still owns criteria, candidate boundaries, question wording and interpretation.
 
-**Spec:** `.agents/specs/2026-10-01-v0.3.0-epic-spec.md`, especially sections 4-7 and 11-12; full Linear issues SHEG-5, SHEG-6, SHEG-7, SHEG-8 and the linked agreed design.
-**Status:** completed-awaiting-retirement. Draft PR [#11](https://github.com/HarleyBartles/sheg/pull/11) is open against `develop` and attached to this Codex task. The authenticated `gh` route created it after the GitHub app connector returned 403. Its verified initial head is `7323b3a06fef13e52943e408c64905a335871626`; this plan/roadmap handoff commit will advance that head and will be verified before return.
+**Spec:** `.agents/specs/2026-10-01-v0.3.0-epic-spec.md`, especially sections 4-7 and 11-12; full Linear issues SHEG-5, SHEG-6, SHEG-7, SHEG-8 and the linked agreed design. **Status:** completed-awaiting-retirement. Draft PR [#11](https://github.com/HarleyBartles/sheg/pull/11) is open against `develop` and attached to this Codex task. The authenticated `gh` route created it after the GitHub app connector returned 403. Its verified initial head is `7323b3a06fef13e52943e408c64905a335871626`; this plan/roadmap handoff commit will advance that head and will be verified before return.
 
 **Branch boundary:** This is the last feature plan on the approved roadmap. It prepares the requested Draft PR targeting `develop`. It does not change package versions, create `release/0.3.0`, tag, publish, merge, or close active Linear issues before merge. Release preparation is a later authorized Gitflow step.
 

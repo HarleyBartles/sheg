@@ -14,9 +14,7 @@ These are simulated responses. Repeating the same respondent, stimulus, and task
 
 ## Supported harness
 
-Sheg currently supports the Codex plugin harness. Other agent harnesses are not
-included in this compatibility contract. Future harness adapters require their
-own compatibility statement, packaging, and validation.
+Sheg currently supports the Codex plugin harness. Other agent harnesses are not included in this compatibility contract. Future harness adapters require their own compatibility statement, packaging, and validation.
 
 ## Install the Codex plugin
 
@@ -33,9 +31,7 @@ You need Node.js 24 to run the bundled MCP server. You do not need TypeScript, `
 
 See the [plugin installation guide](docs/guides/installing-codex-plugin.md) for local development and refresh instructions. Marketplace setup and installation behavior are also covered in the [official Codex plugin guide](https://developers.openai.com/plugins/build/plugins).
 
-For the versioned GitHub Release, download the `sheg-v<version>.zip` asset and
-follow [the release and installation guide](docs/guides/releases.md). The
-existing Git-based marketplace route remains available.
+For the versioned GitHub Release, download the `sheg-v<version>.zip` asset and follow [the release and installation guide](docs/guides/releases.md). The existing Git-based marketplace route remains available.
 
 ## Prepare and run a study
 
@@ -103,9 +99,7 @@ npm test
 
 When changing contracts, update the TypeScript source of truth and regenerate the JSON Schemas. Include generated schemas and `dist/` changes with their source changes. Read [AGENTS.md](AGENTS.md) for repository surfaces and verification guidance, and [the decision log](docs/decisions/README.md) before changing an accepted architectural decision.
 
-Work from `develop` and target feature pull requests at `develop`. See the
-[runbook and playbook policy](.agents/doctrine/repo-runbook-policy.md) for
-release and urgent-fix routing.
+Work from `develop` and target feature pull requests at `develop`. See the [runbook and playbook policy](.agents/doctrine/repo-runbook-policy.md) for release and urgent-fix routing.
 
 ## Project links
 

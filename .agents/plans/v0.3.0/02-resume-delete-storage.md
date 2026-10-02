@@ -68,14 +68,7 @@ RunStore.storageInfo(): StorageInfo
 RunStore.optimizeStorage(): void
 ```
 
-`started` is true only for the caller that atomically transitioned an eligible
-run to `prepared`; only that caller launches a worker. Delete inputs contain 1
-to 200 unique run UUIDs. `DeletePreview` returns one entry per requested run,
-status, evaluation count, attempt count, and `blockedByActiveWork`; `DeleteResult`
-returns the deleted run IDs and aggregate removed row counts. `StorageInfo`
-returns `integrity`, `databaseBytes`, run/evaluation/attempt counts, and active
-run count. Keep result definitions local to the owning layer unless the MCP
-contract shares them across application and infrastructure.
+`started` is true only for the caller that atomically transitioned an eligible run to `prepared`; only that caller launches a worker. Delete inputs contain 1 to 200 unique run UUIDs. `DeletePreview` returns one entry per requested run, status, evaluation count, attempt count, and `blockedByActiveWork`; `DeleteResult` returns the deleted run IDs and aggregate removed row counts. `StorageInfo` returns `integrity`, `databaseBytes`, run/evaluation/attempt counts, and active run count. Keep result definitions local to the owning layer unless the MCP contract shares them across application and infrastructure.
 
 Read `docs/decisions/README.md` before implementation. Add one ADR and update its index only if the settled implementation changes a durable architecture or lifecycle contract beyond the approved epic and existing SQLite/worker decisions.
 

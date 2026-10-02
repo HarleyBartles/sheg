@@ -1,10 +1,6 @@
 # Current primitives and tool contracts
 
-The current MCP run shape is deliberately small. An agent supplies one or more
-distinct respondent profiles, a finite authored sequence or graph of exact
-inline text and typed Choice, Score, or Noul questions, one provider
-configuration, and a bounded physical-call limit. A direct poll is the
-one-question form of the same run contract.
+The current MCP run shape is deliberately small. An agent supplies one or more distinct respondent profiles, a finite authored sequence or graph of exact inline text and typed Choice, Score, or Noul questions, one provider configuration, and a bounded physical-call limit. A direct poll is the one-question form of the same run contract.
 
 | Tool | Purpose | Side effect |
 | --- | --- | --- |
@@ -20,51 +16,20 @@ one-question form of the same run contract.
 
 ## Request design
 
-The agent owns the meaning and granularity of the user's question. If the user
-asks which part of a page loses their interest, the agent can define the choices
-as sections, paragraphs, or another explicit unit. Sheg receives that choice
-structure; it does not decide what constitutes a meaningful “part.” Exact
-material text is preserved as supplied.
+The agent owns the meaning and granularity of the user's question. If the user asks which part of a page loses their interest, the agent can define the choices as sections, paragraphs, or another explicit unit. Sheg receives that choice structure; it does not decide what constitutes a meaningful “part.” Exact material text is preserved as supplied.
 
-Choice option IDs are stable machine identifiers paired with user-meaningful
-labels. Score uses a typed ordered rubric. Noul represents probability. These
-types must match the information the user wants back; do not turn a probability
-or ranking request into a nominal Choice just because it is easy to encode.
-For Choice over authored material candidates, map option IDs to exact material
-IDs with `materialOptions`; linked labels must equal exact text and candidates
-must carry author-supplied source metadata. Keep no-fit options unlinked. Query
-returns the selected `materialId`, exact text, author source identity/digest,
-and Sheg-computed text digest. Pass the ID through follow-on `context.materialIds`.
+Choice option IDs are stable machine identifiers paired with user-meaningful labels. Score uses a typed ordered rubric. Noul represents probability. These types must match the information the user wants back; do not turn a probability or ranking request into a nominal Choice just because it is easy to encode. For Choice over authored material candidates, map option IDs to exact material IDs with `materialOptions`; linked labels must equal exact text and candidates must carry author-supplied source metadata. Keep no-fit options unlinked. Query returns the selected `materialId`, exact text, author source identity/digest, and Sheg-computed text digest. Pass the ID through follow-on `context.materialIds`.
 
-The same request is compiled into one frozen decision packet per respondent.
-Input order, exact material, typed question, provider configuration, and the
-prompt contract determine the accepted request fingerprint. The submission ID
-is an idempotency key for one exact request, not a study name. A changed request
-uses a new submission ID.
+The same request is compiled into one frozen decision packet per respondent. Input order, exact material, typed question, provider configuration, and the prompt contract determine the accepted request fingerprint. The submission ID is an idempotency key for one exact request, not a study name. A changed request uses a new submission ID.
 
 ## Current follow-on boundary
 
-`run_query` filters recorded typed answers and route outcomes in one run. The
-agent inspects those results, decides which respondents and answers matter,
-then submits a follow-on with explicit criteria or exact evaluation/context
-references. A follow-on's context mode determines whether the selected answer
-enters its trajectory and which saved or selected material is presented. Sheg
-does not decide relevance or compose the next question for the agent.
+`run_query` filters recorded typed answers and route outcomes in one run. The agent inspects those results, decides which respondents and answers matter, then submits a follow-on with explicit criteria or exact evaluation/context references. A follow-on's context mode determines whether the selected answer enters its trajectory and which saved or selected material is presented. Sheg does not decide relevance or compose the next question for the agent.
 
-Likewise, run recall is not recovery. Reads discover expired workers as
-interrupted and do not resume them. Use `run_resume` explicitly to continue an
-eligible run under its original attempt allowance. Cancellation prevents the
-next dispatch, but does not discard an answer for a provider call that was
-already in flight.
+Likewise, run recall is not recovery. Reads discover expired workers as interrupted and do not resume them. Use `run_resume` explicitly to continue an eligible run under its original attempt allowance. Cancellation prevents the next dispatch, but does not discard an answer for a provider call that was already in flight.
 
 ## Interpreting evidence
 
-Use status and answer rows together. Completed, failed, pending, and total
-evaluation counts describe coverage. A respondent-local invalid or failed
-answer does not hide sibling results. A run-wide provider failure stops later
-dispatches. An uncertain in-flight call consumes the physical attempt allowance
-without inventing an answer.
+Use status and answer rows together. Completed, failed, pending, and total evaluation counts describe coverage. A respondent-local invalid or failed answer does not hide sibling results. A run-wide provider failure stops later dispatches. An uncertain in-flight call consumes the physical attempt allowance without inventing an answer.
 
-These are modeled respondent outputs for the supplied profiles, material, and
-question. They can help the user examine an artifact or compare possibilities;
-they are not claims about observed human behavior or population prevalence.
+These are modeled respondent outputs for the supplied profiles, material, and question. They can help the user examine an artifact or compare possibilities; they are not claims about observed human behavior or population prevalence.

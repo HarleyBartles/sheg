@@ -8,8 +8,7 @@
 
 **Tech Stack:** TypeScript, Zod, SQLite (`node:sqlite`), MCP SDK, Node test runner, packaged Codex plugin.
 
-**Spec:** `.agents/specs/2026-10-01-v0.3.0-epic-spec.md`, especially sections 3, 5, 7, 9, 10, 11, and 12; Linear issue SHEG-8 and the linked v0.3.0 agreed design.
-**Status:** completed-awaiting-retirement. Whole-branch review package prepared for Plan 7; inline review found no Critical or Important issue. An independent reviewer was not dispatched because this execution is explicitly inline.
+**Spec:** `.agents/specs/2026-10-01-v0.3.0-epic-spec.md`, especially sections 3, 5, 7, 9, 10, 11, and 12; Linear issue SHEG-8 and the linked v0.3.0 agreed design. **Status:** completed-awaiting-retirement. Whole-branch review package prepared for Plan 7; inline review found no Critical or Important issue. An independent reviewer was not dispatched because this execution is explicitly inline.
 
 **Execution Strategy:** Inline `executing-plans`, as directed by the active goal. The reference shape crosses request validation, frozen decision packets, result queries, follow-on lineage, and packaged agent guidance. Those contracts depend on one another, so one implementation context and sequential behavior tests reduce drift; independent task delegation would duplicate the shared data-flow reasoning.
 
@@ -36,12 +35,7 @@
 
 ## Review Focus
 
-Verify the full reference chain from authored candidate through mapped Choice,
-query projection, and follow-on material selection. Pay particular attention to
-the separation between the frozen catalog and respondent exposure, source
-deletion with retained lineage, no-fit behavior, exact text preservation, and
-the boundary between author-supplied source metadata and Sheg-computed candidate
-text digest.
+Verify the full reference chain from authored candidate through mapped Choice, query projection, and follow-on material selection. Pay particular attention to the separation between the frozen catalog and respondent exposure, source deletion with retained lineage, no-fit behavior, exact text preservation, and the boundary between author-supplied source metadata and Sheg-computed candidate text digest.
 
 ## Task 1: Add explicit material origins and Choice links
 
@@ -145,9 +139,4 @@ text digest.
 
 ## Plan 6 boundary
 
-This slice provides exact authored candidate identity, Choice-result linkage, and
-follow-on reuse. It does not implement automated candidate generation,
-paragraph/section parsing, a source-file crawler, a universal text-span
-normalizer, Score-position calibration, causal claims, new respondent-visible
-metadata, or the final section-three release demonstration. Plan 7 owns the
-combined release acceptance and whole-branch Draft PR handoff.
+This slice provides exact authored candidate identity, Choice-result linkage, and follow-on reuse. It does not implement automated candidate generation, paragraph/section parsing, a source-file crawler, a universal text-span normalizer, Score-position calibration, causal claims, new respondent-visible metadata, or the final section-three release demonstration. Plan 7 owns the combined release acceptance and whole-branch Draft PR handoff.
