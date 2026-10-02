@@ -1,6 +1,6 @@
 # Sheg v0.3.0 release roadmap
 
-Status: approved roadmap; Plans 1-5 are implemented on the v0.3.0 feature branch. Plan 6 is the next JIT slice; Plan 7 remains.
+Status: approved roadmap; Plans 1-6 are implemented on the v0.3.0 feature branch. Plan 7 is the final JIT slice before the requested Draft PR.
 Authority: [approved epic specification](../../specs/2026-10-01-v0.3.0-epic-spec.md).
 Linear: [release project](https://linear.app/harleys-workspace/project/sheg-v030-richer-studies-and-inspectable-evidence-6d11068a2761).
 
@@ -14,9 +14,9 @@ defined in the spec.
 
 ## Consecutive plans
 
-Plans 1-5 are delivered and SHEG-7 is Done. SHEG-6's implementation and bounded
-hosted pilot are complete; the issue remains open for the release acceptance
-that follows Plans 6-7. Later rows are capability
+Plans 1-6 are delivered and SHEG-7 is Done. SHEG-6's implementation and bounded
+hosted pilot are complete; the issue remains open for the combined release
+acceptance in Plan 7. Later rows are capability
 boundaries, not implementation plans. Write
 each next plan against the delivered code and evidence of its predecessor. A
 Linear issue may span more than one plan.
@@ -28,8 +28,8 @@ Linear issue may span more than one plan.
 | 3 | Execute authored journeys with durable respondent turn contexts | completed-awaiting-retirement | [Plan 3](03-durable-journeys.md) | `ace6e98` (`3f31a02..ace6e98`) | - | - | SHEG-7 journey foundation; journey MCP request/details and copied-package kill/resume verified; malformed Credential Manager encoding diagnosis included; staged gate passed 260 tests, lint, typecheck, and generated consistency; final inline review clean. SHEG-7 closed Done after Plan 4 |
 | 4 | Query recorded evidence and compose reusable follow-ons | completed-awaiting-retirement | [Plan 4](04-query-and-follow-on-reuse.md) | `e6eabe4`, `11495cc`, `9277057`, `1203e93` (`745094e..1203e93`) | - | - | SHEG-7 query and follow-on accepted and closed Done; exact typed criteria/references, four context modes, SQLite snapshot revalidation, retained lineage after source deletion, MCP `run_query`, and packaged section-three acceptance; full staged gate passed 279 tests, lint, typecheck, and generated consistency. User guidance explains relevance and incomplete-source decisions |
 | 5 | Ask independent typed question groups at new or recorded contexts | completed-awaiting-retirement | [Plan 5](05-independent-question-groups.md) | `8915f51`, `a4e9675`, `4ef8d09` (`1046419..4ef8d09`) | - | - | SHEG-6 implementation and authorized OpenRouter pilot delivered: one physical call returned separate Choice/Score/Noul answers under `maxCalls: 1`, with shared context; deletion and isolated-store integrity verified. Offline full gate passed 299 tests, lint, typecheck and generated consistency. SHEG-6 remains open for full release acceptance. |
-| 6 | Offer source-linked material choices and reuse their exact evidence | executing | [Plan 6](06-source-linked-material-choices.md) | - | - | - | SHEG-8; agent-authored candidate boundaries; candidate catalog is separate from respondent exposure; source metadata is preserved as author-supplied provenance |
-| 7 | Integrate the release workflow and packaged agent guidance | pending | Written after Plan 6 | - | - | - | Across active issues; release preparation only after acceptance and authorization |
+| 6 | Offer source-linked material choices and reuse their exact evidence | completed-awaiting-retirement | [Plan 6](06-source-linked-material-choices.md) | `fce1524`, `faabf39`, `e484226`, `7c31b2e`, `83d1c8a` (`0416cb5..83d1c8a`) | - | - | SHEG-8; exact authored Choice links, source and computed text digests, selection query projection, retained follow-on lineage, and provider-state privacy. Focused set: 96 tests. Final one-attempt OpenRouter confirmation selected `candidate-setup`, with exact text/source match and no provider-state provenance; source deletion/integrity yielded zero runs. `npm run verify`: 310 tests, lint, typecheck, generated consistency. The empty OS-temp SQLite file remains after safety-blocked cleanup. |
+| 7 | Integrate the release workflow and packaged agent guidance | executing | [Plan 7](07-release-integration-and-draft-pr.md) | - | - | - | Across active issues; complete section-three acceptance, reconcile project/issues, then prepare Draft PR; release preparation remains separate |
 
 Commit and PR columns record delivered implementation evidence, not this roadmap's
 own commit. Ratings are intentionally not persisted: the handoff-gates skill
@@ -154,7 +154,10 @@ was retained in the respondent state because the shared compiler copied extra
 runtime fields. The compiler now selects only material ID and text, covered by a
 direct-poll behavior test and the Jev wire contract test. The empty SQLite file
 remains in its OS temporary directory because the local safety layer blocked
-file deletion after Sheg verified the zero-run store.
+file deletion after Sheg verified the zero-run store. A direct-poll behavior test
+caught the structural provenance leak; the shared compiler now whitelists only
+ID and exact text. The whole-branch `git diff --check` finding for two EOF blank
+lines was fixed in Plan 7 commit `b9824f8`.
 
 ### 7. Combined release acceptance
 
@@ -169,6 +172,18 @@ authorization. Feature work targets develop; release preparation owns version
 alignment, release/0.3.0, main promotion, tagging, ZIP publication and reconciliation.
 Do not leave human-owned publication/merge approvals as unfinished implementation
 checkboxes in a completed plan.
+
+Plan 7 extends the copied-package acceptance: query the exact section-three lost-
+interest selection, use its respondent/context/material references for five
+independent mixed Choice/Score/Noul questions, omit earlier history, and verify
+the retained answers/material lineage after source deletion. The local fixture
+confirms each provider request contains one sibling question over identical
+respondent state. `node --import tsx --test test/package.test.ts` passed all 6
+tests; `npm run verify` passed 310 tests, lint, typecheck and generated consistency;
+`npm run build` and `git diff --check` passed. The commit hook also passed the
+310-test gate for `b9824f8`. The verified zero-run pilot SQLite file remains in
+the OS temporary directory after safety-blocked filesystem cleanup; Sheg-level
+deletion and zero-run integrity checks succeeded.
 
 ## Planning and evidence rules
 

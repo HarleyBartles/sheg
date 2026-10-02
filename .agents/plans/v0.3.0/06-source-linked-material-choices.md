@@ -9,6 +9,7 @@
 **Tech Stack:** TypeScript, Zod, SQLite (`node:sqlite`), MCP SDK, Node test runner, packaged Codex plugin.
 
 **Spec:** `.agents/specs/2026-10-01-v0.3.0-epic-spec.md`, especially sections 3, 5, 7, 9, 10, 11, and 12; Linear issue SHEG-8 and the linked v0.3.0 agreed design.
+**Status:** completed-awaiting-retirement. Whole-branch review package prepared for Plan 7; inline review found no Critical or Important issue. An independent reviewer was not dispatched because this execution is explicitly inline.
 
 **Execution Strategy:** Inline `executing-plans`, as directed by the active goal. The reference shape crosses request validation, frozen decision packets, result queries, follow-on lineage, and packaged agent guidance. Those contracts depend on one another, so one implementation context and sequential behavior tests reduce drift; independent task delegation would duplicate the shared data-flow reasoning.
 
@@ -130,11 +131,17 @@ text digest.
 - Modify: `.agents/plans/v0.3.0/06-source-linked-material-choices.md`, `.agents/plans/v0.3.0/roadmap.md`
 - Inspect: approved epic spec sections 5, 7, 9, 10, 11, and 12; full SHEG-8 and linked design; all changed files, generated contract, and copied package
 
-- [ ] Review source-to-choice-to-query-to-follow-on behavior, exact text/digest preservation, no-fit handling, respondent-local context selection, privacy of provider-visible state, retained lineage after source deletion, and no change to existing typed response semantics.
-- [ ] Record focused test commands, the actual OpenRouter pilot outcome, the full verification result, and implementation commits here and in the roadmap.
-- [ ] Mark Plan 6 `completed-awaiting-retirement` only after all agent-owned work passes. Keep SHEG-8 open until the release integration and eventual PR merge are verified.
-- [ ] Confirm Plan 7 is the next JIT capability: complete packaged section-three acceptance, final issue/project reconciliation, and prepare the whole implementation as the user-requested Draft PR. Do not change product version fields, tag, or publish a release before its release-preparation step.
-- [ ] Record any technical correction to this plan as an evidence-backed `Ruling` before implementation continues.
+- [x] Review source-to-choice-to-query-to-follow-on behavior, exact text/digest preservation, no-fit handling, respondent-local context selection, privacy of provider-visible state, retained lineage after source deletion, and no change to existing typed response semantics.
+- [x] Record focused test commands, the actual OpenRouter pilot outcome, the full verification result, and implementation commits here and in the roadmap.
+- [x] Mark Plan 6 `completed-awaiting-retirement` only after all agent-owned work passes. Keep SHEG-8 open until the release integration and eventual PR merge are verified.
+- [x] Confirm Plan 7 is the next JIT capability: complete packaged section-three acceptance, final issue/project reconciliation, and prepare the whole implementation as the user-requested Draft PR. Do not change product version fields, tag, or publish a release before its release-preparation step.
+- [x] Record any technical correction to this plan as an evidence-backed `Ruling` before implementation continues.
+
+**Evidence:** Focused source-linked behavior set passed 96 tests. The bounded final OpenRouter confirmation used one physical attempt and returned exact `setup-excerpt` evidence for `candidate-setup`; it showed no source metadata in respondent state, and deletion plus storage integrity succeeded with zero runs. `npm run verify` passed 310 tests, lint, typecheck, and generated consistency; the commit hook repeated the staged gate. Commits: `fce1524`, `faabf39`, `e484226`, `7c31b2e`, `83d1c8a`. The temporary OS directory still contains only the verified zero-run SQLite file because the safety layer rejected exact cleanup; Sheg-level run deletion and integrity are verified.
+
+**Review:** Prepared the full branch diff from `origin/develop` (`3c5b2f0`) through `83d1c8a`. Reviewed the user-visible reference chain and provider-state boundary against the accepted spec and SHEG-8. No Critical or Important issue found. An independent reviewer was not dispatched under the inline execution constraint. The whole-branch `git diff --check` identified extra EOF blank lines in two new source files (`question-worker.ts`, `run-service.ts`); Plan 7 removed them in commit `b9824f8`.
+
+**Ruling:** The direct-poll provenance correction belongs at the shared `compileDecisionRequest` boundary. Runtime structural typing allowed extra source fields through the direct-poll caller even though journey/follow-on callers projected them; selecting only `{ id, text }` prevents this leak for every caller. Evidence: the new direct-poll behavior test failed before the fix and passed after it, and the final bounded Jev packet inspection confirmed no source metadata. Cost if wrong: source provenance would alter respondent-visible state and reach the provider.
 
 ## Plan 6 boundary
 
