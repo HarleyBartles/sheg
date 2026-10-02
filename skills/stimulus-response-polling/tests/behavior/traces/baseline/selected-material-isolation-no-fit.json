@@ -1,0 +1,18 @@
+{
+  "scenarioId": "selected-material-isolation-no-fit",
+  "scenarioVersion": 1,
+  "trialId": "2026-10-02-gpt-6-sol-medium-selected-material-isolation-no-fit",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/stimulus-response-polling/SKILL.md": "164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794",
+    "skills/stimulus-response-polling/references/run-and-recovery.md": "d854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5"
+  },
+  "guided": {
+    "actor": {"scenarioId":"selected-material-isolation-no-fit","scenarioVersion":1,"actions":[],"finalResponse":"I would make two separate follow-on requests. One selects r1's exact evaluation/context pair (e1, c1) with only material p2; the other selects r3's pair (e3, c3) with only p5. Each uses `omit-history`, so the respondent sees their selected paragraph without earlier material or trajectory. I would ask a typed Choice question such as whether that paragraph expresses the exact pull quote, with yes, no, and cannot tell options. The current runtime cannot expand each row's selected paragraph into a single follow-on request, so separate requests are needed for distinct selections. r2 chose no fit and has no selected paragraph. I would retain and report that response, and would not give r2 another paragraph or include r2 in this paragraph-specific follow-on. I need the exact pull quote before constructing and inspecting either request; no run has been started.","uncertainties":["The exact pull quote text was not supplied.","The fixture does not establish whether the source run is complete, so further matching respondents may exist."]},
+    "evaluator": {"scenarioId":"selected-material-isolation-no-fit","criterionResults":[{"criterionId":"per-respondent-selection","result":"pass","evidence":"The final response maps r1 (e1, c1) to p2 and r3 (e3, c3) to p5 in separate follow-on requests."},{"criterionId":"honest-current-limit","result":"pass","evidence":"The final response states that the current runtime cannot expand each row's selected paragraph into one follow-on request and proposes separate requests for distinct selections."},{"criterionId":"preserves-no-fit","result":"pass","evidence":"The final response says r2 chose no fit, has no selected paragraph, and should be retained and reported without assigning another paragraph."}],"notes":"The actor trace records no actions or started run. Its uncertainties note that the exact pull quote was not supplied and the source run's completeness is unknown."}
+  },
+  "controls": [],
+  "simulationOnly": true
+}

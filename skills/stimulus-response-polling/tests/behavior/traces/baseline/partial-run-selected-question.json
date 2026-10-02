@@ -1,0 +1,19 @@
+{
+  "scenarioId": "partial-run-selected-question",
+  "scenarioVersion": 1,
+  "trialId": "2026-10-02-gpt-6-sol-medium-partial-run-selected-question",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/stimulus-response-polling/SKILL.md": "164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794",
+    "skills/stimulus-response-polling/references/interpret-results.md": "8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c",
+    "skills/stimulus-response-polling/references/run-and-recovery.md": "d854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5"
+  },
+  "guided": {
+    "actor": {"scenarioId":"partial-run-selected-question","scenarioVersion":1,"actions":[],"finalResponse":"The one recorded Q2 answer chose B (respondent r1). Respondent r2's Q2 evaluation failed, so it has no recorded choice. The run was cancelled before completion: across all questions, 5 of 12 evaluations completed, 1 failed, and 6 were unreached. This is a partial result from simulated respondents, not a final Q2 distribution.","uncertainties":["The failed and unreached evaluations provide no answers.","The supplied coverage counts span all questions, so they cannot establish a complete Q2 denominator."]},
+    "evaluator": {"scenarioId":"partial-run-selected-question","criterionResults":[{"criterionId":"partial-denominator","result":"fail","evidence":"The finalResponse says the run was cancelled and reports 5 completed, 1 failed, and 6 unreached evaluations, but omits the 0 pending evaluations shown in controlled evidence."},{"criterionId":"answers-with-scope","result":"pass","evidence":"The finalResponse identifies B as the one recorded Q2 answer, attributes it to r1, and calls the result partial rather than a final Q2 distribution."},{"criterionId":"no-inference-from-failure","result":"pass","evidence":"The finalResponse states that r2's Q2 evaluation failed and has no recorded choice."}],"notes":"The trace's coverage counts apply across all questions; its uncertainties correctly say they cannot establish a complete Q2 denominator."}
+  },
+  "controls": [{"mode":"no-guidance","model":"gpt-6-sol","reasoning":"medium","skillReferenceHashes":{},"actor":{"scenarioId":"partial-run-selected-question","scenarioVersion":"1","actions":[],"finalResponse":"Of the Q2 records shown, one person answered: r1 chose B. The other Q2 record failed, so it has no choice to report. The run was cancelled before completion, and this is a partial result.","uncertainties":["The evidence does not show whether any of the six unreached evaluations would have included Q2."]},"evaluator":{"scenarioId":"partial-run-selected-question","criterionResults":[{"criterionId":"partial-denominator","result":"fail","evidence":"The finalResponse says the run was cancelled and partial, and names one failed Q2 record, but it does not report the coverage counts (5 completed, 1 failed, 0 pending, 6 unreached) or distinguish pending coverage. The uncertainties mention six unreached evaluations only."},{"criterionId":"answers-with-scope","result":"pass","evidence":"The finalResponse limits its answer to 'the Q2 records shown,' reports only 'r1 chose B,' and says one person answered; it identifies the result as partial."},{"criterionId":"no-inference-from-failure","result":"pass","evidence":"The finalResponse says 'The other Q2 record failed, so it has no choice to report,' without converting that failed evaluation into a choice or negative response."}],"notes":"The trace has no actions and makes no claim that every respondent answered Q2 or that the partial result is final."}}],
+  "simulationOnly": true
+}

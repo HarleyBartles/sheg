@@ -45,10 +45,10 @@
 - Consumes: Plan 1's package-derived MCP identity and stable-only release-tag validation.
 - Produces: a `0.3.0-dev.3` plugin identity and a package file walk that omits skill-local `tests/` paths while retaining skill runtime files.
 
-- [ ] Add a stable-package fixture test that creates `skills/study-design/tests/behavior/private-evaluator.json`, packages with `--tag v0.3.0`, and asserts the sentinel is absent while `skills/study-design/SKILL.md` remains present. Run `node --import tsx --test test/release-package.test.ts`; confirm the new test fails because the current package includes the sentinel.
-- [ ] Update the package walk to skip skill-local test trees without changing safe-path and symlink checks. Re-run `node --import tsx --test test/release-package.test.ts` and confirm the fixture archive retains normal skill files and excludes the sentinel.
-- [ ] Align the package version, both lockfile root versions, and plugin version to `0.3.0-dev.3`, preserving dependencies and `private: true`. Run `npm run build`, `npm run typecheck`, `node --import tsx --test test/mcp.test.ts`, and the copied-package suite `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts`.
-- [ ] Run `npm run plugin:package -- --validate-only`; create a local dev.3 ZIP under `Z:/_agent-scratch/sheg/codex-v0.3.0-skill-scenarios/`; inspect its manifest identity and confirm no skill test files are present. Confirm `npm run plugin:package -- --tag v0.3.0 --validate-only` rejects the candidate manifests.
+- [x] Add a stable-package fixture test that creates `skills/study-design/tests/behavior/private-evaluator.json`, packages with `--tag v0.3.0`, and asserts the sentinel is absent while `skills/study-design/SKILL.md` remains present. Run `node --import tsx --test test/release-package.test.ts`; confirm the new test fails because the current package includes the sentinel.
+- [x] Update the package walk to skip skill-local test trees without changing safe-path and symlink checks. Re-run `node --import tsx --test test/release-package.test.ts` and confirm the fixture archive retains normal skill files and excludes the sentinel.
+- [x] Align the package version, both lockfile root versions, and plugin version to `0.3.0-dev.3`, preserving dependencies and `private: true`. Run `npm run build`, `npm run typecheck`, `node --import tsx --test test/mcp.test.ts`, and the copied-package suite `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts`.
+- [x] Run `npm run plugin:package -- --validate-only`; create a local dev.3 ZIP under `Z:/_agent-scratch/sheg/codex-v0.3.0-skill-scenarios/`; inspect its manifest identity and confirm no skill test files are present. Confirm `npm run plugin:package -- --tag v0.3.0 --validate-only` rejects the candidate manifests.
 
 ## Task 2: Add separated skill behavior scenarios and prompt tooling
 
@@ -67,11 +67,11 @@
 - `renderEvaluatorPrompt(scenarioId, actorTrace)` loads the separate evaluator criteria and controlled evidence with the captured actor output. Evaluator output is JSON with `scenarioId`, `criterionResults` (`criterionId`, `result: pass|fail|uncertain`, and evidence), and `notes`. It requests evidence-cited judgments, not phrase matching.
 - Fresh actor execution remains a manual campaign using the generated prompt and Codex's fresh-context subagent route. The script never invokes a model or live tool.
 
-- [ ] Write harness tests first for unique scenario IDs, valid owner/reference paths, exact evaluator-to-scenario pairing, and prompts that include only the intended private/public material. Run `node --import tsx --test test/skill-scenario-harness.test.ts` and capture the expected missing-renderer failure.
-- [ ] Implement the minimal fixture loader and prompt renderers with path containment, strict JSON shape checks, and clear errors for unknown IDs or missing references. Re-run the focused harness tests and confirm actor rendering cannot include evaluator criteria while evaluator rendering can include them.
-- [ ] Add six scenarios with stable IDs: `sequence-versus-linear-graph` for staged/interleaved exposure and context expectations; `independent-dependent-questions`; `selected-material-isolation-no-fit`; `partial-run-selected-question`; `typed-answer-failure`; and `changed-rubric-comparison`.
-- [ ] For current-baseline scoring, require truthful limits where the runtime does not yet support the future journey, per-selection mapping, or lifecycle contract. Define the comparison case as a positive preservation criterion: separate the changed task meaning from comparable evidence and do not claim causal improvement.
-- [ ] Add deterministic test assertions over the six fixtures, evaluator separation, mock-only execution contract, and trace metadata schema. Run `npm run skill:scenario -- --list` and `node --import tsx --test test/skill-scenario-harness.test.ts test/release-package.test.ts`.
+- [x] Write harness tests first for unique scenario IDs, valid owner/reference paths, exact evaluator-to-scenario pairing, and prompts that include only the intended private/public material. Run `node --import tsx --test test/skill-scenario-harness.test.ts` and capture the expected missing-renderer failure.
+- [x] Implement the minimal fixture loader and prompt renderers with path containment, strict JSON shape checks, and clear errors for unknown IDs or missing references. Re-run the focused harness tests and confirm actor rendering cannot include evaluator criteria while evaluator rendering can include them.
+- [x] Add six scenarios with stable IDs: `sequence-versus-linear-graph` for staged/interleaved exposure and context expectations; `independent-dependent-questions`; `selected-material-isolation-no-fit`; `partial-run-selected-question`; `typed-answer-failure`; and `changed-rubric-comparison`.
+- [x] For current-baseline scoring, require truthful limits where the runtime does not yet support the future journey, per-selection mapping, or lifecycle contract. Define the comparison case as a positive preservation criterion: separate the changed task meaning from comparable evidence and do not claim causal improvement.
+- [x] Add deterministic test assertions over the six fixtures, evaluator separation, mock-only execution contract, and trace metadata schema. Run `npm run skill:scenario -- --list` and `node --import tsx --test test/skill-scenario-harness.test.ts test/release-package.test.ts`.
 
 ## Task 3: Run and retain the current-guidance baseline
 
@@ -83,11 +83,11 @@
 - The stored trace wrapper includes scenario/version, trial ID, mode (`guided` or `no-guidance`), `gpt-6-sol` at medium reasoning, SHA-256 for every supplied skill/reference file, actor JSON, evaluator JSON, and an explicit `simulationOnly: true` marker.
 - Evaluation records cite actor actions or final-response evidence for each criterion and distinguish a scenario/guidance issue from a missing runtime feature.
 
-- [ ] Render each actor prompt from the committed fixture and dispatch one fresh-context actor per scenario using `gpt-6-sol` at medium reasoning. Provide no evaluator criteria. Require the actor to return the structured trace contract and prohibit all real tool calls.
-- [ ] For any guided scenario that fails or makes an unsupported product claim, dispatch one matched fresh-context no-guidance control with the same user request and controlled facts. Preserve both outputs before assigning a guidance-specific cause.
-- [ ] Evaluate each result in a separate fresh context with only that case's evaluator criteria, controlled fixture and actor trace. Manually inspect every failed, disputed, or flagged judgment and record cited evidence plus any uncertain evaluator decisions.
-- [ ] Store the six trace/evaluation records under the skill-owned test directories and summarize strengths, observed failures, limitations and later owning plans in the evidence report. Do not edit skill guidance based on a single run; record candidates for Plan 3, 4, 5, or 6.
-- [ ] Confirm the comparison-interpretation scenario's result explicitly, because the Portfolio pilot provides positive evidence for current interpretation guidance. Do not broaden an evidence limitation into a rewrite of all guidance.
+- [x] Render each actor prompt from the committed fixture and dispatch one fresh-context actor per scenario using `gpt-6-sol` at medium reasoning. Provide no evaluator criteria. Require the actor to return the structured trace contract and prohibit all real tool calls.
+- [x] For any guided scenario that fails or makes an unsupported product claim, dispatch one matched fresh-context no-guidance control with the same user request and controlled facts. Preserve both outputs before assigning a guidance-specific cause.
+- [x] Evaluate each result in a separate fresh context with only that case's evaluator criteria, controlled fixture and actor trace. Manually inspect every failed, disputed, or flagged judgment and record cited evidence plus any uncertain evaluator decisions.
+- [x] Store the six trace/evaluation records under the skill-owned test directories and summarize strengths, observed failures, limitations and later owning plans in the evidence report. Do not edit skill guidance based on a single run; record candidates for Plan 3, 4, 5, or 6.
+- [x] Confirm the comparison-interpretation scenario's result explicitly, because the Portfolio pilot provides positive evidence for current interpretation guidance. Do not broaden an evidence limitation into a rewrite of all guidance.
 
 ## Task 4: Complete, validate, and hand off Plan 2
 
@@ -105,3 +105,33 @@
 - Plan 1 merged through PR #12. Merge commit: `7e2943bf1daec403ae5e56e7166eb68f9d868474`; it is the current `develop` tip and contains aligned `0.3.0-dev.2` identity. The prior linked worktree and local branch were retired after PR/head/merge verification.
 - This worktree was created from `origin/develop` at that merge SHA by the repository's bundled `new_worktree.py`; npm dependencies installed successfully. Initial status was clean. `npm test` passed 327 tests, zero failures or skips.
 - No behavior guidance, external inference, PR, release tag or publication has been changed or performed in this Plan 2 worktree yet.
+
+## Task 1 evidence
+
+- The package exclusion test first failed because `private-evaluator.json` appeared in the stable fixture archive; after the file walk change, the test passed and the archive retained `skills/study-design/SKILL.md`.
+- Package, both lockfile root versions, and plugin version now agree at `0.3.0-dev.3`. `npm run build`, typecheck, MCP initialization (10 tests), copied-package/build/release tests (15 tests), and the candidate validator passed. Stable `v0.3.0` validation failed with the expected mismatch.
+- Local ZIP `Z:/_agent-scratch/sheg/codex-v0.3.0-skill-scenarios/sheg-v0.3.0-dev.3.zip` contains 27 files and no skill tests. Final SHA-256 after regenerating the bundle: `B03EC58273AF6B0C664D9B8A6043953133608B1045CDED515D143C54B4B69876`.
+
+## Task 2 harness and scenario evidence
+
+- Added a fixture-only CLI at `scripts/skill-scenario.ts`. Actor rendering does not load evaluator catalogs. Evaluator rendering preserves a JSON actor trace that violates the output schema so a separate evaluator can still judge the observed behavior. The script itself makes no model or tool calls.
+- Added three public scenarios and three paired private evaluators to each skill. `npm run skill:scenario -- --list` returns all six stable IDs. The 15 focused harness and release-package tests pass, lint and typecheck pass, and the package exclusion test keeps `tests/` out while retaining shipped skill guidance. No shipped skill text was changed.
+
+## Task 3 baseline results
+
+- Six guided actors ran in distinct fresh contexts using `gpt-6-sol` at medium reasoning. Each received the generated skill/reference prompt only, no evaluator criteria, and made no tool calls. Six separate fresh evaluator contexts used the case rubric and controlled evidence. Trace/evaluation records are under the owning skill's `tests/behavior/traces/baseline/` directories and marked `simulationOnly: true`.
+- `sequence-versus-linear-graph`: all three criteria passed. The actor recommends three separate turns, distinguishes journey form from answer-history semantics, and calls for packet inspection before asserting earlier answers are present. No unsupported equivalence claim.
+- `independent-dependent-questions`: all three passed. The actor stages selection and dependent follow-up, uses each respondent's selected paragraph as exact material, preserves no-fit, and asks for exact paragraph copy before constructing the request.
+- `selected-material-isolation-no-fit`: all three passed. The actor maps exact evaluation/context pairs to each respondent's selected material, says the current runtime cannot expand all matches into one follow-on request, preserves no-fit, and makes no run claim.
+- `partial-run-selected-question`: two passed and `partial-denominator` failed. The actor omitted the supplied `pending: 0`. Its matched no-guidance control omitted the same coverage detail and also failed the denominator criterion. This does not isolate a guidance defect; it identifies a coverage-reporting case to include in later guidance pressure tests.
+- `typed-answer-failure`: two passed and `reports-available-diagnostic` failed. The actor paraphrased the message but omitted both `invalid_answer` and the exact supplied message. The matched no-guidance control repeated the omission. This is a candidate for the planned error-diagnostic contract and lifecycle guidance, but the baseline does not show a skill-specific regression.
+- `changed-rubric-comparison`: all three passed. The actor identifies the question/rubric change, avoids a winner claim, reports the 9/10 new-run count within its own construct, and recommends a matched same-rubric comparison. This is positive evidence for current interpretation guidance.
+- Failed and disputed judgments were manually checked against trace text and controlled facts. No actor proposed or executed Sheg calls. Both no-guidance controls emitted `scenarioVersion` as the string `"1"`; that observed JSON format violation is preserved and did not affect the content judgments.
+
+## Task 4 validation and handoff status
+
+- Final `npm run verify` passed lint, typecheck, all 335 tests, and generated-output checks.
+- `git diff --check` passes. The code and data changes are limited to the candidate version/package, package exclusion, deterministic scenario harness/tests, private skill-owned fixtures and traces, and plan/evidence files. Neither shipped skill guidance nor Portfolio content/data changed.
+- Rebuilt candidate ZIP contains 27 files. Final SHA-256 is `B03EC58273AF6B0C664D9B8A6043953133608B1045CDED515D143C54B4B69876`. `npm run plugin:package -- --validate-only` confirms the dev.3 manifests agree.
+- [x] Run `git diff --check`, inspect the complete diff, and confirm no skill guidance, Portfolio content, external provider setting, or live study data changed.
+- [x] Record the exact dev.3 package digest, focus results, actor/evaluator trial settings, positive and failed outcomes, matched controls if any, and known limitations in the plan and evidence report.

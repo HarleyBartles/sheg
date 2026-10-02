@@ -1,0 +1,52 @@
+[
+  {
+    "id": "selected-material-isolation-no-fit",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent the paragraph they picked by itself and ask whether it expresses the pull quote. Some may choose no fit. Tell me how to do that and what happens to those respondents.",
+    "controlledEvidence": {
+      "sourceRunId": "run-source-17",
+      "matches": [
+        {"respondentId":"r1","evaluationId":"e1","contextId":"c1","answer":"p2","selectedMaterial":{"materialId":"p2","text":"Exact paragraph two."}},
+        {"respondentId":"r2","evaluationId":"e2","contextId":"c2","answer":"no-fit","selectedMaterial":null},
+        {"respondentId":"r3","evaluationId":"e3","contextId":"c3","answer":"p5","selectedMaterial":{"materialId":"p5","text":"Exact paragraph five."}}
+      ],
+      "runtimeFacts": ["The current follow-on request can select exact evaluation/context pairs and material IDs, but does not yet offer a per-row selected-material expansion primitive.", "Never silently drop no-fit rows or substitute another paragraph."],
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "partial-run-selected-question",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "referencePaths": ["references/interpret-results.md", "references/run-and-recovery.md"],
+    "userRequest": "This run stopped partway through. Of people who answered question Q2, which option did they choose? Can you give me the answer now?",
+    "controlledEvidence": {
+      "sourceRunId": "run-partial-8",
+      "sourceStatus": "cancelled",
+      "sourceComplete": false,
+      "coverage": {"totalEvaluations": 12,"completed": 5,"failed": 1,"pending": 0,"unreached": 6},
+      "matches": [{"respondentId":"r1","questionId":"Q2","status":"completed","result":{"choice":"B"}},{"respondentId":"r2","questionId":"Q2","status":"failed"}],
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "typed-answer-failure",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "referencePaths": ["references/interpret-results.md"],
+    "userRequest": "Why didn't everyone answer the question? Please summarize these results.",
+    "controlledEvidence": {
+      "sourceRunId": "run-invalid-4",
+      "sourceStatus": "completed_with_errors",
+      "sourceComplete": true,
+      "coverage": {"totalEvaluations": 2,"completed": 1,"failed": 1,"pending": 0,"unreached": 0},
+      "items": [
+        {"evaluationId":"e-valid","respondentId":"r1","questionId":"q1","status":"completed","result":{"choice":"yes"}},
+        {"evaluationId":"e-invalid","respondentId":"r2","questionId":"q1","status":"failed","execution":{"failureCode":"invalid_answer","failureMessage":"Answer did not match the question."}}
+      ],
+      "mockOnly": true
+    }
+  }
+]

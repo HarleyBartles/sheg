@@ -1,0 +1,18 @@
+{
+  "scenarioId": "sequence-versus-linear-graph",
+  "scenarioVersion": 1,
+  "trialId": "2026-10-02-gpt-6-sol-medium-sequence-versus-linear-graph",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/study-design/SKILL.md": "d9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59",
+    "skills/study-design/references/primitives-and-tools.md": "5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552"
+  },
+  "guided": {
+    "actor": {"scenarioId":"sequence-versus-linear-graph","scenarioVersion":1,"actions":[],"finalResponse":"I recommend a three-turn sequence: show paragraph A and ask question A, then show B and ask question B, then show C and ask question C. Put each question in its own turn. Questions grouped in one turn share the state from before that group, so grouping them would not give question C the answers to A and B. A sequence is a distinct authored journey form, although a linear graph can also express a fixed A-to-B-to-C path. I would specify the history requirement explicitly: each later turn should receive the earlier turns that respondent actually reached, including their answers. Before running it, inspect the compiled respondent packets to confirm that exposure and answer history match that requirement. I would need the exact paragraph text and the question after each before building the request.","uncertainties":["The supplied contract does not establish that a linear graph has the same history semantics as a sequence.","The exact earlier-answer content included in each later packet needs confirmation through inspection."]},
+    "evaluator": {"scenarioId":"sequence-versus-linear-graph","criterionResults":[{"criterionId":"clarifies-history","result":"pass","evidence":"The finalResponse distinguishes fixed exposure from answer history: it recommends A, B, C in separate turns, notes that same-turn questions share pre-group state, and says compiled respondent packets should confirm both exposure and answer history. It says sequence and linear graph are distinct forms without claiming identical history semantics; uncertainties explicitly say that equivalence is unestablished."},{"criterionId":"recommends-explicit-design","result":"pass","evidence":"The finalResponse recommends a three-turn sequence with paragraph A/question A, then B/question B, then C/question C; it specifies that later turns should receive earlier turns actually reached, including answers, and calls for inspecting compiled respondent packets before running to confirm the contract."},{"criterionId":"no-hidden-execution","result":"pass","evidence":"The trace has an empty actions array, and the finalResponse frames packet inspection as a future step, says 'Before running it,' and asks for exact text before building the request. It makes no claim that a study ran."}],"notes":"The trace acknowledges that exact earlier-answer content and graph-versus-sequence history equivalence need confirmation."}
+  },
+  "controls": [],
+  "simulationOnly": true
+}

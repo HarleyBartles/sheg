@@ -35,6 +35,8 @@ def plugin_files() -> list[Path]:
         for path in root.rglob("*"):
             if path.is_symlink():
                 raise ValueError(f"plugin package cannot include symlinks: {path.relative_to(ROOT).as_posix()}")
+            if "tests" in path.relative_to(ROOT).parts:
+                continue
             if path.is_file():
                 files.append(path.relative_to(ROOT))
     missing = [path.as_posix() for path in required if not (ROOT / path).is_file()]

@@ -344,3 +344,20 @@ test('stable tagged release package remains byte-for-byte reproducible', () => {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
+
+test('stable package excludes skill-local behavior tests while retaining skill guidance', () => {
+  const fixture = createStablePackageFixture();
+  try {
+    const behaviorTests = path.join(fixture.directory, 'skills/study-design/tests/behavior');
+    mkdirSync(behaviorTests, { recursive: true });
+    writeFileSync(path.join(behaviorTests, 'private-evaluator.json'), '{"private":true}');
+    const archive = path.join(fixture.directory, 'with-tests.zip');
+    assert.equal(fixture.run(['--tag', 'v0.3.0', '--output', archive]).status, 0);
+
+    const files = listArchive(archive);
+    assert.ok(files.includes('skills/study-design/SKILL.md'));
+    assert.ok(!files.includes('skills/study-design/tests/behavior/private-evaluator.json'));
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
