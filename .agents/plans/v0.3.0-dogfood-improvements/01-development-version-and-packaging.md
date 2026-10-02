@@ -126,7 +126,7 @@ After this PR is merged, create a fresh canonical worktree from current `develop
 
 ## Handoff evidence
 
-Report exact base/head, worktree and status, the five matching product-identity surfaces, candidate packaging and copied-MCP results, stable-tag rejection, retained stable-fixture protections, focused checks and staged gate. The local ZIP is validation evidence, not a published release. Keep this worktree for the next approved slice; do not clean it or merge it automatically.
+Report exact base/head, worktree and status, the five matching product-identity surfaces, candidate packaging and copied-MCP results, stable-tag rejection, retained stable-fixture protections, focused checks and staged gate. The local ZIP is validation evidence, not a published release. After the authorized PR is merged and exact develop ancestry proves the merge, clean this plan's worktree and branch using the bundled cleanup helper. The next JIT plan starts from a fresh canonical worktree at current `develop`.
 
 ## Planning-turn evidence
 

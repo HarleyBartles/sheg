@@ -20,7 +20,7 @@ Write each next executable plan against the delivered code of its predecessor. L
 
 | # | Title | Status | Plan file | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Align development identity and candidate packaging | implementation committed, PR pending | [Plan 1](01-development-version-and-packaging.md) | `1b47095478ef` | - | - | Merge version `0.3.0-dev.2`. All manifests and MCP advertise it; local candidates package without tags; stable publication protections remain intact |
+| 1 | Align development identity and candidate packaging | PR #12 open; checks pending | [Plan 1](01-development-version-and-packaging.md) | `1b47095478ef` | [#12](https://github.com/HarleyBartles/sheg/pull/12) | - | Merge version `0.3.0-dev.2`. All manifests and MCP advertise it; local candidates package without tags; stable publication protections remain intact |
 | 2 | Establish skill behavior scenarios and baseline | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.3`. Skill-owned scenarios, controlled tools, blinded actor/evaluator boundary, current-guidance traces and repeatable campaign procedure |
 | 3 | Unify journey context across sequence and graph | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.4`. One graph execution model, cumulative exposed material, separate answer-history choice, identical preview/fit/runtime packets and protected frozen evidence |
 | 4 | Follow each selected stimulus in one run | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.5`. Per-source-answer material mapping, optional shared stimulus, no-fit coverage, exact provenance, race protection and deletion-independent recall |
