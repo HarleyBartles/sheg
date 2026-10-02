@@ -172,7 +172,7 @@ derived group. Sibling answers are never sent into another question's state.
 - [x] Update MCP descriptions, schemas, README and canonical skill text with the observed call semantics, physical-call `maxCalls`, source-context handling, incomplete/partial group reporting, and `run_resume` behavior. Do not add prose verdicts or claim multiple respondents share state.
 - [x] Add ADR-0021 for the shared question-group and physical-attempt evidence boundary; index it. No ADR is needed for routine packing implementation details.
 - [x] Run `npm run contracts:build`, `npm run build`, and `node --import tsx --test test/mcp.test.ts test/package.test.ts test/stimulus-response.test.ts`; inspect generated schemas and copied package contents. The focused run passed after fixture correction; final `npm run verify` passed all 299 tests and generated consistency.
-- [ ] Hosted OpenRouter pilot not run: this turn has no explicit authorization for a live inference call. Offline verification used only the local fixture; the pilot remains a release acceptance item.
+- [x] Run the bounded synthetic OpenRouter pilot after the user authorized paid Jev pilots: one physical request returned all three requested typed answers (`choice`, `score`, `noul`), persisted `usedCalls: 1` under `maxCalls: 1`, and kept a shared respondent context. Sheg deleted the run; the isolated datastore reported `integrity: ok` and `runCount: 0`. The temporary data directory and runner were removed.
 - [x] Commit MCP, skill, documentation, ADR, and generated outputs as `feat: expose independent question groups through MCP`.
 
 ## Task 8: Review Plan 5 against SHEG-6 and close its JIT record
@@ -185,7 +185,7 @@ derived group. Sibling answers are never sent into another question's state.
 - [x] Review the final diff against SHEG-6 and epic sections 5, 6, 8, 10, 11, and 12. The implementation uses published Jev batching behavior without a determinism workstream, adds no cost cap, preserves Laya's singleton boundary, keeps siblings isolated across split/recovery, and does not replay saved answers.
 - [x] Stage intended source, tests, canonical guidance, ADR, roadmap and generated projections; commit through the tracked hook. Task 7 commit `4ef8d09` passed the full hook gate.
 - [x] Update the roadmap with implementation commits, full gate evidence, SHEG-6 remaining status, and Plan 6 as the next JIT capability. Plan 5 is `completed-awaiting-retirement` for its eventual completing PR.
-- [x] Record remaining release obligations explicitly. The live OpenRouter pilot was not run because this turn did not authorize hosted inference. Product versions, publication, tagging, merging and SHEG-6 closure remain untouched.
+- [x] Record remaining release obligations explicitly. The bounded hosted pilot passed. Complete section-three acceptance still depends on Plan 6 source-linked choices and Plan 7 release integration. Product versions, publication, tagging, merging and SHEG-6 closure remain untouched.
 
 ## Plan 5 boundary
 

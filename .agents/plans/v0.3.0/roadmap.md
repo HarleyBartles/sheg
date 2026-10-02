@@ -14,9 +14,9 @@ defined in the spec.
 
 ## Consecutive plans
 
-Plans 1-4 are delivered and SHEG-7 is Done. Plan 5's independent-question
-implementation is delivered; SHEG-6 remains open for the bounded hosted pilot
-and the release acceptance that follows Plans 6-7. Later rows are capability
+Plans 1-5 are delivered and SHEG-7 is Done. SHEG-6's implementation and bounded
+hosted pilot are complete; the issue remains open for the release acceptance
+that follows Plans 6-7. Later rows are capability
 boundaries, not implementation plans. Write
 each next plan against the delivered code and evidence of its predecessor. A
 Linear issue may span more than one plan.
@@ -27,7 +27,7 @@ Linear issue may span more than one plan.
 | 2 | Recover, resume, delete and inspect storage through the MCP | completed-awaiting-retirement | [Plan 2](02-resume-delete-storage.md) | `3ecb97f` (`ec3e70a..3ecb97f`) | - | - | SHEG-5 cross-process resume keeps identity and call ceiling; dry-run/transactional deletion; integrity and FK health plus Sheg-managed optimization; copied-package recovery verified; full staged gate 240 tests; whole-plan review clean. SHEG-5 closed after Plans 3-4 |
 | 3 | Execute authored journeys with durable respondent turn contexts | completed-awaiting-retirement | [Plan 3](03-durable-journeys.md) | `ace6e98` (`3f31a02..ace6e98`) | - | - | SHEG-7 journey foundation; journey MCP request/details and copied-package kill/resume verified; malformed Credential Manager encoding diagnosis included; staged gate passed 260 tests, lint, typecheck, and generated consistency; final inline review clean. SHEG-7 closed Done after Plan 4 |
 | 4 | Query recorded evidence and compose reusable follow-ons | completed-awaiting-retirement | [Plan 4](04-query-and-follow-on-reuse.md) | `e6eabe4`, `11495cc`, `9277057`, `1203e93` (`745094e..1203e93`) | - | - | SHEG-7 query and follow-on accepted and closed Done; exact typed criteria/references, four context modes, SQLite snapshot revalidation, retained lineage after source deletion, MCP `run_query`, and packaged section-three acceptance; full staged gate passed 279 tests, lint, typecheck, and generated consistency. User guidance explains relevance and incomplete-source decisions |
-| 5 | Ask independent typed question groups at new or recorded contexts | completed-awaiting-retirement | [Plan 5](05-independent-question-groups.md) | `8915f51`, `a4e9675`, `4ef8d09` (`1046419..4ef8d09`) | - | - | SHEG-6 implementation delivered: shared respondent state, Jev batching with fit-based splitting, Laya singleton execution, per-answer outcomes and shared attempt evidence, explicit interruption recovery, MCP query/follow-on guidance. Full gate passed 299 tests, lint, typecheck and generated consistency. Live OpenRouter pilot not run because this turn did not authorize hosted inference; SHEG-6 remains open. |
+| 5 | Ask independent typed question groups at new or recorded contexts | completed-awaiting-retirement | [Plan 5](05-independent-question-groups.md) | `8915f51`, `a4e9675`, `4ef8d09` (`1046419..4ef8d09`) | - | - | SHEG-6 implementation and authorized OpenRouter pilot delivered: one physical call returned separate Choice/Score/Noul answers under `maxCalls: 1`, with shared context; deletion and isolated-store integrity verified. Offline full gate passed 299 tests, lint, typecheck and generated consistency. SHEG-6 remains open for full release acceptance. |
 | 6 | Offer source-linked material choices and reuse their exact evidence | pending | Written after Plan 5 | - | - | - | SHEG-8; agent-authored candidate boundaries |
 | 7 | Integrate the release workflow and packaged agent guidance | pending | Written after Plan 6 | - | - | - | Across active issues; release preparation only after acceptance and authorization |
 
@@ -127,9 +127,10 @@ recovery), and `4ef8d09` (packaged MCP, agent guidance, and ADR-0021). Offline
 acceptance includes mixed typed groups, selected-turn follow-ons, query by
 question ID, local singleton splitting, and copied-package interruption/resume
 without replaying a saved sibling. `npm run verify` passed all 299 tests,
-lint, typecheck, and generated consistency. The optional bounded hosted
-OpenRouter pilot remains unrun pending explicit authorization; no inference
-request was made during this plan.
+lint, typecheck, and generated consistency. The authorized bounded OpenRouter
+pilot completed one physical request under `maxCalls: 1` and returned separate
+Choice, Score, and Noul answers over one context. Sheg deleted the run and the
+temporary datastore reported integrity `ok` with zero runs remaining.
 
 ### 6. Exact offered material evidence
 
