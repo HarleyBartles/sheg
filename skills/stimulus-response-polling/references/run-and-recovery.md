@@ -51,7 +51,7 @@ Provider attempts are not new responses. An uncertain in-flight call consumes it
 
 ## Delete selected runs
 
-Deletion is explicit and accepts 1 to 200 unique run IDs. First call `run_delete` with `dryRun: true`. The preview lists each selected run's status, evaluation and attempt counts, and whether active work blocks deletion. A preview does not remove data. Sheg rechecks the whole selection at deletion time, so the preview is not a reservation. If any run is missing or active, the delete is all-or-none. Cancel active work, poll until it is terminal, then submit the explicit selection again. Deletion removes the run and its associated evaluation and attempt records. Never manipulate SQLite files or sidecars directly.
+Deletion is explicit and accepts 1 to 200 unique run IDs. First call `run_delete` with `dryRun: true`. The preview lists each selected run's status, evaluation and attempt counts, and whether active work blocks deletion. A preview does not remove data. Sheg rechecks the whole selection at deletion time, so the preview is not a reservation. If any run is missing or active, the delete is all-or-none. Cancel active work, poll until it is terminal, then submit the explicit selection again. Deletion removes the run and its associated evaluation and attempt records. The result distinguishes committed deletion from optimization maintenance: `maintenance.optimization` is `completed` or `failed`, and a failure includes `failureCode`. A maintenance failure does not undo the reported deletion; inspect or retry with `run_storage`. Never manipulate SQLite files or sidecars directly.
 
 ## Inspect and optimize storage
 

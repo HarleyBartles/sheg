@@ -37136,8 +37136,11 @@ var SQLiteRunStore = class {
         THEN json_extract(runs.request_json, '$.request.material') WHEN json_extract(runs.request_json, '$.request.kind') = 'journey'
         THEN json_extract(runs.request_json, '$.request.journey.items') ELSE json_extract(runs.request_json, '$.request.material') END) AS source_material
         WHERE json_extract(source_material.value, '$.id') = ?) OR EXISTS (SELECT 1 FROM evaluations AS material_evaluation, json_each(material_evaluation.packet_json, '$.state.encounteredItems') AS encountered
-        WHERE material_evaluation.run_id = runs.run_id AND json_extract(encountered.value, '$.id') = ?))`);
-      params.push(query.materialId, query.materialId);
+        WHERE material_evaluation.run_id = runs.run_id AND json_extract(encountered.value, '$.id') = ?) OR EXISTS (
+        SELECT 1 FROM json_each(runs.request_json, '$.lineage.materialSnapshots') AS retained_snapshot,
+          json_each(retained_snapshot.value, '$.materials') AS retained_material
+        WHERE json_extract(retained_material.value, '$.id') = ?))`);
+      params.push(query.materialId, query.materialId, query.materialId);
     }
     if (cursor) {
       clauses.push("(created_ms > ? OR (created_ms = ? AND run_id > ?))");
@@ -37598,8 +37601,14 @@ var SQLiteRunStore = class {
       }
       return { deletedRunIds: counts.map(({ runId }) => runId), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
     });
-    this.optimizeStorage();
-    return result;
+    let maintenance;
+    try {
+      this.optimizeStorage();
+      maintenance = { optimization: "completed" };
+    } catch (error62) {
+      maintenance = { optimization: "failed", failureCode: error62 instanceof RunStoreError ? error62.code : "storage_operation_failed" };
+    }
+    return { ...result, maintenance };
   }
   storageInfo() {
     this.ensureOpen();

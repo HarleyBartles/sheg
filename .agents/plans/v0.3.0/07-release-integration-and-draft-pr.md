@@ -64,3 +64,7 @@ An agent can identify respondents who left at section three after selecting the 
 ## Plan boundary
 
 This plan demonstrates and hands off the approved v0.3.0 feature branch. It does not perform release preparation, merge, version alignment, tagging, plugin ZIP publication or release/develop reconciliation. Those operations belong to a separately authorized release step after review.
+
+## Post-handoff fresh review follow-up
+
+A user-requested independent whole-branch review of head `2a6838f` found two actionable issues: post-commit storage optimization failure made a completed `run_delete` appear to fail, and `run_list` material filtering omitted source-linked catalog items retained only in follow-on lineage snapshots. Both behaviors now have regression tests that failed before the implementation change. Deletion results report optimization status separately from committed deletion, and discovery includes retained lineage material. The request-store tests pass; the repository gate and generated build were rerun before publication.

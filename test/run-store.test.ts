@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
+import { materializeJourneyRun, prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import type { DecisionResult } from '../src/domain/decision/decision.js';
 import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedFollowOnRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun } from '../src/domain/run/request.js';
@@ -812,6 +812,42 @@ test('evidence query resolves a mapped Choice answer to exact source-linked mate
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('run list finds retained follow-on catalog material that was not encountered in the source turn', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const candidate = { id: 'section-three', text: 'Later section.', sourceId: 'article-v1', sourceSha256: 'f'.repeat(64) };
+  const sourceRequest: InlineJourneyRequest = {
+    ...journeyRequest,
+    journey: { ...journeyRequest.journey, items: [journeyRequest.journey.items[0]!, candidate] },
+  };
+  try {
+    const sourceAdmission = await prepareRun(sourceRequest, provider);
+    assert.ok(sourceAdmission.journey);
+    const source = store.acceptJourney(randomUUID(), materializeJourneyRun(sourceAdmission.journey)).run;
+    const sourceRecord = store.getJourneyRun(source.runId);
+    const sourceEvaluation = sourceRecord.evaluations[0]!;
+    assert.deepEqual(sourceEvaluation.packet.state.encounteredItems, [{ id: 'section-one', text: 'Opening section.' }]);
+
+    const followOnRequest = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId: source.runId,
+      selection: { references: [{ evaluationId: sourceEvaluation.evaluationId, contextId: sourceEvaluation.contextId }] },
+      context: { mode: 'recorded' },
+      questions: [{ type: 'choice', id: 'choose-section', instructions: 'Which section?', options: { candidate: candidate.text, 'no-fit': 'Neither' }, materialOptions: { candidate: candidate.id } }],
+      provider: input.provider, maxCalls: 1,
+    });
+    const sources = store.resolveFollowOnSources(followOnRequest);
+    const followOn = await prepareFollowOnRun(followOnRequest, sources, provider);
+    assert.equal(followOn.inspection.valid, true, JSON.stringify(followOn.inspection));
+    const accepted = store.accept(randomUUID(), followOn.prepared).run;
+    const saved = store.getRequest(accepted.runId);
+    const encounteredItems = saved.evaluations[0]!.packet.state.encounteredItems as Array<{ id: string; text: string }>;
+    assert.equal(encounteredItems.some(({ id }) => id === candidate.id), false);
+    assert.equal(saved.lineage?.materialSnapshots.some(({ materials }) => materials.some(({ id }) => id === candidate.id)), true);
+
+    assert.deepEqual(store.list({ materialId: candidate.id }).items.map(({ runId }) => runId).sort(), [source.runId, accepted.runId].sort());
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('follow-on snapshots source material for query and another follow-on after source deletion', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
@@ -1169,13 +1205,31 @@ test('delete revalidates state after preview and cascades evaluations and attemp
     try { terminalDb.prepare("UPDATE runs SET status = 'completed' WHERE run_id = ?").run(runId); }
     finally { terminalDb.close(); }
     const deleted = store.deleteRuns([runId]);
-    assert.deepEqual(deleted, { deletedRunIds: [runId], removed: { runs: 1, evaluations: 2, attempts: 2 } });
+    assert.deepEqual(deleted, { deletedRunIds: [runId], removed: { runs: 1, evaluations: 2, attempts: 2 }, maintenance: { optimization: 'completed' } });
     assert.throws(() => store.getStatus(runId), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
     const verify = new DatabaseSync(path.join(root, 'runs.sqlite'));
     try {
       assert.equal((verify.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as { count: number }).count, 0);
       assert.equal((verify.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as { count: number }).count, 0);
     } finally { verify.close(); }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('delete reports committed deletion when post-delete optimization fails', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const runId = await completedRun(store);
+    store.optimizeStorage = () => { throw new RunStoreError('storage_operation_failed', 'Optimization unavailable.'); };
+
+    const result = store.deleteRuns([runId]);
+
+    assert.deepEqual(result, {
+      deletedRunIds: [runId],
+      removed: { runs: 1, evaluations: 2, attempts: 2 },
+      maintenance: { optimization: 'failed', failureCode: 'storage_operation_failed' },
+    });
+    assert.throws(() => store.getStatus(runId), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
