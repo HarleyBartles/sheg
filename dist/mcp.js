@@ -37362,10 +37362,10 @@ var SQLiteRunStore = class {
       const items = pageRows.map((row) => {
         const contextId = asText(row.context_id, "context ID");
         const respondentId = asText(row.respondent_id, "respondent ID");
+        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "evidence packet"));
         const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
         let selectedMaterial;
         if (result?.type === "choice") {
-          const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "evidence packet"));
           const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
           if (materialId) {
             const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
@@ -37398,7 +37398,7 @@ var SQLiteRunStore = class {
             model,
             endpoint,
             compilerFingerprint,
-            contextFingerprint: asText(row.packet_fingerprint, "context fingerprint")
+            contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint })
           }
         };
       });
@@ -37749,7 +37749,7 @@ var SQLiteRunStore = class {
           }
         }
       }
-      this.database.prepare("UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(claim2.runId);
+      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : 1, claim2.runId);
     });
   }
   settle(claim2, attemptId, outcome) {
@@ -37774,7 +37774,7 @@ var SQLiteRunStore = class {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
         }
       }
-      this.database.prepare("UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(claim2.runId);
+      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : 1, claim2.runId);
     });
   }
   settleJourney(claim2, attemptId, outcome, transition) {
@@ -37886,7 +37886,7 @@ var SQLiteRunStore = class {
         transition.expectedRevision
       );
       if (updatedState.changes !== 1) throw new RunStoreError("journey_transition_conflict", "Journey respondent state changed before its transition committed.");
-      this.database.prepare("UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(claim2.runId);
+      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : 1, claim2.runId);
     });
   }
   finish(claim2) {

@@ -257,7 +257,7 @@ test('an interrupted grouped attempt consumes one call and resume dispatches onl
   } finally { await f.close(); }
 });
 
-test('a shared grouped authorization failure stops dispatch and explicit resume retries all reserved questions', async () => {
+test('a shared dispatched authorization failure consumes its call and explicit resume retries reserved questions', async () => {
   const input = request(1); input.maxCalls = 2;
   input.questions.push({ type: 'noul', id: 'interest-loss', instructions: 'Did anything reduce interest?' });
   const f = await fixture(input); let calls = 0; const dispatched: string[][] = [];
@@ -266,7 +266,7 @@ test('a shared grouped authorization failure stops dispatch and explicit resume 
     async decide() { throw new Error('Expected grouped request.'); },
     async decideBatch(batch) {
       calls += 1; dispatched.push(batch.questions.map(({ id }) => id));
-      if (calls === 1) throw new JevCallError('credential unavailable', 0, undefined, undefined, 'run', 'credential_unavailable');
+      if (calls === 1) throw new JevCallError('authorization rejected', 1, undefined, undefined, 'run', 'credential_unavailable');
       return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => question.type === 'choice'
         ? { questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }
         : { questionId: question.id, value: { type: 'noul' as const, noul: 0.6 } }) };
@@ -281,6 +281,32 @@ test('a shared grouped authorization failure stops dispatch and explicit resume 
     assert.deepEqual(dispatched, [['interest', 'interest-loss'], ['interest', 'interest-loss']]);
     assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered']);
     assert.equal(f.store.getStatus(f.runId).usedCalls, 2);
+  } finally { await f.close(); }
+});
+
+test('a credential failure before dispatch preserves the call allowance for explicit resume', async () => {
+  const input = request(1); input.maxCalls = 1;
+  const f = await fixture(input); let calls = 0;
+  const provider: DecisionProvider = {
+    measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }),
+    async decide() { throw new Error('Expected grouped request.'); },
+    async decideBatch(batch) {
+      calls += 1;
+      if (calls === 1) throw new JevCallError('credential unavailable', 0, undefined, undefined, 'run', 'credential_unavailable');
+      return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => ({ questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } })) };
+    },
+  };
+  try {
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.equal(f.store.getStatus(f.runId).status, 'failed');
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 0);
+    assert.equal(f.store.getStatus(f.runId).reservedCalls, 0);
+    assert.equal(f.store.answers(f.runId).items[0]!.status, 'failed');
+    assert.equal(f.store.resume(f.runId, Date.now()).started, true);
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    assert.equal(calls, 2);
+    assert.equal(f.store.getStatus(f.runId).status, 'completed');
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 1);
   } finally { await f.close(); }
 });
 

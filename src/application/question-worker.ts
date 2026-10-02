@@ -152,10 +152,11 @@ function failureScope(error: unknown): 'evaluation' | 'run' {
   return error instanceof JevCallError || error instanceof LayaCallError ? error.failureScope : 'evaluation';
 }
 
-function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: string; message: string } {
+function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: string; message: string; providerAttempts?: number } {
   const code = scope === 'run' && error instanceof JevCallError ? error.failureCode : scope === 'run' ? 'provider_unavailable' : 'decision_failed';
   const message = scope === 'run' && error instanceof JevCallError && error.failureCode.startsWith('credential_')
     ? error.message
     : scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
-  return { code, message };
+  const providerAttempts = error instanceof JevCallError || error instanceof LayaCallError ? error.attempts : undefined;
+  return { code, message, ...(providerAttempts === undefined ? {} : { providerAttempts }) };
 }

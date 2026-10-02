@@ -1,6 +1,6 @@
 # Prepare and trace a file-backed journey
 
-This reference describes the multi-stage journey CLI, not the current MCP run tools. For the direct MCP request, build an inline request and use `run_inspect`.
+This reference describes the multi-stage journey CLI, not the current MCP run tools. For the direct MCP request, build an inline request and optionally use `run_inspect` when a fit preview would help; `run_start` performs admission validation itself.
 
 Use this workflow to validate inputs, inspect stimulus and task boundaries, or debug a graph route without model inference.
 

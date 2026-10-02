@@ -59,7 +59,7 @@ for (const contract of contracts) {
   schema.title = contract.title;
   if (contract.validationRules) schema['x-validation-rules'] = contract.validationRules;
   if (contract.filename === 'respondent-profile.schema.json') {
-    schema.description = 'JSON Schema validators do not enforce the aggregate 1,500-character prose limit in x-validation-rules. Include the profile in a direct request and call run_inspect for Sheg runtime validation before starting a run.';
+    schema.description = 'JSON Schema validators do not enforce the aggregate 1,500-character prose limit in x-validation-rules. Include the profile in a direct request; optionally call run_inspect for a fit preview. run_start performs Sheg runtime validation.';
   }
   await writeFile(resolve(contractDirectory, contract.filename), `${JSON.stringify(schema, null, 2)}\n`);
 }

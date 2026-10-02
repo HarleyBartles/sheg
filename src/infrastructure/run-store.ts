@@ -46,7 +46,7 @@ function encounteredMaterialsFromState(state: Record<string, unknown>): Array<{ 
 
 export type AttemptOutcome =
   | { kind: 'answered'; result: import('../domain/decision/decision.js').DecisionResult }
-  | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run' };
+  | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run'; providerAttempts?: number };
 
 export type RunListQuery = RunListQueryInput;
 export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean; retainedFollowOnRunIds: string[] }>; blockedByActiveWork: boolean };
@@ -982,10 +982,10 @@ class SQLiteRunStore implements RunStore {
       const items: RunEvidencePage['items'] = pageRows.map((row) => {
         const contextId = asText(row.context_id, 'context ID');
         const respondentId = asText(row.respondent_id, 'respondent ID');
+        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'evidence packet'));
         const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution'));
         let selectedMaterial: RunEvidencePage['items'][number]['selectedMaterial'];
         if (result?.type === 'choice') {
-          const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'evidence packet'));
           const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
           if (materialId) {
             const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
@@ -1013,7 +1013,7 @@ class SQLiteRunStore implements RunStore {
             model,
             endpoint,
             compilerFingerprint,
-            contextFingerprint: asText(row.packet_fingerprint, 'context fingerprint'),
+            contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint }),
           },
         };
       });
@@ -1379,7 +1379,8 @@ class SQLiteRunStore implements RunStore {
           }
         }
       }
-      this.database.prepare('UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0').run(claim.runId);
+      this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
+        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : 1, claim.runId);
     });
   }
 
@@ -1412,7 +1413,8 @@ class SQLiteRunStore implements RunStore {
             .run(outcome.scope, outcome.code, outcome.message, claim.runId);
         }
       }
-      this.database.prepare('UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0').run(claim.runId);
+      this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
+        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : 1, claim.runId);
     });
   }
 
@@ -1527,8 +1529,8 @@ class SQLiteRunStore implements RunStore {
           transition.state.revision, JSON.stringify(transition.state.events), JSON.stringify(transition.state.route), transition.state.outcome ?? null,
           claim.runId, respondentId, transition.expectedRevision);
       if (updatedState.changes !== 1) throw new RunStoreError('journey_transition_conflict', 'Journey respondent state changed before its transition committed.');
-      this.database.prepare('UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
-        .run(claim.runId);
+      this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
+        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : 1, claim.runId);
     });
   }
 

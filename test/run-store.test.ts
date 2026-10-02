@@ -785,6 +785,30 @@ test('evidence query matches typed answers and material while preserving distrib
     assert.equal(query.items[0]!.result?.type, 'choice');
     assert.equal(query.items[0]!.result?.type === 'choice' ? query.items[0]!.result.confidence : undefined, 0.81);
     assert.equal(query.items[0]!.provenance.contextFingerprint.length > 0, true);
+    const allEvidence = store.queryEvidence({ sourceRunId: runId, criteria: {}, limit: 10 });
+    assert.notEqual(allEvidence.items[0]!.provenance.contextFingerprint, allEvidence.items[1]!.provenance.contextFingerprint);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('independent questions over one frozen context share its provenance fingerprint', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const grouped: InlineRunRequest = {
+    ...input,
+    respondents: input.respondents.slice(0, 1),
+    questions: [
+      input.questions[0]!,
+      { type: 'noul', id: 'clarity', instructions: 'How clear is the section?' },
+    ],
+  };
+  try {
+    const runId = await completedRun(store, grouped, (index) => index === 0 ? savedAnswer : {
+      type: 'noul', noul: 0.8, attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {},
+    });
+    const evidence = store.queryEvidence({ sourceRunId: runId, criteria: {}, limit: 10 });
+    assert.equal(evidence.items.length, 2);
+    assert.equal(evidence.items[0]!.contextId, evidence.items[1]!.contextId);
+    assert.equal(evidence.items[0]!.provenance.contextFingerprint, evidence.items[1]!.provenance.contextFingerprint);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

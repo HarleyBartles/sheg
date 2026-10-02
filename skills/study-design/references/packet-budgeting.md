@@ -1,6 +1,6 @@
 # Decision packet budgeting
 
-This guide describes decision packets and the file-backed journey CLI. The v0.3.0 MCP accepts a direct one-question request; use `run_inspect` to measure that exact request. It does not expose draft variant batching or full-journey preflight.
+This guide describes decision packets and the file-backed journey CLI. The v0.3.0 MCP accepts a direct one-question request; optionally use `run_inspect` to measure that exact request. `run_start` validates the request itself. It does not expose draft variant batching or full-journey preflight.
 
 Use this guide when deciding whether a draft task or complete journey can fit the configured provider. Each respondent decision is a fresh, stateless model call, so Sheg sends the current decision packet again at every task.
 
@@ -51,7 +51,7 @@ For profiles, include only perspective details that could affect the answer. The
 
 ## Iterate from one task to the full study
 
-1. For the direct MCP request, use `run_inspect` after choosing the exact material, profiles, question, provider, and call limit. It measures one compiled packet per respondent without inference.
+1. For a direct MCP request, optionally use `run_inspect` after choosing the exact material, profiles, question, provider, and call limit when a fit preview would help. It measures one compiled packet per respondent without inference.
 2. If using the file-backed journey CLI, use `preflight` to walk all respondents and possible choice paths at every task. It reports where a provider stops fitting, including the packet and route, or whether a provider measurement is unavailable.
 3. Use CLI `check` for deterministic minimum/maximum reachable decision-call bounds and whether the configured `maxCalls` covers the maximum. The call limit bounds physical provider attempts, including retries.
 
