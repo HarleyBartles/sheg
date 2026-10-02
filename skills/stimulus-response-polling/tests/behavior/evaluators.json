@@ -1,7 +1,7 @@
 [
   {
     "scenarioId": "selected-material-isolation-no-fit",
-    "version": 4,
+    "version": 5,
     "criteria": [
       {
         "id": "per-respondent-selection",
@@ -9,7 +9,7 @@
       },
       {
         "id": "honest-current-limit",
-        "condition": "Does not claim the current runtime automatically expands one selected material per match; offers the explicit current workaround or clearly labels the feature gap."
+        "condition": "States that the current one-material-per-request contract requires separate requests for different selected paragraphs, or clearly labels that per-selection batching is a feature gap; never implies one request can route a different selected material for every respondent."
       },
       {
         "id": "preserves-no-fit",
@@ -50,7 +50,7 @@
   },
   {
     "scenarioId": "typed-answer-failure",
-    "version": 4,
+    "version": 5,
     "criteria": [
       {
         "id": "failure-not-negative",

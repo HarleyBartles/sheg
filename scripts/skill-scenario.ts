@@ -207,6 +207,9 @@ export function renderEvaluatorPrompt(
     if (wrappedTrace.data.scenarioVersion !== scenario.version) {
       throw new Error(`Stored trace version ${String(wrappedTrace.data.scenarioVersion)} does not match current version ${scenario.version}.`);
     }
+    if (options.controlIndex === undefined && !wrappedTrace.data.guided) {
+      throw new Error('Stored trace wrapper has no guided actor.');
+    }
   }
   if (options.controlIndex !== undefined) {
     if (!Number.isInteger(options.controlIndex) || options.controlIndex < 1) {

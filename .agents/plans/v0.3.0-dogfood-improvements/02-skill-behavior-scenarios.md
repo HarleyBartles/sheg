@@ -105,7 +105,7 @@
 
 - Plan 1 merged through PR #12. Merge commit: `7e2943bf1daec403ae5e56e7166eb68f9d868474`; it is the current `develop` tip and contains aligned `0.3.0-dev.2` identity. The prior linked worktree and local branch were retired after PR/head/merge verification.
 - This worktree was created from `origin/develop` at that merge SHA by the repository's bundled `new_worktree.py`; npm dependencies installed successfully. Initial status was clean. `npm test` passed 327 tests, zero failures or skips.
-- No behavior guidance, external inference, PR, release tag or publication has been changed or performed in this Plan 2 worktree yet.
+- Shipped skill guidance was not changed. The behavior scenario references, fixtures, harness and evidence report were changed. PR #13 exists against `develop`; no release tag or stable publication was created. Controlled scenario actors were run without paid Sheg inference.
 
 ## Task 1 evidence
 
@@ -116,17 +116,17 @@
 ## Task 2 harness and scenario evidence
 
 - Added a fixture-only CLI at `scripts/skill-scenario.ts`. Guided and no-guidance renderers use the same scenario request/evidence; control input digests make matched inputs replayable. Actor rendering does not load evaluator catalogs. Evaluator rendering preserves a JSON actor trace that violates the output schema while rejecting mismatched scenario identity/version. The script itself makes no model or tool calls.
-- Added three public scenarios and three paired private evaluators to each skill. `npm run skill:scenario -- --list` returns all six stable IDs. The focused harness suite now has 21 passing tests. The previous full verification passed 343 tests before review follow-ups; rerun it with the 8 release-package tests after all changes. No shipped skill text was changed.
+- Added three public scenarios and three paired private evaluators to each skill. `npm run skill:scenario -- --list` returns all six stable IDs. The focused harness suite now has 24 passing tests, including malformed-wrapper rejection and a fixture check that the recovery scenario supplies its routed recovery reference. No shipped skill text was changed.
 
 ## Task 3 baseline results
 
 See [the evidence report](evidence/02-skill-scenario-baseline.md) for scenario-level results and limitations. Guided actors ran in fresh contexts using `gpt-6-sol` at medium reasoning, with no evaluator criteria. The prompts instructed actors not to call tools, but the current route does not expose tool disabling or an independent audit. Traces therefore use `toolUseAudit: "not-captured"`; do not claim that no tools were called. The user accepted this evidence level for dev.3; the immutable tool-use hook and Devin tool-disabled profile they identified are future harness-expansion options, not available methods used here. `simulationOnly: true` describes the controlled input evidence only.
 
-The selected-material v4 fixture conforms to one fixed Choice option set and the current run query contract. Its guided actor preserves respondent-specific paragraphs and no-fit, but proposes unsupported per-selection contexts in one request. The refreshed no-guidance control describes individual per-respondent follow-ups and preserves no-fit. The partial-run v3 fixture now has two answered Q2 rows and a separate failed Q1 sibling; both guided and control actors correctly report complete Q2 evidence while keeping the source partial. The typed-failure v4 rubric includes the exhausted-call recovery boundary. Both guided and control actors report the failure code and meaning without guessing at a cause, but neither rules out resumption after the full call allowance has been used. This is a specific follow-up for later guidance work, not a guidance edit in this baseline plan. Earlier v2/v3 traces remain in the archive.
+The selected-material v5 fixture conforms to one fixed Choice option set and the current run query contract. Both guided and no-guidance actors map respondents to their selected paragraphs and preserve no-fit; neither states that different selected paragraphs require separate requests or identifies per-selection batching as a feature gap. The guided actor also proposes unsupported per-selection contexts in one request. The partial-run v3 fixture has two answered Q2 rows and a separate failed Q1 sibling; both guided and control actors correctly report complete Q2 evidence while keeping the source partial. The typed-failure v5 actor receives the relevant recovery reference, applies the exhausted-call boundary, and proposes a separate bounded run. Its no-guidance control independently reaches the same conclusion from explicit call-count evidence. Earlier invalid or superseded v2-v4 trials remain archived with their limitations recorded. No shipped skill wording changed.
 
 ## Task 4 validation and handoff status
 
-- The focused harness suite passes all 21 tests. `npm run verify` passes lint, typecheck, all 349 tests, and generated-output checks after the review follow-ups.
+- The focused harness suite passes all 24 tests. The latest full staged-snapshot `npm run verify` passed 350 tests before this review-fix batch; rerun the complete gate on the final staged tree. An earlier concurrent full-suite run intermittently hung in a copied-MCP test, while the same test passed alone and the serial full suite passed. Do not count the earlier run as final evidence.
 - Rebuilt candidate ZIP contains 27 files, excludes all skill tests, and has SHA-256 `B03EC58273AF6B0C664D9B8A6043953133608B1045CDED515D143C54B4B69876`.
 - [x] Run `git diff --check`, inspect the complete diff, and confirm no skill guidance, Portfolio content, external provider setting, or live study data changed.
 - [x] Record the exact dev.3 package digest, focus results, actor/evaluator trial settings, positive and failed outcomes, matched controls if any, and known limitations in the plan and evidence report.

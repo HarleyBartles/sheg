@@ -64,6 +64,14 @@ test('no-guidance control prompts preserve the scenario request and evidence wit
   assert.match(controlPrompt.sha256, /^[a-f0-9]{64}$/);
 });
 
+test('typed recovery scenario supplies the routed recovery guidance it asks the actor to apply', () => {
+  const scenario = loadScenarioCatalog().find((candidate) => candidate.id === 'typed-answer-failure')!;
+  const prompt = renderActorPrompt(scenario.id);
+
+  assert.ok(scenario.referencePaths.includes('references/run-and-recovery.md'));
+  assert.ok(prompt.includes('when the original call allowance permits'));
+});
+
 test('scenario CLI emits a reproducible no-guidance control prompt and digest', () => {
   const output = execFileSync(process.execPath, [
     '--import', 'tsx',
@@ -116,10 +124,21 @@ test('evaluator rejects malformed stored wrappers instead of treating them as ra
   }), /Stored trace wrapper is malformed/);
 });
 
+test('evaluator requires a guided actor when replaying a stored wrapper without a control selector', () => {
+  assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {
+    scenarioId: 'typed-answer-failure',
+    scenarioVersion: 5,
+    controls: [{
+      actor: { finalResponse: 'Control output.' },
+      evaluator: { notes: 'PRIVATE_OLD_VERDICT' },
+    }],
+  }), /Stored trace wrapper has no guided actor/);
+});
+
 test('evaluator prompts can select a stored no-guidance control without including the guided actor or prior judgment', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
-    scenarioVersion: 4,
+    scenarioVersion: 5,
     guided: { actor: { scenarioId: 'typed-answer-failure', finalResponse: 'Guided actor.' } },
     controls: [{
       actor: { answer: 'Control actor without a scenario ID.' },
@@ -158,14 +177,14 @@ test('scenario CLI replays a stored no-guidance control by one-based index', () 
 test('evaluator refuses to replay a control whose actor scenario ID conflicts with its wrapper', () => {
   assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', {
     scenarioId: 'selected-material-isolation-no-fit',
-    scenarioVersion: 4,
+    scenarioVersion: 5,
     controls: [{ actor: { scenarioId: 'control_selected_material', finalResponse: 'Wrong identity.' } }],
   }, { controlIndex: 1 }), /Actor trace does not match scenario/);
 });
 
 test('evaluator prompt control selector validates the stored one-based index', () => {
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {
-    scenarioId: 'typed-answer-failure', scenarioVersion: 4, controls: [],
+    scenarioId: 'typed-answer-failure', scenarioVersion: 5, controls: [],
   }, { controlIndex: 1 }), /no control at index 1/);
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {}, { controlIndex: 0 }), /positive one-based integer/);
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', { scenarioId: 'another-scenario', finalResponse: 'Mismatch.' }), /does not match scenario/);
@@ -184,7 +203,7 @@ test('evaluator rejects archived versions of a scenario before selecting an acto
   const tracePath = path.join(process.cwd(), 'skills/stimulus-response-polling/tests/behavior/traces/archive/selected-material-isolation-no-fit-v3.json');
   const trace = JSON.parse(readFileSync(tracePath, 'utf8')) as unknown;
 
-  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', trace), /version 3.*current version 4/);
+  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', trace), /version 3.*current version 5/);
 });
 
 test('evaluator rejects raw actors that declare a stale scenario version', () => {
@@ -192,13 +211,13 @@ test('evaluator rejects raw actors that declare a stale scenario version', () =>
     scenarioId: 'typed-answer-failure',
     scenarioVersion: 2,
     finalResponse: 'Stale actor output.',
-  }), /version 2.*current version 4/);
+  }), /version 2.*current version 5/);
 });
 
 test('evaluator can inspect a JSON trace that violates the actor output schema', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
-    scenarioVersion: 4,
+    scenarioVersion: 5,
     actions: [{ tool: 4 }],
     finalResponse: 'The failure was described.',
   });

@@ -1,7 +1,7 @@
 [
   {
     "id": "selected-material-isolation-no-fit",
-    "version": 4,
+    "version": 5,
     "ownerSkill": "stimulus-response-polling",
     "referencePaths": [
       "references/run-and-recovery.md"
@@ -219,10 +219,11 @@
   },
   {
     "id": "typed-answer-failure",
-    "version": 4,
+    "version": 5,
     "ownerSkill": "stimulus-response-polling",
     "referencePaths": [
-      "references/interpret-results.md"
+      "references/interpret-results.md",
+      "references/run-and-recovery.md"
     ],
     "userRequest": "One respondent's answer failed with invalid_answer. I need the reason and want to recover that response. Explain what happened, whether this run can resume, and what I should do next. Do not assume a specific provider cause.",
     "controlledEvidence": {
