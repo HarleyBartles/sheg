@@ -7,7 +7,7 @@
 **Architecture:** Reuse durable run, query, follow-on and typed question-set contracts. Extend the existing package-level section-three behavior test so one local fixture execution proves the combined workflow; do not add another product primitive or change route semantics. Keep authored source lineage out of provider-visible state. The agent still owns criteria, candidate boundaries, question wording and interpretation.
 
 **Spec:** `.agents/specs/2026-10-01-v0.3.0-epic-spec.md`, especially sections 4-7 and 11-12; full Linear issues SHEG-5, SHEG-6, SHEG-7, SHEG-8 and the linked agreed design.
-**Status:** blocked at Draft PR creation. The branch is pushed and implementation is complete, but the GitHub integration returned 403 `Resource not accessible by integration`; read-only search found no PR. Connector-safety guidance requires stopping rather than retrying through another surface.
+**Status:** completed-awaiting-retirement. Draft PR [#11](https://github.com/HarleyBartles/sheg/pull/11) is open against `develop` and attached to this Codex task. The authenticated `gh` route created it after the GitHub app connector returned 403. Its verified initial head is `7323b3a06fef13e52943e408c64905a335871626`; this plan/roadmap handoff commit will advance that head and will be verified before return.
 
 **Branch boundary:** This is the last feature plan on the approved roadmap. It prepares the requested Draft PR targeting `develop`. It does not change package versions, create `release/0.3.0`, tag, publish, merge, or close active Linear issues before merge. Release preparation is a later authorized Gitflow step.
 
@@ -54,17 +54,13 @@ An agent can identify respondents who left at section three after selecting the 
 - Modify: this plan and `.agents/plans/v0.3.0/roadmap.md`
 - External: open one Draft PR from `codex/v0.3.0-release-spec` to `develop`, then attach its URL to this Codex task.
 
-- [x] Record implementation commit SHAs (`fce1524`, `faabf39`, `e484226`, `7c31b2e`, `83d1c8a`, `b9824f8`), `npm run verify`, `npm run build`, copied-package result, `git diff --check`, base SHA, and environment exception. The pushed documentation head is recorded in Linear and on the remote ref.
-- [x] Re-read the active Linear issues and project. Record the branch, validation and verified Draft PR blocker on SHEG-5, SHEG-6 and SHEG-8; retain SHEG-7 as Done and SHEG-9/10 as Canceled. Do not mark the project completed or close active issues before merge; record the exact post-merge reconciliation boundary.
+- [x] Record implementation commit SHAs (`fce1524`, `faabf39`, `e484226`, `7c31b2e`, `83d1c8a`, `b9824f8`), `npm run verify`, `npm run build`, copied-package result, `git diff --check`, base SHA, and environment exception. The final docs handoff commit and remote head are checked in GitHub before return.
+- [x] Re-read the active Linear issues and project. Record implementation evidence and Draft PR #11 on SHEG-5, SHEG-6 and SHEG-8; retain SHEG-7 as Done and SHEG-9/10 as Canceled. Do not mark the project completed or close active issues before merge; record the exact post-merge reconciliation boundary.
 - [x] Confirm the working tree contains only intentional changes plus the pre-existing untracked design sketch. Stage intended files only and commit through the tracked hook.
-- [x] Push the feature branch to origin. Draft PR creation was attempted through the GitHub connector, returned 403 `Resource not accessible by integration`, and a read-only search found no PR. Do not retry using another surface; connector-safety guidance says to stop after a missing-capability response.
-- [ ] Create and verify the Draft PR targeting `develop`, attach its URL to this Codex task, and mark this plan `completed-awaiting-retirement` after live handoff evidence exists.
+- [x] Push the feature branch and create Draft PR #11 targeting `develop`. Use a reviewable title/body that explains the user-visible end-to-end capability and validation. Link relevant issues without auto-closing them before merge.
+- [x] Attach the PR artifact, verify the PR remains draft and targets `develop`, and keep this plan `completed-awaiting-retirement` through the handoff. Merge and release publication remain separate.
 
-- [ ] Record final commit SHAs, `npm run verify`, `npm run build`, copied-package integration result, `git diff --check`, base SHA, and any environment exception in the plan and roadmap.
-- [ ] Re-read the active Linear issues and project. Add the Draft PR and final implementation evidence to SHEG-5, SHEG-6 and SHEG-8; retain SHEG-7 as Done and SHEG-9/10 as Canceled. Do not mark the project completed or close active issues before merge; record the exact post-merge reconciliation boundary.
-- [ ] Confirm the working tree contains only intentional changes plus the pre-existing untracked design sketch. Stage intended files only and commit through the tracked hook.
-- [ ] Push the feature branch and create a Draft PR targeting `develop`. Use a reviewable title/body that explains the user-visible end-to-end capability and validation. Link relevant issues without auto-closing them before merge.
-- [ ] Attach the PR artifact, verify the remote head and PR draft/base/head state, and mark this plan `completed-awaiting-retirement` only after the handoff evidence is live.
+**Validation and handoff evidence:** `npm run verify` passed 310 tests, lint, typecheck, and generated consistency; `npm run build`, `git diff --check`, and `node --import tsx --test test/package.test.ts` (6 tests) passed. The tracked hook passed 310 tests for commits `b9824f8`, `aca8733`, and `7323b3a`. The branch starts at `origin/develop` SHA `3c5b2f00037634e24b5a4766d37004a699c43d2c`. `gh pr view 11` confirmed title, OPEN state, `isDraft: true`, base `develop`, branch `codex/v0.3.0-release-spec`, and initial head `7323b3a06fef13e52943e408c64905a335871626`. PR #11 is attached to the Codex task. The zero-run pilot SQLite file remains in the OS temporary directory after the local safety layer blocked cleanup; Sheg-level deletion and integrity were verified. The original design sketch remains the only untracked worktree file.
 
 ## Plan boundary
 

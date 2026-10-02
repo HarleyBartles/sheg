@@ -1,6 +1,6 @@
 # Sheg v0.3.0 release roadmap
 
-Status: approved roadmap; Plans 1-6 are implemented on the v0.3.0 feature branch. Plan 7 is the final JIT slice before the requested Draft PR.
+Status: approved roadmap; Plans 1-7 are implemented on the v0.3.0 feature branch. Draft PR #11 is open against `develop`; merge and release preparation remain separate.
 Authority: [approved epic specification](../../specs/2026-10-01-v0.3.0-epic-spec.md).
 Linear: [release project](https://linear.app/harleys-workspace/project/sheg-v030-richer-studies-and-inspectable-evidence-6d11068a2761).
 
@@ -14,9 +14,8 @@ defined in the spec.
 
 ## Consecutive plans
 
-Plans 1-6 are delivered and SHEG-7 is Done. SHEG-6's implementation and bounded
-hosted pilot are complete; the issue remains open for the combined release
-acceptance in Plan 7. Later rows are capability
+Plans 1-7 are delivered and SHEG-7 is Done. SHEG-6's implementation and bounded
+hosted pilot are complete; the issue remains open through PR #11 merge. Later rows are capability
 boundaries, not implementation plans. Write
 each next plan against the delivered code and evidence of its predecessor. A
 Linear issue may span more than one plan.
@@ -29,7 +28,7 @@ Linear issue may span more than one plan.
 | 4 | Query recorded evidence and compose reusable follow-ons | completed-awaiting-retirement | [Plan 4](04-query-and-follow-on-reuse.md) | `e6eabe4`, `11495cc`, `9277057`, `1203e93` (`745094e..1203e93`) | - | - | SHEG-7 query and follow-on accepted and closed Done; exact typed criteria/references, four context modes, SQLite snapshot revalidation, retained lineage after source deletion, MCP `run_query`, and packaged section-three acceptance; full staged gate passed 279 tests, lint, typecheck, and generated consistency. User guidance explains relevance and incomplete-source decisions |
 | 5 | Ask independent typed question groups at new or recorded contexts | completed-awaiting-retirement | [Plan 5](05-independent-question-groups.md) | `8915f51`, `a4e9675`, `4ef8d09` (`1046419..4ef8d09`) | - | - | SHEG-6 implementation and authorized OpenRouter pilot delivered: one physical call returned separate Choice/Score/Noul answers under `maxCalls: 1`, with shared context; deletion and isolated-store integrity verified. Offline full gate passed 299 tests, lint, typecheck and generated consistency. SHEG-6 remains open for full release acceptance. |
 | 6 | Offer source-linked material choices and reuse their exact evidence | completed-awaiting-retirement | [Plan 6](06-source-linked-material-choices.md) | `fce1524`, `faabf39`, `e484226`, `7c31b2e`, `83d1c8a` (`0416cb5..83d1c8a`) | - | - | SHEG-8; exact authored Choice links, source and computed text digests, selection query projection, retained follow-on lineage, and provider-state privacy. Focused set: 96 tests. Final one-attempt OpenRouter confirmation selected `candidate-setup`, with exact text/source match and no provider-state provenance; source deletion/integrity yielded zero runs. `npm run verify`: 310 tests, lint, typecheck, generated consistency. The empty OS-temp SQLite file remains after safety-blocked cleanup. |
-| 7 | Integrate the release workflow and packaged agent guidance | blocked | [Plan 7](07-release-integration-and-draft-pr.md) | `b9824f8` plus planning evidence | - | - | Section-three acceptance and Linear evidence are complete; branch pushed. Draft PR creation connector returned 403 `Resource not accessible by integration`; no PR exists. Stop per connector-safety guidance. |
+| 7 | Integrate the release workflow and packaged agent guidance | completed-awaiting-retirement | [Plan 7](07-release-integration-and-draft-pr.md) | `b9824f8` plus handoff docs | [Draft PR #11](https://github.com/HarleyBartles/sheg/pull/11) | - | Section-three package acceptance passed; five mixed independent questions use one selected respondent context with history omitted; retained evidence survives source deletion. PR #11 is open Draft against `develop`; merge and release preparation remain separate. |
 
 Commit and PR columns record delivered implementation evidence, not this roadmap's
 own commit. Ratings are intentionally not persisted: the handoff-gates skill
@@ -185,15 +184,13 @@ tests; `npm run verify` passed 310 tests, lint, typecheck and generated consiste
 the OS temporary directory after safety-blocked filesystem cleanup; Sheg-level
 deletion and zero-run integrity checks succeeded.
 
-The user-authorized branch push succeeded at
-`aca87338e4ea3c89a83e888156134c9db6264569`. Draft PR creation returned GitHub API
-403 `Resource not accessible by integration`; a read-only PR search found no
-open PR. Connector-safety guidance requires stopping rather than retrying the
-same mutation through another surface. The PR form is
-https://github.com/HarleyBartles/sheg/pull/new/codex/v0.3.0-release-spec . Linear
-comments on the project and active SHEG-5, SHEG-6 and SHEG-8 record this state.
-Those issues remain In Progress, SHEG-7 remains Done, and SHEG-9/SHEG-10 remain
-Canceled.
+Draft PR #11 was created through the authenticated GitHub CLI after the
+GitHub app connector returned 403 `Resource not accessible by integration`. The
+PR is Draft, targets `develop`, and its initial head was `7323b3a`; the final
+plan/roadmap update advances it. PR #11 is attached to this Codex task. Linear
+comments on the project and active SHEG-5, SHEG-6 and SHEG-8 record the PR and
+final branch head. Those issues remain In Progress, SHEG-7 remains Done, and
+SHEG-9/SHEG-10 remain Canceled. Merge and release preparation remain separate.
 
 ## Planning and evidence rules
 
