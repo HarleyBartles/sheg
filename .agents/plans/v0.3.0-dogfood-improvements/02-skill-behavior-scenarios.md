@@ -126,7 +126,7 @@ The selected-material v5 fixture conforms to one fixed Choice option set and the
 
 ## Task 4 validation and handoff status
 
-- The focused harness suite passes all 24 tests. The latest full staged-snapshot `npm run verify` passed 350 tests before this review-fix batch; rerun the complete gate on the final staged tree. An earlier concurrent full-suite run intermittently hung in a copied-MCP test, while the same test passed alone and the serial full suite passed. Do not count the earlier run as final evidence.
+- The focused harness suite passes all 24 tests. The final staged-snapshot pre-commit gate passed lint, typecheck, all 352 tests, and generated-output validation. Earlier concurrent full-suite attempts intermittently hung in a copied-MCP test; the final clean staged run passed all tests.
 - Rebuilt candidate ZIP contains 27 files, excludes all skill tests, and has SHA-256 `B03EC58273AF6B0C664D9B8A6043953133608B1045CDED515D143C54B4B69876`.
 - [x] Run `git diff --check`, inspect the complete diff, and confirm no skill guidance, Portfolio content, external provider setting, or live study data changed.
 - [x] Record the exact dev.3 package digest, focus results, actor/evaluator trial settings, positive and failed outcomes, matched controls if any, and known limitations in the plan and evidence report.
