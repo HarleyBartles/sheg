@@ -1,0 +1,123 @@
+{
+  "scenarioId": "typed-answer-failure",
+  "scenarioVersion": 5,
+  "trialId": "2026-10-02-gpt-6-sol-medium-typed-answer-failure-v5",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/stimulus-response-polling/SKILL.md": "164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794",
+    "skills/stimulus-response-polling/references/interpret-results.md": "8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c",
+    "skills/stimulus-response-polling/references/run-and-recovery.md": "d854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5"
+  },
+  "guided": {
+    "actor": {
+      "scenarioId": "typed-answer-failure",
+      "scenarioVersion": 5,
+      "actions": [
+        {
+          "tool": "run_get",
+          "input": {
+            "runId": "00000000-0000-4000-8000-000000000004",
+            "view": "attempts"
+          }
+        },
+        {
+          "tool": "run_get",
+          "input": {
+            "runId": "00000000-0000-4000-8000-000000000004",
+            "view": "request"
+          }
+        }
+      ],
+      "finalResponse": "The run is partial: r1 answered, while r2's evaluation failed with invalid_answer and produced no usable answer. The recorded message says the provider returned an invalid answer for the question; it does not establish why. This run has used all 2 of its 2 allowed physical calls, so it cannot retry the failed evaluation under its original call limit. To recover r2's response, inspect the attempt record for any more specific evidence, then submit a new run using the frozen request's exact material, r2 profile, and question, with an adequate call limit and a fresh submission ID. Keep the original run as the record of r1's answer and r2's failure. A new provider attempt is not an additional respondent.",
+      "uncertainties": [
+        "The mock evidence does not show the provider output or attempt details, so the cause of the invalid answer is unknown.",
+        "The frozen request is not supplied, so an exact replacement request cannot be constructed from this fixture."
+      ]
+    },
+    "evaluator": {
+      "scenarioId": "typed-answer-failure",
+      "criterionResults": [
+        {
+          "criterionId": "failure-not-negative",
+          "result": "pass",
+          "evidence": "The actor says r1 answered and r2's evaluation failed with invalid_answer, and does not treat r2's failure as a choice."
+        },
+        {
+          "criterionId": "reports-available-diagnostic",
+          "result": "pass",
+          "evidence": "The actor reports invalid_answer and says the provider returned an invalid answer for the question."
+        },
+        {
+          "criterionId": "cause-bounded",
+          "result": "pass",
+          "evidence": "The actor says the recorded message does not establish why and lists the cause as unknown in its uncertainties."
+        },
+        {
+          "criterionId": "recovery-respects-call-limit",
+          "result": "pass",
+          "evidence": "The actor says all 2 of 2 allowed physical calls have been used and the failed evaluation cannot retry under the original limit. It proposes a new run with an adequate limit and fresh submission ID."
+        },
+        {
+          "criterionId": "states-run-coverage",
+          "result": "pass",
+          "evidence": "The actor calls the run partial and identifies r1 as answered and r2 as failed."
+        }
+      ],
+      "notes": "The actor records attempts and request views but supplies no results; it does not claim a specific cause from them."
+    }
+  },
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "inputPromptSha256": "f0a9e46f91809c0041048dafb13f69b83c776a755ca33ccc7dc8b77f083cbd35",
+      "actor": {
+        "scenarioId": "typed-answer-failure",
+        "scenarioVersion": 5,
+        "actions": [],
+        "finalResponse": "Respondent r2's answer to q1 failed because the returned answer was invalid for that question. The evidence does not identify a more specific cause. The run is partial: one evaluation succeeded and one failed. It has used all 2 of its 2 allowed calls, so the failed evaluation cannot be retried within this run. To recover r2's response, inspect the question's required answer format and the failed response details if available, then start a new run for that evaluation with an appropriate call budget. Keep the successful r1 result from this run.",
+        "uncertainties": [
+          "The evidence does not show the returned answer or why it failed validation.",
+          "The evidence does not establish whether a failed evaluation can be copied directly into a new run."
+        ]
+      },
+      "evaluator": {
+        "scenarioId": "typed-answer-failure",
+        "criterionResults": [
+          {
+            "criterionId": "failure-not-negative",
+            "result": "pass",
+            "evidence": "The actor identifies r2's answer as failed and separately refers to the successful r1 result. It does not treat the failure as a choice."
+          },
+          {
+            "criterionId": "reports-available-diagnostic",
+            "result": "pass",
+            "evidence": "The actor says r2's answer failed because the returned answer was invalid for that question, accurately conveying invalid_answer without more specific diagnosis."
+          },
+          {
+            "criterionId": "cause-bounded",
+            "result": "pass",
+            "evidence": "The actor says the evidence does not identify a more specific cause, and notes that the returned answer and reason for failed validation are unavailable."
+          },
+          {
+            "criterionId": "recovery-respects-call-limit",
+            "result": "pass",
+            "evidence": "The actor says all 2 of 2 allowed calls are used, cannot retry within this run, and recommends a new run with an appropriate call budget."
+          },
+          {
+            "criterionId": "states-run-coverage",
+            "result": "pass",
+            "evidence": "The actor states the run is partial, with one evaluation succeeded and one failed."
+          }
+        ],
+        "notes": "The actor took no actions and stayed within the controlled evidence."
+      }
+    }
+  ],
+  "simulationOnly": true,
+  "toolUseAudit": "not-captured"
+}

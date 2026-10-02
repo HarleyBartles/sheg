@@ -1,0 +1,280 @@
+[
+  {
+    "id": "selected-material-isolation-no-fit",
+    "version": 5,
+    "ownerSkill": "stimulus-response-polling",
+    "referencePaths": [
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent the paragraph they picked by itself and ask whether it expresses the pull quote. Some may choose no fit. Tell me how to do that and what happens to those respondents.",
+    "controlledEvidence": {
+      "pullQuote": "A city is a promise people keep making to each other.",
+      "queryResult": {
+        "items": [
+          {
+            "questionId": "q-pull-quote",
+            "status": "answered",
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            },
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000101",
+            "contextId": "00000000-0000-4000-8000-000000000201",
+            "respondentId": "r1",
+            "result": {
+              "type": "choice",
+              "choice": "p2",
+              "probabilities": {
+                "p2": 1,
+                "p5": 0,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p2",
+              "text": "Exact paragraph two.",
+              "sourceId": "paragraph-source",
+              "sourceSha256": "618b19dbef61b34f147530b8b6fadd678c76504989154ccab9f566b0936aa16c",
+              "textSha256": "618b19dbef61b34f147530b8b6fadd678c76504989154ccab9f566b0936aa16c"
+            }
+          },
+          {
+            "questionId": "q-pull-quote",
+            "status": "answered",
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            },
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000102",
+            "contextId": "00000000-0000-4000-8000-000000000202",
+            "respondentId": "r2",
+            "result": {
+              "type": "choice",
+              "choice": "no-fit",
+              "probabilities": {
+                "p2": 0,
+                "p5": 0,
+                "no-fit": 1
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            }
+          },
+          {
+            "questionId": "q-pull-quote",
+            "status": "answered",
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            },
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000103",
+            "contextId": "00000000-0000-4000-8000-000000000203",
+            "respondentId": "r3",
+            "result": {
+              "type": "choice",
+              "choice": "p5",
+              "probabilities": {
+                "p2": 0,
+                "p5": 1,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p5",
+              "text": "Exact paragraph five.",
+              "sourceId": "paragraph-source",
+              "sourceSha256": "0c3b47d4ba5d9934a4761fd067f2068ed8b78d05ccedd36870e33985cd45b03b",
+              "textSha256": "0c3b47d4ba5d9934a4761fd067f2068ed8b78d05ccedd36870e33985cd45b03b"
+            }
+          }
+        ],
+        "totalMatches": 3,
+        "sourceRunId": "00000000-0000-4000-8000-000000000017",
+        "sourceStatus": "completed",
+        "sourceComplete": true,
+        "coverage": {
+          "totalEvaluations": 3,
+          "completedEvaluations": 3,
+          "failedEvaluations": 0,
+          "respondents": {
+            "total": 3,
+            "active": 0,
+            "completed": 3,
+            "failed": 0,
+            "unreached": 0
+          }
+        }
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "partial-run-selected-question",
+    "version": 3,
+    "ownerSkill": "stimulus-response-polling",
+    "referencePaths": [
+      "references/interpret-results.md",
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "The run is partial because one Q1 evaluation failed, but both respondents have Q2 answers. I only need Q2: report every Q2 choice and tell me whether the Q2 evidence is complete even though the overall run is partial.",
+    "controlledEvidence": {
+      "queryResult": {
+        "items": [
+          {
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000111",
+            "contextId": "00000000-0000-4000-8000-000000000201",
+            "respondentId": "r1",
+            "questionId": "Q2",
+            "status": "answered",
+            "result": {
+              "type": "choice",
+              "choice": "A",
+              "probabilities": { "A": 1, "B": 0 },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            }
+          },
+          {
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000112",
+            "contextId": "00000000-0000-4000-8000-000000000202",
+            "respondentId": "r2",
+            "questionId": "Q2",
+            "status": "answered",
+            "result": {
+              "type": "choice",
+              "choice": "B",
+              "probabilities": { "A": 0, "B": 1 },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-2"
+            }
+          }
+        ],
+        "totalMatches": 2,
+        "sourceRunId": "00000000-0000-4000-8000-000000000017",
+        "sourceStatus": "partial",
+        "sourceComplete": false,
+        "coverage": {
+          "totalEvaluations": 3,
+          "completedEvaluations": 2,
+          "failedEvaluations": 1,
+          "respondents": {
+            "total": 2,
+            "active": 1,
+            "completed": 1,
+            "failed": 0,
+            "unreached": 0
+          }
+        }
+      },
+      "siblingFailure": {
+        "respondentId": "r1",
+        "questionId": "Q1",
+        "status": "failed",
+        "failureCode": "invalid_answer"
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "typed-answer-failure",
+    "version": 5,
+    "ownerSkill": "stimulus-response-polling",
+    "referencePaths": [
+      "references/interpret-results.md",
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "One respondent's answer failed with invalid_answer. I need the reason and want to recover that response. Explain what happened, whether this run can resume, and what I should do next. Do not assume a specific provider cause.",
+    "controlledEvidence": {
+      "statusView": {
+        "runId": "00000000-0000-4000-8000-000000000004",
+        "status": "partial",
+        "createdAt": "2026-10-02T10:00:00.000Z",
+        "completedEvaluations": 1,
+        "failedEvaluations": 1,
+        "totalEvaluations": 2,
+        "usedCalls": 2,
+        "reservedCalls": 0,
+        "maxCalls": 2,
+        "cancelRequested": false
+      },
+      "answersView": {
+        "items": [
+          {
+            "evaluationId": "00000000-0000-4000-8000-000000000401",
+            "contextId": "00000000-0000-4000-8000-000000000501",
+            "respondentId": "r1",
+            "questionId": "q1",
+            "status": "answered",
+            "result": {
+              "type": "choice",
+              "choice": "yes",
+              "probabilities": {
+                "yes": 1,
+                "no": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 16,
+              "usage": {}
+            }
+          },
+          {
+            "evaluationId": "00000000-0000-4000-8000-000000000402",
+            "contextId": "00000000-0000-4000-8000-000000000502",
+            "respondentId": "r2",
+            "questionId": "q1",
+            "status": "failed",
+            "failure": {
+              "code": "invalid_answer",
+              "message": "The provider returned an invalid answer for this question."
+            }
+          }
+        ]
+      },
+      "mockOnly": true
+    }
+  }
+]

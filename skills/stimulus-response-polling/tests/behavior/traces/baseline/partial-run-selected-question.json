@@ -1,0 +1,82 @@
+{
+  "scenarioId": "partial-run-selected-question",
+  "scenarioVersion": 3,
+  "trialId": "2026-10-02-gpt-6-sol-medium-partial-run-selected-question-v3",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/stimulus-response-polling/SKILL.md": "164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794",
+    "skills/stimulus-response-polling/references/interpret-results.md": "8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c",
+    "skills/stimulus-response-polling/references/run-and-recovery.md": "d854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5"
+  },
+  "guided": {
+    "actor": {
+      "scenarioId": "partial-run-selected-question",
+      "scenarioVersion": 3,
+      "actions": [],
+      "finalResponse": "Q2 choices: r1 selected A; r2 selected B. Both respondents have Q2 answers, so the Q2 evidence is complete for this run. The overall run remains partial: 2 of 3 evaluations completed and 1 failed, on r1's Q1 evaluation (invalid_answer).",
+      "uncertainties": []
+    },
+    "evaluator": {
+      "scenarioId": "partial-run-selected-question",
+      "criterionResults": [
+        {
+          "criterionId": "selected-question-complete",
+          "result": "pass",
+          "evidence": "The final response reports r1 selected A and r2 selected B and says both have Q2 answers."
+        },
+        {
+          "criterionId": "source-remains-partial",
+          "result": "pass",
+          "evidence": "The final response says the overall run remains partial with 2 of 3 evaluations completed and 1 failed."
+        },
+        {
+          "criterionId": "separates-sibling-failure",
+          "result": "pass",
+          "evidence": "It identifies the invalid_answer failure as r1's Q1 evaluation, separate from the Q2 choices."
+        }
+      ],
+      "notes": "A fresh evaluator found the selected Q2 evidence complete while preserving the separate partial source status."
+    }
+  },
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "inputPromptSha256": "9ccc9b333f88fdef39b499f403cbba072bf5853df3ddfa2386c8f4b796c44bf9",
+      "actor": {
+        "scenarioId": "partial-run-selected-question",
+        "scenarioVersion": 3,
+        "actions": [],
+        "finalResponse": "Q2 choices: r1 chose A; r2 chose B. The Q2 evidence is complete for both respondents. The overall run is still partial because r1's Q1 evaluation failed.",
+        "uncertainties": []
+      },
+      "evaluator": {
+        "scenarioId": "partial-run-selected-question",
+        "criterionResults": [
+          {
+            "criterionId": "selected-question-complete",
+            "result": "pass",
+            "evidence": "The final response maps r1 to A and r2 to B and scopes complete coverage to both Q2 respondents."
+          },
+          {
+            "criterionId": "source-remains-partial",
+            "result": "pass",
+            "evidence": "It says the overall run is still partial because r1's Q1 evaluation failed."
+          },
+          {
+            "criterionId": "separates-sibling-failure",
+            "result": "pass",
+            "evidence": "It identifies the failure as r1's Q1 evaluation, distinct from the Q2 choices."
+          }
+        ],
+        "notes": "A fresh evaluator found the control scoped completeness to Q2 and retained the overall partial status."
+      }
+    }
+  ],
+  "simulationOnly": true,
+  "toolUseAudit": "not-captured"
+}

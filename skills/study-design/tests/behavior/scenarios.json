@@ -1,0 +1,38 @@
+[
+  {
+    "id": "sequence-versus-linear-graph",
+    "version": 2,
+    "ownerSkill": "study-design",
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "I want readers to see paragraph A, then B, then C, with a question after each. Does a sequence mean each question remembers earlier answers, or is it just a straight graph? Please recommend a design that makes the history expectation explicit.",
+    "controlledEvidence": {
+      "materials": ["Paragraph A", "Paragraph B", "Paragraph C"],
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "independent-dependent-questions",
+    "version": 2,
+    "ownerSkill": "study-design",
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "Ask readers which of these seven paragraphs best represents my pull quote. Then, based on the paragraph they picked, ask whether that paragraph expresses the pull quote when read by itself.",
+    "controlledEvidence": {
+      "pullQuote": "A city is a promise people keep making to each other.",
+      "paragraphs": ["p1", "p2", "p3", "p4", "p5", "p6", "p7"],
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "changed-rubric-comparison",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "Compare whether this revised introduction is clearer than the old one. We ran one cohort on the old clarity rubric and a later run on a new clarity rubric. Can you interpret which version won?",
+    "controlledEvidence": {
+      "oldRun": {"question": "How engaging is the opening?", "rubric": ["low", "medium", "high"], "answers": {"low": 2, "medium": 3, "high": 5}},
+      "newRun": {"question": "How clear is the opening?", "rubric": ["unclear", "mostly clear", "very clear"], "answers": {"unclear": 1, "mostly clear": 4, "very clear": 5}},
+      "cohort": "same profile labels, separate simulated runs",
+      "mockOnly": true
+    }
+  }
+]

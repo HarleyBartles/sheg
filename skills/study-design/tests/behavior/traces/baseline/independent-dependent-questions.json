@@ -1,0 +1,103 @@
+{
+  "scenarioId": "independent-dependent-questions",
+  "scenarioVersion": 2,
+  "trialId": "2026-10-02-gpt-6-sol-medium-independent-dependent-questions-v2",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/study-design/SKILL.md": "d9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59",
+    "skills/study-design/references/primitives-and-tools.md": "5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552"
+  },
+  "guided": {
+    "actor": {
+      "scenarioId": "independent-dependent-questions",
+      "scenarioVersion": 2,
+      "actions": [],
+      "finalResponse": "I’d ask readers to choose the paragraph that best represents the pull quote, then ask each reader whether their chosen paragraph expresses it when read by itself. The second question depends on the first answer, so I would use the recorded selection to show only that paragraph and the pull quote in a fresh context, without the earlier choices or answer history. Please provide the exact text of all seven paragraphs; the supplied p1–p7 labels do not contain their wording. I can then present the respondent perspectives and call limit for your approval before a run.",
+      "uncertainties": [
+        "The seven paragraph texts and their source identities are missing.",
+        "Respondent perspectives and the provider have not been selected."
+      ]
+    },
+    "evaluator": {
+      "scenarioId": "independent-dependent-questions",
+      "criterionResults": [
+        {
+          "criterionId": "separates-dependency",
+          "result": "pass",
+          "evidence": "The actor says the second question depends on the first answer and calls for a recorded selection."
+        },
+        {
+          "criterionId": "uses-selected-paragraph",
+          "result": "pass",
+          "evidence": "The actor says the recorded selection should show only that paragraph and the pull quote in a fresh context without earlier answers."
+        },
+        {
+          "criterionId": "no-fit-is-honest",
+          "result": "fail",
+          "evidence": "The actor response does not offer a no-fit or unanswerable path."
+        }
+      ],
+      "notes": "A matched no-guidance control also omitted no-fit. This single case does not isolate a guidance-specific failure."
+    }
+  },
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "inputPromptSha256": "ba23b102040dfade07656d5118e3095c22f354b2bc0a744f48c589ae3d067655",
+      "actor": {
+        "scenarioId": "independent-dependent-questions",
+        "scenarioVersion": 2,
+        "actions": [
+          {
+            "tool": "ask_readers",
+            "input": {
+              "question": "Which of these seven paragraphs best represents the pull quote: “A city is a promise people keep making to each other.”",
+              "responseType": "choice",
+              "options": ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
+            }
+          },
+          {
+            "tool": "ask_readers",
+            "input": {
+              "question": "Does the paragraph you selected express the pull quote when read by itself?",
+              "responseType": "choice",
+              "options": ["Yes", "No"],
+              "dependsOn": "answer to the paragraph selection question",
+              "paragraph": "the paragraph selected by the reader"
+            }
+          }
+        ],
+        "finalResponse": "I would ask readers to choose the paragraph that best represents the pull quote, then ask whether their selected paragraph expresses it when read by itself.",
+        "uncertainties": []
+      },
+      "evaluator": {
+        "scenarioId": "independent-dependent-questions",
+        "criterionResults": [
+          {
+            "criterionId": "separates-dependency",
+            "result": "pass",
+            "evidence": "The second ask_readers action depends on the paragraph-selection answer."
+          },
+          {
+            "criterionId": "uses-selected-paragraph",
+            "result": "pass",
+            "evidence": "The follow-up asks whether the paragraph selected by the reader expresses the pull quote by itself."
+          },
+          {
+            "criterionId": "no-fit-is-honest",
+            "result": "fail",
+            "evidence": "The first action offers p1 through p7 and includes no no-fit or unanswerable choice."
+          }
+        ],
+        "notes": "A fresh evaluator found a dependent follow-up but no path for a respondent who cannot select a paragraph."
+      }
+    }
+  ],
+  "simulationOnly": true,
+  "toolUseAudit": "not-captured"
+}

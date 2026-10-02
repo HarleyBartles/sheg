@@ -1,0 +1,126 @@
+{
+  "scenarioId": "selected-material-isolation-no-fit",
+  "scenarioVersion": 3,
+  "trialId": "2026-10-02-gpt-6-sol-medium-selected-material-isolation-no-fit-v3",
+  "mode": "guided",
+  "model": "gpt-6-sol",
+  "reasoning": "medium",
+  "skillReferenceHashes": {
+    "skills/stimulus-response-polling/SKILL.md": "164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794",
+    "skills/stimulus-response-polling/references/run-and-recovery.md": "d854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5"
+  },
+  "guided": {
+    "actor": {
+      "scenarioId": "selected-material-isolation-no-fit",
+      "scenarioVersion": 3,
+      "actions": [
+        {
+          "tool": "run_inspect",
+          "input": {
+            "proposedFollowOns": [
+              {
+                "sourceRunId": "00000000-0000-4000-8000-000000000017",
+                "selection": [
+                  {
+                    "evaluationId": "00000000-0000-4000-8000-000000000101",
+                    "contextId": "00000000-0000-4000-8000-000000000201"
+                  }
+                ],
+                "context": {
+                  "mode": "omit-history",
+                  "materialIds": [
+                    "p2"
+                  ]
+                },
+                "question": {
+                  "type": "choice",
+                  "prompt": "Does this paragraph express the pull quote, “A city is a promise people keep making to each other”?",
+                  "options": [
+                    "expresses",
+                    "no-fit"
+                  ]
+                },
+                "provider": "laya",
+                "maxCalls": 1
+              },
+              {
+                "sourceRunId": "00000000-0000-4000-8000-000000000017",
+                "selection": [
+                  {
+                    "evaluationId": "00000000-0000-4000-8000-000000000103",
+                    "contextId": "00000000-0000-4000-8000-000000000203"
+                  }
+                ],
+                "context": {
+                  "mode": "omit-history",
+                  "materialIds": [
+                    "p5"
+                  ]
+                },
+                "question": {
+                  "type": "choice",
+                  "prompt": "Does this paragraph express the pull quote, “A city is a promise people keep making to each other”?",
+                  "options": [
+                    "expresses",
+                    "no-fit"
+                  ]
+                },
+                "provider": "laya",
+                "maxCalls": 1
+              }
+            ]
+          }
+        },
+        {
+          "tool": "run_start",
+          "input": {
+            "condition": "Only after each exact follow-on request passes inspection.",
+            "requests": "Start the two inspected follow-ons with distinct fresh submission IDs, then retain their run IDs."
+          }
+        }
+      ],
+      "finalResponse": "The completed source run has three respondents. r1 selected p2 (“Exact paragraph two.”) and r3 selected p5 (“Exact paragraph five.”). I would ask each a separate Choice question using only that respondent’s selected paragraph and the pull quote, with “expresses” and “no fit” as answers. The omit-history context keeps their saved respondent perspective while removing earlier material exposure and answer history. r2 chose no fit in the original selection, so r2 has no selected paragraph to receive and is excluded from this follow-on. If r1 or r3 chooses no fit in the follow-on, that answer remains a recorded result for that respondent; it does not create a paragraph selection or remove them from the results. I would inspect the two exact requests, start them if valid, and report their recorded answers and completion counts. No follow-on has been run in this scenario.",
+      "uncertainties": [
+        "The mock evidence cannot establish how r1 or r3 will answer the follow-on.",
+        "Fit and execution have not been checked; the proposed tool actions were not called."
+      ]
+    },
+    "evaluator": {
+      "scenarioId": "selected-material-isolation-no-fit",
+      "criterionResults": [
+        { "criterionId": "per-respondent-selection", "result": "pass", "evidence": "The response identifies r1's p2 and r3's p5 and proposes a separate follow-on for each respondent using only that respondent's selected paragraph." },
+        { "criterionId": "honest-current-limit", "result": "fail", "evidence": "Although it proposes a follow-on per respondent, it does not label the per-match feature gap or give a valid current workaround; it proposes unsupported batch-shaped inputs." },
+        { "criterionId": "preserves-no-fit", "result": "pass", "evidence": "It explicitly reports that r2 chose no fit and has no selected paragraph for the follow-on." },
+        { "criterionId": "valid-proposed-actions", "result": "fail", "evidence": "The proposed run_inspect input uses proposedFollowOns, but the current contract requires a single request field. The run_start input uses requests as a string and omits submissionId and request; the current contract requires submissionId and one request." }
+      ],
+      "notes": "A prior evaluator passed honest-current-limit by focusing on the absence of an explicit automatic-expansion claim. A fresh evaluator applied the criterion's full requirement for a current workaround or clear gap label and failed it. Retain the stricter reading because the proposed executable actions are batch-shaped and unsupported."
+    }
+  },
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "actor": {
+        "scenarioId": "selected-material-isolation-no-fit",
+        "scenarioVersion": 3,
+        "actions": [],
+        "finalResponse": "I can set up a follow-on from completed run 00000000-0000-4000-8000-000000000017, giving each respondent who selected a paragraph only their exact selected paragraph, then asking whether it expresses the pull quote: ‘A city is a promise people keep making to each other.’ r1 would receive ‘Exact paragraph two.’ and r3 would receive ‘Exact paragraph five.’ r2 chose no fit, so there is no selected paragraph to show them; they would not be included in this selected-paragraph follow-on. No follow-on has been run yet, so no responses or outcomes are available.",
+        "uncertainties": []
+      },
+      "evaluator": {
+        "scenarioId": "selected-material-isolation-no-fit",
+        "criterionResults": [
+          { "criterionId": "per-respondent-selection", "result": "pass", "evidence": "It names r1's exact paragraph two and r3's exact paragraph five, and describes giving each selecting respondent only their own text." },
+          { "criterionId": "honest-current-limit", "result": "fail", "evidence": "It claims it can set up per-respondent follow-ons without evidence of current runtime support, and does not state the feature gap or a verified workaround." },
+          { "criterionId": "preserves-no-fit", "result": "pass", "evidence": "It says r2 receives no selected-paragraph follow-on and retains r2's original no-fit answer." },
+          { "criterionId": "valid-proposed-actions", "result": "pass", "evidence": "The actor's actions array is empty, so it does not present any executable tool inputs or invent batch fields." }
+        ],
+        "notes": "No follow-on is claimed to have run, and the actor does not mention evaluation/context handles or submission IDs. This fresh no-guidance actor was evaluated separately against the current criteria."
+      }
+    }
+  ],
+  "simulationOnly": true,
+  "toolUseAudit": "not-captured"
+}

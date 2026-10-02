@@ -1,12 +1,13 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plan 1 implementation committed; PR and merge pending. Authority: [agreed scope](../../specs/2026-10-02-v0.3.0-dogfood-improvements.md). The next develop merge advertises `0.3.0-dev.2`; no release tag or publication is authorized.
+Status: Plan 1 merged; Plan 2 implementation and baseline campaign are complete, with validation and review handoff in progress. Authority: [agreed scope](../../specs/2026-10-02-v0.3.0-dogfood-improvements.md). Plan 1 delivered `0.3.0-dev.2`; Plan 2 targets `0.3.0-dev.3`. No release tag or publication is authorized.
 
 ## Workspace and base
 
-- Worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-dogfood-improvements`.
-- Branch: `codex/v0.3.0-dogfood-improvements`, based on `origin/develop` at `ad1f20bbe324f6858574c4c54be989faf77a3f4d`.
-- Initial linked-worktree status: clean. Baseline `npm test`: 323 tests passed, zero failed, zero skipped.
+- Current worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-skill-scenarios`.
+- Current branch: `codex/v0.3.0-skill-scenarios`, based on `origin/develop` at Plan 1 merge `7e2943bf1daec403ae5e56e7166eb68f9d868474`.
+- Plan 2 initial linked-worktree status: clean. Baseline `npm test`: 327 tests passed, zero failed, zero skipped.
+- Plan 1 merged as PR #12 at `7e2943bf1daec403ae5e56e7166eb68f9d868474`; its prior linked worktree and local branch were removed after exact PR/head/develop verification.
 - Shared root exception: `Z:/sheg` is configured `core.bare=true`, with an existing staged snapshot. Its main ref equals fetched `origin/main` at `9bc6a961313ce38e3614dc238a708599e7637d50`. The bundled worktree script created the canonical worktree without changing that configuration or staged snapshot. Fresh develop was fetched explicitly because the remote fetch configuration only tracks main by default.
 - Planning and implementation guidance: `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
 
@@ -20,8 +21,8 @@ Write each next executable plan against the delivered code of its predecessor. L
 
 | # | Title | Status | Plan file | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Align development identity and candidate packaging | PR #12 open; checks pending | [Plan 1](01-development-version-and-packaging.md) | `1b47095478ef` | [#12](https://github.com/HarleyBartles/sheg/pull/12) | - | Merge version `0.3.0-dev.2`. All manifests and MCP advertise it; local candidates package without tags; stable publication protections remain intact |
-| 2 | Establish skill behavior scenarios and baseline | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.3`. Skill-owned scenarios, controlled tools, blinded actor/evaluator boundary, current-guidance traces and repeatable campaign procedure |
+| 1 | Align development identity and candidate packaging | merged | [Plan 1](01-development-version-and-packaging.md) | `7e2943bf1dae` | [#12](https://github.com/HarleyBartles/sheg/pull/12) | - | Merged to `develop` as `0.3.0-dev.2`. Candidate ZIP identity and stable publication protections verified |
+| 2 | Establish skill behavior scenarios and baseline | validation/review | [Plan 2](02-skill-behavior-scenarios.md) | `85936e0e8424` | [#13](https://github.com/HarleyBartles/sheg/pull/13) | - | Target `0.3.0-dev.3`. Six skill-owned scenarios, private evaluator boundary, fresh-agent baseline and matched controls recorded; `npm run verify` passes |
 | 3 | Unify journey context across sequence and graph | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.4`. One graph execution model, cumulative exposed material, separate answer-history choice, identical preview/fit/runtime packets and protected frozen evidence |
 | 4 | Follow each selected stimulus in one run | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.5`. Per-source-answer material mapping, optional shared stimulus, no-fit coverage, exact provenance, race protection and deletion-independent recall |
 | 5 | Expose precise failure and lifecycle evidence | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.6`. Safe structured validation reasons, consistent execution/coverage/recovery, selected-question coverage and captured query-state semantics |

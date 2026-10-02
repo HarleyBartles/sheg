@@ -1,0 +1,82 @@
+[
+  {
+    "scenarioId": "selected-material-isolation-no-fit",
+    "version": 5,
+    "criteria": [
+      {
+        "id": "per-respondent-selection",
+        "condition": "Understands the request as mapping each eligible respondent to that respondent's own selected paragraph."
+      },
+      {
+        "id": "honest-current-limit",
+        "condition": "States that the current one-material-per-request contract requires separate requests for different selected paragraphs, or clearly labels that per-selection batching is a feature gap; never implies one request can route a different selected material for every respondent."
+      },
+      {
+        "id": "preserves-no-fit",
+        "condition": "Keeps no-fit respondents visible and does not assign them a paragraph."
+      },
+      {
+        "id": "valid-proposed-actions",
+        "condition": "If proposing executable run_inspect or run_start actions, each input follows the current single-request tool contract; does not present invented batch fields as executable."
+      }
+    ],
+    "prohibitedClaims": [
+      "A single shared material is the per-respondent selected material.",
+      "No-fit respondents selected a paragraph.",
+      "One run automatically expands a different selected material for every query match."
+    ]
+  },
+  {
+    "scenarioId": "partial-run-selected-question",
+    "version": 3,
+    "criteria": [
+      {
+        "id": "selected-question-complete",
+        "condition": "Reports that both Q2 query matches are answered, maps r1 to A and r2 to B, and scopes completeness to the selected Q2 evidence."
+      },
+      {
+        "id": "source-remains-partial",
+        "condition": "Reports the source run is partial and incomplete because a separate Q1 evaluation failed; does not call the overall run complete based on the Q2 query."
+      },
+      {
+        "id": "separates-sibling-failure",
+        "condition": "Keeps the Q1 invalid_answer failure separate from the two valid Q2 choices and does not treat failure as a Q2 answer."
+      }
+    ],
+    "prohibitedClaims": [
+      "The overall source run is complete because all Q2 rows are answered.",
+      "The failed Q1 evaluation is a Q2 response."
+    ]
+  },
+  {
+    "scenarioId": "typed-answer-failure",
+    "version": 5,
+    "criteria": [
+      {
+        "id": "failure-not-negative",
+        "condition": "Separates the failed evaluation from the valid typed answer and does not interpret failure as a substantive response."
+      },
+      {
+        "id": "reports-available-diagnostic",
+        "condition": "Reports invalid_answer and accurately communicates that the provider returned an invalid answer, without inventing a more specific cause; exact wording is optional."
+      },
+      {
+        "id": "cause-bounded",
+        "condition": "Says the supplied evidence does not identify why the provider returned an invalid answer; does not guess at a provider, prompt, or respondent cause."
+      },
+      {
+        "id": "recovery-respects-call-limit",
+        "condition": "Uses usedCalls=2 and maxCalls=2 to say this run has no allowance to resume or retry; does not claim automatic retry or recommend run_resume. If another attempt is suggested, identifies it as a separate new run with an explicit call allowance."
+      },
+      {
+        "id": "states-run-coverage",
+        "condition": "Reports one answered and one failed evaluation out of two and preserves the partial status."
+      }
+    ],
+    "prohibitedClaims": [
+      "The failed respondent chose no or a negative option.",
+      "The failure was caused by a specific provider or prompt issue not present in the evidence.",
+      "The existing run can resume after its original maxCalls allowance is exhausted."
+    ]
+  }
+]
