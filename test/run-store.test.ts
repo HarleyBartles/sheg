@@ -538,6 +538,34 @@ test('resume selects the newest run-scoped failure when attempt timestamps tie',
   } finally { await f.close(); }
 });
 
+test('follow-on source resolution reconciles an expired worker lease before freezing source status', async () => {
+  const root = await temporaryRoot();
+  let nowMs = 10_000;
+  const store = openRunStore(root, { now: () => nowMs });
+  try {
+    const accepted = store.accept(randomUUID(), await preparedRun());
+    const saved = store.getRequest(accepted.run.runId);
+    const sourceEvaluation = saved.evaluations[0]!;
+    const claim = store.claim(accepted.run.runId, nowMs, 1234);
+    assert.ok(claim);
+    assert.ok(store.reserveNext(claim, nowMs));
+    nowMs += 30_001;
+
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId: accepted.run.runId,
+      selection: { references: [{ evaluationId: sourceEvaluation.evaluationId, contextId: sourceEvaluation.contextId }] },
+      context: { mode: 'recorded' },
+      questions: [{ type: 'choice', id: 'next-question', instructions: 'What would you ask next?', options: { yes: 'Yes', no: 'No' } }],
+      provider: input.provider, maxCalls: 1,
+    });
+    const sources = store.resolveFollowOnSources(request);
+    assert.equal(sources.sourceStatus, 'interrupted');
+    assert.equal(sources.version.usedCalls, 1);
+    assert.equal(sources.version.reservedCalls, 0);
+    assert.equal(sources.turns.length, 1);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('resume rejects a run-wide failure after the original call budget is exhausted', async () => {
   const f = await resumableFixture();
   try {

@@ -22515,7 +22515,8 @@ var SQLiteRunStore = class {
   resolveFollowOnSources(input2) {
     this.ensureOpen();
     const request = followOnRunRequestSchema.parse(input2);
-    return this.readTransaction(() => {
+    return this.transaction(() => {
+      this.reconcileInside(request.sourceRunId, this.now());
       const run = this.database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
       if (!run) throw this.notFound();
       const stored = parseJson(run.request_json, "source run request");

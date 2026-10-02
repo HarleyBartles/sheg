@@ -798,7 +798,8 @@ class SQLiteRunStore implements RunStore {
   resolveFollowOnSources(input: ParsedFollowOnRunRequest): FollowOnSourceSet {
     this.ensureOpen();
     const request = followOnRunRequestSchema.parse(input);
-    return this.readTransaction(() => {
+    return this.transaction(() => {
+      this.reconcileInside(request.sourceRunId, this.now());
       const run = this.database.prepare('SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?').get(request.sourceRunId) as DatabaseRow | undefined;
       if (!run) throw this.notFound();
       const stored = parseJson<{ request?: unknown; lineage?: unknown }>(run.request_json, 'source run request');
