@@ -77,16 +77,16 @@ The package command rejects a malformed tag, a mismatch among package,
 plugin, and lockfile versions, or a tag that does not match those versions. To
 verify an identity without creating an archive, use:
 
+```sh
+python3 scripts/package-plugin.py --tag v0.1.0 --validate-only
+```
+
 For local candidate inspection, omit the release tag and use an explicit
 candidate filename. This creates a local ZIP and does not publish it. Record
 the candidate version and SHA-256 digest with dogfood evidence. Stable
 publication accepts only `vMAJOR.MINOR.PATCH` tags with matching stable
 manifests; prerelease tags do not publish. Promote a candidate by removing its
 suffix on the release branch and aligning all version surfaces before tagging.
-
-```sh
-python3 scripts/package-plugin.py --tag v0.1.0 --validate-only
-```
 
 On Windows, the npm wrapper uses the Python launcher (`py -3`). By default the
 ZIP is written to `release-artifacts/sheg-v<version>.zip`.

@@ -1,6 +1,6 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: planned, not executing. Authority: [agreed scope](../../specs/2026-10-02-v0.3.0-dogfood-improvements.md). The user requested this worktree and planning artifacts, with the next develop merge advertising `0.3.0-dev.2` and no release tag or publication.
+Status: Plan 1 implementation committed; PR and merge pending. Authority: [agreed scope](../../specs/2026-10-02-v0.3.0-dogfood-improvements.md). The next develop merge advertises `0.3.0-dev.2`; no release tag or publication is authorized.
 
 ## Workspace and base
 

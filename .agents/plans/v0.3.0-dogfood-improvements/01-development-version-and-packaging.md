@@ -115,9 +115,9 @@ Enable `resolveJsonModule` if needed for TypeScript NodeNext. esbuild must embed
 ## Implementation evidence
 
 - Product identity is `0.3.0-dev.2` in `package.json`, both root `package-lock.json` version fields, `plugin.json`, and the initialized MCP server. The copied packaged MCP reports the copied package version without its source checkout or dependency tree.
-- Focused verification passed: `node --import tsx --test test/release-package.test.ts` (6 tests); `npm run typecheck`; `node --import tsx --test test/mcp.test.ts` (10 tests); `npm run build`; `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts` (13 tests); `npm run plugin:package -- --validate-only`; stable-tag validation against `v0.3.0` failed as required for candidate manifests.
+- Focused verification passed: `node --import tsx --test test/release-package.test.ts` (7 tests); `npm run typecheck`; `node --import tsx --test test/mcp.test.ts` (10 tests); `npm run build`; `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts` (13 tests); `npm run plugin:package -- --validate-only`; stable-tag validation against `v0.3.0` failed as required for candidate manifests. The stable tagged archive fixture proves byte-for-byte reproducibility separately from the candidate ZIP.
 - Local candidate archive: `Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`, 27 files, SHA-256 `9DABA37AA2921E4DC1A65A4B02E0078A4EEDF362BAC918E68DD126B288795B17`.
-- `npm run verify` passed with 326 tests, zero failures or skips. The tracked pre-commit staged-snapshot hook independently passed the same gate.
+- The tracked pre-commit staged-snapshot hook passed `npm run verify` with 327 tests, zero failures or skips after the fresh review correction. The generated-output check also passed.
 - Implementation checkpoint: `1b47095478ef`; `git diff --check` passed. No release tag, GitHub Release, npm publication or paid inference was used.
 
 ## Next plan handoff
