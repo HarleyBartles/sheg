@@ -42,11 +42,7 @@ for (const contract of contracts) {
   // Emit the accepted JSON input contract. Runtime schemas may normalize legacy
   // input with Zod transforms, which are intentionally not part of JSON Schema.
   const schema = z.toJSONSchema(contract.schema, { io: 'input' }) as Record<string, unknown>;
-  if (contract.filename === 'study-manifest.schema.json') {
-    const arms = (schema.properties as Record<string, { items: { properties: Record<string, { items: unknown }> } }>).arms!;
-    const taskVariants = arms.items.properties.tasks!.items;
-    annotateChoiceOptions(taskVariants);
-  }
+  if (contract.filename === 'run-request.schema.json' || contract.filename === 'study-manifest.schema.json') annotateChoiceOptions(schema);
   schema.$id = `${schemaBaseUri}${contract.filename}`;
   if (contract.filename === 'respondent-archetype-library.schema.json') {
     schema.items = { $ref: `${schemaBaseUri}respondent-archetype.schema.json` };

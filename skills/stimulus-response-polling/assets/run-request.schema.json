@@ -134,7 +134,8 @@
                     "additionalProperties": {
                       "type": "string",
                       "minLength": 1
-                    }
+                    },
+                    "minProperties": 1
                   },
                   "materialOptions": {
                     "type": "object",
@@ -486,7 +487,8 @@
                         "additionalProperties": {
                           "type": "string",
                           "minLength": 1
-                        }
+                        },
+                        "minProperties": 1
                       },
                       "materialOptions": {
                         "type": "object",
@@ -548,7 +550,8 @@
                             "additionalProperties": {
                               "type": "string",
                               "minLength": 1
-                            }
+                            },
+                            "minProperties": 1
                           },
                           "materialOptions": {
                             "type": "object",
@@ -1223,7 +1226,8 @@
                     "additionalProperties": {
                       "type": "string",
                       "minLength": 1
-                    }
+                    },
+                    "minProperties": 1
                   },
                   "materialOptions": {
                     "type": "object",
