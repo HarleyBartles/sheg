@@ -104,9 +104,9 @@ text digest.
 - The copied packaged MCP runs a synthetic source-linked candidate request on the local fixture provider, queries one selected option, starts a follow-on from the exact evaluation/context/material handles, deletes the source run, and retrieves the retained material evidence from the follow-on. Candidate text remains in the frozen catalog but is not duplicated into the respondent's encountered-item state unless the journey actually exposes it.
 - The test uses no network, no real user content, and no checkout or local dependency directory at runtime.
 
-- [ ] Add the copied-package behavior test against the actual MCP tool contract, including a no-fit option that remains unlinked and a selected option that resolves to one exact candidate.
-- [ ] Assert exact option-to-material linkage, stable selected ID, exact text, source identity/digest, same respondent context, no candidate metadata in respondent/provider state, and retained follow-on evidence after source deletion.
-- [ ] Run `node --import tsx --test test/mcp.test.ts test/package.test.ts test/study-loader.test.ts test/stimulus-response.test.ts`.
+- [x] Add the copied-package behavior test against the actual MCP tool contract, including a no-fit option that remains unlinked and a selected option that resolves to one exact candidate.
+- [x] Assert exact option-to-material linkage, stable selected ID, exact text, source identity/digest, same respondent context, no candidate metadata in respondent/provider state, and retained follow-on evidence after source deletion.
+- [x] Run `node --import tsx --test test/mcp.test.ts test/package.test.ts test/study-loader.test.ts test/stimulus-response.test.ts`.
 
 ## Task 5: Verify the real Jev wire path and close the implementation slice
 

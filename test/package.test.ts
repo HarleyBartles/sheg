@@ -13,8 +13,8 @@ import { openRunStore } from '../src/infrastructure/run-store.js';
 
 type JourneyDetailTestShape = { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId: string }> } } } }> };
 type FollowOnRequestTestShape = {
-  evaluations: Array<{ packet: { state: { encounteredItems: Array<{ id: string }>; trajectory: { responses: unknown[] } } } }>;
-  lineage: { sourceAvailable: boolean };
+  evaluations: Array<{ packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } } } }>;
+  lineage: { sourceAvailable: boolean; selections: Array<{ sourceContextId: string }>; materialSnapshots: Array<{ materials: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> }> };
 };
 
 test('a copied plugin launches its shipped MCP without checkout or node_modules', async (t) => {
@@ -371,13 +371,16 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
   await cp(path.resolve('dist'), path.join(plugin, 'dist'), { recursive: true });
   const tokenizerPath = path.resolve('test/fixtures/laya-tokenizer.json');
   const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerPath)).digest('hex');
+  const providerPayloads: string[] = [];
   const inference = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { questions: Record<string, unknown> };
+    const payload = Buffer.concat(chunks).toString('utf8');
+    providerPayloads.push(payload);
+    const body = JSON.parse(payload) as { questions: Record<string, unknown> };
     const questionId = Object.keys(body.questions)[0] ?? '';
     const answer = questionId === 'interest'
-      ? { type: 'choice', choice: 'leave', probabilities: { continue: 0.1, leave: 0.9 } }
+      ? { type: 'choice', choice: 'candidate-three', probabilities: { 'candidate-one': 0.05, 'candidate-two': 0.05, 'candidate-three': 0.85, 'no-fit': 0.05 } }
       : { type: 'noul', noul: 0.82 };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
       model: 'fixture-checkpoint', routing: { model: 'fixture-checkpoint' }, usage: {}, answers: { [questionId]: answer },
@@ -393,16 +396,22 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
   const journey = {
     kind: 'journey', respondents: [{ id: 'reader-a', intent: 'Understand the article', context: 'New reader', desired_outcome: 'Decide whether to continue', engagement_cues: 'Specific examples', friction_cues: 'Repetition' }],
     journey: { id: 'article', label: 'Section three interest', items: [
-      { id: 'section-one', text: 'First section.' }, { id: 'section-two', text: 'Second section.' }, { id: 'section-three', text: 'Third section.' },
-    ], tasks: [{ id: 'interest', type: 'choice', instructions: 'Would you continue after section three?', options: { continue: 'Continue', leave: 'Leave' } }],
+      { id: 'section-one', text: 'First section.', sourceId: 'article-section-1', sourceSha256: '1'.repeat(64) },
+      { id: 'section-two', text: 'Second section.', sourceId: 'article-section-2', sourceSha256: '2'.repeat(64) },
+      { id: 'section-three', text: 'Third section.', sourceId: 'article-section-3', sourceSha256: '3'.repeat(64) },
+    ], tasks: [{ id: 'interest', type: 'choice', instructions: 'Which section lost your interest?', options: {
+      'candidate-one': 'First section.', 'candidate-two': 'Second section.', 'candidate-three': 'Third section.', 'no-fit': 'No section lost my interest.',
+    }, materialOptions: { 'candidate-one': 'section-one', 'candidate-two': 'section-two', 'candidate-three': 'section-three' } }],
     presentation: { kind: 'graph', entryNodeId: 'expose-one', maxDecisions: 1, nodes: [
       { id: 'expose-one', kind: 'expose', itemId: 'section-one' }, { id: 'expose-two', kind: 'expose', itemId: 'section-two' },
       { id: 'expose-three', kind: 'expose', itemId: 'section-three' }, { id: 'ask-interest', kind: 'ask', taskId: 'interest' },
       { id: 'left-lost-interest', kind: 'terminal', outcome: 'left-lost-interest' }, { id: 'continued', kind: 'terminal', outcome: 'continued' },
     ], transitions: [
       { fromNodeId: 'expose-one', toNodeId: 'expose-two' }, { fromNodeId: 'expose-two', toNodeId: 'expose-three' },
-      { fromNodeId: 'expose-three', toNodeId: 'ask-interest' }, { fromNodeId: 'ask-interest', optionId: 'leave', toNodeId: 'left-lost-interest' },
-      { fromNodeId: 'ask-interest', optionId: 'continue', toNodeId: 'continued' },
+      { fromNodeId: 'expose-three', toNodeId: 'ask-interest' }, { fromNodeId: 'ask-interest', optionId: 'candidate-three', toNodeId: 'left-lost-interest' },
+      { fromNodeId: 'ask-interest', optionId: 'candidate-one', toNodeId: 'continued' },
+      { fromNodeId: 'ask-interest', optionId: 'candidate-two', toNodeId: 'continued' },
+      { fromNodeId: 'ask-interest', optionId: 'no-fit', toNodeId: 'continued' },
     ] },
     }, maxCalls: 1, provider: localProvider,
   };
@@ -415,15 +424,16 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     const sourceRunId = (started.structuredContent as { runId: string }).runId;
     await waitForCompleted(dataRoot, sourceRunId);
     const queried = await client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: {
-      materialId: 'section-three', answer: { type: 'choice', choiceId: 'leave' }, outcome: 'left-lost-interest',
+      materialId: 'section-three', answer: { type: 'choice', choiceId: 'candidate-three' }, outcome: 'left-lost-interest',
     } } });
     assert.equal(queried.isError ?? false, false, JSON.stringify(queried.structuredContent));
-    const evidence = queried.structuredContent as { items: Array<{ evaluationId: string; contextId: string }>; sourceComplete: boolean };
+    const evidence = queried.structuredContent as { items: Array<{ evaluationId: string; contextId: string; selectedMaterial?: { materialId: string; text: string; sourceId: string; sourceSha256: string; textSha256: string } }>; sourceComplete: boolean };
     assert.equal(evidence.sourceComplete, true);
     assert.equal(evidence.items.length, 1);
+    assert.deepEqual(evidence.items[0]?.selectedMaterial, { materialId: 'section-three', text: 'Third section.', sourceId: 'article-section-3', sourceSha256: '3'.repeat(64), textSha256: createHash('sha256').update('Third section.', 'utf8').digest('hex') });
     const followOn = {
       kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
-      context: { mode: 'omit-history', materialIds: ['section-three'] },
+      context: { mode: 'omit-history', materialIds: [evidence.items[0]!.selectedMaterial!.materialId] },
       questions: [{ type: 'noul', id: 'why-interest', instructions: 'What about section three lost your interest?' }],
       provider: localProvider, maxCalls: 1,
     };
@@ -435,9 +445,17 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     await waitForCompleted(dataRoot, followOnRunId);
     const beforeDelete = await client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'request' } });
     const savedBeforeDelete = beforeDelete.structuredContent as FollowOnRequestTestShape;
-    assert.deepEqual(savedBeforeDelete.evaluations[0]?.packet.state.encounteredItems.map(({ id }) => id), ['section-three']);
+    assert.deepEqual(savedBeforeDelete.evaluations[0]?.packet.state.encounteredItems, [{ id: 'section-three', text: 'Third section.' }]);
     assert.equal(savedBeforeDelete.evaluations[0]?.packet.state.trajectory.responses.length, 0);
     assert.equal(savedBeforeDelete.lineage.sourceAvailable, true);
+    assert.deepEqual(savedBeforeDelete.lineage.selections[0]?.sourceContextId, evidence.items[0]?.contextId);
+    assert.deepEqual(savedBeforeDelete.lineage.materialSnapshots[0]?.materials, [
+      { id: 'section-one', text: 'First section.', sourceId: 'article-section-1', sourceSha256: '1'.repeat(64) },
+      { id: 'section-two', text: 'Second section.', sourceId: 'article-section-2', sourceSha256: '2'.repeat(64) },
+      { id: 'section-three', text: 'Third section.', sourceId: 'article-section-3', sourceSha256: '3'.repeat(64) },
+    ]);
+    assert.equal(providerPayloads.length, 2);
+    assert.ok(providerPayloads.every((payload) => !/materialOptions|article-section-[123]|sourceSha256|[123]{64}/.test(payload)));
     const deleted = await client.callTool({ name: 'run_delete', arguments: { runIds: [sourceRunId] } });
     assert.equal(deleted.isError ?? false, false);
     const afterDelete = await client.callTool({ name: 'run_get', arguments: { runId: followOnRunId, view: 'request' } });
