@@ -39,7 +39,7 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 ### Task 1: Normalize sequence and graph traversal
 
-**Test first:** Add behavior tests proving that a sequence and its equivalent all-items-then-tasks linear graph produce the same ask order, stable node/task mapping, typed response routing, terminal outcome, and corresponding packets. Cover Choice, Score, and Noul routes. Add a linear graph with interleaved exposure and questions to prove that the shorthand does not constrain graph topology.
+**Test first:** Add behavior tests proving that a sequence and its equivalent all-items-then-tasks linear graph produce the same ask order, stable node/task mapping, typed response routing, terminal outcome, and normalized preview nodes/routes. Cover Choice, Score, and Noul routes. Add a linear graph with interleaved exposure and questions to prove that the shorthand does not constrain graph topology. Packet equivalence belongs to Task 2 because that task changes the current sequence/graph context-window difference.
 
 **Implement:** Add one pure journey-topology normalization boundary that compiles sequence shorthand to a deterministic linear graph while preserving graph requests as authored. Route `runJourney`, `advanceJourney`, preview, and preflight packet traversal through the normalized graph. Keep request schemas and serialized authored presentation readable as `sequence` or `graph`; normalization is an execution projection, not a rewrite of the accepted request.
 
@@ -47,7 +47,7 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 ### Task 2: Make encountered material cumulative and consistent
 
-**Test first:** Extend packet tests for a graph that exposes item A, asks, exposes B, asks, then re-exposes A. The later packet contains A then B once each; the exposure history still records both A occurrences. Add a branch test where sibling-only material never appears in another path. Compare corresponding sequence and linear-graph packet state. Verify `responseHistory: omit` removes prior responses while retaining all encountered material and exposure evidence.
+**Test first:** Extend packet tests for a graph that exposes item A, asks, exposes B, asks, then re-exposes A. The later packet contains A then B once each; the exposure history still records both A occurrences. Add a branch test where sibling-only material never appears in another path. Compare corresponding sequence and linear-graph packet state after Task 1 normalized their traversal. Verify `responseHistory: omit` removes prior responses while retaining all encountered material and exposure evidence.
 
 **Implement:** Compile respondent-visible material from exposure events through the current turn, deduplicating by item ID in first-exposure order. Keep trajectory event counts and exposure IDs occurrence-based. Update the prompt contract identity. Ensure `responseHistory` stays independent of material inclusion.
 
