@@ -1,7 +1,7 @@
 {
   "scenarioId": "independent-dependent-questions",
-  "scenarioVersion": 1,
-  "trialId": "2026-10-02-gpt-6-sol-medium-independent-dependent-questions",
+  "scenarioVersion": 2,
+  "trialId": "2026-10-02-gpt-6-sol-medium-independent-dependent-questions-v2",
   "mode": "guided",
   "model": "gpt-6-sol",
   "reasoning": "medium",
@@ -10,9 +10,69 @@
     "skills/study-design/references/primitives-and-tools.md": "5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552"
   },
   "guided": {
-    "actor": {"scenarioId":"independent-dependent-questions","scenarioVersion":1,"actions":[],"finalResponse":"I would use a two-step journey. First, each modeled reader chooses which of the seven exact paragraphs best represents the pull quote, with a 'none of these' option. Then only readers who choose a paragraph see that same paragraph as exact material and answer: 'Read by itself, does this paragraph express “A city is a promise people keep making to each other”?' The second question must depend on each reader’s recorded choice; placing both questions in one independent group would not carry that choice forward. Please provide the full text of the seven paragraphs so I can preserve their wording. We would also need to settle the reader perspectives, provider, and call limit before a run.","uncertainties":["The fixture supplies p1 through p7 as labels, not the paragraphs’ full text.","Respondent profiles, provider, and maximum calls are unspecified."]},
-    "evaluator": {"scenarioId":"independent-dependent-questions","criterionResults":[{"criterionId":"separates-dependency","result":"pass","evidence":"The finalResponse proposes a two-step journey and says the second question must depend on each reader’s recorded choice; an independent group would not carry that choice forward."},{"criterionId":"uses-selected-paragraph","result":"pass","evidence":"The finalResponse says readers who choose a paragraph see that same paragraph as exact material, then answer whether it expresses the quoted sentence when read by itself."},{"criterionId":"no-fit-is-honest","result":"pass","evidence":"The finalResponse includes a 'none of these' option and sends only readers who choose a paragraph to the follow-up."}],"notes":"The trace contains no actions. The actor asks for the full paragraph text because the fixture supplies only p1 through p7 labels."}
+    "actor": {
+      "scenarioId": "independent-dependent-questions",
+      "scenarioVersion": 2,
+      "actions": [],
+      "finalResponse": "I’d ask readers to choose the paragraph that best represents the pull quote, then ask each reader whether their chosen paragraph expresses it when read by itself. The second question depends on the first answer, so I would use the recorded selection to show only that paragraph and the pull quote in a fresh context, without the earlier choices or answer history. Please provide the exact text of all seven paragraphs; the supplied p1–p7 labels do not contain their wording. I can then present the respondent perspectives and call limit for your approval before a run.",
+      "uncertainties": [
+        "The seven paragraph texts and their source identities are missing.",
+        "Respondent perspectives and the provider have not been selected."
+      ]
+    },
+    "evaluator": {
+      "scenarioId": "independent-dependent-questions",
+      "criterionResults": [
+        {
+          "criterionId": "separates-dependency",
+          "result": "pass",
+          "evidence": "The actor says the second question depends on the first answer and calls for a recorded selection."
+        },
+        {
+          "criterionId": "uses-selected-paragraph",
+          "result": "pass",
+          "evidence": "The actor says the recorded selection should show only that paragraph and the pull quote in a fresh context without earlier answers."
+        },
+        {
+          "criterionId": "no-fit-is-honest",
+          "result": "fail",
+          "evidence": "The actor response does not offer a no-fit or unanswerable path."
+        }
+      ],
+      "notes": "A matched no-guidance control also omitted no-fit. This single case does not isolate a guidance-specific failure."
+    }
   },
-  "controls": [],
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "actor": {
+        "message": "Please provide the text of p1 through p7. Readers need the paragraphs to choose which best represents the pull quote. I can then ask each reader whether their chosen paragraph expresses the pull quote when read by itself."
+      },
+      "evaluator": {
+        "scenarioId": "independent-dependent-questions",
+        "criterionResults": [
+          {
+            "criterionId": "separates-dependency",
+            "result": "pass",
+            "evidence": "The response says it will ask each reader whether their chosen paragraph expresses the pull quote by itself."
+          },
+          {
+            "criterionId": "uses-selected-paragraph",
+            "result": "pass",
+            "evidence": "It makes the chosen paragraph the standalone follow-up stimulus and retains the pull quote as the frame; it asks for exact text because only labels are supplied."
+          },
+          {
+            "criterionId": "no-fit-is-honest",
+            "result": "fail",
+            "evidence": "The response does not preserve a no-fit or unanswerable path."
+          }
+        ],
+        "notes": "The control returned prose rather than the requested JSON actor trace; the observed response is preserved exactly."
+      }
+    }
+  ],
   "simulationOnly": true
 }

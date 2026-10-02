@@ -1,7 +1,7 @@
 {
   "scenarioId": "selected-material-isolation-no-fit",
-  "scenarioVersion": 1,
-  "trialId": "2026-10-02-gpt-6-sol-medium-selected-material-isolation-no-fit",
+  "scenarioVersion": 2,
+  "trialId": "2026-10-02-gpt-6-sol-medium-selected-material-isolation-no-fit-v2",
   "mode": "guided",
   "model": "gpt-6-sol",
   "reasoning": "medium",
@@ -10,9 +10,149 @@
     "skills/stimulus-response-polling/references/run-and-recovery.md": "d854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5"
   },
   "guided": {
-    "actor": {"scenarioId":"selected-material-isolation-no-fit","scenarioVersion":1,"actions":[],"finalResponse":"I would make two separate follow-on requests. One selects r1's exact evaluation/context pair (e1, c1) with only material p2; the other selects r3's pair (e3, c3) with only p5. Each uses `omit-history`, so the respondent sees their selected paragraph without earlier material or trajectory. I would ask a typed Choice question such as whether that paragraph expresses the exact pull quote, with yes, no, and cannot tell options. The current runtime cannot expand each row's selected paragraph into a single follow-on request, so separate requests are needed for distinct selections. r2 chose no fit and has no selected paragraph. I would retain and report that response, and would not give r2 another paragraph or include r2 in this paragraph-specific follow-on. I need the exact pull quote before constructing and inspecting either request; no run has been started.","uncertainties":["The exact pull quote text was not supplied.","The fixture does not establish whether the source run is complete, so further matching respondents may exist."]},
-    "evaluator": {"scenarioId":"selected-material-isolation-no-fit","criterionResults":[{"criterionId":"per-respondent-selection","result":"pass","evidence":"The final response maps r1 (e1, c1) to p2 and r3 (e3, c3) to p5 in separate follow-on requests."},{"criterionId":"honest-current-limit","result":"pass","evidence":"The final response states that the current runtime cannot expand each row's selected paragraph into one follow-on request and proposes separate requests for distinct selections."},{"criterionId":"preserves-no-fit","result":"pass","evidence":"The final response says r2 chose no fit, has no selected paragraph, and should be retained and reported without assigning another paragraph."}],"notes":"The actor trace records no actions or started run. Its uncertainties note that the exact pull quote was not supplied and the source run's completeness is unknown."}
+    "actor": {
+      "scenarioId": "selected-material-isolation-no-fit",
+      "scenarioVersion": 2,
+      "actions": [
+        {
+          "tool": "run_get",
+          "input": {
+            "runId": "run-source-17",
+            "view": "request"
+          }
+        },
+        {
+          "tool": "run_get",
+          "input": {
+            "runId": "run-source-17",
+            "view": "status"
+          }
+        },
+        {
+          "tool": "run_query",
+          "input": {
+            "runId": "run-source-17",
+            "purpose": "Confirm the complete set of mapped paragraph selections and retain each exact evaluationId, contextId, and selectedMaterial.materialId."
+          }
+        },
+        {
+          "tool": "run_inspect",
+          "input": {
+            "proposedFollowOns": [
+              {
+                "selection": {
+                  "evaluationId": "e1",
+                  "contextId": "c1"
+                },
+                "context": {
+                  "mode": "omit-history",
+                  "materialIds": [
+                    "p2"
+                  ]
+                },
+                "question": "A typed Choice asking whether this paragraph expresses the exact pull quote, with yes, no, and unanswerable options."
+              },
+              {
+                "selection": {
+                  "evaluationId": "e3",
+                  "contextId": "c3"
+                },
+                "context": {
+                  "mode": "omit-history",
+                  "materialIds": [
+                    "p5"
+                  ]
+                },
+                "question": "The same typed Choice about the exact pull quote, with yes, no, and unanswerable options."
+              }
+            ]
+          }
+        }
+      ],
+      "finalResponse": "Use each mapped selection to make a follow-on at that respondent’s saved perspective. For r1, select e1/c1 and expose only p2, “Exact paragraph two.” For r3, select e3/c3 and expose only p5, “Exact paragraph five.” Use omit-history with the respective materialId so earlier material and exposure order are absent. Ask each a Choice question using the exact pull quote: yes, no, or unanswerable. r2 chose no-fit, so there is no selected paragraph to isolate and r2 does not enter this follow-on. Report r2 separately as a no-fit result, not as a failed or negative answer to the new question. First confirm the source run is complete and recover the exact pull quote and request details; then inspect the follow-ons and start them only with the required provider authorization and physical-call bound. These are proposed actions only; the fixture is mock evidence.",
+      "uncertainties": [
+        "The exact pull quote text and provider settings are absent from the mock evidence.",
+        "The mock evidence does not establish whether the source run is complete or whether additional respondents may match.",
+        "No follow-on was inspected or started, and no new answers exist."
+      ]
+    },
+    "evaluator": {
+      "scenarioId": "selected-material-isolation-no-fit",
+      "criterionResults": [
+        {
+          "criterionId": "per-respondent-selection",
+          "result": "pass",
+          "evidence": "The response maps r1/e1/c1 to p2 and r3/e3/c3 to p5, each at that respondent’s saved perspective."
+        },
+        {
+          "criterionId": "honest-current-limit",
+          "result": "fail",
+          "evidence": "The response does not state that one material per match is not automatically expanded by the current runtime or give the explicit separate-follow-on workaround; its proposed run_inspect input also presents a `proposedFollowOns` shape not established by this tool contract."
+        },
+        {
+          "criterionId": "preserves-no-fit",
+          "result": "pass",
+          "evidence": "The response says r2 has no selected paragraph and should be reported separately, not treated as a failed or negative answer."
+        }
+      ],
+      "notes": "The matched no-guidance control also failed the current-limit criterion. The case identifies the runtime feature gap but does not isolate a guidance-specific miss."
+    }
   },
-  "controls": [],
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "actor": {
+        "sourceRunId": "run-source-17",
+        "plan": "Create one follow-on question for each respondent with a selected paragraph. Show only that respondent's exact selected paragraph and ask whether it expresses the pull quote. Allow a no-fit answer.",
+        "followOns": [
+          {
+            "respondentId": "r1",
+            "evidenceId": "e1",
+            "choiceId": "c1",
+            "materialId": "p2",
+            "material": "Exact paragraph two."
+          },
+          {
+            "respondentId": "r3",
+            "evidenceId": "e3",
+            "choiceId": "c3",
+            "materialId": "p5",
+            "material": "Exact paragraph five."
+          }
+        ],
+        "respondentOutcomes": {
+          "r1": "Receives p2 alone and answers the pull-quote question.",
+          "r2": "Selected no-fit and has no paragraph to assess, so receives no selected-paragraph follow-on.",
+          "r3": "Receives p5 alone and answers the pull-quote question."
+        },
+        "noFitHandling": "If a respondent answers no-fit in the follow-on, record that answer without assigning another paragraph.",
+        "sourceStatus": "Completion is unknown. These follow-ons cover the supplied selections only; check the source run before treating this as the complete set."
+      },
+      "evaluator": {
+        "scenarioId": "selected-material-isolation-no-fit",
+        "criterionResults": [
+          {
+            "criterionId": "per-respondent-selection",
+            "result": "pass",
+            "evidence": "Creates one follow-on per selected respondent and maps r1 to p2 and r3 to p5 with exact text."
+          },
+          {
+            "criterionId": "honest-current-limit",
+            "result": "pass",
+            "evidence": "Does not claim automatic expansion; one follow-on per eligible respondent is an explicit workaround, and it warns that more matches may exist until source completion is checked."
+          },
+          {
+            "criterionId": "preserves-no-fit",
+            "result": "pass",
+            "evidence": "r2 is not assigned material or included in the paragraph-specific follow-ons."
+          }
+        ],
+        "notes": "The control returned a domain-specific JSON object rather than the requested actor JSON wrapper. Evaluator judged its content; the format issue is preserved."
+      }
+    }
+  ],
   "simulationOnly": true
 }

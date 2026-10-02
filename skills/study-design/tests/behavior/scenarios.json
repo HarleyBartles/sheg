@@ -1,26 +1,24 @@
 [
   {
     "id": "sequence-versus-linear-graph",
-    "version": 1,
+    "version": 2,
     "ownerSkill": "study-design",
     "referencePaths": ["references/primitives-and-tools.md"],
     "userRequest": "I want readers to see paragraph A, then B, then C, with a question after each. Does a sequence mean each question remembers earlier answers, or is it just a straight graph? Please recommend a design that makes the history expectation explicit.",
     "controlledEvidence": {
-      "runtimeFacts": ["A sequence and a response-routed graph are distinct authored journey forms.", "A linear graph can express a fixed path, but do not assume its history semantics are identical to sequence semantics without checking the contract.", "Journey contexts record turns actually reached; questions in one group share a pre-group state."],
       "materials": ["Paragraph A", "Paragraph B", "Paragraph C"],
       "mockOnly": true
     }
   },
   {
     "id": "independent-dependent-questions",
-    "version": 1,
+    "version": 2,
     "ownerSkill": "study-design",
     "referencePaths": ["references/primitives-and-tools.md"],
     "userRequest": "Ask readers which of these seven paragraphs best represents my pull quote. Then, based on the paragraph they picked, ask whether that paragraph expresses the pull quote when read by itself.",
     "controlledEvidence": {
       "pullQuote": "A city is a promise people keep making to each other.",
       "paragraphs": ["p1", "p2", "p3", "p4", "p5", "p6", "p7"],
-      "runtimeFacts": ["Questions in one group never see sibling answers.", "A dependent follow-up must explicitly select recorded answers or contexts.", "The follow-up question should use the respondent's selected paragraph as exact material."],
       "mockOnly": true
     }
   },

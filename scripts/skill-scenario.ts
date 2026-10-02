@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -64,11 +64,25 @@ export type ActorTrace = z.infer<typeof actorTraceSchema>;
 
 export function assertReferencePathContained(ownerSkill: string, referencePath: string): string {
   const skillRoot = path.resolve(root, 'skills', ownerSkill);
+  const referencesRoot = path.resolve(skillRoot, 'references');
   const resolved = path.resolve(skillRoot, referencePath);
-  if (resolved !== skillRoot && !resolved.startsWith(`${skillRoot}${path.sep}`)) {
-    throw new Error(`Reference path is outside the owning skill directory: ${referencePath}`);
+  const relative = path.relative(referencesRoot, resolved);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`Reference path is outside the shipped references tree: ${referencePath}`);
   }
-  return resolved;
+  try {
+    const realReferencesRoot = realpathSync(referencesRoot);
+    const realResolved = realpathSync(resolved);
+    const realRelative = path.relative(realReferencesRoot, realResolved);
+    if (!realRelative || realRelative === '..' || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) {
+      throw new Error(`Reference path resolves outside the shipped references tree: ${referencePath}`);
+    }
+    if (!statSync(realResolved).isFile()) throw new Error(`Reference path is not a file in the shipped references tree: ${referencePath}`);
+    return realResolved;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('shipped references tree')) throw error;
+    throw new Error(`Scenario reference is missing or unreadable in the shipped references tree: ${referencePath}`, { cause: error });
+  }
 }
 
 function loadJson<T>(filePath: string, schema: z.ZodType<T>): T[] {
@@ -152,7 +166,11 @@ export function renderActorPrompt(scenarioId: string): string {
 
 export function renderEvaluatorPrompt(scenarioId: string, actorTrace: unknown): string {
   const scenario = findScenario(scenarioId);
-  const traceIdentity = z.object({ scenarioId: z.string() }).passthrough().parse(actorTrace);
+  const wrappedTrace = z.object({
+    guided: z.object({ actor: z.unknown() }).passthrough(),
+  }).passthrough().safeParse(actorTrace);
+  const observedActorTrace = wrappedTrace.success ? wrappedTrace.data.guided.actor : actorTrace;
+  const traceIdentity = z.object({ scenarioId: z.string() }).passthrough().parse(observedActorTrace);
   if (traceIdentity.scenarioId !== scenario.id) {
     throw new Error(`Actor trace does not match scenario ${scenario.id}.`);
   }
@@ -165,7 +183,7 @@ export function renderEvaluatorPrompt(scenarioId: string, actorTrace: unknown): 
     `\n## Controlled evidence (mock only)\n${JSON.stringify(scenario.controlledEvidence, null, 2)}`,
     `\n## Private evaluation criteria\n${JSON.stringify(evaluator.criteria, null, 2)}`,
     `\n## Prohibited claims\n${JSON.stringify(evaluator.prohibitedClaims, null, 2)}`,
-    `\n## Actor trace (preserve the observed output exactly, including any contract violations)\n${JSON.stringify(actorTrace, null, 2)}`,
+    `\n## Actor trace (preserve the observed output exactly, including any contract violations)\n${JSON.stringify(observedActorTrace, null, 2)}`,
   ].join('\n');
 }
 

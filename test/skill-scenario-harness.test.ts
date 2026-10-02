@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { runEvidencePageSchema } from '../src/domain/run/request.js';
 import {
   actorTraceSchema,
   assertReferencePathContained,
@@ -67,6 +69,19 @@ test('evaluator prompts pair the private rubric with the observed actor trace an
   assert.ok(prompt.includes(JSON.stringify(scenario.controlledEvidence, null, 2)));
 });
 
+test('evaluator prompts exclude any prior evaluation stored beside the actor trace', () => {
+  const prompt = renderEvaluatorPrompt('sequence-versus-linear-graph', {
+    scenarioId: 'sequence-versus-linear-graph',
+    guided: {
+      actor: { scenarioId: 'sequence-versus-linear-graph', finalResponse: 'Observed answer.' },
+      evaluator: { criterionResults: [{ criterionId: 'old-judgment', result: 'pass' }], notes: 'Prior evaluator output.' },
+    },
+  });
+
+  assert.match(prompt, /Observed answer\./);
+  assert.doesNotMatch(prompt, /old-judgment|Prior evaluator output/);
+});
+
 test('evaluator can inspect a JSON trace that violates the actor output schema', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
@@ -80,7 +95,8 @@ test('evaluator can inspect a JSON trace that violates the actor output schema',
 });
 
 test('scenario reference paths cannot escape their owning skill directory', () => {
-  assert.throws(() => assertReferencePathContained('study-design', '../../package.json'), /outside.*skill/i);
+  assert.throws(() => assertReferencePathContained('study-design', '../../package.json'), /outside.*references/i);
+  assert.throws(() => assertReferencePathContained('study-design', 'tests/behavior/evaluators.json'), /references/i);
 });
 
 test('actor and evaluator outputs require evidence-bearing structured fields', () => {
@@ -114,6 +130,24 @@ test('baseline trace files carry valid trial metadata and explicitly mark simula
       assert.equal(trace.guided.evaluator.scenarioId, trace.scenarioId);
       assert.equal(trace.guided.actor.scenarioVersion, trace.scenarioVersion);
       assert.equal(trace.simulationOnly, true);
+      const scenario = loadScenarioCatalog().find((item) => item.id === trace.scenarioId)!;
+      assert.equal(trace.scenarioVersion, scenario.version);
+      const suppliedFiles = [`skills/${skill}/SKILL.md`, ...scenario.referencePaths.map((reference) => `skills/${skill}/${reference}`)];
+      const currentHashes = Object.fromEntries(suppliedFiles.map((file) => [
+        file,
+        createHash('sha256').update(readFileSync(path.join(process.cwd(), file))).digest('hex'),
+      ]));
+      assert.deepEqual(trace.skillReferenceHashes, currentHashes);
     }
   }
+});
+
+test('partial selected-question fixture matches the current run query contract', () => {
+  const scenario = loadScenarioCatalog().find((item) => item.id === 'partial-run-selected-question')!;
+  const evidence = scenario.controlledEvidence as { queryResult: unknown };
+  const queryResult = runEvidencePageSchema.parse(evidence.queryResult);
+
+  assert.equal(queryResult.sourceStatus, 'cancelled');
+  assert.equal(queryResult.sourceComplete, false);
+  assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'unreached']);
 });

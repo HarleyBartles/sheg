@@ -1,7 +1,7 @@
 {
   "scenarioId": "typed-answer-failure",
-  "scenarioVersion": 1,
-  "trialId": "2026-10-02-gpt-6-sol-medium-typed-answer-failure",
+  "scenarioVersion": 2,
+  "trialId": "2026-10-02-gpt-6-sol-medium-typed-answer-failure-v2",
   "mode": "guided",
   "model": "gpt-6-sol",
   "reasoning": "medium",
@@ -10,9 +10,68 @@
     "skills/stimulus-response-polling/references/interpret-results.md": "8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c"
   },
   "guided": {
-    "actor": {"scenarioId":"typed-answer-failure","scenarioVersion":1,"actions":[],"finalResponse":"The run finished with errors. One of two evaluations produced a valid answer: r1 chose “yes” for q1. The other evaluation failed because its answer did not match the question, so r2 has no recorded answer. There are no pending or unreached evaluations. These are modeled responses, and the valid answer represents one respondent profile, not a population result.","uncertainties":["The evidence does not show what r2 attempted to answer or why it failed beyond the recorded question mismatch.","The frozen question, answer choices, respondent profiles, and material are not supplied, so the meaning of “yes” cannot be interpreted further."]},
-    "evaluator": {"scenarioId":"typed-answer-failure","criterionResults":[{"criterionId":"failure-not-negative","result":"pass","evidence":"The trace's finalResponse separates 'r1 chose “yes” for q1' from 'The other evaluation failed ... so r2 has no recorded answer'; it does not treat r2 as a negative response."},{"criterionId":"reports-available-diagnostic","result":"fail","evidence":"The trace's finalResponse says 'its answer did not match the question' but does not report the supplied failure code 'invalid_answer' or the exact message 'Answer did not match the question.' The uncertainties say no further cause is known."},{"criterionId":"states-completeness","result":"pass","evidence":"The trace's finalResponse says 'The run finished with errors,' 'One of two evaluations produced a valid answer,' and 'There are no pending or unreached evaluations,' matching the complete source and 1 completed, 1 failed of 2."}],"notes":"The trace avoids the prohibited negative-response and invented-provider claims, but omits the exact diagnostic code and message."}
+    "actor": {
+      "scenarioId": "typed-answer-failure",
+      "scenarioVersion": 2,
+      "actions": [],
+      "finalResponse": "The run is partial: 1 of 2 evaluations produced an answer, and 1 failed. Respondent r1 answered “yes.” Respondent r2’s evaluation failed because the provider returned an invalid answer for the question, so there is no recorded answer from them. Sheg’s evidence does not explain why the provider returned an invalid answer. The run used 2 of its 2 allowed calls.",
+      "uncertainties": [
+        "The evidence gives the failure code and message but does not identify what made the provider’s answer invalid."
+      ]
+    },
+    "evaluator": {
+      "scenarioId": "typed-answer-failure",
+      "criterionResults": [
+        {
+          "criterionId": "failure-not-negative",
+          "result": "pass",
+          "evidence": "The response says r2’s evaluation failed and has no recorded answer; it makes no substantive-response inference."
+        },
+        {
+          "criterionId": "reports-available-diagnostic",
+          "result": "fail",
+          "evidence": "It paraphrases the invalid-answer explanation but omits code `invalid_answer` and the exact safe message."
+        },
+        {
+          "criterionId": "states-completeness",
+          "result": "pass",
+          "evidence": "It reports a partial run with one answer and one failure out of two evaluations."
+        }
+      ],
+      "notes": "The matched no-guidance control also omitted the code and exact message."
+    }
   },
-  "controls": [{"mode":"no-guidance","model":"gpt-6-sol","reasoning":"medium","skillReferenceHashes":{},"actor":{"scenarioId":"typed-answer-failure","scenarioVersion":"1","actions":[],"finalResponse":"One of two evaluations produced a valid answer: r1 answered yes. r2's evaluation failed because its answer did not match the question. The run is complete with errors; nobody is still pending or unreached.","uncertainties":["The evidence does not show why r2 produced an invalid answer."]},"evaluator":{"scenarioId":"typed-answer-failure","criterionResults":[{"criterionId":"failure-not-negative","result":"pass","evidence":"The finalResponse identifies r1's 'yes' as the valid answer and says r2's evaluation failed. It does not treat r2's failure as a negative answer."},{"criterionId":"reports-available-diagnostic","result":"fail","evidence":"The finalResponse paraphrases the message as 'its answer did not match the question' but omits the supplied failure code, 'invalid_answer', and does not report the safe message exactly."},{"criterionId":"states-completeness","result":"pass","evidence":"The finalResponse says 'One of two evaluations produced a valid answer' and 'The run is complete with errors; nobody is still pending or unreached.'"}],"notes":"The trace's uncertainties state that the evidence does not show why r2 produced an invalid answer."}}],
+  "controls": [
+    {
+      "mode": "no-guidance",
+      "model": "gpt-6-sol",
+      "reasoning": "medium",
+      "skillReferenceHashes": {},
+      "actor": {
+        "answer": "The run is partial: one of two respondents answered “yes,” and the other did not produce a valid answer. The second response failed with `invalid_answer`: the provider returned an invalid answer for that question. The run has used its two-call limit, so no calls remain to retry."
+      },
+      "evaluator": {
+        "scenarioId": "typed-answer-failure",
+        "criterionResults": [
+          {
+            "criterionId": "failure-not-negative",
+            "result": "pass",
+            "evidence": "Separates the failed respondent from the valid yes answer and does not treat the failure as a substantive response."
+          },
+          {
+            "criterionId": "reports-available-diagnostic",
+            "result": "fail",
+            "evidence": "Reports `invalid_answer` but paraphrases the exact supplied message, omitting “The provider returned an invalid answer for this question.”"
+          },
+          {
+            "criterionId": "states-completeness",
+            "result": "pass",
+            "evidence": "Says the run is partial, identifies one of two answered and one failed, and states that the call limit is exhausted."
+          }
+        ],
+        "notes": "The control returned an `answer` object rather than the requested actor JSON trace; content was evaluated and the wrapper violation is preserved."
+      }
+    }
+  ],
   "simulationOnly": true
 }
