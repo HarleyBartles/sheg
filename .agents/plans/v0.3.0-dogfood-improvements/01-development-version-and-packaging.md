@@ -108,9 +108,21 @@ Enable `resolveJsonModule` if needed for TypeScript NodeNext. esbuild must embed
 - [x] Write the version-policy ADR with status Accepted and partial supersession of ADR-0013's no-development-version-bump consequence. Retain Gitflow, stable tag identity, main ancestry and publication safeguards. Update the ADR index without rewriting the earlier decision text.
 - [x] Update the release guide and playbooks: deliberate dev/rc checkpoints may update aligned identity on develop; no bump per arbitrary merge; the current checkpoint is `0.3.0-dev.2`; stable promotion removes the suffix on its release branch; no-tag local candidate packaging publishes nothing.
 - [x] Document how dogfood evidence identifies the installed candidate using its package version and exact package digest or source evidence. Do not embed a guessed HEAD or timestamp in committed generated output. Skill-content provenance can use the archive digest until the later campaign work specifies its evidence format.
-- [ ] Inspect the intentional diff with `git diff --check` and `git diff --stat`. Stage source, docs, manifests and regenerated outputs explicitly. Commit Tasks 1-3 as one passing checkpoint through `.githooks/pre-commit`; its staged `npm run verify` must pass. Do not run the same full gate immediately before or after a successful hooked commit without a new concern.
-- [ ] Record focused commands, archive identity, hook result and commit SHA in this plan and update the roadmap's first row only after the system proves completion. A later evidence-only commit also goes through the hook.
-- [ ] Re-read the agreed scope and check that no runtime semantic work or publication was smuggled into this slice. Prepare the next skill-scenario baseline plan from current source and existing guidance; do not mark later rows complete.
+- [x] Inspect the intentional diff with `git diff --check` and `git diff --stat`. Stage source, docs, manifests and regenerated outputs explicitly. Commit Tasks 1-3 as one passing checkpoint through `.githooks/pre-commit`; its staged `npm run verify` must pass. Do not run the same full gate immediately before or after a successful hooked commit without a new concern.
+- [x] Record focused commands, archive identity, hook result and commit SHA in this plan and update the roadmap's first row only after the system proves completion. A later evidence-only commit also goes through the hook.
+- [x] Re-read the agreed scope and check that no runtime semantic work or publication was smuggled into this slice.
+
+## Implementation evidence
+
+- Product identity is `0.3.0-dev.2` in `package.json`, both root `package-lock.json` version fields, `plugin.json`, and the initialized MCP server. The copied packaged MCP reports the copied package version without its source checkout or dependency tree.
+- Focused verification passed: `node --import tsx --test test/release-package.test.ts` (6 tests); `npm run typecheck`; `node --import tsx --test test/mcp.test.ts` (10 tests); `npm run build`; `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts` (13 tests); `npm run plugin:package -- --validate-only`; stable-tag validation against `v0.3.0` failed as required for candidate manifests.
+- Local candidate archive: `Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`, 27 files, SHA-256 `9DABA37AA2921E4DC1A65A4B02E0078A4EEDF362BAC918E68DD126B288795B17`.
+- `npm run verify` passed with 326 tests, zero failures or skips. The tracked pre-commit staged-snapshot hook independently passed the same gate.
+- Implementation checkpoint: `1b47095478ef`; `git diff --check` passed. No release tag, GitHub Release, npm publication or paid inference was used.
+
+## Next plan handoff
+
+After this PR is merged, create a fresh canonical worktree from current `develop`, record its merge evidence in the roadmap, then author Plan 2 for `0.3.0-dev.3`. Establish skill-owned baseline scenarios against current guidance before changing skills; retain fresh actor and evaluator traces and use no paid inference.
 
 ## Handoff evidence
 
