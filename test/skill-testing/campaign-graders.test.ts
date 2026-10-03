@@ -46,6 +46,45 @@ test('deterministic grader accepts only the exact selected material in an isolat
   }, undefined, selectedEvaluator.criteria, 'focused', [], undefined, { id: selectedScenario.id, version: selectedScenario.version, controlledEvidence: selectedScenario.controlledEvidence });
   assert.equal(grade('p2').deterministic.result, 'pass');
   assert.match(grade('p5').deterministic.issues.join(' '), /must contain only selected material p2/i);
+  const request = (overrides: Record<string, unknown> = {}) => ({
+    ...followOn('p2'), ...overrides,
+  });
+  const gradeRequest = (requestValue: unknown) => gradeTrial(selectedScenario.id, {
+    scenarioId: selectedScenario.id, scenarioVersion: selectedScenario.version,
+    actions: [{ tool: 'run_start', input: { request: requestValue } }], finalResponse: 'Follow-on.', uncertainties: [],
+  }, undefined, selectedEvaluator.criteria, 'focused', [], undefined, { id: selectedScenario.id, version: selectedScenario.version, controlledEvidence: selectedScenario.controlledEvidence });
+  assert.match(gradeRequest(request({ sourceRunId: '00000000-0000-4000-8000-000000000999' })).deterministic.issues.join(' '), /source run/i);
+  assert.match(gradeRequest(request({ selection: { references: [{ evaluationId: '00000000-0000-4000-8000-000000000999', contextId: '00000000-0000-4000-8000-000000000998' }] } })).deterministic.issues.join(' '), /reference.*frozen evidence|no selected/i);
+  const frozenSelectedMaterial = (selectedScenario.controlledEvidence as { queryResult: { items: Array<{ respondentId: string; selectedMaterial?: { materialId: string; text: string; sourceId?: string; sourceSha256?: string } }> } }).queryResult.items.find((item) => item.respondentId === 'r1')!.selectedMaterial!;
+  const inlineGrade = gradeRequest({ ...followOn('p2'), context: { mode: 'fresh-material' }, material: [{ id: frozenSelectedMaterial.materialId, text: frozenSelectedMaterial.text, sourceId: frozenSelectedMaterial.sourceId, sourceSha256: frozenSelectedMaterial.sourceSha256 }] });
+  assert.equal(inlineGrade.deterministic.result, 'pass', inlineGrade.deterministic.issues.join(' '));
+  assert.match(gradeRequest({ ...followOn('p2'), material: [{ id: 'extra', text: 'Unselected extra material.' }] }).deterministic.issues.join(' '), /only the exact frozen selected material p2/i);
+});
+
+test('deterministic grader resolves frozen Score and Noul follow-on filters', () => {
+  const selectedScenario = loadScenarioCatalog().find((item) => item.id === 'selected-material-isolation-no-fit')!;
+  const selectedEvaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === selectedScenario.id)!;
+  const grade = (answer: Record<string, unknown>, result: Record<string, unknown>) => {
+    const controlledEvidence = structuredClone(selectedScenario.controlledEvidence) as { queryResult: { items: Array<Record<string, unknown>> } };
+    const respondent = controlledEvidence.queryResult.items.find((item) => item.respondentId === 'r1')!;
+    respondent.result = result;
+    const request = {
+      ...{
+        kind: 'follow-on', sourceRunId: '00000000-0000-4000-8000-000000000017',
+        selection: { criteria: { respondentId: 'r1', answer } }, context: { mode: 'fresh-material', materialIds: ['p2'] },
+        questions: [{ type: 'noul', id: 'quote-fit', instructions: 'Does this paragraph express the pull quote?' }],
+        provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+      },
+    };
+    return gradeTrial(selectedScenario.id, {
+      scenarioId: selectedScenario.id, scenarioVersion: selectedScenario.version,
+      actions: [{ tool: 'run_start', input: { request } }], finalResponse: 'I selected the respondent and their paragraph.', uncertainties: [],
+    }, undefined, selectedEvaluator.criteria, 'focused', [], undefined, { id: selectedScenario.id, version: selectedScenario.version, controlledEvidence });
+  };
+  assert.equal(grade({ type: 'score', operator: 'gte', value: 0.5 }, { type: 'score', score: 0.8 }).deterministic.result, 'pass');
+  assert.equal(grade({ type: 'noul', operator: 'lt', value: 0.4 }, { type: 'noul', noul: 0.2 }).deterministic.result, 'pass');
+  assert.equal(grade({ type: 'noul', operator: 'gte', value: 0.5 }, { type: 'noul', noul: 0.2 }).deterministic.result, 'fail');
+  assert.equal(grade({ type: 'choice', choiceId: 'p2' }, { choice: 'p2' }).deterministic.result, 'pass');
 });
 
 test('historical grading uses its frozen scenario identity after the live catalog changes', () => {

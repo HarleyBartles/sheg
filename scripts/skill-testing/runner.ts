@@ -99,9 +99,10 @@ export async function runCampaign(
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > manifest.concurrency) {
     throw new Error(`Campaign concurrency must be between 1 and ${manifest.concurrency}.`);
   }
-  const runtimeIdentity = adapter.preflight
+  const adapterRuntimeIdentity = adapter.preflight
     ? await adapter.preflight()
     : { adapter: typeof manifest.execution.adapter === 'string' ? manifest.execution.adapter : 'custom', executionSha256: manifest.basis.executionSha256 };
+  const runtimeIdentity = { ...adapterRuntimeIdentity, effectiveConcurrency: concurrency };
   const runtimeIdentitySha256 = sha256(stableJson(runtimeIdentity));
   const existingRuntime = journalEntries(journal).find((entry) => entry.type === 'actor-runtime-preflight');
   if (existingRuntime?.runtimeIdentitySha256 && existingRuntime.runtimeIdentitySha256 !== runtimeIdentitySha256) throw new Error('Campaign runtime identity changed since its first execution.');
@@ -137,10 +138,12 @@ export async function runCampaign(
           const userBoundary = arm.actorPrompt.indexOf(marker);
           const guidanceMarker = '\n## Current skill and declared references\n';
           const guidanceBoundary = arm.actorPrompt.indexOf(guidanceMarker);
-          if (userBoundary < 0 || guidanceBoundary < 0 || !manifest.workflowTurns?.length) throw new Error('Workflow prompt, frozen guidance, or turns are missing.');
+          if (userBoundary < 0 || (guidanceBoundary < 0 && Object.keys(arm.skillReferenceHashes).length > 0) || !manifest.workflowTurns?.length) throw new Error('Workflow prompt, frozen guidance, or turns are missing.');
           const turns = manifest.workflowTurns.map((turn) => `${turn.user}${turn.evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(turn.evidence)}`}`);
-          const workflowPrelude = `${arm.actorPrompt.slice(0, userBoundary)}${arm.actorPrompt.slice(guidanceBoundary)}`
+          const guidance = guidanceBoundary >= 0 ? arm.actorPrompt.slice(guidanceBoundary) : '';
+          const workflowPrelude = `${arm.actorPrompt.slice(0, userBoundary)}${guidance}`
             .replace('Use the supplied skill and references to respond to the user request. Treat the evidence below as a mock fixture, not a live tool result.', 'Use the supplied skill and references to handle the conversation. The scripted evidence is fixture data supplied only at its listed turn.')
+            .replace('Do not call tools, connectors, inference providers, or external services. If an action would help, describe it in the response rather than executing it.', 'Sheg MCP tools are available when relevant to the user request. You may use them to inspect, start, query, or resume studies. Do not call tools outside Sheg or use hosted inference. Never invent a tool result; report unavailable local services clearly.')
             .replace('Do not call tools, connectors, inference providers, or external services. If a tool action would help, record it as a proposed action only.', 'Sheg MCP tools are available when relevant to the user request. You may use them to inspect, start, query, or resume studies. Do not call tools outside Sheg or use hosted inference. Never invent a tool result; report unavailable local services clearly.')
             .replace('Return only JSON with scenarioId, scenarioVersion, actions (objects with tool and input), finalResponse, and uncertainties.', 'Respond to the user naturally and use tools when needed.');
           const workflowPrompts = [`${workflowPrelude}\n## Workflow turn 1\n${turns[0]}`, ...turns.slice(1)];

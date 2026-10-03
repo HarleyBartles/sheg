@@ -158,6 +158,20 @@ test('grading resumes from retained evaluator output when the grade file is miss
     assert.equal(redispatched, 0);
     assert.equal(resumed, 1);
     assert.ok(existsSync(path.join(evaluatorDirectory, 'grade.json')));
+    const recoveredTrial = collectCampaignReport(campaign).trials[0]!;
+    assert.equal(recoveredTrial.grade?.actorContract.result, 'pass');
+    assert.equal(recoveredTrial.responseExcerpt, 'The request needs a clarification.');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('campaign resume rejects a changed effective concurrency', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-concurrency-identity-'));
+  try {
+    const campaign = path.join(root, 'campaign');
+    prepareCampaign({ ...config('concurrency-identity'), repetitions: 2, concurrency: 2 }, campaign);
+    const adapter: CampaignAdapter = { async execute() { return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: actor('Done.'), rawStderr: '', sessionId: null, observedSettings: {} }; } };
+    await runCampaign(campaign, adapter, { concurrency: 1 });
+    await assert.rejects(runCampaign(campaign, adapter, { concurrency: 2 }), /runtime identity changed/i);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

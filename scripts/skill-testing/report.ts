@@ -49,15 +49,15 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
     mkdirSync(path.join(evaluatorRoot, 'scratch'), { recursive: true });
     let evaluatorError: string | undefined;
     let semantic: unknown;
-    let rawFinal = '';
+    let evaluatorRawFinal: string;
+    const actorRawFinal = readFileSync(path.join(attemptRoot, 'raw-final-message.txt'), 'utf8');
     if (existsSync(resultPath) && existsSync(path.join(evaluatorRoot, 'raw-final-message.txt'))) {
       const saved = JSON.parse(readFileSync(resultPath, 'utf8')) as { status?: string; exitCode?: number | null };
-      rawFinal = readFileSync(path.join(evaluatorRoot, 'raw-final-message.txt'), 'utf8');
+      evaluatorRawFinal = readFileSync(path.join(evaluatorRoot, 'raw-final-message.txt'), 'utf8');
       if (saved.status !== 'completed') evaluatorError = `Evaluator ended with ${String(saved.status)} (exit ${String(saved.exitCode)}).`;
-      else { try { semantic = JSON.parse(rawFinal) as unknown; } catch { evaluatorError = 'Evaluator output was not valid JSON.'; } }
+      else { try { semantic = JSON.parse(evaluatorRawFinal) as unknown; } catch { evaluatorError = 'Evaluator output was not valid JSON.'; } }
     } else {
       const rawEvents = readFileSync(path.join(attemptRoot, 'raw-events.jsonl'), 'utf8');
-      rawFinal = readFileSync(path.join(attemptRoot, 'raw-final-message.txt'), 'utf8');
       const prompt = [
         'Judge this Sheg agent output independently against the frozen criteria. Do not infer an arm, version, or expected result from the output path.',
         'Return only JSON with scenarioId, criterionResults (criterionId, result: pass|fail|uncertain, evidence), and notes as one string. Use this shape: {"scenarioId":"...","criterionResults":[{"criterionId":"...","result":"pass","evidence":"..."}],"notes":"..."}. Cite observed output for each criterion.',
@@ -67,7 +67,7 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
         `\n## Controlled evidence\n${JSON.stringify(manifest.evaluationBasis.controlledEvidence, null, 2)}`,
         `\n## Private evaluation criteria\n${JSON.stringify(manifest.evaluationBasis.criteria, null, 2)}`,
         `\n## Prohibited claims\n${JSON.stringify(manifest.evaluationBasis.prohibitedClaims, null, 2)}`,
-        `\n## Raw actor events and final output\n${JSON.stringify({ rawEvents, rawFinalMessage: rawFinal }, null, 2)}`,
+        `\n## Raw actor events and final output\n${JSON.stringify({ rawEvents, rawFinalMessage: actorRawFinal }, null, 2)}`,
       ].join('\n');
       try {
         const run = await adapter.execute({ prompt, cwd: path.join(evaluatorRoot, 'scratch'), timeoutMs: manifest.timeoutMs, requestedSettings: manifest.execution });
@@ -80,8 +80,8 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
       } catch (error) { evaluatorError = error instanceof Error ? error.message : String(error); }
     }
     const actorValue = manifest.suite === 'workflow'
-      ? { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: rawFinal || 'No final response was captured.', uncertainties: [] }
-      : (() => { try { return JSON.parse(rawFinal) as unknown; } catch { return rawFinal; } })();
+      ? { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: actorRawFinal || 'No final response was captured.', uncertainties: [] }
+      : (() => { try { return JSON.parse(actorRawFinal) as unknown; } catch { return actorRawFinal; } })();
     const rawAttemptResult = JSON.parse(readFileSync(path.join(attemptRoot, 'result.json'), 'utf8')) as { workflowTurnEvents?: unknown };
     const expectedToolsByTurn = manifest.workflowTurns?.map((turn) => turn.expectedTools) ?? [];
     const observedToolsByTurn = Array.isArray(rawAttemptResult.workflowTurnEvents) && rawAttemptResult.workflowTurnEvents.every((item) => typeof item === 'string')

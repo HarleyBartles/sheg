@@ -55,6 +55,27 @@ test('workflow actor gets one conversation with Sheg tools and only incrementall
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('no-guidance workflow arm runs without a guidance section marker', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-no-guidance-'));
+  const campaign = path.join(root, 'campaign');
+  try {
+    prepareCampaign({
+      id: 'workflow-no-guidance', scenarioId: 'selected-material-isolation-no-fit', suite: 'workflow', classification: 'capability',
+      repetitions: 1, concurrency: 1, timeoutMs: 60000, execution: { adapter: 'fake' }, workflowTurns: turns,
+      arms: [{ id: 'no-guidance', referencePaths: [] }],
+    }, campaign);
+    let dispatched = 0;
+    let initialPrompt = '';
+    await runCampaign(campaign, {
+      async execute() { throw new Error('workflow must preserve a conversation'); },
+      async executeWorkflow(input) { dispatched += 1; initialPrompt = input.initialPrompt; return result; },
+    });
+    assert.equal(dispatched, 1);
+    assert.match(initialPrompt, /Sheg MCP tools are available/);
+    assert.doesNotMatch(initialPrompt, /## Current skill and declared references|Use a graph to interleave questions/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('workflow preflight refuses a single-turn-only backend', async () => {
   const { root, campaign } = setup();
   try {
