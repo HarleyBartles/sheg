@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { runEvidencePageSchema } from '../src/domain/run/request.js';
 import {
@@ -15,49 +15,26 @@ import {
   renderActorPrompt,
   renderControlPrompt,
   renderEvaluatorPrompt,
+  selectScenarios,
 } from '../scripts/skill-scenario.js';
 
 const expectedScenarioIds = [
   'changed-rubric-comparison',
   'cumulative-journey-material',
+  'cumulative-journey-material-heldout',
+  'discover-polling-frontend-near-miss',
   'discover-polling-positive',
   'discover-polling-vocabulary-near-miss',
   'discover-study-design-positive',
   'independent-dependent-questions',
+  'isolated-storage-inspection',
+  'live-storage-inspection',
+  'live-storage-inspection-heldout',
   'partial-run-selected-question',
   'selected-material-isolation-no-fit',
   'sequence-versus-linear-graph',
   'typed-answer-failure',
 ];
-
-const expectedBaselineSkillHashes: Record<string, Record<string, string>> = {
-  'changed-rubric-comparison': {
-    'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
-    'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
-  },
-  'independent-dependent-questions': {
-    'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
-    'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
-  },
-  'sequence-versus-linear-graph': {
-    'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
-    'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
-  },
-  'partial-run-selected-question': {
-    'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
-    'skills/stimulus-response-polling/references/interpret-results.md': '8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c',
-    'skills/stimulus-response-polling/references/run-and-recovery.md': 'd854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5',
-  },
-  'selected-material-isolation-no-fit': {
-    'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
-    'skills/stimulus-response-polling/references/run-and-recovery.md': 'd854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5',
-  },
-  'typed-answer-failure': {
-    'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
-    'skills/stimulus-response-polling/references/interpret-results.md': '8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c',
-    'skills/stimulus-response-polling/references/run-and-recovery.md': 'd854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5',
-  },
-};
 
 test('skill behavior catalog has paired versioned scenarios and evaluators', () => {
   const scenarios = loadScenarioCatalog();
@@ -68,8 +45,25 @@ test('skill behavior catalog has paired versioned scenarios and evaluators', () 
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(evaluators.map((evaluator) => evaluator.scenarioId).sort(), expectedScenarioIds);
   for (const scenario of scenarios) {
+    assert.ok(scenario.tags.length > 0, `${scenario.id} needs at least one selectable tag`);
     assert.equal(evaluators.find((evaluator) => evaluator.scenarioId === scenario.id)?.version, scenario.version);
   }
+});
+
+test('scenario selection intersects owner, tags, and guidance paths and can include shared safeguards', () => {
+  const selected = selectScenarios({
+    ownerSkill: 'stimulus-response-polling',
+    tags: ['lifecycle'],
+    guidancePaths: ['references/run-and-recovery.md'],
+    includeSharedSafeguards: true,
+  });
+  const ids = selected.map(({ id }) => id);
+  assert.deepEqual(ids, [
+    'partial-run-selected-question', 'typed-answer-failure', 'selected-material-isolation-no-fit',
+    'cumulative-journey-material', 'cumulative-journey-material-heldout',
+    'live-storage-inspection-heldout', 'live-storage-inspection',
+  ]);
+  assert.throws(() => selectScenarios({}), /owner, tag, or guidance path/);
 });
 
 test('actor prompts include only the owner skill, declared references, user request and controlled evidence', () => {
@@ -195,16 +189,22 @@ test('evaluator prompts accept a raw control output without an embedded scenario
 });
 
 test('scenario CLI replays a stored no-guidance control by one-based index', () => {
-  const tracePath = path.join(process.cwd(), 'skills/stimulus-response-polling/tests/behavior/traces/baseline/typed-answer-failure.json');
-  const prompt = execFileSync(process.execPath, [
-    '--import', 'tsx',
-    path.join(process.cwd(), 'scripts/skill-scenario.ts'),
-    '--evaluator-prompt', 'typed-answer-failure', tracePath, '--control', '1',
-  ], { encoding: 'utf8' });
-
-  assert.match(prompt, /trace selection: no-guidance control 1/);
-  assert.match(prompt, /invalid_answer/);
-  assert.doesNotMatch(prompt, /proposedFollowOns/);
+  const scratch = mkdtempSync(path.join(os.tmpdir(), 'sheg-scenario-control-'));
+  const tracePath = path.join(scratch, 'synthetic-trace.json');
+  try {
+    writeFileSync(tracePath, JSON.stringify({
+      scenarioId: 'typed-answer-failure', scenarioVersion: 5,
+      controls: [{ actor: { scenarioId: 'typed-answer-failure', finalResponse: 'The response failed with invalid_answer.' } }],
+    }));
+    const prompt = execFileSync(process.execPath, [
+      '--import', 'tsx',
+      path.join(process.cwd(), 'scripts/skill-scenario.ts'),
+      '--evaluator-prompt', 'typed-answer-failure', tracePath, '--control', '1',
+    ], { encoding: 'utf8' });
+    assert.match(prompt, /trace selection: no-guidance control 1/);
+    assert.match(prompt, /invalid_answer/);
+    assert.doesNotMatch(prompt, /proposedFollowOns/);
+  } finally { rmSync(scratch, { recursive: true, force: true }); }
 });
 
 test('evaluator refuses to replay a control whose actor scenario ID conflicts with its wrapper', () => {
@@ -233,10 +233,10 @@ test('evaluator rejects a wrapped trace from another scenario before selecting i
 });
 
 test('evaluator rejects archived versions of a scenario before selecting an actor', () => {
-  const tracePath = path.join(process.cwd(), 'skills/stimulus-response-polling/tests/behavior/traces/archive/selected-material-isolation-no-fit-v3.json');
-  const trace = JSON.parse(readFileSync(tracePath, 'utf8')) as unknown;
-
-  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', trace), /version 3.*current version 5/);
+  assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', {
+    scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 3,
+    guided: { actor: { scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 3, finalResponse: 'Synthetic stale trace.' } },
+  }), /version 3.*current version 5/);
 });
 
 test('evaluator rejects raw actors that declare a stale scenario version', () => {
@@ -286,109 +286,20 @@ test('actor and evaluator outputs require evidence-bearing structured fields', (
   }).success, false);
 });
 
-test('baseline trace files carry valid trial metadata and explicitly mark simulation-only evidence', () => {
-  for (const skill of ['study-design', 'stimulus-response-polling']) {
-    const directory = path.join(process.cwd(), 'skills', skill, 'tests', 'behavior', 'traces', 'baseline');
-    for (const name of readdirSync(directory).filter((file) => file.endsWith('.json'))) {
-      const trace = baselineTraceSchema.parse(JSON.parse(readFileSync(path.join(directory, name), 'utf8')));
-      assert.equal(trace.guided.actor.scenarioId, trace.scenarioId);
-      assert.equal(trace.guided.evaluator.scenarioId, trace.scenarioId);
-      assert.equal(trace.guided.actor.scenarioVersion, trace.scenarioVersion);
-      assert.equal(trace.simulationOnly, true);
-      assert.equal(trace.toolUseAudit, 'not-captured');
-      const scenario = loadScenarioCatalog().find((item) => item.id === trace.scenarioId)!;
-      assert.equal(trace.scenarioVersion, scenario.version);
-      assert.deepEqual(trace.skillReferenceHashes, expectedBaselineSkillHashes[trace.scenarioId]);
-      for (const control of trace.controls) {
-        assert.equal(control.inputPromptSha256, renderControlPrompt(trace.scenarioId).sha256);
-      }
-    }
-  }
-});
-
-test('journey guidance campaigns retain matched trials, prompt hashes, and manually reviewed outcomes', () => {
-  type CampaignTrial = { trialId: string; evaluation: Record<string, string> };
-  type CampaignTrace = {
-    scenarioId: string;
-    phase: string;
-    simulationOnly: boolean;
-    toolUseAudit: string;
-    scenarioPromptSha256: string;
-    modelSetting: string;
-    reasoningSetting: string;
-    guided: CampaignTrial[];
-    controls: CampaignTrial[];
-    skillReferenceHashes: Record<string, string>;
-    controlsReusedFrom?: string;
-  };
-  const campaigns = [
-    {
-      scenarioId: 'sequence-versus-linear-graph',
-      owner: 'study-design',
-      criteria: ['clarifies-history', 'recommends-explicit-design', 'no-hidden-execution'],
-      prompt: 'skills/stimulus-response-polling/tests/behavior/traces/prompts/sequence-versus-linear-graph.md',
-      baselineHashes: {
-        'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
-        'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
-      },
-      candidateFiles: ['skills/study-design/SKILL.md', 'skills/study-design/references/primitives-and-tools.md'],
+test('legacy trace schema validates a synthetic wrapper without storing campaign output', () => {
+  const scenario = loadScenarioCatalog().find((item) => item.id === 'typed-answer-failure')!;
+  const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenario.id)!;
+  const trace = baselineTraceSchema.parse({
+    scenarioId: scenario.id, scenarioVersion: scenario.version, trialId: 'synthetic-contract', mode: 'guided',
+    model: 'fixture-model', reasoning: 'medium', skillReferenceHashes: { 'SKILL.md': 'a'.repeat(64) },
+    guided: {
+      actor: { scenarioId: scenario.id, scenarioVersion: scenario.version, actions: [], finalResponse: 'Synthetic behavior fixture.', uncertainties: [] },
+      evaluator: { scenarioId: scenario.id, criterionResults: evaluator.criteria.map(({ id }) => ({ criterionId: id, result: 'uncertain', evidence: 'Synthetic test data.' })), notes: '' },
     },
-    {
-      scenarioId: 'cumulative-journey-material',
-      owner: 'stimulus-response-polling',
-      criteria: ['selects-graph-for-branching', 'cumulative-unique-material', 'isolates-branch-material', 'all-or-none-answer-history', 'no-live-run-claim'],
-      prompt: 'skills/stimulus-response-polling/tests/behavior/traces/prompts/cumulative-journey-material.md',
-      baselineHashes: {
-        'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
-      },
-      candidateFiles: ['skills/stimulus-response-polling/SKILL.md'],
-    },
-  ];
-
-  for (const campaign of campaigns) {
-    const baselinePath = path.join(process.cwd(), 'skills', campaign.owner, 'tests/behavior/traces/campaign/baseline', `${campaign.scenarioId}.json`);
-    const candidatePath = path.join(process.cwd(), 'skills', campaign.owner, 'tests/behavior/traces/campaign/candidate', `${campaign.scenarioId}.json`);
-    const baseline = JSON.parse(readFileSync(baselinePath, 'utf8')) as CampaignTrace;
-    const candidate = JSON.parse(readFileSync(candidatePath, 'utf8')) as CampaignTrace;
-    const prompt = readFileSync(path.join(process.cwd(), campaign.prompt), 'utf8');
-    const promptHash = createHash('sha256').update(prompt).digest('hex');
-    const scenario = loadScenarioCatalog().find((entry) => entry.id === campaign.scenarioId)!;
-    assert.ok(prompt.includes(scenario.userRequest));
-    assert.ok(prompt.includes(JSON.stringify(scenario.controlledEvidence, null, 2)));
-
-    for (const trace of [baseline, candidate]) {
-      assert.equal(trace.scenarioId, campaign.scenarioId);
-      assert.equal(trace.simulationOnly, true);
-      assert.equal(trace.toolUseAudit, 'not-captured');
-      assert.equal(trace.scenarioPromptSha256, promptHash);
-      assert.equal(trace.guided.length, 5);
-      const expectedTrialIds = ['1', '2', '3', '4', '5'].map((number) => `${trace.phase === 'baseline' ? 'guided' : 'candidate'}-${number}`);
-      assert.deepEqual(trace.guided.map((trial) => trial.trialId), expectedTrialIds);
-      for (const trial of trace.guided) {
-        for (const criterion of campaign.criteria) assert.ok(['pass', 'fail', 'uncertain'].includes(trial.evaluation[criterion]!), `${campaign.scenarioId} ${trial.trialId} lacks ${criterion}`);
-      }
-    }
-
-    assert.equal(baseline.phase, 'baseline');
-    assert.equal(candidate.phase, 'candidate');
-    assert.equal(baseline.controls.length, 5);
-    assert.deepEqual(candidate.modelSetting, baseline.modelSetting);
-    assert.deepEqual(candidate.reasoningSetting, baseline.reasoningSetting);
-    assert.deepEqual(baseline.controls.map((trial: { trialId: string }) => trial.trialId), ['control-1', 'control-2', 'control-3', 'control-4', 'control-5']);
-    for (const trial of baseline.controls) {
-      for (const criterion of campaign.criteria) assert.ok(['pass', 'fail', 'uncertain'].includes(trial.evaluation[criterion]!));
-    }
-    assert.deepEqual(baseline.skillReferenceHashes, campaign.baselineHashes);
-    const currentCandidateHashes = Object.fromEntries(campaign.candidateFiles.map((file) => [
-      file,
-      createHash('sha256').update(readFileSync(path.join(process.cwd(), file))).digest('hex'),
-    ]));
-    assert.deepEqual(candidate.skillReferenceHashes, currentCandidateHashes);
-    assert.equal(candidate.controlsReusedFrom, `../baseline/${campaign.scenarioId}.json`);
-    assert.ok(candidate.guided.every((trial) => campaign.criteria.every((criterion) => trial.evaluation[criterion] === 'pass')));
-    assert.ok(baseline.guided.some((trial) => campaign.criteria.some((criterion) => trial.evaluation[criterion] === 'fail')));
-    assert.ok(baseline.controls.some((trial) => campaign.criteria.some((criterion) => trial.evaluation[criterion] === 'fail')));
-  }
+    controls: [], simulationOnly: true, toolUseAudit: 'not-captured',
+  });
+  assert.equal(trace.guided.actor.scenarioId, scenario.id);
+  assert.equal(trace.guided.actor.scenarioVersion, scenario.version);
 });
 
 test('partial selected-question fixture separates complete Q2 evidence from a failed Q1 sibling', () => {
@@ -443,4 +354,30 @@ test('selected-material fixture matches the current run query contract and omits
   assert.equal(choiceResults.length, queryResult.items.length);
   const sharedOptions = Object.keys(choiceResults[0]!.probabilities);
   for (const result of choiceResults) assert.deepEqual(Object.keys(result.probabilities), sharedOptions);
+});
+
+test('held-out live inspection uses distinct wording with the same read-only evidence contract', () => {
+  const scenarios = loadScenarioCatalog();
+  const primary = scenarios.find((scenario) => scenario.id === 'live-storage-inspection')!;
+  const heldout = scenarios.find((scenario) => scenario.id === 'live-storage-inspection-heldout')!;
+  const evaluators = loadEvaluatorCatalog();
+  const primaryEvaluator = evaluators.find((evaluator) => evaluator.scenarioId === primary.id)!;
+  const heldoutEvaluator = evaluators.find((evaluator) => evaluator.scenarioId === heldout.id)!;
+  assert.equal(heldout.ownerSkill, primary.ownerSkill);
+  assert.notEqual(heldout.userRequest, primary.userRequest);
+  assert.deepEqual(heldoutEvaluator.criteria, primaryEvaluator.criteria);
+  assert.deepEqual(heldoutEvaluator.prohibitedClaims, primaryEvaluator.prohibitedClaims);
+});
+
+test('held-out material-history case changes wording while preserving evidence and rubric', () => {
+  const scenarios = loadScenarioCatalog();
+  const primary = scenarios.find((scenario) => scenario.id === 'cumulative-journey-material')!;
+  const heldout = scenarios.find((scenario) => scenario.id === 'cumulative-journey-material-heldout')!;
+  const evaluators = loadEvaluatorCatalog();
+  const primaryEvaluator = evaluators.find((evaluator) => evaluator.scenarioId === primary.id)!;
+  const heldoutEvaluator = evaluators.find((evaluator) => evaluator.scenarioId === heldout.id)!;
+  assert.notEqual(heldout.userRequest, primary.userRequest);
+  assert.deepEqual(heldout.controlledEvidence, primary.controlledEvidence);
+  assert.deepEqual(heldoutEvaluator.criteria, primaryEvaluator.criteria);
+  assert.deepEqual(heldoutEvaluator.prohibitedClaims, primaryEvaluator.prohibitedClaims);
 });

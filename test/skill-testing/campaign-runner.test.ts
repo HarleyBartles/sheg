@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { prepareCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
-import { addTrial, runCampaign, type CampaignAdapter, type ExecutionResult } from '../../scripts/skill-testing/runner.js';
+import { addTrial, campaignScratchRoot, runCampaign, type CampaignAdapter, type ExecutionResult } from '../../scripts/skill-testing/runner.js';
 
 function setup(): { root: string; campaign: string; config: CampaignConfig; cleanup: () => void } {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-runner-'));
@@ -24,6 +24,16 @@ function result(finalMessage: string): ExecutionResult {
 }
 
 function adapter(execute: CampaignAdapter['execute']): CampaignAdapter { return { execute }; }
+
+test('campaign scratch working directories stay short for long campaign and trial identities', () => {
+  const campaign = path.join(os.tmpdir(), 'campaign-root-', 'c'.repeat(100));
+  const trialId = 'long-scenario-id-'.repeat(8);
+  const attemptId = `${trialId}:attempt-001`;
+  const scratch = campaignScratchRoot(campaign, trialId, attemptId);
+  assert.ok(scratch.length < 200, `Scratch path must remain below 200 characters, got ${scratch.length}: ${scratch}`);
+  assert.equal(campaignScratchRoot(campaign, trialId, attemptId), scratch);
+  assert.notEqual(campaignScratchRoot(campaign, trialId, `${trialId}:attempt-002`), scratch);
+});
 
 test('runner retains outputs and resume never dispatches an already captured trial', async () => {
   const input = setup();

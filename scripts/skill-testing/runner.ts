@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -123,7 +124,7 @@ export async function runCampaign(
           const turns = manifest.workflowTurns.map((turn) => `${turn.user}${turn.evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(turn.evidence)}`}`);
           const workflowPrelude = arm.actorPrompt.slice(0, userBoundary)
             .replace('Use the supplied skill and references to respond to the user request. Treat the evidence below as a mock fixture, not a live tool result.', 'Use the supplied skill and references to handle the conversation. The scripted evidence is fixture data supplied only at its listed turn.')
-            .replace('Do not call tools, connectors, inference providers, or external services. If a tool action would help, record it as a proposed action only.', 'Use available Sheg MCP tools when the user asks you to inspect, start, query, or resume a study. Do not call tools outside Sheg or use hosted inference. Never invent a tool result; report unavailable local services clearly.')
+            .replace('Do not call tools, connectors, inference providers, or external services. If a tool action would help, record it as a proposed action only.', 'Sheg MCP tools are available when relevant to the user request. You may use them to inspect, start, query, or resume studies. Do not call tools outside Sheg or use hosted inference. Never invent a tool result; report unavailable local services clearly.')
             .replace('Return only JSON with scenarioId, scenarioVersion, actions (objects with tool and input), finalResponse, and uncertainties.', 'Respond to the user naturally and use tools when needed.');
           result = await adapter.executeWorkflow!({
             initialPrompt: `${workflowPrelude}\n## Workflow turn 1\n${turns[0]}`,
@@ -177,5 +178,6 @@ export async function runCampaign(
 }
 
 export function campaignScratchRoot(campaignDirectory: string, trialId: string, attemptId: string): string {
-  return path.join(os.tmpdir(), 'sheg-skill-campaign', fileSegment(path.resolve(campaignDirectory)), fileSegment(trialId), fileSegment(attemptId));
+  const key = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 16);
+  return path.join(os.tmpdir(), 'sheg-skill-campaign', key(path.resolve(campaignDirectory)), key(trialId), key(attemptId));
 }

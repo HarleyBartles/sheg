@@ -30,7 +30,10 @@ test('Codex workflow resumes the exact session and sends turns in order without 
     });
     return child as unknown as ChildProcess;
   }) as unknown as typeof import('node:child_process').spawn;
-  const adapter = createCodexAdapter({ executable: 'codex-test', spawnProcess: fakeSpawn });
+  const adapter = createCodexAdapter({
+    executable: 'codex-test', spawnProcess: fakeSpawn,
+    shegMcpConfig: { enabled: true, transport: { type: 'stdio', command: 'node', args: ['sheg-mcp.js'], cwd: process.cwd(), env: { PLUGIN_DATA: 'default-data', PLUGIN_ROOT: 'plugin-root' } } },
+  });
   const result = await adapter.executeWorkflow!({
     initialPrompt: 'first prompt', turns: ['second prompt', 'third prompt'], cwd: process.cwd(), timeoutMs: 5000,
     requestedSettings: { model: 'test-model', reasoning: 'medium' },
@@ -42,6 +45,27 @@ test('Codex workflow resumes the exact session and sends turns in order without 
   assert.equal(invocations[1]![1], 'resume');
   assert.equal(invocations[1]![2], '11111111-1111-4111-8111-111111111111');
   assert.equal(invocations.some((args) => args.includes('--last') || args.includes('--ephemeral')), false);
+  assert.ok(invocations.every((args) => args.some((arg) => arg.startsWith('mcp_servers.sheg={') && arg.includes('PLUGIN_DATA=') && arg.includes('SHEG_DATA_DIR='))));
   assert.equal(result.sessionId, '11111111-1111-4111-8111-111111111111');
   assert.match(result.rawFinalMessage, /Turn 3/);
+});
+
+test('Codex stdout pipe errors become retained attempt failures instead of unhandled process errors', async () => {
+  const fakeSpawn = (() => {
+    const child = new EventEmitter();
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    const stdin = new EventEmitter();
+    Object.assign(stdin, { end() {} });
+    Object.assign(child, { stdout, stderr, stdin, kill() { return true; } });
+    setImmediate(() => stdout.emit('error', Object.assign(new Error('read ENOTCONN'), { code: 'ENOTCONN' })));
+    return child as unknown as ChildProcess;
+  }) as unknown as typeof import('node:child_process').spawn;
+  const adapter = createCodexAdapter({
+    executable: 'codex-test', spawnProcess: fakeSpawn,
+    shegMcpConfig: { enabled: true, transport: { type: 'stdio', command: 'node', args: ['sheg-mcp.js'], cwd: process.cwd() } },
+  });
+  const result = await adapter.execute({ prompt: 'inspect', cwd: process.cwd(), timeoutMs: 5000, requestedSettings: {} });
+  assert.equal(result.status, 'failed');
+  assert.match(result.rawStderr, /stdout stream error.*ENOTCONN/i);
 });

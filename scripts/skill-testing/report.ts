@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { assertComparableManifests, campaignManifestSchema, type CampaignManifest } from './contracts.js';
-import { gradeTrial, type TrialGrade } from './graders.js';
+import { extractShegToolCalls, gradeTrial, type TrialGrade } from './graders.js';
 import type { CampaignAdapter } from './runner.js';
 
 type Entry = { type: string; trialId?: string; attemptId?: string; armId?: string; repetition?: number };
@@ -36,7 +36,7 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
     const rawFinal = readFileSync(path.join(attemptRoot, 'raw-final-message.txt'), 'utf8');
     const prompt = [
       'Judge this Sheg agent output independently against the frozen criteria. Do not infer an arm, version, or expected result from the output path.',
-      'Return only JSON with scenarioId, criterionResults (criterionId, result: pass|fail|uncertain, evidence), and notes. Cite observed output for each criterion.',
+      'Return only JSON with scenarioId, criterionResults (criterionId, result: pass|fail|uncertain, evidence), and notes as one string. Use this shape: {"scenarioId":"...","criterionResults":[{"criterionId":"...","result":"pass","evidence":"..."}],"notes":"..."}. Cite observed output for each criterion.',
       `scenarioId: ${manifest.scenarioId}`,
       `\n## User request\n${manifest.evaluationBasis.userRequest}`,
       ...(manifest.workflowTurns ? [`\n## Ordered workflow turns and hidden checkpoint expectations\n${JSON.stringify(manifest.workflowTurns, null, 2)}`] : []),
@@ -59,7 +59,8 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
     const actorValue = manifest.suite === 'workflow'
       ? { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: rawFinal || 'No final response was captured.', uncertainties: [] }
       : (() => { try { return JSON.parse(rawFinal) as unknown; } catch { return rawFinal; } })();
-    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria, manifest.suite);
+    const expectedTools = manifest.workflowTurns?.flatMap((turn) => turn.expectedTools) ?? [];
+    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria, manifest.suite, expectedTools, extractShegToolCalls(rawEvents));
     if (evaluatorError) grade.semantic = { result: 'uncertain', criteria: [], error: evaluatorError };
     writeFileSync(path.join(evaluatorRoot, 'grade.json'), `${JSON.stringify(grade, null, 2)}\n`);
     appendFileSync(path.join(root, 'grades.jsonl'), `${JSON.stringify({ trialId: trial.trialId, attemptId: capture.attemptId, gradePath: path.relative(root, path.join(evaluatorRoot, 'grade.json')).replaceAll('\\', '/') })}\n`);
@@ -82,12 +83,14 @@ export function collectCampaignReport(directory: string): Report {
     const finalPath = path.join(attemptRoot, 'raw-final-message.txt');
     const resultPath = path.join(attemptRoot, 'result.json');
     const finalText = readFileSync(finalPath, 'utf8');
+    const rawEvents = readFileSync(path.join(attemptRoot, 'raw-events.jsonl'), 'utf8');
     let parsed: unknown = null;
     if (manifest.suite === 'workflow') parsed = { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: finalText || 'No final response was captured.', uncertainties: [] };
     else try { parsed = JSON.parse(finalText) as unknown; } catch { /* Malformed raw output stays preserved and grades as an actor contract failure. */ }
     const evaluatorGradePath = path.join(attemptRoot, 'evaluator', 'grade.json');
     const semanticGrade = existsSync(evaluatorGradePath) ? (JSON.parse(readFileSync(evaluatorGradePath, 'utf8')) as TrialGrade).semantic : undefined;
-    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria, manifest.suite);
+    const expectedTools = manifest.workflowTurns?.flatMap((turn) => turn.expectedTools) ?? [];
+    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria, manifest.suite, expectedTools, extractShegToolCalls(rawEvents));
     if (semanticGrade) grade.semantic = semanticGrade;
     const responseExcerpt = parsed && typeof parsed === 'object' && 'finalResponse' in parsed && typeof parsed.finalResponse === 'string' ? parsed.finalResponse : finalText;
     const settings = existsSync(resultPath) ? (JSON.parse(readFileSync(resultPath, 'utf8')) as { observedSettings?: Record<string, unknown> }).observedSettings ?? {} : {};
@@ -110,6 +113,9 @@ export function collectCampaignReport(directory: string): Report {
     campaignId: manifest.campaignId, scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion,
     suite: manifest.suite, classification: manifest.classification, sampleSize: trials.length,
     completeTrialPasses: captured.filter((trial) => trial.grade?.actorContract.result === 'pass' && trial.grade.deterministic.result !== 'fail' && trial.grade.semantic.result === 'pass').length,
+    semanticPasses: captured.filter((trial) => trial.grade?.semantic.result === 'pass').length,
+    semanticFailures: captured.filter((trial) => trial.grade?.semantic.result === 'fail').length,
+    semanticUncertain: captured.filter((trial) => trial.grade?.semantic.result === 'uncertain').length,
     actorContractFailures: captured.filter((trial) => trial.grade?.actorContract.result === 'fail').length,
     deterministicFailures: captured.filter((trial) => trial.grade?.deterministic.result === 'fail').length,
     semanticNotRun: captured.filter((trial) => trial.grade?.semantic.result === 'not-run').length, runtimeErrors: trials.filter((trial) => trial.status === 'runtime-error').length,
@@ -126,11 +132,18 @@ export function collectCampaignReport(directory: string): Report {
   return { manifest, trials, comparisons, summary };
 }
 
-export function compareCampaigns(baselineDirectory: string, candidateDirectory: string): { baseline: Report; candidate: Report } {
+export function compareCampaigns(baselineDirectory: string, candidateDirectory: string): { baseline: Report; candidate: Report; criterionChanges: Array<{ criterionId: string; baseline: { pass: number; fail: number; uncertain: number }; candidate: { pass: number; fail: number; uncertain: number }; delta: { pass: number; fail: number; uncertain: number } }> } {
   const baseline = collectCampaignReport(baselineDirectory);
   const candidate = collectCampaignReport(candidateDirectory);
   assertComparableManifests(baseline.manifest, candidate.manifest);
-  return { baseline, candidate };
+  const baselineCounts = baseline.summary.criterionCounts as Record<string, { pass: number; fail: number; uncertain: number }>;
+  const candidateCounts = candidate.summary.criterionCounts as Record<string, { pass: number; fail: number; uncertain: number }>;
+  const criterionChanges = baseline.manifest.evaluationBasis.criteria.map(({ id }) => {
+    const before = baselineCounts[id] ?? { pass: 0, fail: 0, uncertain: 0 };
+    const after = candidateCounts[id] ?? { pass: 0, fail: 0, uncertain: 0 };
+    return { criterionId: id, baseline: before, candidate: after, delta: { pass: after.pass - before.pass, fail: after.fail - before.fail, uncertain: after.uncertain - before.uncertain } };
+  });
+  return { baseline, candidate, criterionChanges };
 }
 
 const comparisonGradeSchema = z.object({
@@ -163,7 +176,7 @@ export async function gradeBlindComparisons(baselineDirectory: string, candidate
       { order: 'B-then-A', pair: [{ label: 'B', raw: labeled.B }, { label: 'A', raw: labeled.A }] },
     ].map(({ order, pair }) => ({ order, prompt: [
       'Compare two anonymized Sheg agent outputs against the frozen evidence and criteria. Do not infer which is newer or better from position or style. Prefer the output that is more correct and useful for each criterion; use tie or uncertain when evidence does not support a preference.',
-      'Return only JSON with criterionResults (criterionId, preferred: A|B|tie|uncertain, evidence) and notes.',
+      'Return only JSON with criterionResults (criterionId, preferred: A|B|tie|uncertain, evidence) and notes as one string.',
       `Scenario: ${candidate.manifest.scenarioId} v${candidate.manifest.scenarioVersion}`,
       `\n## User request\n${candidate.manifest.evaluationBasis.userRequest}`,
       ...(candidate.manifest.workflowTurns ? [`\n## Ordered workflow turns\n${JSON.stringify(candidate.manifest.workflowTurns, null, 2)}`] : []),

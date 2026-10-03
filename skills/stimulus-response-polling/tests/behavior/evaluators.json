@@ -113,5 +113,29 @@
     ]
   }
 ,
+  {
+    "scenarioId": "cumulative-journey-material-heldout",
+    "version": 1,
+    "criteria": [
+      { "id": "selects-graph-for-branching", "condition": "Recommends a graph because continue and stop lead to different material and questions; does not force this branching path into a sequence." },
+      { "id": "cumulative-unique-material", "condition": "Explains that Q2 sees A then B and Q3 sees A then B once each, in first-exposure order, even though A is exposed again." },
+      { "id": "isolates-branch-material", "condition": "Keeps C exclusive to the stop path and never includes it in the continue-path questions." },
+      { "id": "all-or-none-answer-history", "condition": "Treats responseHistory as a per-task include/omit setting: tasks set to include receive all earlier typed answers available on their path, and omitting answers does not remove exposed material. Does not claim the task-level setting can include one preceding answer while excluding another." },
+      { "id": "no-live-run-claim", "condition": "Treats the fixture as mock-only and does not claim to have inspected, started, or run a study." }
+    ],
+    "prohibitedClaims": [
+      "Q2 receives only B because it is the latest exposure.",
+      "Q3 receives A twice as duplicate stimulus text.",
+      "A sequence provides the conditional continue/stop branch.",
+      "The continue path can receive C even though C was not exposed there.",
+      "A task can include Q1's answer while omitting Q2's answer when both are prior answers on the same path."
+    ]
+  }
+,
   {"scenarioId":"discover-polling-positive","version":1,"criteria":[{"id":"skill-selection","condition":"Selects stimulus-response-polling because the user needs help with a Sheg run, typed evidence, partial completion, and a follow-on."},{"id":"trigger-rationale","condition":"Explains the polling workflow trigger based on run/evidence operations, not merely article subject matter."}],"prohibitedClaims":[]}
+,
+  {"scenarioId":"discover-polling-frontend-near-miss","version":1,"criteria":[{"id":"no-false-trigger","condition":"Selects no skill because the request is a frontend CSS fix and the polling interval is incidental."},{"id":"trigger-rationale","condition":"Explains that the request does not involve Sheg, respondent simulation, or study design."}],"prohibitedClaims":[]},
+  {"scenarioId":"isolated-storage-inspection","version":1,"criteria":[{"id":"reports-observed-health","condition":"Uses run_storage inspect and reports the actual returned integrity status without inventing unavailable health facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
+  {"scenarioId":"live-storage-inspection-heldout","version":1,"criteria":[{"id":"reports-observed-health","condition":"Calls Sheg MCP run_storage inspect and reports the actual returned health fields without inventing unavailable facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
+  {"scenarioId":"live-storage-inspection","version":1,"criteria":[{"id":"reports-observed-health","condition":"Calls Sheg MCP run_storage inspect and reports the actual returned health fields without inventing unavailable facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]}
 ]

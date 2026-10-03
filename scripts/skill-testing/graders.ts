@@ -16,7 +16,18 @@ export const discoveryTraceSchema = z.object({
   rationale: z.string().min(1),
 }).strict();
 
-export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[], suite: 'focused' | 'discovery' | 'workflow' = 'focused'): TrialGrade {
+export function extractShegToolCalls(rawEvents: string): string[] {
+  const calls: string[] = [];
+  for (const line of rawEvents.split(/\r?\n/).filter(Boolean)) {
+    try {
+      const event = JSON.parse(line) as { type?: string; item?: { type?: string; server?: string; tool?: string } };
+      if (event.type === 'item.started' && event.item?.type === 'mcp_tool_call' && event.item.server === 'sheg' && event.item.tool) calls.push(event.item.tool);
+    } catch { /* Retain malformed events for inspection; they cannot prove a Sheg call. */ }
+  }
+  return calls;
+}
+
+export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[], suite: 'focused' | 'discovery' | 'workflow' = 'focused', expectedTools: readonly string[] = [], observedTools: readonly string[] = []): TrialGrade {
   const scenario = loadScenarioCatalog().find((item) => item.id === scenarioId);
   const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId);
   if (!scenario || !evaluator) throw new Error(`Unknown scenario: ${scenarioId}`);
@@ -30,6 +41,16 @@ export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValu
   if (suite === 'discovery' && !discovery?.success) actorIssues.push(...(discovery?.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`) ?? ['Discovery result is invalid.']));
   if (actor.success && (actor.data.scenarioId !== scenario.id || actor.data.scenarioVersion !== scenario.version)) actorIssues.push('Actor scenario identity does not match the frozen scenario.');
   const requestIssues: string[] = [];
+  if (suite === 'workflow') {
+    const observedCounts = new Map<string, number>();
+    for (const tool of observedTools) observedCounts.set(tool, (observedCounts.get(tool) ?? 0) + 1);
+    const requiredCounts = new Map<string, number>();
+    for (const tool of expectedTools) requiredCounts.set(tool, (requiredCounts.get(tool) ?? 0) + 1);
+    for (const [tool, required] of requiredCounts) {
+      const observed = observedCounts.get(tool) ?? 0;
+      if (observed < required) requestIssues.push(`Expected Sheg MCP tool ${tool} at least ${required} time(s), but the call was not observed often enough (${observed} observed).`);
+    }
+  }
   if (actor.success) for (const [index, action] of actor.data.actions.entries()) {
     if (!['run_inspect', 'run_start', 'run_list', 'run_query', 'run_get', 'run_cancel', 'run_resume', 'run_delete', 'run_storage'].includes(action.tool)) {
       actorIssues.push(`actions.${index}: unknown Sheg tool ${action.tool}.`);

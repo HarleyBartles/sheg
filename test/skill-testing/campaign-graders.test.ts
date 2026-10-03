@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { calibrationAgreement, gradeTrial } from '../../scripts/skill-testing/graders.js';
+import { calibrationAgreement, extractShegToolCalls, gradeTrial } from '../../scripts/skill-testing/graders.js';
 import { loadEvaluatorCatalog, loadScenarioCatalog } from '../../scripts/skill-scenario.js';
 
 const scenario = loadScenarioCatalog()[0]!;
@@ -32,6 +32,21 @@ test('unknown Sheg tools fail the actor contract even when the final prose is pl
   const grade = gradeTrial(scenario.id, actor([{ tool: 'run_magic', input: {} }]), semantic());
   assert.equal(grade.actorContract.result, 'fail');
   assert.match(grade.actorContract.issues.join(' '), /unknown Sheg tool/);
+});
+
+test('workflow checkpoints require actual Sheg MCP tool events, not actor claims', () => {
+  const scenario = loadScenarioCatalog().find((item) => item.id === 'isolated-storage-inspection')!;
+  const semanticValue = semantic();
+  const noCall = gradeTrial(scenario.id, actor(), semanticValue, [{ id: 'workflow-tool-checkpoints', condition: 'Calls run_storage.' }], 'workflow', ['run_storage'], []);
+  assert.equal(noCall.deterministic.result, 'fail');
+  assert.match(noCall.deterministic.issues.join(' '), /run_storage.*not observed/i);
+  const events = [
+    JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call', server: 'sheg', tool: 'run_storage' } }),
+    JSON.stringify({ type: 'item.completed', item: { type: 'mcp_tool_call', server: 'sheg', tool: 'run_storage' } }),
+  ].join('\n');
+  assert.deepEqual(extractShegToolCalls(events), ['run_storage']);
+  const observed = gradeTrial(scenario.id, actor(), semanticValue, [{ id: 'workflow-tool-checkpoints', condition: 'Calls run_storage.' }], 'workflow', ['run_storage'], extractShegToolCalls(events));
+  assert.equal(observed.deterministic.result, 'pass');
 });
 
 test('calibration reports disagreement rather than forcing a passing judgment', () => {

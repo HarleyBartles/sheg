@@ -11,6 +11,13 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 
+function closeTestServer(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+    server.closeAllConnections();
+  });
+}
+
 type JourneyDetailTestShape = { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId: string }> } } } }> };
 type FollowOnRequestTestShape = {
   evaluations: Array<{ questionId: string; contextId: string; packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } } } }>;
@@ -103,7 +110,7 @@ test('a packaged run survives its requesting MCP and can be recalled from a new 
     }));
   });
   await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
-  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  t.after(() => closeTestServer(inference));
   const address = inference.address();
   assert.ok(address && typeof address === 'object');
   const request = {
@@ -180,7 +187,7 @@ test('a dead packaged worker is discovered as interrupted and reads never relaun
     }));
   });
   await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
-  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  t.after(() => closeTestServer(inference));
   const address = inference.address();
   assert.ok(address && typeof address === 'object');
   const request = {
@@ -280,7 +287,7 @@ test('a copied MCP runs a journey across connections and resumes its saved turn 
     }));
   });
   await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
-  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  t.after(() => closeTestServer(inference));
   const address = inference.address();
   assert.ok(address && typeof address === 'object');
   const runRequest = {
@@ -394,7 +401,7 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     }));
   });
   await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
-  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  t.after(() => closeTestServer(inference));
   const address = inference.address();
   assert.ok(address && typeof address === 'object');
   const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: dataRoot };
@@ -504,7 +511,10 @@ test('a copied MCP splits local independent questions and resumes without replay
   const calls: string[] = [];
   let secondArrived: (() => void) | undefined;
   let releaseSecond: (() => void) | undefined;
+  let finalArrived: (() => void) | undefined;
+  let releaseFinal: (() => void) | undefined;
   const arrived = new Promise<void>((resolve) => { secondArrived = resolve; });
+  const finalRequestArrived = new Promise<void>((resolve) => { finalArrived = resolve; });
   const inference = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -514,6 +524,10 @@ test('a copied MCP splits local independent questions and resumes without replay
     if (calls.length === 2) {
       secondArrived?.();
       await new Promise<void>((resolve) => { releaseSecond = resolve; });
+    }
+    if (questionId === 'why-interest') {
+      finalArrived?.();
+      await new Promise<void>((resolve) => { releaseFinal = resolve; });
     }
     const answer = questionId === 'interest'
       ? { type: 'choice', choice: 'leave', probabilities: { continue: 0.1, leave: 0.9 } }
@@ -525,7 +539,7 @@ test('a copied MCP splits local independent questions and resumes without replay
     }));
   });
   await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
-  t.after(async () => new Promise<void>((resolve) => inference.close(() => resolve())));
+  t.after(() => closeTestServer(inference));
   const address = inference.address();
   assert.ok(address && typeof address === 'object');
   const runRequest = {
@@ -545,20 +559,20 @@ test('a copied MCP splits local independent questions and resumes without replay
   const transportA = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
   await clientA.connect(transportA);
   let workerPid = 0;
+  let resumedWorkerPid = 0;
   try {
     const inspected = await clientA.callTool({ name: 'run_inspect', arguments: { request: runRequest } });
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true, JSON.stringify(inspected.structuredContent));
     const started = await clientA.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: runRequest } });
     const runId = (started.structuredContent as { runId: string }).runId;
-    await arrived;
+    await waitForSignal(arrived, 'second independent provider request');
     const db = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
     try {
       const owner = db.prepare('SELECT owner_pid, owner_token FROM runs WHERE run_id = ?').get(runId) as { owner_pid?: number; owner_token?: string } | undefined;
       assert.ok(owner?.owner_token);
       workerPid = Number(owner.owner_pid);
       assert.ok(Number.isInteger(workerPid) && workerPid > 0 && isPidAlive(workerPid));
-      const evaluations = db.prepare('SELECT question_id, status FROM evaluations WHERE run_id = ? ORDER BY question_id').all(runId) as Array<{ question_id: string; status: string }>;
-      assert.equal(evaluations.find(({ question_id }) => question_id === 'interest')?.status, 'answered');
+      await waitForEvaluationStatus(db, runId, 'interest', 'answered');
     } finally { db.close(); }
     killPid(workerPid);
     await waitForPidExit(workerPid);
@@ -577,7 +591,16 @@ test('a copied MCP splits local independent questions and resumes without replay
       assert.equal((interrupted.structuredContent as { usedCalls: number }).usedCalls, 2);
       const resumed = await clientB.callTool({ name: 'run_resume', arguments: { runId } });
       assert.equal(resumed.isError ?? false, false, JSON.stringify(resumed.structuredContent));
+      await waitForSignal(finalRequestArrived, 'resumed final provider request');
+      const resumedOwner = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
+      try {
+        const owner = resumedOwner.prepare('SELECT owner_pid FROM runs WHERE run_id = ?').get(runId) as { owner_pid?: number } | undefined;
+        resumedWorkerPid = Number(owner?.owner_pid);
+        assert.ok(Number.isInteger(resumedWorkerPid) && resumedWorkerPid > 0, 'The resumed run must have a live worker before its last answer is released.');
+      } finally { resumedOwner.close(); }
+      releaseFinal?.();
       await waitForCompleted(dataRoot, runId);
+      await waitForPidExit(resumedWorkerPid);
       assert.deepEqual(calls, ['interest', 'severity', 'severity', 'why-interest']);
       const interest = await clientB.callTool({ name: 'run_query', arguments: { sourceRunId: runId, criteria: { questionId: 'interest' } } });
       const severity = await clientB.callTool({ name: 'run_query', arguments: { sourceRunId: runId, criteria: { questionId: 'severity' } } });
@@ -590,7 +613,16 @@ test('a copied MCP splits local independent questions and resumes without replay
     } finally { await killMcpConnection(clientB, transportB); }
   } finally {
     releaseSecond?.();
-    if (workerPid) killPid(workerPid);
+    releaseFinal?.();
+    if (workerPid) {
+      killPid(workerPid);
+      await waitForPidExit(workerPid);
+    }
+    if (resumedWorkerPid) {
+      killPid(resumedWorkerPid);
+      await waitForPidExit(resumedWorkerPid);
+    }
+    await killMcpConnection(clientA, transportA);
   }
 });
 
@@ -616,6 +648,20 @@ async function waitForPidExit(pid: number): Promise<void> {
   assert.fail(`Owned worker ${pid} did not exit after termination.`);
 }
 
+async function waitForSignal(signal: Promise<void>, description: string): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      signal,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${description}.`)), 10_000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function waitForCompleted(dataRoot: string, runId: string): Promise<void> {
   const store = openRunStore(dataRoot);
   try {
@@ -626,6 +672,17 @@ async function waitForCompleted(dataRoot: string, runId: string): Promise<void> 
     }
     assert.fail(`Run ${runId} did not complete after its requesting MCP exited: ${JSON.stringify({ status: store.getStatus(runId), answers: store.answers(runId) })}`);
   } finally { store.close(); }
+}
+
+async function waitForEvaluationStatus(db: DatabaseSync, runId: string, questionId: string, expectedStatus: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let evaluations: Array<{ question_id: string; status: string }> = [];
+  while (Date.now() < deadline) {
+    evaluations = db.prepare('SELECT question_id, status FROM evaluations WHERE run_id = ? ORDER BY question_id').all(runId) as Array<{ question_id: string; status: string }>;
+    if (evaluations.find(({ question_id }) => question_id === questionId)?.status === expectedStatus) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail(`Evaluation ${questionId} did not reach ${expectedStatus}: ${JSON.stringify(evaluations)}`);
 }
 
 async function exists(filePath: string): Promise<boolean> {

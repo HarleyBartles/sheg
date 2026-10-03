@@ -36,7 +36,8 @@ test('workflow actor gets one conversation with Sheg tools and only incrementall
     const summary = await runCampaign(campaign, adapter);
     assert.equal(summary.captured, 1);
     assert.ok(input);
-    assert.match(input.initialPrompt, /Use available Sheg MCP tools/);
+    assert.match(input.initialPrompt, /Sheg MCP tools are available/);
+    assert.doesNotMatch(input.initialPrompt, /Use available Sheg MCP tools when the user asks/);
     assert.doesNotMatch(input.initialPrompt, /Do not call tools, connectors|Return only JSON|The cohort is approved/);
     assert.doesNotMatch(input.initialPrompt, /intended reader cohort|workflow-tool-checkpoints|expectedTools/);
     assert.match(input.initialPrompt, /Seven paragraphs/);
@@ -66,4 +67,12 @@ test('owning-skill workflow fixture requires real Sheg actions at the relevant c
   assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [[], ['run_inspect'], ['run_start'], ['run_query'], ['run_query']]);
   assert.match(fixture.turns[2]!.user, /Start the study/);
   assert.match(fixture.turns[4]!.user, /selected paragraph/);
+});
+
+test('live workflow fixture is read-only and changes state by interpreting the captured health response', () => {
+  const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/storage-health-follow-up.json', 'utf8')) as { turns: Array<{ user: string; expectedTools: string[] }> };
+  assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [['run_storage'], []]);
+  assert.match(fixture.turns[0]!.user, /without changing/);
+  assert.match(fixture.turns[1]!.user, /previous health response/);
+  assert.doesNotMatch(fixture.turns.map(({ user }) => user).join(' '), /start the study|run_start/i);
 });

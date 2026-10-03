@@ -1,6 +1,6 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plans 1, 2, and 3 merged; Plan 3a is ready for review; Plan 4 is paused by the user on 2026-10-03. Authority: [agreed scope](../../specs/2026-10-02-v0.3.0-dogfood-improvements.md). Plans 1 through 3 delivered `0.3.0-dev.2` through `0.3.0-dev.4`; Plan 3a targets `0.3.0-dev.5`; Plan 4 resumes afterward targeting `0.3.0-dev.6`. No release tag or publication is authorized.
+Status: Plans 1, 2, and 3 merged; Plan 3a is in progress; Plan 4 is paused by the user on 2026-10-03. Authority: [agreed scope](../../specs/2026-10-02-v0.3.0-dogfood-improvements.md). Plans 1 through 3 delivered `0.3.0-dev.2` through `0.3.0-dev.4`; Plan 3a targets `0.3.0-dev.5`; Plan 4 resumes afterward targeting `0.3.0-dev.6`. No release tag or publication is authorized.
 
 ## Workspace and base
 
@@ -17,6 +17,12 @@ Status: Plans 1, 2, and 3 merged; Plan 3a is ready for review; Plan 4 is paused 
 
 An author can ask an agent to stage a reading journey, select respondents' material and reuse it in isolation, understand failures and stopped partial runs, and compare evidence without losing its framing. The installed package identifies its development version accurately. Versioned fresh-agent scenarios protect the skills that teach this workflow.
 
+## Study-input variation principle
+
+Rich results come from deliberate variation in the study inputs: respondent profile, stimulus, question/response, and state such as prior-turn visibility. Treat inputs matching across all four dimensions as duplicates for study-design purposes; rerunning them can sample ordinary model variability, but does not add substantive coverage. Do not advise agents to repeat the same input in search of a different result or to choose the smallest cohort by default. The cohort supplies respondent-profile variation, so size and compose it for the differences the author needs to understand.
+
+Carry this principle through Plans 4-6. Plan 4 should explain that each respondent's selected material supplies stimulus variation for the isolated follow-up while keeping its shared framing and question interpretable. Plan 5 should preserve enough coverage and lifecycle evidence to explain which respondents and selected inputs were represented, without treating call counts as input diversity. Plan 6 should teach agents to choose purposeful variation across the four dimensions and pressure-test duplicate-input recognition against useful changes. Add duplicate detection to runtime only if implementation evidence shows the contract needs it.
+
 ## Consecutive implementation plans
 
 Write each next executable plan against the delivered code of its predecessor. Later rows define committed scope and acceptance, not imaginary completed plans. Each JIT plan gets a fresh canonical worktree and its own PR into develop. Every develop merge increments the development prerelease number: Plans 1-3 delivered `0.3.0-dev.2` through `0.3.0-dev.4`; Plan 3a targets `0.3.0-dev.5`, followed by Plans 4-6 targeting `0.3.0-dev.6` through `0.3.0-dev.8`. Write the target version into each plan before executing it. Do not merge the planning artifacts alone under the old version.
@@ -26,10 +32,10 @@ Write each next executable plan against the delivered code of its predecessor. L
 | 1 | Align development identity and candidate packaging | merged | [Plan 1](01-development-version-and-packaging.md) | `7e2943bf1dae` | [#12](https://github.com/HarleyBartles/sheg/pull/12) | - | Merged to `develop` as `0.3.0-dev.2`. Candidate ZIP identity and stable publication protections verified |
 | 2 | Establish skill behavior scenarios and baseline | merged | [Plan 2](02-skill-behavior-scenarios.md) | `1d758ceae6db` | [#13](https://github.com/HarleyBartles/sheg/pull/13) | - | Merged to `develop` as `0.3.0-dev.3`; six skill-owned scenarios, private evaluator boundary, fresh-agent baseline, matched controls, and `sheg-verify` passed |
 | 3 | Unify journey context across sequence and graph | merged | [Plan 3](03-journey-context.md) | `be3ff2a2490a` | [#14](https://github.com/HarleyBartles/sheg/pull/14) | - | Merged to `develop` as `0.3.0-dev.4`; hosted check, fresh review, 360-test staged gate, repeated-exposure parity, and 27-file candidate package verified |
-| 3a | Build the repeatable skill campaign harness | ready | [Plan 3a](03a-skill-campaign-harness.md) | - | - | - | Merge version `0.3.0-dev.5`. Frozen old/new experiments, resumable dispatch, contract-aware and calibrated semantic graders, discovery/workflow suites, inspectable comparisons |
-| 4 | Follow each selected stimulus in one run | paused | [Plan 4](04-selected-stimulus-reuse.md) | - | - | - | Merge version `0.3.0-dev.6`. Resume after Plan 3a; Tasks 1-3 retained through `f09978f`, unfinished Task 4 campaign will use the new harness. Per-source-answer material mapping, optional shared stimulus, no-fit coverage, exact provenance, race protection and deletion-independent recall |
-| 5 | Expose precise failure and lifecycle evidence | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.7`. Safe structured validation reasons, consistent execution/coverage/recovery, selected-question coverage and captured query-state semantics |
-| 6 | Reconcile guidance and verify the installed author journey | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.8`. Comparative interpretation guidance, old/new scenario evidence, copied candidate integration, final source/generated agreement |
+| 3a | Build the repeatable skill campaign harness | in progress | [Plan 3a](03a-skill-campaign-harness.md) | - | - | - | Merge version `0.3.0-dev.5`. Frozen old/new experiments, resumable dispatch, contract-aware and calibrated semantic graders, owner/tag/guidance-path suite selection, held-out material/history wording, criterion-level comparison deltas, and discovery/workflow suites. Keep live campaign results transient |
+| 4 | Follow each selected stimulus in one run | paused | [Plan 4](04-selected-stimulus-reuse.md) | - | - | - | Merge version `0.3.0-dev.6`. Resume after Plan 3a; Tasks 1-3 retained through `f09978f`, unfinished Task 4 campaign will use the new harness. For each respondent who selected a piece of stimulus, allow the request to recall that exact selected piece and use it as that respondent's next stimulus; preserve optional shared framing, no-fit coverage, exact provenance, race protection and deletion-independent recall. The selected piece supplies stimulus variation for the follow-up |
+| 5 | Expose precise failure and lifecycle evidence | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.7`. Safe structured validation reasons, consistent execution/coverage/recovery, selected-question coverage and captured query-state semantics; make represented respondents and selected inputs legible without equating call counts with input diversity |
+| 6 | Reconcile guidance and verify the installed author journey | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.8`. Comparative interpretation guidance, old/new scenario evidence, purposeful variation across the four input dimensions, duplicate-input recognition, copied candidate integration, final source/generated agreement |
 
 ## Plan exits and likely source seams
 
@@ -59,7 +65,7 @@ Own typed decision validation, provider/worker failure propagation, `src/domain/
 
 ### 6. Combined guidance and installed proof
 
-Own comparison/interpretation references and package integration scenarios. Earlier slices already ship guidance for their contracts. This final slice checks the conversation as a whole: staged reading, material selection, isolated reuse, changed framing, one invalid answer, successful explicit retry and later recall. Read current skills as an agent receives them; run the versioned fresh-context scenarios with fixed criteria and retained traces. Report both strengths preserved and remaining limitations.
+Own comparison/interpretation references and package integration scenarios. Earlier slices already ship guidance for their contracts. This final slice checks the conversation as a whole: staged reading, material selection, isolated reuse, changed framing, one invalid answer, successful explicit retry and later recall. Read current skills as an agent receives them; run versioned fresh-context scenarios with fixed criteria and transient campaign outputs. Include cases where an identical input is repeated and where one input dimension changes purposefully. Report both strengths preserved and remaining limitations.
 
 ## Validation and handoff
 

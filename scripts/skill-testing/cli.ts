@@ -6,6 +6,7 @@ import { createCodexAdapter } from './codex-adapter.js';
 import { runCampaign } from './runner.js';
 import { compareCampaigns, gradeBlindComparisons, gradeCampaign, writeCampaignReport } from './report.js';
 import { calibrationAgreement, type CriterionGrade } from './graders.js';
+import { selectScenarios, type ScenarioSelection } from '../skill-scenario.js';
 
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -21,6 +22,11 @@ function required(args: string[], name: string): string {
   return value;
 }
 
+function commaValues(args: string[], name: string): string[] | undefined {
+  const value = option(args, name);
+  return value?.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
 function assertOutsideRepository(output: string): void {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const relative = path.relative(repoRoot, output);
@@ -31,6 +37,20 @@ function assertOutsideRepository(output: string): void {
 
 export async function main(args: string[]): Promise<void> {
   const [command, ...rest] = args;
+  if (command === 'select') {
+    const ownerSkill = option(rest, '--owner') as ScenarioSelection['ownerSkill'];
+    if (ownerSkill && !['study-design', 'stimulus-response-polling'].includes(ownerSkill)) throw new Error('--owner must be study-design or stimulus-response-polling.');
+    const tags = commaValues(rest, '--tag');
+    const guidancePaths = commaValues(rest, '--guidance-path');
+    const selected = selectScenarios({
+      ...(ownerSkill ? { ownerSkill } : {}),
+      ...(tags ? { tags } : {}),
+      ...(guidancePaths ? { guidancePaths } : {}),
+      includeSharedSafeguards: rest.includes('--include-shared'),
+    });
+    process.stdout.write(`${JSON.stringify(selected.map(({ id, version, ownerSkill: owner, tags: scenarioTags, referencePaths }) => ({ id, version, ownerSkill: owner, tags: scenarioTags, referencePaths })), null, 2)}\n`);
+    return;
+  }
   if (command === 'prepare') {
     const configPath = path.resolve(required(rest, '--config'));
     const output = path.resolve(required(rest, '--output'));
@@ -68,7 +88,7 @@ export async function main(args: string[]): Promise<void> {
     const candidate = path.resolve(required(rest, '--candidate'));
     const comparison = compareCampaigns(baseline, candidate);
     const judgments = await gradeBlindComparisons(baseline, candidate, createCodexAdapter());
-    process.stdout.write(`${JSON.stringify({ baseline: comparison.baseline.summary, candidate: comparison.candidate.summary, comparisons: judgments.length }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ baseline: comparison.baseline.summary, candidate: comparison.candidate.summary, criterionChanges: comparison.criterionChanges, comparisons: judgments.length }, null, 2)}\n`);
     return;
   }
   if (command === 'calibrate') {
@@ -88,7 +108,7 @@ export async function main(args: string[]): Promise<void> {
     process.stdout.write(`${JSON.stringify({ command, campaignId: JSON.parse(readFileSync(path.join(directory, 'campaign.json'), 'utf8')).campaignId, ...result }, null, 2)}\n`);
     return;
   }
-  throw new Error('Usage: skill:campaign -- prepare --config <file> --output <off-repo-dir> | status|report --campaign <dir> | grade --campaign <dir> --backend codex | compare --baseline <dir> --candidate <dir> --backend codex | calibrate --reference <file> --observed <file> | run|resume --campaign <dir> --backend codex [--concurrency N]');
+  throw new Error('Usage: skill:campaign -- select (--owner <skill> | --tag <tag,...> | --guidance-path <path,...>) [--include-shared] | prepare --config <file> --output <off-repo-dir> | status|report --campaign <dir> | grade --campaign <dir> --backend codex | compare --baseline <dir> --candidate <dir> --backend codex | calibrate --reference <file> --observed <file> | run|resume --campaign <dir> --backend codex [--concurrency N]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

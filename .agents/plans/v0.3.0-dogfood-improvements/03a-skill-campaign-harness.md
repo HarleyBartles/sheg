@@ -4,7 +4,7 @@
 
 **Goal:** Make Sheg skill experiments reproducible, resumable, contract-aware, and reviewable across discovery, focused behavior, and scripted workflows.
 
-**Architecture:** Extend the existing prompt/catalog seam with a frozen campaign manifest, an append-only trial runner, a Codex process adapter, layered graders, and a static comparison report. Keep deterministic verification independent of live agent dispatch. Preserve the existing scenario CLI and historical traces through explicit compatibility readers rather than rewriting evidence.
+**Architecture:** Extend the existing prompt/catalog seam with a frozen campaign manifest, an append-only trial runner, a Codex process adapter, layered graders, and a static comparison report. Keep deterministic verification independent of live agent dispatch. Preserve the existing scenario CLI and its ability to read externally supplied trace wrappers; keep reusable scenario/evaluator fixtures in source and rely on Git history for prior development results.
 
 **Tech Stack:** TypeScript, Zod, Node test runner, Node child processes, installed Codex CLI, JSON/JSONL, static HTML and Markdown reports. No new evaluation framework dependency.
 
@@ -12,7 +12,7 @@
 
 **Execution Strategy:** `executing-plans` - frozen identities, retry state, grading records, and report comparability share contracts across tasks. Inline implementation maintains those invariants; fresh scenario actors/evaluators and whole-branch review provide independent checks.
 
-**Status:** Ready for review; implementation has not started. Plan 4 is paused. Its completed product commits are not dependencies of this plan.
+**Status:** Implementation in progress; Tasks 1-5 are implemented, and Task 6 remains in proof, review, and publication. Plan 4 is paused. Its completed product commits are not dependencies of this plan.
 
 **Target development version:** `0.3.0-dev.5`, based on latest `develop` after Plan 3. Use `/using-git-worktrees` and its bundled script for a fresh canonical `codex/skill-campaign-harness` worktree. Leave `codex/v0.3.0-selected-stimulus` intact. Do not merge Plan 4 product changes into Plan 3a.
 
@@ -20,9 +20,9 @@
 
 `scripts/skill-scenario.ts` renders prompts and validates catalog pairing, reference containment, actor/evaluator shape, and stored trace identity. It does not dispatch or grade agents. `test/skill-scenario-harness.test.ts` has bespoke evidence checks for two named campaigns. `test/release-package.test.ts` proves skill-local tests are excluded from the plugin. These are the starting points, not claims of a complete campaign runner.
 
-Existing skill scenarios/evaluators/traces stay under `skills/{study-design,stimulus-response-polling}/tests/behavior/`. Shared harness modules will live under `scripts/skill-testing/`: `contracts.ts`, `snapshots.ts`, `runner.ts`, `codex-adapter.ts`, `graders.ts`, `report.ts`, and `cli.ts`, each owning its named responsibility. Shared deterministic tests live under `test/skill-testing/`. Preserve `npm run skill:scenario`; add `npm run skill:campaign` pointing at `cli.ts`.
+Existing skill scenarios and evaluators stay under `skills/{study-design,stimulus-response-polling}/tests/behavior/`; prior baseline/campaign results are represented by Git history and are not source fixtures. Shared harness modules will live under `scripts/skill-testing/`: `contracts.ts`, `snapshots.ts`, `runner.ts`, `codex-adapter.ts`, `graders.ts`, `report.ts`, and `cli.ts`, each owning its named responsibility. Shared deterministic tests live under `test/skill-testing/`. Preserve `npm run skill:scenario`; add `npm run skill:campaign` pointing at `cli.ts`.
 
-Plan 4 has completed Tasks 1-3 through `f09978f`, with 366 tests passing at that checkpoint; Task 4 has preliminary actor outputs but no finished campaign. Its uncommitted posture doctrine and AGENTS pointer are inputs for this plan, not implemented harness features. Incorporate corrected posture documentation in Task 5. Historical five-trial evidence remains historical; do not relabel it as runner-generated or fill missing metadata by inference.
+Plan 4 has completed Tasks 1-3 through `f09978f`, with 366 tests passing at that checkpoint; Task 4 has preliminary actor outputs but no finished campaign. Its uncommitted posture doctrine and AGENTS pointer are inputs for this plan, not implemented harness features. Incorporate corrected posture documentation in Task 5. Do not preserve or relabel historical campaign outputs as source artifacts.
 
 ## Review Focus
 
@@ -75,7 +75,7 @@ For the Codex adapter, use `codex exec --json` to start workflow trials, capture
 
 - [ ] Add positive and near-miss discovery cases for both skills, including requests sharing polling vocabulary but not needing a study. Add a design/cohort/approval/partial-result/changed-follow-up script with no paid Sheg execution.
 - [ ] Test that discovery receives no skill body, actors receive no rubric or future turns, workflow context persists within a trial, and two trials share no conversation. Test a missing backend conversation capability as a preflight error.
-- [ ] Implement suite selection by owner, tags, and relevant guidance paths. Preserve existing six focused scenario families and historical evidence. Add a held-out wording variant for a material/history case without tuning guidance to its answer.
+- [x] Implement suite selection by owner, tags, and relevant guidance paths, with optional shared-safeguard inclusion. Preserve scenario coverage while keeping past campaign outputs in Git history only. Add a held-out wording variant for a material/history case without tuning guidance to its answer.
 - [ ] Run `node --import tsx --test test/skill-testing/campaign-suites.test.ts`; commit.
 
 ## Task 5: Report comparisons and encode the operating posture
@@ -85,22 +85,22 @@ For the Codex adapter, use `codex exec --json` to start workflow trials, capture
 **Interfaces:** CLI `grade`, `calibrate`, `compare`, and `report` consume retained campaign directories. Reports produce escaped static HTML, Markdown, and JSON showing per-scenario/criterion counts, sample size, complete-trial passes, uncertainty, failures, runtime errors, missing metadata, guidance hashes, measured timing/usage, and links to exact outputs. Qualitative A/B comparisons have reproducibly shuffled labels and swapped-order judgments; expose disagreements and human adjudication. No composite quality score or significance claim.
 
 - [ ] Test changed-input rejection, order-swapped comparison disagreement, unavailable usage, failed attempts excluded from behavioral denominators but visibly counted, and HTML escaping of actor text.
-- [ ] Implement reports and generic evidence validators driven by campaign manifests, retaining explicit legacy validation for existing campaigns. Remove no historical evidence. Replace bespoke current-campaign trial-count expectations with manifest-configured checks.
+- [x] Implement reports and generic evidence validators driven by campaign manifests, retaining external legacy trace compatibility where useful. Keep campaign results out of source. Replace bespoke current-campaign result expectations with reusable contract and scenario checks. Campaign comparisons report per-criterion pass/fail/uncertain counts and candidate-minus-baseline deltas.
 - [ ] Write doctrine describing exactly what the runner enforces, what the operator decides, required calibration/review, suite selection, evidence retention, and limits. Route to it from the small AGENTS entrypoint. Keep tool isolation outside ownership.
 - [ ] Run `node --import tsx --test test/skill-testing/campaign-report.test.ts test/skill-scenario-harness.test.ts test/release-package.test.ts`; commit.
 
 ## Task 6: Prove the experiment loop and publish the checkpoint
 
-**Files:** Owning-skill retained proof campaign, version manifests, generated runtime, roadmap, and the paused Plan 4 handoff.
+**Files:** Live campaign inputs in the owning skill, version manifests, generated runtime, roadmap, and the paused Plan 4 handoff. Campaign outputs remain transient and off-repository.
 
 - [ ] Prepare a small live smoke campaign with explicit runtime/model settings under existing account-backed Codex access. No paid Sheg provider calls. Use frozen old/candidate guidance with a deliberate narrowly scoped test mutation, a no-guidance attribution arm, known calibration cases, discovery near-misses, and one scripted workflow. Restore authored guidance after the mutation; record it only as a campaign snapshot.
-- [ ] Use the ambient `/temporary-tool-auditing` procedure for fresh subagents whose tool activity is part of the proof. Verify session/worktree binding and boundary controls, assess the exact subject, preserve only a sanitized assessment receipt with limitations, then disable, verify teardown and purge owned raw logs. Separate CLI actor sessions require their own verified binding; never infer parent-family capture. An unavailable capture is recorded as `not-captured`, never retroactively inferred from an actor statement. Do not implement Sheg-owned hooks or isolation.
+- [ ] Pressure-test workflow actors should call the Sheg MCP tools required by their frozen checkpoints. Preserve raw CLI events and have the harness deterministically verify observed Sheg calls. Tool isolation and universal tool-use auditing remain ambient Agent Capability Pack concerns; do not add Sheg-owned hooks, telemetry, or isolation, and do not infer tool absence from actor claims.
 - [ ] Interrupt and resume one campaign; demonstrate unchanged completed outputs, retained attempts, independent evaluator capture, contract-aware detection of the mutation, and report drill-down. Repeat the focused case with held-out wording. If the installed backend cannot execute a required capability, report it and stop that dependent proof; do not label fake-adapter results as live evidence.
-- [ ] Retain the deliberate reviewed proof under the owning skill's test tree with exact manifests/raw outputs/grades/adjudications; keep transient output off-repo. Document observed failures and limitations rather than requiring the candidate to pass every capability case.
+- [ ] Inspect live manifests, raw outputs, grades, adjudications, and reports transiently outside the repository during development, then discard them after review. Commit reusable skill tests and fixtures, never campaign results or receipts. Do not require the candidate to pass every capability case.
 - [ ] Align authoritative versions to `0.3.0-dev.5`, run `npm run build`, and `npm run plugin:package -- --validate-only`. Package a no-tag candidate ZIP in scratch and confirm skills ship while tests/campaign artifacts do not. Record ZIP hash and file count.
 - [ ] Stage and commit through the tracked hook's `npm run verify`; obtain fresh whole-branch review, fix findings and rerun affected checks, then publish a PR targeting develop under the existing roadmap authorization. Update roadmap with verified head/check/merge evidence after each system proves it. No stable release/tag.
 - [ ] After merge, resume Plan 4 by rebasing its retained branch onto the new develop and resolving shared docs/harness changes. Preserve completed Tasks 1-3, reassess generated contracts and focused product tests, replace preliminary Task 4 manual results with a frozen old/new campaign using this harness, and target `0.3.0-dev.6`. Update its JIT plan before executing resumed work.
 
 ## Completion evidence
 
-Return the committed plan, execution base/worktree, generic harness test results, exact live campaign identities and runtime metadata, interrupted/resumed proof, contract-aware and semantic findings, calibration disagreements, inspectable report, candidate package exclusion proof, PR/head/check state, and the updated Plan 4 resume handoff. A deterministic green gate alone does not prove skill improvement.
+Return the execution base/worktree, relevant generic harness test results, live campaign findings while their transient outputs are available, interrupted/resumed behavior, contract-aware and semantic findings, calibration disagreements, candidate package exclusion, PR/head/check state, and the updated Plan 4 resume handoff. Do not preserve campaign outputs as repository history. A deterministic green gate alone does not prove skill improvement.

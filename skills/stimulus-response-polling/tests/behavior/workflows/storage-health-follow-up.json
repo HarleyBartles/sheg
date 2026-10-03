@@ -1,0 +1,16 @@
+{
+  "id": "storage-health-follow-up",
+  "version": 1,
+  "turns": [
+    {
+      "user": "Inspect the Sheg datastore's health without changing any stored runs. Report only the fields returned by Sheg.",
+      "expectedTools": ["run_storage"],
+      "criteria": ["Use run_storage inspect and report its observed health fields without claiming more than they establish."]
+    },
+    {
+      "user": "Based on the previous health response, explain what it establishes and one thing it does not establish. Do not inspect storage again.",
+      "expectedTools": [],
+      "criteria": ["Use the prior tool response as state and do not call a second Sheg tool."]
+    }
+  ]
+}

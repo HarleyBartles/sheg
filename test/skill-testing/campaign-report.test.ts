@@ -41,6 +41,9 @@ test('report separates runtime errors from behavioral denominators and escapes a
     assert.equal(report.summary.runtimeErrors, 1);
     assert.equal(report.summary.sampleSize, 2);
     assert.equal(report.summary.completeTrialPasses, 1);
+    assert.equal(report.summary.semanticPasses, 1);
+    assert.equal(report.summary.semanticFailures, 0);
+    assert.equal(report.summary.semanticUncertain, 0);
     assert.equal(report.summary.semanticNotRun, 0);
     assert.equal((report.summary.criterionCounts as Record<string, { pass: number }>)[manifest.evaluationBasis.criteria[0]!.id]!.pass, 1);
     assert.doesNotMatch(judgePrompt, /candidate skill body|Arm: candidate|candidate label/);
@@ -60,6 +63,30 @@ test('campaign comparison blocks changed execution inputs', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('campaign comparison reports per-criterion count changes', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-criterion-delta-'));
+  try {
+    const baseline = path.join(root, 'baseline');
+    const candidate = path.join(root, 'candidate');
+    const baselineManifest = prepareCampaign({ ...config('baseline'), repetitions: 1 }, baseline);
+    const candidateManifest = prepareCampaign({ ...config('candidate'), repetitions: 1 }, candidate);
+    const actorAdapter: CampaignAdapter = { async execute() { return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: actor('I would ask for the missing selections first.'), rawStderr: '', sessionId: null, observedSettings: {} }; } };
+    await runCampaign(baseline, actorAdapter);
+    await runCampaign(candidate, actorAdapter);
+    const gradeWith = (manifest: typeof baselineManifest, result: 'pass' | 'fail'): CampaignAdapter => ({ async execute() {
+      const judged = { scenarioId: manifest.scenarioId, criterionResults: manifest.evaluationBasis.criteria.map(({ id }) => ({ criterionId: id, result, evidence: `Observed ${result} evidence.` })), notes: '' };
+      return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: JSON.stringify(judged), rawStderr: '', sessionId: 'judge', observedSettings: {} };
+    } });
+    await gradeCampaign(baseline, gradeWith(baselineManifest, 'fail'));
+    await gradeCampaign(candidate, gradeWith(candidateManifest, 'pass'));
+    const comparison = compareCampaigns(baseline, candidate) as { criterionChanges: Array<{ criterionId: string; baseline: { pass: number; fail: number }; candidate: { pass: number; fail: number }; delta: { pass: number; fail: number } }> };
+    assert.equal(comparison.criterionChanges[0]!.baseline.fail, 1);
+    assert.equal(comparison.criterionChanges[0]!.candidate.pass, 1);
+    assert.equal(comparison.criterionChanges[0]!.delta.fail, -1);
+    assert.equal(comparison.criterionChanges[0]!.delta.pass, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('evaluator timeouts are uncertain judgments and remain separate from actor runtime errors', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-judge-timeout-'));
   try {
@@ -76,6 +103,31 @@ test('evaluator timeouts are uncertain judgments and remain separate from actor 
     assert.equal(report.summary.semanticNotRun, 0);
     assert.equal(report.trials[0]!.grade?.semantic.result, 'uncertain');
     assert.match(report.trials[0]!.grade?.semantic.error ?? '', /timed-out/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('workflow report deterministically rejects a missing MCP call and accepts an observed Sheg event', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-workflow-tool-report-'));
+  try {
+    const campaign = path.join(root, 'campaign');
+    const workflow = {
+      ...config('workflow-tool-report'), suite: 'workflow' as const, repetitions: 2,
+      workflowTurns: [{ user: 'Inspect storage.', expectedTools: ['run_storage'], criteria: [] }],
+    };
+    const manifest = prepareCampaign(workflow, campaign);
+    let actorCalls = 0;
+    await runCampaign(campaign, { async execute() { throw new Error('Workflow actor must use the conversation adapter.'); }, async executeWorkflow() {
+      actorCalls += 1;
+      const events = actorCalls === 1 ? '' : `${JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call', server: 'sheg', tool: 'run_storage' } })}\n`;
+      return { status: 'completed', exitCode: 0, rawEvents: events, rawFinalMessage: 'Done.', rawStderr: '', sessionId: `actor-${actorCalls}`, observedSettings: {} };
+    } });
+    await gradeCampaign(campaign, { async execute() {
+      const judged = { scenarioId: manifest.scenarioId, criterionResults: manifest.evaluationBasis.criteria.map(({ id }) => ({ criterionId: id, result: 'pass', evidence: 'The actor output and captured workflow evidence satisfy this criterion.' })), notes: '' };
+      return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: JSON.stringify(judged), rawStderr: '', sessionId: 'judge', observedSettings: {} };
+    } });
+    const report = collectCampaignReport(campaign);
+    assert.equal(report.summary.deterministicFailures, 1);
+    assert.equal(report.summary.completeTrialPasses, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

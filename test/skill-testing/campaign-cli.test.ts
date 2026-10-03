@@ -24,3 +24,21 @@ test('campaign CLI prepares and inspects off-repository campaign data without di
     assert.throws(() => execFileSync(process.execPath, ['--import', 'tsx', cli, 'run', '--campaign', outputPath], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), /explicit --backend codex/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('campaign CLI selects affected scenarios by owner and guidance with shared safeguards', () => {
+  const cli = path.resolve('scripts/skill-testing/cli.ts');
+  const output = execFileSync(process.execPath, [
+    '--import', 'tsx', cli, 'select', '--owner', 'stimulus-response-polling', '--guidance-path', 'references/run-and-recovery.md', '--include-shared',
+  ], { encoding: 'utf8' });
+  const selected = JSON.parse(output) as Array<{ id: string; tags: string[] }>;
+  assert.deepEqual(selected.map(({ id }) => id), [
+    'selected-material-isolation-no-fit', 'partial-run-selected-question', 'typed-answer-failure',
+    'isolated-storage-inspection', 'live-storage-inspection-heldout', 'live-storage-inspection',
+    'cumulative-journey-material', 'cumulative-journey-material-heldout',
+  ]);
+  assert.deepEqual(selected.filter(({ tags }) => tags.includes('shared-safeguard')).map(({ id }) => id), [
+    'selected-material-isolation-no-fit', 'partial-run-selected-question', 'typed-answer-failure',
+    'live-storage-inspection-heldout', 'live-storage-inspection',
+    'cumulative-journey-material', 'cumulative-journey-material-heldout',
+  ]);
+});
