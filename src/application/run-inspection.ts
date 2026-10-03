@@ -85,7 +85,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       for (const id of request.context.materialIds) {
         const item = catalog.find((candidate) => candidate.id === id);
         if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
-        referencedMaterial.push({ id: item.id, text: item.text });
+        referencedMaterial.push(item);
       }
       selectedMaterial = [...referencedMaterial, ...selectedMaterial];
     }
@@ -118,11 +118,19 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       evaluations.push(evaluation);
       return evaluation;
     });
-    materialSnapshots.push({ contextId, respondentId: turn.respondentId, materials: mergeMaterials(catalog, selectedMaterial) });
+    const linkedMaterialIds = new Set(request.questions.flatMap((question) => question.type === 'choice' ? Object.values(question.materialOptions ?? {}) : []));
+    const linkedMaterials = [...linkedMaterialIds].map((id) => {
+      const item = catalog.find((candidate) => candidate.id === id);
+      if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
+      return item;
+    });
+    materialSnapshots.push({ contextId, respondentId: turn.respondentId,
+      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, linkedMaterials) : mergeMaterials(catalog, selectedMaterial) });
     preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
       selections.push({ sourceEvaluationId: sourceTurn.evaluationId, sourceContextId: sourceTurn.contextId,
-        respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId });
+        respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId,
+        ...(request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}) });
     }
   }
   if (groups.size === 0) problems.push({ code: 'no_follow_on_matches', message: 'No source evaluations match this follow-on selection.' });

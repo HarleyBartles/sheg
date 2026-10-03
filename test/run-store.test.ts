@@ -9,7 +9,7 @@ import test from 'node:test';
 import { materializeJourneyRun, prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import type { DecisionResult } from '../src/domain/decision/decision.js';
-import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedFollowOnRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun } from '../src/domain/run/request.js';
+import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedFollowOnRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun, type RunMaterialItem } from '../src/domain/run/request.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
@@ -918,6 +918,57 @@ test('evidence query resolves a mapped Choice answer to exact source-linked mate
     const unlinkedRunId = await completedRun(store, input);
     const unlinked = store.queryEvidence({ sourceRunId: unlinkedRunId, criteria: { answer: { type: 'choice', choiceId: 'continue' } } });
     assert.equal(unlinked.items[0]!.selectedMaterial, undefined);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('selected-material lineage is recipient-specific, survives source deletion, and rejects tampering', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const quote = { id: 'pull-quote', text: 'A city is a promise.', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) };
+  const p3 = { id: 'paragraph-3', text: 'Paragraph three.', sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) };
+  const p7 = { id: 'paragraph-7', text: 'Paragraph seven.', sourceId: 'article-v1', sourceSha256: 'c'.repeat(64) };
+  const sourceRequest = { ...input, respondents: [...input.respondents, { ...input.respondents[1]!, id: 'reader-c' }, { ...input.respondents[0]!, id: 'reader-d' }], material: [quote, p3, p7],
+    questions: [{ type: 'choice' as const, id: 'pick-paragraph', instructions: 'Which paragraph best represents the quote?',
+      options: { p3: p3.text, p7: p7.text, 'no-fit': 'Neither' }, materialOptions: { p3: p3.id, p7: p7.id } }], maxCalls: 4 };
+  try {
+    const sourceRunId = await completedRun(store, sourceRequest, (index) => ({ ...savedAnswer,
+      choice: index === 2 ? 'p7' : index === 3 ? 'no-fit' : 'p3',
+      probabilities: index === 2 ? { p3: 0.1, p7: 0.8, 'no-fit': 0.1 } : index === 3 ? { p3: 0.1, p7: 0.1, 'no-fit': 0.8 } : { p3: 0.8, p7: 0.1, 'no-fit': 0.1 } }));
+    const request = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId,
+      selection: { criteria: { questionId: 'pick-paragraph' } },
+      context: { mode: 'fresh-material', includeSelectedMaterial: true, materialIds: [quote.id] },
+      questions: [{ type: 'noul', id: 'represents-quote', instructions: 'Does this paragraph express the quote?' }],
+      provider: input.provider, maxCalls: 3 });
+    const sources = store.resolveFollowOnSources(request);
+    const admission = await prepareFollowOnRun(request, sources, provider);
+    assert.equal(admission.inspection.valid, true);
+    assert.deepEqual(admission.inspection.selectionCoverage, { matched: 4, eligible: 3,
+      excluded: { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 1 } });
+    const mutated = structuredClone(admission.prepared);
+    mutated.lineage!.selections[0]!.selectedMaterial!.text = 'Tampered paragraph.';
+    assert.throws(() => store.accept(randomUUID(), mutated), (error: unknown) => error instanceof RunStoreError && error.code === 'invalid_prepared_run');
+
+    const submissionId = randomUUID();
+    const accepted = store.accept(submissionId, admission.prepared);
+    const saved = store.getRequest(accepted.run.runId);
+    assert.equal(saved.lineage?.selectionCoverage?.eligible, 3);
+    assert.equal(saved.lineage?.selections.length, 3);
+    assert.equal(saved.lineage?.excludedSelections.length, 1);
+    assert.equal(saved.lineage?.excludedSelections[0]?.reason, 'unmappedChoice');
+    for (const selection of saved.lineage!.selections) {
+      const output = saved.evaluations.find(({ evaluationId }) => evaluationId === selection.evaluationId)!;
+      assert.deepEqual(output.packet.state.encounteredItems, [{ id: quote.id, text: quote.text }, { id: selection.selectedMaterial!.materialId, text: selection.selectedMaterial!.text }]);
+      const catalog: RunMaterialItem[] = saved.lineage!.materialSnapshots.find(({ contextId }) => contextId === selection.contextId)!.materials;
+      assert.deepEqual(catalog.map(({ id }) => id).sort(), [quote.id, selection.selectedMaterial!.materialId].sort());
+      assert.equal(selection.selectedMaterial!.textSha256, createHash('sha256').update(selection.selectedMaterial!.text, 'utf8').digest('hex'));
+    }
+    assert.equal(store.deleteRuns([sourceRunId]).deletedRunIds[0], sourceRunId);
+    const recalled = store.getRequest(accepted.run.runId);
+    assert.equal(recalled.lineage?.sourceAvailable, false);
+    assert.deepEqual(recalled.lineage?.selections, saved.lineage?.selections);
+    const retry = store.accept(submissionId, admission.prepared);
+    assert.equal(retry.created, false);
+    assert.equal(retry.run.runId, accepted.run.runId);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

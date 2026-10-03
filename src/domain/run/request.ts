@@ -181,6 +181,13 @@ export const selectionCoverageSchema = z.object({
   }
 });
 export type SelectionCoverage = z.infer<typeof selectionCoverageSchema>;
+const selectedMaterialEvidenceSchema = z.object({
+  materialId: materialItemSchema.shape.id,
+  text: materialItemSchema.shape.text,
+  sourceId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  sourceSha256: z.string().regex(/^[a-f\d]{64}$/i),
+  textSha256: z.string().regex(/^[a-f\d]{64}$/i),
+}).strict();
 
 export const followOnLineageSchema = z.object({
   sourceRunId: z.string().uuid(),
@@ -191,7 +198,9 @@ export const followOnLineageSchema = z.object({
   sourceRecordState: z.enum(['live', 'historical']).optional(),
   selectionCoverage: selectionCoverageSchema.optional(),
   excludedSelections: z.array(followOnExclusionSchema).default([]),
-  selections: z.array(z.object({ sourceEvaluationId: z.string().uuid(), sourceContextId: z.string().uuid(), respondentId: z.string().min(1), evaluationId: z.string().uuid(), contextId: z.string().uuid() }).strict()),
+  selections: z.array(z.object({ sourceEvaluationId: z.string().uuid(), sourceContextId: z.string().uuid(), respondentId: z.string().min(1), evaluationId: z.string().uuid(), contextId: z.string().uuid(),
+    selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+  }).strict()),
   materialSnapshots: z.array(z.object({ contextId: z.string().uuid(), respondentId: z.string().min(1), materials: z.array(materialItemSchema) }).strict()).default([]),
 }).strict();
 
@@ -224,13 +233,7 @@ export const runEvidenceItemSchema = z.object({
     questionId: z.string().min(1),
     status: z.enum(['pending', 'answered', 'failed', 'unreached']),
     result: decisionResultSchema.optional(),
-    selectedMaterial: z.object({
-      materialId: materialItemSchema.shape.id,
-      text: materialItemSchema.shape.text,
-      sourceId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-      sourceSha256: z.string().regex(/^[a-f\d]{64}$/i),
-      textSha256: z.string().regex(/^[a-f\d]{64}$/i),
-    }).strict().optional(),
+    selectedMaterial: selectedMaterialEvidenceSchema.optional(),
     execution: providerExecutionEvidenceSchema.optional(),
     turnId: z.string().min(1).optional(),
     nodeId: z.string().min(1).optional(),
