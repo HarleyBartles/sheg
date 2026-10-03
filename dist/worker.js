@@ -19872,13 +19872,7 @@ function compileDecisionPacket(arm, profile, taskId, history = []) {
   const task = arm.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`Unknown task ${taskId}.`);
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
-  let itemIds;
-  if (arm.presentation.kind === "sequence") {
-    itemIds = arm.items.map((item) => item.id);
-  } else {
-    const lastChoiceIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
-    itemIds = history.slice(lastChoiceIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
-  }
+  const itemIds = [...new Set(history.filter((event) => event.type === "exposure").map((event) => event.itemId))];
   const encounteredItems = itemIds.map((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);

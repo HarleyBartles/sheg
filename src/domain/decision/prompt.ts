@@ -51,13 +51,12 @@ export function questionForTask(task: JourneyDefinition['tasks'][number]): Decis
 }
 
 const promptContract = {
-  version: 6,
+  version: 7,
   stateFields: ['respondent.profile', 'encounteredItems', 'trajectory'],
-  graphExposureWindow: 'items exposed since the previous decision',
-  sequenceExposureWindow: 'all arm items for every task',
+  encounteredMaterial: 'all items exposed through the current turn, unique by item ID in first-exposure order',
   trajectory: ['prior task IDs and typed responses with meanings', 'prior exposure IDs', 'event counts and range'],
   responseHistory: 'per-task include or omit; omitted legacy setting includes prior responses',
-  onlyCurrentGraphExposureText: true,
+  noUnexposedOrSiblingMaterial: true,
   preserveEncounterOrder: true,
   historyOrder: 'chronological',
   studyMetadataExcluded: true,
@@ -216,15 +215,9 @@ export function compileDecisionPacket(
   if (!task) throw new Error(`Unknown task ${taskId}.`);
 
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
-  let itemIds: string[];
-  if (arm.presentation.kind === 'sequence') {
-    itemIds = arm.items.map((item) => item.id);
-  } else {
-    const lastChoiceIndex = history.findLastIndex((event) => event.type === 'choice' || event.type === 'response');
-    itemIds = history.slice(lastChoiceIndex + 1)
-      .filter((event): event is Extract<PromptHistoryEvent, { type: 'exposure' }> => event.type === 'exposure')
-      .map((event) => event.itemId);
-  }
+  const itemIds = [...new Set(history
+    .filter((event): event is Extract<PromptHistoryEvent, { type: 'exposure' }> => event.type === 'exposure')
+    .map((event) => event.itemId))];
 
   const encounteredItems = itemIds.map((id) => {
     const item = itemsById.get(id);

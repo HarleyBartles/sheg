@@ -288,7 +288,10 @@ test('answer, route transition and next reached turn commit atomically', async (
     assert.notEqual(reopened.evaluations[0]!.turnId, reopened.evaluations[2]!.turnId);
     assert.equal(reopened.evaluations[0]!.questionId, reopened.evaluations[2]!.questionId);
     assert.notEqual(reopened.evaluations[0]!.nodeId, reopened.evaluations[2]!.nodeId);
-    assert.deepEqual(reopened.evaluations[2]!.packet.state.encounteredItems, [{ id: 'section-three', text: 'Later section.' }]);
+    assert.deepEqual(reopened.evaluations[2]!.packet.state.encounteredItems, [
+      { id: 'section-one', text: 'Opening section.' },
+      { id: 'section-three', text: 'Later section.' },
+    ]);
     const history = new DatabaseSync(path.join(root, 'runs.sqlite'));
     try {
       const attempts = history.prepare('SELECT status, result_json FROM attempts WHERE run_id = ? ORDER BY started_ms').all(accepted.run.runId) as Array<{ status: string; result_json: string }>;

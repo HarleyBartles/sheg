@@ -45,7 +45,7 @@ test('previews sequence stimuli before the authored questions and routes every c
     if (secondQuestion.kind === 'question') {
       assert.deepEqual(secondQuestion.routeContexts.map((context) => context.priorChoices.map(({ taskId, optionId, meaning }) => ({ taskId, optionId, meaning }))),
         Object.entries(task.options).map(([optionId, meaning]) => [{ taskId: task.id, optionId, meaning }]));
-      assert.ok(secondQuestion.routeContexts.every((context) => context.exposedStimulusIds.length === 0));
+      assert.ok(secondQuestion.routeContexts.every((context) => context.exposedStimulusIds.join(',') === arm.items.map(({ id }) => id).join(',')));
     }
   }
 });
@@ -66,6 +66,41 @@ test('sequence preview matches the equivalent all-items-first linear graph for t
 
   assert.deepEqual(sequencePreview.entryNodeId, graphPreview.entryNodeId);
   assert.deepEqual(sequencePreview.nodes, graphPreview.nodes);
+});
+
+test('preview route contexts retain unique material across repeated exposure events', () => {
+  const firstChoice = arm.tasks[0]!;
+  if (!('options' in firstChoice)) throw new Error('Expected a Choice fixture task.');
+  const tasks = [arm.tasks[0]!, { ...arm.tasks[0]!, id: 'middle' }, { ...arm.tasks[0]!, id: 'last' }];
+  const graphArm: StudyArm = {
+    ...arm,
+    tasks,
+    presentation: {
+      kind: 'graph', entryNodeId: 'show-symptom', maxDecisions: 3,
+      nodes: [
+        { id: 'show-symptom', kind: 'expose', itemId: 'symptom' },
+        { id: 'first', kind: 'ask', taskId: tasks[0]!.id },
+        { id: 'show-investigation', kind: 'expose', itemId: 'investigation' },
+        { id: 'second', kind: 'ask', taskId: tasks[1]!.id },
+        { id: 'show-symptom-again', kind: 'expose', itemId: 'symptom' },
+        { id: 'third', kind: 'ask', taskId: tasks[2]!.id },
+        { id: 'done', kind: 'terminal', outcome: 'done' },
+      ],
+      transitions: [
+        { fromNodeId: 'show-symptom', toNodeId: 'first' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'first', optionId, toNodeId: 'show-investigation' })),
+        { fromNodeId: 'show-investigation', toNodeId: 'second' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'second', optionId, toNodeId: 'show-symptom-again' })),
+        { fromNodeId: 'show-symptom-again', toNodeId: 'third' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'third', optionId, toNodeId: 'done' })),
+      ],
+    },
+  };
+  const preview = previewStudyJourney([graphArm]).arms[0]!;
+  const questions = preview.nodes.filter((node) => node.kind === 'question');
+
+  assert.ok(questions[1]?.kind === 'question' && questions[1].routeContexts.every(({ exposedStimulusIds }) => exposedStimulusIds.join(',') === 'symptom,investigation'));
+  assert.ok(questions[2]?.kind === 'question' && questions[2].routeContexts.every(({ exposedStimulusIds }) => exposedStimulusIds.join(',') === 'symptom,investigation'));
 });
 
 test('previews every graph branch and represents a shared continuation node once', () => {

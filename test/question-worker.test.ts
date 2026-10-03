@@ -424,7 +424,10 @@ test('a detached journey worker records reached Choice, Score and Noul turns thr
     assert.equal(status.usedCalls, 3);
     assert.equal(calls, 3);
     assert.deepEqual(requests.map(({ questionId }) => questionId), ['interest', 'clarity', 'likely']);
-    assert.deepEqual(requests[1]!.encounteredItems, [{ id: 'section-three', text: 'Later section.' }]);
+    assert.deepEqual(requests[1]!.encounteredItems, [
+      { id: 'section-one', text: 'Opening section.' },
+      { id: 'section-three', text: 'Later section.' },
+    ]);
     assert.equal(requests[1]!.responseCount, 1);
     assert.equal(requests[2]!.responseCount, 2);
     assert.deepEqual(run.evaluations.map(({ status: evaluationStatus, nodeId }) => [evaluationStatus, nodeId]), [

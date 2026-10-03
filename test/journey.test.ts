@@ -60,7 +60,7 @@ test('graph mode follows selected stable option IDs and stops at terminal node',
   assert.equal(result.outcome, 'completed');
   assert.deepEqual(result.events.filter((event) => event.type === 'exposure').map((event) => event.itemId), ['symptom', 'investigation', 'test-notes', 'repair']);
   const states = requests.map((request) => request.state as unknown as PromptState);
-  assert.deepEqual(states.map((state) => state.encounteredItems.map((item) => item.id)), [['symptom'], ['investigation'], ['test-notes']]);
+  assert.deepEqual(states.map((state) => state.encounteredItems.map((item) => item.id)), [['symptom'], ['symptom', 'investigation'], ['symptom', 'investigation', 'test-notes']]);
   assert.deepEqual(states[2]?.trajectory.choices.map((choice) => choice.choiceId), ['continue', 'open-notes']);
 });
 
