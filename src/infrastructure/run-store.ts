@@ -852,8 +852,15 @@ class SQLiteRunStore implements RunStore {
         const respondentId = asText(row.respondent_id, 'respondent ID');
         return {
           evaluationId: asText(row.evaluation_id, 'evaluation ID'), contextId,
-          respondentId, packet, ...(result ? { result } : {}),
+          respondentId, status: asText(row.status, 'evaluation status') as FollowOnSourceSet['turns'][number]['status'], packet, ...(result ? { result } : {}),
           materials: materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems),
+          ...(result?.type === 'choice' && packet.question.type === 'choice' && packet.question.materialOptions?.[result.choice]
+            ? (() => {
+              const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
+              const candidate = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems).find(({ id }) => id === materialId);
+              if (!candidate?.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+              return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') } };
+            })() : {}),
         };
       });
       return {

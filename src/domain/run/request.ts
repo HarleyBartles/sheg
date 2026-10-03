@@ -162,6 +162,7 @@ const followOnExclusionSchema = z.object({
   choiceId: z.string().min(1).optional(),
   choiceMeaning: z.string().min(1).optional(),
 }).strict();
+export type FollowOnSelectionExclusion = z.infer<typeof followOnExclusionSchema>;
 
 export const selectionCoverageSchema = z.object({
   matched: z.number().int().nonnegative(),
@@ -302,9 +303,11 @@ export type FollowOnSourceTurn = {
   evaluationId: string;
   contextId: string;
   respondentId: string;
+  status: 'pending' | 'answered' | 'failed' | 'unreached';
   packet: import('../decision/decision.js').DecisionRequest & { state: import('../decision/prompt.js').PromptState };
   result?: import('../decision/decision.js').DecisionResult;
   materials?: RunMaterialItem[];
+  selectedMaterial?: RunEvidenceItem['selectedMaterial'];
 };
 export type FollowOnSourceSet = {
   sourceRunId: string;

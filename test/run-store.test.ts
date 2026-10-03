@@ -904,6 +904,16 @@ test('evidence query resolves a mapped Choice answer to exact source-linked mate
       materialId: candidate.id, text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
       textSha256: createHash('sha256').update(text, 'utf8').digest('hex'),
     });
+    const followOnRequest = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId: runId,
+      selection: { criteria: { questionId: 'which-section' } },
+      context: { mode: 'fresh-material', includeSelectedMaterial: true },
+      questions: [{ type: 'noul', id: 'isolated-fit', instructions: 'Does this paragraph express the pull quote?' }],
+      provider: mappedInput.provider, maxCalls: 1,
+    });
+    const resolved = store.resolveFollowOnSources(followOnRequest);
+    assert.equal(resolved.turns[0]?.status, 'answered');
+    assert.deepEqual(resolved.turns[0]?.selectedMaterial, query.items[0]!.selectedMaterial);
 
     const unlinkedRunId = await completedRun(store, input);
     const unlinked = store.queryEvidence({ sourceRunId: unlinkedRunId, criteria: { answer: { type: 'choice', choiceId: 'continue' } } });
