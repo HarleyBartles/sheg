@@ -38947,6 +38947,7 @@ var package_default = {
     verify: "npm run lint && npm run typecheck && npm test && node --import tsx scripts/check-generated.ts",
     "contracts:build": "node --import tsx scripts/generate-contracts.ts",
     "skill:scenario": "node --import tsx scripts/skill-scenario.ts",
+    "skill:campaign": "node --import tsx scripts/skill-testing/cli.ts",
     build: "node --import tsx scripts/build.ts",
     "plugin:package": "node scripts/package-plugin.mjs",
     start: "node dist/mcp.js"

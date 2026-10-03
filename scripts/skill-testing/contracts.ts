@@ -7,9 +7,12 @@ import { readGuidanceSnapshot, sha256, stableJson, type GuidanceSnapshot } from 
 
 const armConfigSchema = z.object({
   id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  guidanceRoot: z.string().min(1),
+  guidanceRoot: z.string().min(1).optional(),
   referencePaths: z.array(z.string()),
-}).strict();
+}).strict().superRefine((arm, context) => {
+  if (arm.id !== 'no-guidance' && !arm.guidanceRoot) context.addIssue({ code: 'custom', path: ['guidanceRoot'], message: 'Guided arms require a skill snapshot root.' });
+  if (arm.id === 'no-guidance' && arm.guidanceRoot) context.addIssue({ code: 'custom', path: ['guidanceRoot'], message: 'The no-guidance arm cannot load a skill body.' });
+});
 
 export const campaignConfigSchema = z.object({
   id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
@@ -72,14 +75,14 @@ function actorPrompt(base: string, snapshot: GuidanceSnapshot): string {
   return `${base.slice(0, boundary)}${marker}${material}`;
 }
 
-function discoveryPrompt(base: string, ownerSkill: string, snapshot: GuidanceSnapshot): string {
+function discoveryPrompt(base: string, ownerSkill: string, description: string): string {
   const marker = '\n## User request\n';
   const boundary = base.indexOf(marker);
   if (boundary < 0) throw new Error('Scenario renderer did not expose its request boundary.');
   const candidates = loadScenarioCatalog()
     .map((scenario) => scenario.ownerSkill)
     .filter((skill, index, all) => all.indexOf(skill) === index)
-    .map((skill) => ({ name: skill, description: skill === ownerSkill ? snapshot.description : readDescription(skill) }));
+    .map((skill) => ({ name: skill, description: skill === ownerSkill ? description : readDescription(skill) }));
   const intro = 'Select which available skill, if any, should guide this request. Return the selected skill name or none and explain the trigger. Do not use skill bodies or references in this discovery trial.';
   return `${intro}\n\n## Available skills\n${JSON.stringify(candidates, null, 2)}${base.slice(boundary)}`;
 }
@@ -111,13 +114,16 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
   if (!evaluator || evaluator.version !== scenario.version) throw new Error(`Scenario evaluator is missing or stale: ${config.scenarioId}`);
   const rendered = renderActorPrompt(config.scenarioId);
   const control = renderControlPrompt(config.scenarioId).prompt;
-  const snapshots = config.arms.map((arm) => ({ arm, snapshot: readGuidanceSnapshot(arm.guidanceRoot, arm.referencePaths) }));
+  const snapshots = config.arms.map((arm) => ({
+    arm,
+    snapshot: arm.guidanceRoot ? readGuidanceSnapshot(arm.guidanceRoot, arm.referencePaths) : undefined,
+  }));
   const arms = snapshots.map(({ arm, snapshot }) => {
-    const prompt = actorPrompt(rendered, snapshot);
-    const discovery = discoveryPrompt(control, scenario.ownerSkill, snapshot);
+    const prompt = snapshot ? actorPrompt(rendered, snapshot) : control;
+    const discovery = discoveryPrompt(control, scenario.ownerSkill, snapshot?.description ?? readDescription(scenario.ownerSkill));
     return {
       id: arm.id,
-      skillReferenceHashes: snapshot.hashes,
+      skillReferenceHashes: snapshot?.hashes ?? {},
       actorPrompt: prompt,
       actorPromptSha256: sha256(prompt),
       discoveryPrompt: discovery,
@@ -157,7 +163,7 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
   const staging = path.join(parent, `.${path.basename(outputRoot)}-${randomUUID()}.preparing`);
   try {
     mkdirSync(staging, { recursive: false });
-    for (const { arm, snapshot } of snapshots) freezeSnapshot(staging, arm.id, snapshot);
+    for (const { arm, snapshot } of snapshots) if (snapshot) freezeSnapshot(staging, arm.id, snapshot);
     writeFileSync(path.join(staging, 'campaign.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     renameSync(staging, outputRoot);
   } catch (error) {

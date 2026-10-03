@@ -85,5 +85,11 @@ test('trial identities are unique and discovery snapshots descriptions without s
     assert.equal(new Set(manifest.trials.map((trial) => trial.trialId)).size, 2);
     assert.ok(manifest.arms[0]?.discoveryPrompt.includes('candidate guidance'));
     assert.ok(!manifest.arms[0]?.discoveryPrompt.includes('candidate skill body'));
+    const noGuidance = prepareCampaign({
+      ...input.config,
+      arms: [{ id: 'no-guidance', referencePaths: [] }],
+    }, path.join(input.root, 'no-guidance'));
+    assert.doesNotMatch(noGuidance.arms[0]!.actorPrompt, /candidate skill body|candidate reference/);
+    assert.deepEqual(noGuidance.arms[0]!.skillReferenceHashes, {});
   } finally { input.cleanup(); }
 });
