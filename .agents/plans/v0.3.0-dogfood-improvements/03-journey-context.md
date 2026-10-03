@@ -81,7 +81,7 @@ Align `package.json`, both root version fields in `package-lock.json`, and `plug
 
 **Verify:** Run generated-output checks, `npm run build`, the focused tests named above, `npm run plugin:package -- --validate-only`, and the tracked staged `npm run verify` gate before publication. Build a local no-tag candidate with `npm run plugin:package -- --output <scratch>/sheg-v0.3.0-dev.4.zip`, record file count and SHA-256, and confirm behavior test assets are absent. Do not tag or publish it.
 
-**Candidate evidence:** Source manifests and MCP runtime identify `0.3.0-dev.4`. `npm run build`, candidate validation, and the full `npm run verify` gate passed (360 tests). Stable-tag validation correctly rejected `v0.3.0` against the dev manifest. The local ZIP at `Z:/_agent-scratch/sheg/codex-v0.3.0-journey-context/sheg-v0.3.0-dev.4.zip` contains 27 files, includes both shipped skill entrypoints, excludes all behavior tests, and has SHA-256 `5e98d7278cd4381b4286082832810d718834f6222aa43c19fd1daac5e5976d65`.
+**Candidate evidence:** Source manifests and MCP runtime identify `0.3.0-dev.4`. `npm run build`, candidate validation, and the full `npm run verify` gate passed (360 tests). Stable-tag validation correctly rejected `v0.3.0` against the dev manifest. The local ZIP at `Z:/_agent-scratch/sheg/codex-v0.3.0-journey-context/sheg-v0.3.0-dev.4.zip` contains 27 files, includes both shipped skill entrypoints, excludes all behavior tests, and has SHA-256 `32110d9194fc0f83fbd915384e2dc1d07711b150b994fa376b652697be9919d4`.
 
 ## Readiness and handoff evidence
 

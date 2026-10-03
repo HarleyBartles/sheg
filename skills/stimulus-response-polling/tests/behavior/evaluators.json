@@ -97,7 +97,7 @@
       },
       {
         "id": "all-or-none-answer-history",
-        "condition": "Treats responseHistory as a per-task include/omit switch: include carries all earlier typed answers on that respondent's path, while omit leaves them all out, without changing the material packet. Does not recommend including one earlier answer while omitting another that precedes the same task."
+        "condition": "Treats responseHistory as a per-task include/omit setting: tasks set to include receive all earlier typed answers available on their path, and omitting answers does not remove exposed material. Does not claim the task-level setting can include one preceding answer while excluding another."
       },
       {
         "id": "no-live-run-claim",
