@@ -27,6 +27,35 @@ const expectedScenarioIds = [
   'typed-answer-failure',
 ];
 
+const expectedBaselineSkillHashes: Record<string, Record<string, string>> = {
+  'changed-rubric-comparison': {
+    'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
+    'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
+  },
+  'independent-dependent-questions': {
+    'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
+    'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
+  },
+  'sequence-versus-linear-graph': {
+    'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
+    'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
+  },
+  'partial-run-selected-question': {
+    'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
+    'skills/stimulus-response-polling/references/interpret-results.md': '8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c',
+    'skills/stimulus-response-polling/references/run-and-recovery.md': 'd854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5',
+  },
+  'selected-material-isolation-no-fit': {
+    'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
+    'skills/stimulus-response-polling/references/run-and-recovery.md': 'd854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5',
+  },
+  'typed-answer-failure': {
+    'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
+    'skills/stimulus-response-polling/references/interpret-results.md': '8d15fadebe8e4374ee2d1382486350178b08d1dda1314a7dad11dbafe7617d3c',
+    'skills/stimulus-response-polling/references/run-and-recovery.md': 'd854bd7c20b965122a44300a2caccbfd9f6d8dc90c52a6ca41d89cd9021b60b5',
+  },
+};
+
 test('skill behavior catalog has paired versioned scenarios and evaluators', () => {
   const scenarios = loadScenarioCatalog();
   const evaluators = loadEvaluatorCatalog();
@@ -266,12 +295,7 @@ test('baseline trace files carry valid trial metadata and explicitly mark simula
       assert.equal(trace.toolUseAudit, 'not-captured');
       const scenario = loadScenarioCatalog().find((item) => item.id === trace.scenarioId)!;
       assert.equal(trace.scenarioVersion, scenario.version);
-      const suppliedFiles = [`skills/${skill}/SKILL.md`, ...scenario.referencePaths.map((reference) => `skills/${skill}/${reference}`)];
-      const baselineHashes = Object.fromEntries(suppliedFiles.map((file) => [
-        file,
-        createHash('sha256').update(execFileSync('git', ['show', `f3d7b79:${file}`])).digest('hex'),
-      ]));
-      assert.deepEqual(trace.skillReferenceHashes, baselineHashes);
+      assert.deepEqual(trace.skillReferenceHashes, expectedBaselineSkillHashes[trace.scenarioId]);
       for (const control of trace.controls) {
         assert.equal(control.inputPromptSha256, renderControlPrompt(trace.scenarioId).sha256);
       }
@@ -309,7 +333,7 @@ test('journey guidance campaigns retain matched trials, prompt hashes, and manua
     {
       scenarioId: 'cumulative-journey-material',
       owner: 'stimulus-response-polling',
-      criteria: ['selects-graph-for-branching', 'cumulative-unique-material', 'isolates-branch-material', 'separates-answer-history', 'no-live-run-claim'],
+      criteria: ['selects-graph-for-branching', 'cumulative-unique-material', 'isolates-branch-material', 'all-or-none-answer-history', 'no-live-run-claim'],
       prompt: 'skills/stimulus-response-polling/tests/behavior/traces/prompts/cumulative-journey-material.md',
       baselineHashes: {
         'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',

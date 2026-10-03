@@ -96,8 +96,8 @@
         "condition": "Keeps C exclusive to the stop path and never includes it in the continue-path questions."
       },
       {
-        "id": "separates-answer-history",
-        "condition": "Explains that prior answer inclusion is controlled independently per task with responseHistory include or omit; earlier exposed text remains when answer history is omitted."
+        "id": "all-or-none-answer-history",
+        "condition": "Treats responseHistory as a per-task include/omit switch: include carries all earlier typed answers on that respondent's path, while omit leaves them all out, without changing the material packet. Does not recommend including one earlier answer while omitting another that precedes the same task."
       },
       {
         "id": "no-live-run-claim",
@@ -108,7 +108,8 @@
       "Q2 receives only B because it is the latest exposure.",
       "Q3 receives A twice as duplicate stimulus text.",
       "A sequence provides the conditional continue/stop branch.",
-      "The continue path can receive C even though C was not exposed there."
+      "The continue path can receive C even though C was not exposed there.",
+      "A task can include Q1's answer while omitting Q2's answer when both are prior answers on the same path."
     ]
   }
 ]

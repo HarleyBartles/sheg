@@ -7,83 +7,97 @@
   "modelSetting": "inherited-default, no per-trial override",
   "reasoningSetting": "inherited-default, no per-trial override",
   "skillReferenceHashes": {
-    "skills/stimulus-response-polling/SKILL.md": "a21ec9e28bb224b067402cec49de6abc65d9805cb136b89f7c3c5b97b034e8d5"
+    "skills/stimulus-response-polling/SKILL.md": "8ced17270c3661153962ed06fbbef012efb24af9cb23bcb1d8db9940cf7f27de"
   },
   "guided": [
     {
       "trialId": "candidate-1",
       "output": {
-        "finalResponse": "I’d model this as a graph because the question turns need to be interleaved with material and Q1 determines the next path. Everyone sees A and answers Q1. Readers who continue see B, answer Q2, see A again, and answer Q3. Readers who stop see C and answer Q4. Each question receives the exact text of distinct material exposed so far on that reader’s path, in first-exposure order. Q1 gets A. Q2 gets A then B. Q3 gets A then B, with A’s second exposure recorded separately but its text included only once. Q4 gets A then C; readers who stop do not receive B. Answer history is configured separately from material exposure. I’d omit Q1’s answer from Q2 because Q2 asks about the relationship between A and B. For Q3, I’d include Q1’s answer so the reader can say whether B changed their view; Q2’s answer can be omitted unless you want it to inform that judgment. I’d include Q1’s answer at Q4 because it records the choice that led to stopping. Omitting an answer from a task does not remove material already seen.",
-        "uncertainties": []
+        "actions": [
+          {"action":"proposed","description":"Use a graph: the journey branches after Q1 and interleaves questions with material. A sequence would expose all materials before asking questions, so it cannot express this journey."},
+          {"action":"proposed","description":"Expose A, then ask Q1, “Would you keep reading?” Use Choice options “continue” and “stop.” Q1 receives A and no prior answers."},
+          {"action":"proposed","description":"On “continue,” expose B and ask Q2, “How clearly does B follow the promise in A?” Use a Score with an authored ordered clarity rubric. Q2 receives A then B, and, with responseHistory set to include, Q1’s answer."},
+          {"action":"proposed","description":"After Q2, expose A again and ask Q3, “Does the later evidence change your view of A?” Use Choice options such as “yes” and “no,” with “unanswerable” if readers may lack enough information. Q3 receives A then B once each, in first-exposure order, and, with responseHistory set to include, Q1 and Q2 answers."},
+          {"action":"proposed","description":"On “stop,” expose C and ask Q4, “Why did you stop?” This needs an authored Choice list of reasons, since the supported question types are Choice, Score, and Noul. Q4 receives A then C and, with responseHistory set to include, Q1’s answer."},
+          {"action":"proposed","description":"The second exposure to A is recorded as another exposure event, while A appears only once in Q3’s material packet. responseHistory is configured per task: include makes earlier typed answers available; omit excludes them but does not remove previously exposed material."}
+        ],
+        "finalResponse": "This journey fits a graph because questions must happen between material exposures and Q1 determines which branch follows. The continue branch is A → Q1 → B → Q2 → A again → Q3; the stop branch is A → Q1 → C → Q4. The question packets and prior answers are described above. The A shown again before Q3 is a recorded repeated exposure, but the packet still contains A only once, followed by B in first-exposure order. Set responseHistory to include on each later task if it should receive all earlier typed answers along that respondent’s path. Material remains available regardless of whether answer history is included. These are proposed journey details; no run was created.",
+        "uncertainties": ["Q4 asks why readers stopped, but no reason options were supplied. An authored Choice list is needed before that question can be specified; I have not inferred the reasons."]
       },
       "evaluation": {
         "selects-graph-for-branching": "pass",
         "cumulative-unique-material": "pass",
         "isolates-branch-material": "pass",
-        "separates-answer-history": "pass",
+        "all-or-none-answer-history": "pass",
         "no-live-run-claim": "pass"
       },
-      "evidence": "Specifies graph topology, cumulative unique text, first-exposure order, branch exclusion, and per-task include/omit decisions."
+      "evidence": "Identifies the graph and each path's distinct material; explicitly says include makes all prior answers on the path available and does not alter material."
     },
     {
       "trialId": "candidate-2",
       "output": {
-        "finalResponse": "A graph fits because each reader answers Q1 before the next material, and that answer selects the continue or stop branch. A sequence would expose all material before asking questions, so it cannot represent this order. On the continue path, Q1 receives A. Q2 receives A then B and, if configured with responseHistory: include, Q1's answer. Q3 receives A then B once each, despite A's second exposure, and can include Q1 and Q2 answers. On the stop path, Q4 receives A then C and can include Q1's answer. Each task's responseHistory setting is explicit: include adds earlier typed answers, while omit leaves them out without removing exposed material. The journey records each exposure event separately. These are proposed settings; no journey has been submitted.",
+        "finalResponse": "Use a graph because the questions must be interleaved with material and Q1 determines which turn comes next. A straight sequence would expose A, B, and C before asking Q1 through Q4, so it would not match this journey.\n\nProposed path and context:\n\n- Q1: expose A, then ask “Would you keep reading?” No earlier material or answers are available yet.\n- Continue path: expose B, then ask Q2. Its material packet contains A then B. Set `responseHistory: include` so Q1’s typed answer is available.\n- Next, expose A again, then ask Q3. Its packet still contains A then B once each, in first-exposure order. The journey records the second exposure of A. Set `responseHistory: include` so Q1 and Q2 answers are available.\n- Stop path: expose C, then ask Q4. Its material packet contains A then C. Set `responseHistory: include` so Q1’s answer is available.\n\nMaterial history and answer history are separate settings: graph questions receive the distinct material exposed along that respondent’s path, while each task’s `responseHistory` setting controls whether earlier typed answers are included. For Q4, author bounded Choice options for reasons readers might stop, and include `unanswerable` if they may lack enough information; Sheg’s supported question types are Choice, Score, and Noul.",
         "uncertainties": []
       },
       "evaluation": {
         "selects-graph-for-branching": "pass",
         "cumulative-unique-material": "pass",
         "isolates-branch-material": "pass",
-        "separates-answer-history": "pass",
+        "all-or-none-answer-history": "pass",
         "no-live-run-claim": "pass"
       },
-      "evidence": "Correctly identifies graph, unique A/B material for Q3, stop-only C, and responseHistory setting semantics."
+      "evidence": "Names all earlier answers made available at each included task and keeps material packet semantics separate."
     },
     {
       "trialId": "candidate-3",
       "output": {
-        "finalResponse": "A graph fits because questions must appear between material turns and Q1 determines which material comes next. The continue route is A, Q1, B, Q2, A again, Q3. The stop route is A, Q1, C, Q4. Q1 receives A. Q2 receives A then B and can include Q1's answer. Q3 receives A and B once each, in first-exposure order, and can include Q1 and Q2. Q4 receives A and C and can include Q1. Keep both exposure events for A in the journey record. Re-exposure adds an event but does not add a second copy of A to later packets. Omitting response history excludes earlier answers only; it does not remove exposed material.",
-        "uncertainties": []
+        "finalResponse": "Final response: Use a graph because the questions must be interleaved with material and Q1 determines which paragraph comes next. A sequence would show A, B, and C before asking Q1–Q4, so it cannot represent this journey.\n\nProposed graph:\n\n- Everyone sees A, then answers Q1, “Would you keep reading?” with a Choice between “continue” and “stop.”\n- If they continue, they see B and answer Q2, “How clearly does B follow the promise in A?” Use a Score with an authored ordered rubric. Then expose A again and ask Q3, “Does the later evidence change your view of A?” Use an authored typed response, such as a Choice with defined options.\n- If they stop, they see C and answer Q4, “Why did you stop?” Define the response options or rubric before building the request.\n\nMaterial history and answer history are separate settings. At each graph question, the packet includes the exact text of each distinct paragraph exposed so far on that respondent’s path, in first-exposure order. So Q2 receives A and B; Q3 receives A and B once each, even though A was exposed again. Q4 receives A and C.\n\nSet `responseHistory: include` on Q2, Q3, and Q4 if each should receive all earlier typed answers available on that path. Then Q2 receives Q1’s answer; Q3 receives Q1 and Q2; Q4 receives Q1. If any question should not receive earlier answers, set that task to `responseHistory: omit`; this does not remove previously exposed material. The setting cannot include only selected earlier answers.\n\nUncertainties: The exact Choice options for Q3 and Q4, and the ordered Score rubric for Q2, need to be authored. No journey was inspected or run; this is a proposed design based on the supplied mock paragraphs and questions.",
+        "uncertainties": ["Choice options for Q3 and Q4 and the Score rubric for Q2 still need authorship."]
       },
       "evaluation": {
         "selects-graph-for-branching": "pass",
         "cumulative-unique-material": "pass",
         "isolates-branch-material": "pass",
-        "separates-answer-history": "pass",
+        "all-or-none-answer-history": "pass",
         "no-live-run-claim": "pass"
       },
-      "evidence": "Accurately states all material and answer-history criteria."
+      "evidence": "Correctly assigns full prior answers by path and distinguishes repeated exposure from distinct packet text."
     },
     {
       "trialId": "candidate-4",
       "output": {
-        "finalResponse": "A graph journey fits because the questions must be interleaved with material and Q1 determines which turn comes next. Expose A, then ask Q1. If the reader continues, expose B and ask Q2, then expose A again and ask Q3. If the reader stops, expose C and ask Q4. Q1 receives A. Q2 receives A then B, each once. Include Q1’s answer in response history so the rating has the initial choice as context. Q3 receives A then B once each, in first-exposure order; the journey records both A exposures. Include Q1 and Q2 so the change-of-view answer can be read with the earlier responses. Q4 receives A then C; B is unseen on this route and is excluded. Include Q1 so the stopping reason follows the choice. Material packets contain distinct items seen so far on that respondent’s route. Answer history is controlled separately per task with responseHistory include or omit; omitting answers does not remove exposed material.",
-        "uncertainties": []
+        "finalResponse": "Final response: Use a graph because questions must be interleaved with material and Q1 determines which paragraph comes next. A sequence would show A, B, and C before asking Q1–Q4, so it cannot represent this journey.\n\nProposed graph:\n\n- Everyone sees A, then answers Q1, “Would you keep reading?” with a Choice between “continue” and “stop.”\n- If they continue, they see B and answer Q2, “How clearly does B follow the promise in A?” Use a Score with an authored ordered rubric. Then expose A again and ask Q3, “Does the later evidence change your view of A?” Use an authored typed response, such as a Choice with defined options.\n- If they stop, they see C and answer Q4, “Why did you stop?” Define the response options or rubric before building the request.\n\nMaterial history and answer history are separate settings. At each graph question, the packet includes the exact text of each distinct paragraph exposed so far on that respondent’s path, in first-exposure order. So Q2 receives A and B; Q3 receives A and B once each, even though A was exposed again. Q4 receives A and C.\n\nSet `responseHistory: include` on Q2, Q3, and Q4 if each should receive all earlier typed answers available on that path. Then Q2 receives Q1’s answer; Q3 receives Q1 and Q2; Q4 receives Q1. If any question should not receive earlier answers, set that task to `responseHistory: omit`; this does not remove previously exposed material. The setting cannot include only selected earlier answers.\n\nUncertainties: The exact Choice options for Q3 and Q4, and the ordered Score rubric for Q2, need to be authored. No journey was inspected or run; this is a proposed design based on the supplied mock paragraphs and questions.",
+        "uncertainties": ["The polling skill directs the agent to use the study-design skill first, but that skill was not part of the permitted context.", "The proposed answer-history settings are a design choice."]
       },
       "evaluation": {
         "selects-graph-for-branching": "pass",
         "cumulative-unique-material": "pass",
         "isolates-branch-material": "pass",
-        "separates-answer-history": "pass",
+        "all-or-none-answer-history": "pass",
         "no-live-run-claim": "pass"
       },
-      "evidence": "Fully covers the graph, cumulative materials, branch locality, repeated exposure, and separate answer policy."
+      "evidence": "Explicitly states inclusion carries all earlier path answers and preserves material when history is omitted."
     },
     {
       "trialId": "candidate-5",
       "output": {
-        "finalResponse": "A graph fits because each question needs to happen between material exposures, and Q1 determines which material comes next. Everyone sees A and answers Q1. Readers who continue see B and answer Q2, then see A again and answer Q3. Readers who stop see C and answer Q4. Each question receives the exact text of distinct material already exposed on that reader’s path, in first-exposure order. Q1 receives A. Q2 receives A then B. Q3 receives A then B: A appears once in its packet, while the journey records that A was exposed twice. Q4 receives A then C. Material exposure and answer history are separate. Set answer history per question: Q2 omits earlier answers; Q3 includes Q1 so the reader can compare their earlier view with their current one; Q4 includes Q1 to give context for why they stopped. Omitting an answer does not remove material already seen.",
-        "uncertainties": []
+        "actions": [
+          "Propose a graph journey. A sequence would show all material before asking questions, so it cannot represent the requested question-and-branch order.",
+          "On the shared opening path, expose paragraph A and ask Q1, ‘Would you keep reading?’",
+          "If the reader continues, expose B and ask Q2, then expose A again and ask Q3. Set responseHistory to include for Q2 and Q3, so Q2 receives Q1’s answer and Q3 receives Q1’s and Q2’s answers.",
+          "If the reader stops, expose C and ask Q4. Set responseHistory to include, so Q4 receives Q1’s answer."
+        ],
+        "finalResponse": "A graph fits because it can ask Q1 after A, then branch on that answer. Q2 receives the exact text of A followed by B, plus the reader’s Q1 answer. Q3 receives A followed by B in its material packet, plus the reader’s Q1 and Q2 answers. Although A is shown again before Q3, the packet contains each distinct exposed item once; the journey still records the second exposure to A. Q4 receives A followed by C, plus the reader’s Q1 answer. Each task’s responseHistory setting controls whether earlier typed answers are included; it does not remove previously exposed material. The setting includes all earlier answers on that path or omits them all, so it cannot include only a chosen answer. This is a proposed journey design; no run was started.",
+        "uncertainties": ["The request does not specify whether Q2 or Q4 should receive earlier answers; this proposal includes them.", "Q3 may need a baseline question about the reader's view of A to measure a change."]
       },
       "evaluation": {
         "selects-graph-for-branching": "pass",
         "cumulative-unique-material": "pass",
         "isolates-branch-material": "pass",
-        "separates-answer-history": "pass",
+        "all-or-none-answer-history": "pass",
         "no-live-run-claim": "pass"
       },
-      "evidence": "Specifies correct route-specific packet text and independent per-task answer history."
+      "evidence": "States the all-or-none include/omit contract directly and correctly models each route's material and answers."
     }
   ],
   "controlsReusedFrom": "../baseline/cumulative-journey-material.json",
