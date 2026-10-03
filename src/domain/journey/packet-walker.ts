@@ -4,6 +4,7 @@ import type { DecisionRequest } from '../decision/decision.js';
 import type { DecisionValue } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 import { journeyDefinitionSchema, studyArmSchema, type JourneyDefinition, type StudyArm } from '../study/arm.js';
+import { journeyTopology } from './topology.js';
 
 export const DEFAULT_MAX_PREFLIGHT_PACKETS = 100_000;
 export const DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
@@ -105,36 +106,7 @@ export function walkStudyPackets(
       const events: PromptHistoryEvent[] = [];
       const choices: PathChoice[] = [];
 
-      if (arm.presentation.kind === 'sequence') {
-        for (const item of arm.items) {
-          events.push({ type: 'exposure', sequence: events.length, nodeId: `sequence-expose-${item.id}`, itemId: item.id });
-        }
-        const visitTask = (taskIndex: number): void => {
-          if (stopped) return;
-          const task = arm.tasks[taskIndex];
-          if (!task) {
-            terminalJourneyCount += 1;
-            return;
-          }
-          const decisionIndex = taskIndex + 1;
-          const nodeId = `sequence-ask-${task.id}`;
-          emitPacket(arm, respondent, task.id, nodeId, decisionIndex, choices, events);
-          if (stopped) return;
-          for (const response of representativeResponses(task)) {
-            const choiceId = response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`;
-            choices.push({ nodeId, choiceId });
-            events.push({ type: 'response', sequence: events.length, nodeId, taskId: task.id, result: response });
-            visitTask(taskIndex + 1);
-            events.pop();
-            choices.pop();
-            if (stopped) return;
-          }
-        };
-        visitTask(0);
-        continue;
-      }
-
-      const graph = arm.presentation;
+      const graph = journeyTopology(arm);
       const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
       const activeNodes = new Set<string>();
       const visitNode = (nodeId: string, decisionCount: number): void => {

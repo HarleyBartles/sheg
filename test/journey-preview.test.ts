@@ -45,9 +45,27 @@ test('previews sequence stimuli before the authored questions and routes every c
     if (secondQuestion.kind === 'question') {
       assert.deepEqual(secondQuestion.routeContexts.map((context) => context.priorChoices.map(({ taskId, optionId, meaning }) => ({ taskId, optionId, meaning }))),
         Object.entries(task.options).map(([optionId, meaning]) => [{ taskId: task.id, optionId, meaning }]));
-      assert.ok(secondQuestion.routeContexts.every((context) => context.exposedStimulusIds.join(',') === arm.items.map(({ id }) => id).join(',')));
+      assert.ok(secondQuestion.routeContexts.every((context) => context.exposedStimulusIds.length === 0));
     }
   }
+});
+
+test('sequence preview matches the equivalent all-items-first linear graph for typed routes', () => {
+  const sequenceArm: StudyArm = {
+    ...arm,
+    tasks: [
+      { id: 'tone', type: 'score', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] },
+      { id: 'interest', type: 'noul', instructions: 'Does this hold interest?' },
+      arm.tasks[0]!,
+    ],
+    presentation: { kind: 'sequence' },
+  };
+  const graphArm = linearGraphEquivalent(sequenceArm);
+  const sequencePreview = previewStudyJourney([sequenceArm]).arms[0]!;
+  const graphPreview = previewStudyJourney([graphArm]).arms[0]!;
+
+  assert.deepEqual(sequencePreview.entryNodeId, graphPreview.entryNodeId);
+  assert.deepEqual(sequencePreview.nodes, graphPreview.nodes);
 });
 
 test('previews every graph branch and represents a shared continuation node once', () => {
@@ -173,3 +191,34 @@ test('rejects a journey whose route-context count exceeds the preview bound', ()
 
   assert.throws(() => previewStudyJourney([manyChoiceTasks]), /10,?000-context limit.*no partial preview/i);
 });
+
+function linearGraphEquivalent(arm: StudyArm): StudyArm {
+  const itemNodes = arm.items.map((item) => ({ id: `sequence-expose-${item.id}`, kind: 'expose' as const, itemId: item.id }));
+  const askNodes = arm.tasks.map((task) => ({ id: `sequence-ask-${task.id}`, kind: 'ask' as const, taskId: task.id }));
+  const terminal = { id: `sequence-terminal-${arm.id}`, kind: 'terminal' as const, outcome: 'complete' };
+  const nodes = [...itemNodes, ...askNodes, terminal];
+  const transitions: Extract<StudyArm['presentation'], { kind: 'graph' }>['transitions'] = [];
+  const nextAfterItems = askNodes[0]!.id;
+
+  for (const [index, node] of itemNodes.entries()) {
+    transitions.push({ fromNodeId: node.id, toNodeId: itemNodes[index + 1]?.id ?? nextAfterItems });
+  }
+  for (const [index, task] of arm.tasks.entries()) {
+    const nodeId = askNodes[index]!.id;
+    const nextNodeId = askNodes[index + 1]?.id ?? terminal.id;
+    if ('options' in task) {
+      for (const optionId of Object.keys(task.options)) transitions.push({ fromNodeId: nodeId, optionId, toNodeId: nextNodeId });
+    } else {
+      transitions.push({ fromNodeId: nodeId, when: {
+        type: 'rubric' in task ? 'score' : 'noul',
+        minimum: 0,
+        maximum: 'rubric' in task ? task.rubric.length - 1 : 1,
+        minimumInclusive: true,
+        maximumInclusive: true,
+      }, toNodeId: nextNodeId });
+    }
+  }
+  return { ...arm, presentation: {
+    kind: 'graph', entryNodeId: itemNodes[0]!.id, maxDecisions: arm.tasks.length, nodes, transitions,
+  } };
+}

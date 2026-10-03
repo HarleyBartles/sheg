@@ -10,6 +10,7 @@ import type { AttemptReservation, AnswerRow, JourneyEvaluation, JourneyEvaluatio
 import { decisionResultSchema, decisionValueSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput, type RunMaterialItem } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
+import { journeyTopology } from '../domain/journey/topology.js';
 
 const SCHEMA_VERSION = 6;
 const LEASE_MS = 30_000;
@@ -78,25 +79,17 @@ function sameDecisionValue(left: import('../domain/decision/decision.js').Decisi
 }
 
 function isJourneyAskNode(journey: JourneyDefinition, nodeId: string, questionId: string): boolean {
-  if (journey.presentation.kind === 'graph') {
-    const node = journey.presentation.nodes.find((candidate) => candidate.id === nodeId);
-    return node?.kind === 'ask' && node.taskId === questionId;
-  }
-  return nodeId === `sequence-ask-${questionId}` && journey.tasks.some((task) => task.id === questionId);
+  const node = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
+  return node?.kind === 'ask' && node.taskId === questionId;
 }
 
 function journeyRouteTarget(journey: JourneyDefinition, nodeId: string, response: import('../domain/decision/decision.js').DecisionValue): string | undefined {
-  if (journey.presentation.kind === 'sequence') {
-    const taskIndex = journey.tasks.findIndex((task) => `sequence-ask-${task.id}` === nodeId);
-    if (taskIndex < 0) return undefined;
-    const next = journey.tasks[taskIndex + 1];
-    return next ? `sequence-ask-${next.id}` : 'sequence-terminal-complete';
-  }
-  const node = journey.presentation.nodes.find((candidate) => candidate.id === nodeId);
+  const graph = journeyTopology(journey);
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
   if (node?.kind !== 'ask') return undefined;
   const task = journey.tasks.find((candidate) => candidate.id === node.taskId);
   if (!task) return undefined;
-  const edge = journey.presentation.transitions.find((candidate) => {
+  const edge = graph.transitions.find((candidate) => {
     if (candidate.fromNodeId !== nodeId) return false;
     if (response.type === 'choice') return candidate.optionId === response.choice;
     const interval = candidate.when;

@@ -1,5 +1,6 @@
 import { journeyDefinitionSchema, studyArmSchema, type JourneyDefinition, type StudyArm } from '../study/arm.js';
 import type { RespondentProfile } from '../respondents/profile.js';
+import { journeyTopology } from './topology.js';
 
 export type RunDecisionCallBounds = {
   minimumDecisionCalls: number;
@@ -16,9 +17,7 @@ export function estimateRunDecisionCalls(arms: readonly (JourneyDefinition | Stu
   let maximumDecisionCalls = 0;
   for (const rawArm of arms) {
     const arm = ('sources' in rawArm ? studyArmSchema : journeyDefinitionSchema).parse(rawArm);
-    const range = arm.presentation.kind === 'sequence'
-      ? { minimum: arm.tasks.length, maximum: arm.tasks.length }
-      : graphDecisionRange(arm);
+    const range = graphDecisionRange(arm);
     minimumDecisionCalls += range.minimum * respondents.length;
     maximumDecisionCalls += range.maximum * respondents.length;
     if (!Number.isSafeInteger(minimumDecisionCalls) || !Number.isSafeInteger(maximumDecisionCalls)) {
@@ -29,8 +28,7 @@ export function estimateRunDecisionCalls(arms: readonly (JourneyDefinition | Stu
 }
 
 function graphDecisionRange(arm: JourneyDefinition): DecisionRange {
-  if (arm.presentation.kind !== 'graph') throw new Error('Graph decision bounds require a graph presentation.');
-  const graph = arm.presentation;
+  const graph = journeyTopology(arm);
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   const outgoing = new Map<string, typeof graph.transitions>();
   for (const edge of graph.transitions) {

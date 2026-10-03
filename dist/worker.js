@@ -19917,6 +19917,34 @@ function compileDecisionRequest(parts) {
   };
 }
 
+// src/domain/journey/topology.ts
+function journeyTopology(arm) {
+  if (arm.presentation.kind === "graph") return arm.presentation;
+  const nodes = [];
+  const transitions = [];
+  const exposes = arm.items.map((item) => `sequence-expose-${item.id}`);
+  const asks = arm.tasks.map((task) => `sequence-ask-${task.id}`);
+  const terminal = `sequence-terminal-${arm.id}`;
+  arm.items.forEach((item, index) => {
+    const id = exposes[index];
+    nodes.push({ id, kind: "expose", itemId: item.id });
+    transitions.push({ fromNodeId: id, toNodeId: exposes[index + 1] ?? asks[0] });
+  });
+  arm.tasks.forEach((task, index) => {
+    const id = asks[index];
+    nodes.push({ id, kind: "ask", taskId: task.id });
+    const toNodeId = asks[index + 1] ?? terminal;
+    if ("options" in task) {
+      for (const optionId of Object.keys(task.options)) transitions.push({ fromNodeId: id, optionId, toNodeId });
+    } else {
+      const maximum = "rubric" in task ? task.rubric.length - 1 : 1;
+      transitions.push({ fromNodeId: id, when: { type: task.type, minimum: 0, maximum, minimumInclusive: true, maximumInclusive: true }, toNodeId });
+    }
+  });
+  nodes.push({ id: terminal, kind: "terminal", outcome: "complete" });
+  return { kind: "graph", nodes, transitions, entryNodeId: exposes[0], maxDecisions: arm.tasks.length };
+}
+
 // src/domain/journey/run.ts
 var JourneyExecutionError = class extends Error {
   constructor(message) {
@@ -19929,21 +19957,16 @@ function advanceJourney(arm, profile, state, rawResult) {
   const events = [...state.events];
   const route = [...state.route];
   const nodeId = state.currentNodeId;
+  const graph = journeyTopology(arm);
   let taskId;
   let routeTarget;
-  if (arm.presentation.kind === "sequence") {
-    const taskIndex = arm.tasks.findIndex((task2) => `sequence-ask-${task2.id}` === nodeId);
-    const task = arm.tasks[taskIndex];
-    if (taskIndex < 0 || !task) throw new JourneyExecutionError(`Unknown sequence ask node ${nodeId}.`);
-    taskId = task.id;
-    routeTarget = arm.tasks[taskIndex + 1] ? `sequence-ask-${arm.tasks[taskIndex + 1].id}` : "sequence-terminal-complete";
-  } else {
-    const askNode = arm.presentation.nodes.find((node2) => node2.id === nodeId);
+  {
+    const askNode = graph.nodes.find((node2) => node2.id === nodeId);
     if (askNode?.kind !== "ask") throw new JourneyExecutionError(`Node ${nodeId} is not a journey ask node.`);
     taskId = askNode.taskId;
     const task = arm.tasks.find((candidate) => candidate.id === taskId);
     if (!task) throw new JourneyExecutionError(`Ask node ${nodeId} references unknown task ${taskId}.`);
-    const edge = arm.presentation.transitions.find((candidate) => {
+    const edge = graph.transitions.find((candidate) => {
       if (candidate.fromNodeId !== nodeId) return false;
       if (result.type === "choice") return candidate.optionId === result.choice;
       const interval = candidate.when;
@@ -19957,12 +19980,7 @@ function advanceJourney(arm, profile, state, rawResult) {
   events.push(answerEvent);
   route.push({ nodeId, response: result, toNodeId: routeTarget });
   const pathId = route.length === 0 ? "root" : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`}`).join(">");
-  if (arm.presentation.kind === "sequence") {
-    const nextTask = arm.tasks.find((task) => `sequence-ask-${task.id}` === routeTarget);
-    if (!nextTask) return { events, route, status: "completed", outcome: "complete" };
-    return { events, route, status: "active", outcome: null, next: { nodeId: routeTarget, taskId: nextTask.id, pathId, packet: compileDecisionPacket(arm, profile, nextTask.id, events) } };
-  }
-  const nodes = new Map(arm.presentation.nodes.map((node2) => [node2.id, node2]));
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
   let current = routeTarget;
   while (true) {
     const node2 = nodes.get(current);
@@ -19970,7 +19988,7 @@ function advanceJourney(arm, profile, state, rawResult) {
     if (node2.kind === "terminal") return { events, route, status: "completed", outcome: node2.outcome };
     if (node2.kind === "expose") {
       events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
-      const edge = arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
       if (!edge) throw new JourneyExecutionError(`Exposure node ${node2.id} has no transition.`);
       current = edge.toNodeId;
       continue;
@@ -21824,24 +21842,16 @@ function sameDecisionValue(left, right) {
   return left.type === "noul" && right.type === "noul" && left.noul === right.noul;
 }
 function isJourneyAskNode(journey, nodeId, questionId) {
-  if (journey.presentation.kind === "graph") {
-    const node2 = journey.presentation.nodes.find((candidate) => candidate.id === nodeId);
-    return node2?.kind === "ask" && node2.taskId === questionId;
-  }
-  return nodeId === `sequence-ask-${questionId}` && journey.tasks.some((task) => task.id === questionId);
+  const node2 = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
+  return node2?.kind === "ask" && node2.taskId === questionId;
 }
 function journeyRouteTarget(journey, nodeId, response) {
-  if (journey.presentation.kind === "sequence") {
-    const taskIndex = journey.tasks.findIndex((task2) => `sequence-ask-${task2.id}` === nodeId);
-    if (taskIndex < 0) return void 0;
-    const next = journey.tasks[taskIndex + 1];
-    return next ? `sequence-ask-${next.id}` : "sequence-terminal-complete";
-  }
-  const node2 = journey.presentation.nodes.find((candidate) => candidate.id === nodeId);
+  const graph = journeyTopology(journey);
+  const node2 = graph.nodes.find((candidate) => candidate.id === nodeId);
   if (node2?.kind !== "ask") return void 0;
   const task = journey.tasks.find((candidate) => candidate.id === node2.taskId);
   if (!task) return void 0;
-  const edge = journey.presentation.transitions.find((candidate) => {
+  const edge = graph.transitions.find((candidate) => {
     if (candidate.fromNodeId !== nodeId) return false;
     if (response.type === "choice") return candidate.optionId === response.choice;
     const interval = candidate.when;
