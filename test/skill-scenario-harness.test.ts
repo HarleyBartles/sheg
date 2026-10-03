@@ -19,6 +19,7 @@ import {
 
 const expectedScenarioIds = [
   'changed-rubric-comparison',
+  'cumulative-journey-material',
   'independent-dependent-questions',
   'partial-run-selected-question',
   'selected-material-isolation-no-fit',
@@ -26,7 +27,7 @@ const expectedScenarioIds = [
   'typed-answer-failure',
 ];
 
-test('skill behavior catalog has the six versioned scenarios and a paired evaluator for each', () => {
+test('skill behavior catalog has paired versioned scenarios and evaluators', () => {
   const scenarios = loadScenarioCatalog();
   const evaluators = loadEvaluatorCatalog();
   const ids = scenarios.map((scenario) => scenario.id).sort();
@@ -266,15 +267,100 @@ test('baseline trace files carry valid trial metadata and explicitly mark simula
       const scenario = loadScenarioCatalog().find((item) => item.id === trace.scenarioId)!;
       assert.equal(trace.scenarioVersion, scenario.version);
       const suppliedFiles = [`skills/${skill}/SKILL.md`, ...scenario.referencePaths.map((reference) => `skills/${skill}/${reference}`)];
-      const currentHashes = Object.fromEntries(suppliedFiles.map((file) => [
+      const baselineHashes = Object.fromEntries(suppliedFiles.map((file) => [
         file,
-        createHash('sha256').update(readFileSync(path.join(process.cwd(), file))).digest('hex'),
+        createHash('sha256').update(execFileSync('git', ['show', `f3d7b79:${file}`])).digest('hex'),
       ]));
-      assert.deepEqual(trace.skillReferenceHashes, currentHashes);
+      assert.deepEqual(trace.skillReferenceHashes, baselineHashes);
       for (const control of trace.controls) {
         assert.equal(control.inputPromptSha256, renderControlPrompt(trace.scenarioId).sha256);
       }
     }
+  }
+});
+
+test('journey guidance campaigns retain matched trials, prompt hashes, and manually reviewed outcomes', () => {
+  type CampaignTrial = { trialId: string; evaluation: Record<string, string> };
+  type CampaignTrace = {
+    scenarioId: string;
+    phase: string;
+    simulationOnly: boolean;
+    toolUseAudit: string;
+    scenarioPromptSha256: string;
+    modelSetting: string;
+    reasoningSetting: string;
+    guided: CampaignTrial[];
+    controls: CampaignTrial[];
+    skillReferenceHashes: Record<string, string>;
+    controlsReusedFrom?: string;
+  };
+  const campaigns = [
+    {
+      scenarioId: 'sequence-versus-linear-graph',
+      owner: 'study-design',
+      criteria: ['clarifies-history', 'recommends-explicit-design', 'no-hidden-execution'],
+      prompt: 'skills/stimulus-response-polling/tests/behavior/traces/prompts/sequence-versus-linear-graph.md',
+      baselineHashes: {
+        'skills/study-design/SKILL.md': 'd9a69200bcf45c779cce7e2a405171fd93032ed36d337e568f25ed831d95ce59',
+        'skills/study-design/references/primitives-and-tools.md': '5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552',
+      },
+      candidateFiles: ['skills/study-design/SKILL.md', 'skills/study-design/references/primitives-and-tools.md'],
+    },
+    {
+      scenarioId: 'cumulative-journey-material',
+      owner: 'stimulus-response-polling',
+      criteria: ['selects-graph-for-branching', 'cumulative-unique-material', 'isolates-branch-material', 'separates-answer-history', 'no-live-run-claim'],
+      prompt: 'skills/stimulus-response-polling/tests/behavior/traces/prompts/cumulative-journey-material.md',
+      baselineHashes: {
+        'skills/stimulus-response-polling/SKILL.md': '164e6ce88936f7d2a6138cfa9f7b0b7a21dfc6127c269adf6ad612204afd1794',
+      },
+      candidateFiles: ['skills/stimulus-response-polling/SKILL.md'],
+    },
+  ];
+
+  for (const campaign of campaigns) {
+    const baselinePath = path.join(process.cwd(), 'skills', campaign.owner, 'tests/behavior/traces/campaign/baseline', `${campaign.scenarioId}.json`);
+    const candidatePath = path.join(process.cwd(), 'skills', campaign.owner, 'tests/behavior/traces/campaign/candidate', `${campaign.scenarioId}.json`);
+    const baseline = JSON.parse(readFileSync(baselinePath, 'utf8')) as CampaignTrace;
+    const candidate = JSON.parse(readFileSync(candidatePath, 'utf8')) as CampaignTrace;
+    const prompt = readFileSync(path.join(process.cwd(), campaign.prompt), 'utf8');
+    const promptHash = createHash('sha256').update(prompt).digest('hex');
+    const scenario = loadScenarioCatalog().find((entry) => entry.id === campaign.scenarioId)!;
+    assert.ok(prompt.includes(scenario.userRequest));
+    assert.ok(prompt.includes(JSON.stringify(scenario.controlledEvidence, null, 2)));
+
+    for (const trace of [baseline, candidate]) {
+      assert.equal(trace.scenarioId, campaign.scenarioId);
+      assert.equal(trace.simulationOnly, true);
+      assert.equal(trace.toolUseAudit, 'not-captured');
+      assert.equal(trace.scenarioPromptSha256, promptHash);
+      assert.equal(trace.guided.length, 5);
+      const expectedTrialIds = ['1', '2', '3', '4', '5'].map((number) => `${trace.phase === 'baseline' ? 'guided' : 'candidate'}-${number}`);
+      assert.deepEqual(trace.guided.map((trial) => trial.trialId), expectedTrialIds);
+      for (const trial of trace.guided) {
+        for (const criterion of campaign.criteria) assert.ok(['pass', 'fail', 'uncertain'].includes(trial.evaluation[criterion]!), `${campaign.scenarioId} ${trial.trialId} lacks ${criterion}`);
+      }
+    }
+
+    assert.equal(baseline.phase, 'baseline');
+    assert.equal(candidate.phase, 'candidate');
+    assert.equal(baseline.controls.length, 5);
+    assert.deepEqual(candidate.modelSetting, baseline.modelSetting);
+    assert.deepEqual(candidate.reasoningSetting, baseline.reasoningSetting);
+    assert.deepEqual(baseline.controls.map((trial: { trialId: string }) => trial.trialId), ['control-1', 'control-2', 'control-3', 'control-4', 'control-5']);
+    for (const trial of baseline.controls) {
+      for (const criterion of campaign.criteria) assert.ok(['pass', 'fail', 'uncertain'].includes(trial.evaluation[criterion]!));
+    }
+    assert.deepEqual(baseline.skillReferenceHashes, campaign.baselineHashes);
+    const currentCandidateHashes = Object.fromEntries(campaign.candidateFiles.map((file) => [
+      file,
+      createHash('sha256').update(readFileSync(path.join(process.cwd(), file))).digest('hex'),
+    ]));
+    assert.deepEqual(candidate.skillReferenceHashes, currentCandidateHashes);
+    assert.equal(candidate.controlsReusedFrom, `../baseline/${campaign.scenarioId}.json`);
+    assert.ok(candidate.guided.every((trial) => campaign.criteria.every((criterion) => trial.evaluation[criterion] === 'pass')));
+    assert.ok(baseline.guided.some((trial) => campaign.criteria.some((criterion) => trial.evaluation[criterion] === 'fail')));
+    assert.ok(baseline.controls.some((trial) => campaign.criteria.some((criterion) => trial.evaluation[criterion] === 'fail')));
   }
 });
 

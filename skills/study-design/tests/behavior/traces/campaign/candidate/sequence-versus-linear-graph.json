@@ -1,0 +1,87 @@
+{
+  "scenarioId": "sequence-versus-linear-graph",
+  "scenarioVersion": 2,
+  "scenarioPromptFile": "skills/stimulus-response-polling/tests/behavior/traces/prompts/sequence-versus-linear-graph.md",
+  "scenarioPromptSha256": "ea0a8a9e960a80a61b6070486bceec74e740bb43657d13e406f1b879b0fed044",
+  "phase": "candidate",
+  "modelSetting": "inherited-default, no per-trial override",
+  "reasoningSetting": "inherited-default, no per-trial override",
+  "skillReferenceHashes": {
+    "skills/study-design/SKILL.md": "62f43b3a6078422c717821ad72bee07c78f5047f17674ea12209f71aff52d159",
+    "skills/study-design/references/primitives-and-tools.md": "5332d070df95b5611e72db2be2a0c686ced14a9ff325b3ba162f7dc6d6420552"
+  },
+  "guided": [
+    {
+      "trialId": "candidate-1",
+      "output": {
+        "finalResponse": "A sequence is a fixed order, but it would show readers A, B, and C before asking any questions. For the experience you described, I recommend a straight graph: show A and ask Q_A, then show B and ask Q_B, then show C and ask Q_C. The graph makes two kinds of history explicit. Each question receives the distinct paragraphs exposed so far: Q_A sees A, Q_B sees A and B, and Q_C sees A, B, and C. Separately, choose responseHistory for each question: include passes earlier typed answers along; omit leaves those answers out while keeping the exposed paragraphs. Which answer-history behavior do you want for Q_B and Q_C?",
+        "uncertainties": [
+          "The desired answer-history behavior for Q_B and Q_C is not specified, so it should be chosen explicitly before building the request."
+        ]
+      },
+      "evaluation": {
+        "clarifies-history": "pass",
+        "recommends-explicit-design": "pass",
+        "no-hidden-execution": "pass"
+      },
+      "evidence": "Recommends interleaved graph, states sequence ordering, separates cumulative material from per-question responseHistory, and asks for the missing answer-history choice."
+    },
+    {
+      "trialId": "candidate-2",
+      "output": {
+        "finalResponse": "A sequence does not pair each paragraph with its question. It exposes A, B, and C, then asks Q_A, Q_B, and Q_C. To show each paragraph immediately before its question, use a graph with a straight route: expose A, ask Q_A, expose B, ask Q_B, expose C, ask Q_C. For each question, specify whether earlier answers should be included with responseHistory. The question will still receive all distinct material exposed so far on that respondent's path, in first-exposure order, even when earlier answers are omitted. This makes material history and answer history separate and explicit.",
+        "uncertainties": []
+      },
+      "evaluation": {
+        "clarifies-history": "pass",
+        "recommends-explicit-design": "pass",
+        "no-hidden-execution": "pass"
+      },
+      "evidence": "Explicitly distinguishes sequence ordering, interleaved graph topology, cumulative material, and answer-history omission."
+    },
+    {
+      "trialId": "candidate-3",
+      "output": {
+        "finalResponse": "A sequence exposes A, B, and C first, then asks all three questions, so it does not give you the A, question about A, B, question about B order you want. I recommend a straight graph with interleaved expose and ask turns: A, Q_A, B, Q_B, C, Q_C. The graph controls that order; it does not by itself decide whether earlier answers are included. Set responseHistory to include on each question if later questions should remember earlier answers, or omit if they should not. In either case, each question still receives the text of material exposed earlier on that respondent's path.",
+        "uncertainties": []
+      },
+      "evaluation": {
+        "clarifies-history": "pass",
+        "recommends-explicit-design": "pass",
+        "no-hidden-execution": "pass"
+      },
+      "evidence": "Names both packet dimensions and recommends the required graph topology."
+    },
+    {
+      "trialId": "candidate-4",
+      "output": {
+        "finalResponse": "A sequence exposes all three paragraphs first, then asks the questions: A, B, C, followed by Q_A, Q_B, Q_C. It does not put a question after each paragraph. For your order, use a straight graph with interleaved turns: expose A, ask Q_A, expose B, ask Q_B, expose C, ask Q_C. Make answer history explicit on each graph question. With responseHistory: include, Q_B and Q_C receive earlier typed answers; with responseHistory: omit, they do not. Either way, each question receives the distinct material exposed so far on that reader's path. So Q_B sees A and B, and Q_C sees A, B, and C. A practical starting design is omit if you want each answer without influence from prior answers, while retaining the accumulated paragraph context. If you want later answers to build on earlier responses, choose include instead.",
+        "uncertainties": [
+          "The scenario does not say whether later questions should be influenced by earlier answers; the proposed default is to omit earlier answers while retaining previously exposed material."
+        ]
+      },
+      "evaluation": {
+        "clarifies-history": "pass",
+        "recommends-explicit-design": "pass",
+        "no-hidden-execution": "pass"
+      },
+      "evidence": "Fully separates topology, cumulative material, and the explicit include/omit answer policy."
+    },
+    {
+      "trialId": "candidate-5",
+      "output": {
+        "finalResponse": "A sequence would show readers A, B, and C first, then ask the three questions. For the order you want, use a straight graph with interleaved turns: show A and ask Q_A, show B and ask Q_B, then show C and ask Q_C. There are two separate kinds of history. Each question receives the paragraphs exposed so far: Q_A gets A, Q_B gets A and B, and Q_C gets A, B, and C. Separately, choose responseHistory for each question: include passes earlier answers too; omit leaves earlier answers out while keeping the exposed paragraphs. Which answer-history behavior do you want for Q_B and Q_C?",
+        "uncertainties": []
+      },
+      "evaluation": {
+        "clarifies-history": "pass",
+        "recommends-explicit-design": "pass",
+        "no-hidden-execution": "pass"
+      },
+      "evidence": "Separates cumulative material from answers and accurately chooses a straight graph for the interleaved order."
+    }
+  ],
+  "controlsReusedFrom": "../baseline/sequence-versus-linear-graph.json",
+  "simulationOnly": true,
+  "toolUseAudit": "not-captured"
+}

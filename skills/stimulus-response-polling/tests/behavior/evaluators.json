@@ -78,5 +78,37 @@
       "The failure was caused by a specific provider or prompt issue not present in the evidence.",
       "The existing run can resume after its original maxCalls allowance is exhausted."
     ]
+  },
+  {
+    "scenarioId": "cumulative-journey-material",
+    "version": 1,
+    "criteria": [
+      {
+        "id": "selects-graph-for-branching",
+        "condition": "Recommends a graph because continue and stop lead to different material and questions; does not force this branching path into a sequence."
+      },
+      {
+        "id": "cumulative-unique-material",
+        "condition": "Explains that Q2 sees A then B and Q3 sees A then B once each, in first-exposure order, even though A is exposed again."
+      },
+      {
+        "id": "isolates-branch-material",
+        "condition": "Keeps C exclusive to the stop path and never includes it in the continue-path questions."
+      },
+      {
+        "id": "separates-answer-history",
+        "condition": "Explains that prior answer inclusion is controlled independently per task with responseHistory include or omit; earlier exposed text remains when answer history is omitted."
+      },
+      {
+        "id": "no-live-run-claim",
+        "condition": "Treats the fixture as mock-only and does not claim to have inspected, started, or run a study."
+      }
+    ],
+    "prohibitedClaims": [
+      "Q2 receives only B because it is the latest exposure.",
+      "Q3 receives A twice as duplicate stimulus text.",
+      "A sequence provides the conditional continue/stop branch.",
+      "The continue path can receive C even though C was not exposed there."
+    ]
   }
 ]
