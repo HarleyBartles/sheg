@@ -14,6 +14,8 @@ const armConfigSchema = z.object({
   if (arm.id === 'no-guidance' && arm.guidanceRoot) context.addIssue({ code: 'custom', path: ['guidanceRoot'], message: 'The no-guidance arm cannot load a skill body.' });
 });
 
+const workflowTurnSchema = z.object({ user: z.string().min(1), evidence: z.unknown().optional() }).strict();
+
 export const campaignConfigSchema = z.object({
   id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   scenarioId: z.string().min(1),
@@ -23,8 +25,11 @@ export const campaignConfigSchema = z.object({
   concurrency: z.number().int().min(1).max(32),
   timeoutMs: z.number().int().min(1000).max(3600000),
   execution: z.record(z.string(), z.unknown()),
+  workflowTurns: z.array(workflowTurnSchema).min(1).optional(),
   arms: z.array(armConfigSchema).min(1),
 }).strict().superRefine((config, context) => {
+  if (config.suite === 'workflow' && !config.workflowTurns) context.addIssue({ code: 'custom', path: ['workflowTurns'], message: 'Workflow campaigns require ordered scripted turns.' });
+  if (config.suite !== 'workflow' && config.workflowTurns) context.addIssue({ code: 'custom', path: ['workflowTurns'], message: 'Scripted turns are only valid for workflow campaigns.' });
   const ids = config.arms.map((arm) => arm.id);
   if (new Set(ids).size !== ids.length) context.addIssue({ code: 'custom', path: ['arms'], message: 'Campaign arm IDs must be unique.' });
 });
@@ -52,6 +57,7 @@ export const campaignManifestSchema = z.object({
   concurrency: z.number().int().positive(),
   timeoutMs: z.number().int().positive(),
   execution: z.record(z.string(), z.unknown()),
+  workflowTurns: z.array(workflowTurnSchema).optional(),
   basis: z.object({
     requestSha256: z.string(),
     evidenceSha256: z.string(),
@@ -141,9 +147,10 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
     concurrency: config.concurrency,
     timeoutMs: config.timeoutMs,
     execution: config.execution,
+    ...(config.workflowTurns ? { workflowTurns: config.workflowTurns } : {}),
     basis: {
       requestSha256: sha256(scenario.userRequest),
-      evidenceSha256: sha256(stableJson(scenario.controlledEvidence)),
+      evidenceSha256: sha256(stableJson({ controlledEvidence: scenario.controlledEvidence, workflowTurns: config.workflowTurns ?? null })),
       criteriaSha256: sha256(stableJson(evaluator.criteria)),
       suite: config.suite,
       classification: config.classification,

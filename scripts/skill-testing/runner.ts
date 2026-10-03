@@ -14,7 +14,8 @@ export interface ExecutionResult {
 }
 
 export interface CampaignAdapter {
-  execute(input: { prompt: string; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal }): Promise<ExecutionResult>;
+  execute(input: { prompt: string; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; persistent?: boolean; resumeSessionId?: string }): Promise<ExecutionResult>;
+  executeWorkflow?(input: { initialPrompt: string; turns: string[]; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal }): Promise<ExecutionResult>;
 }
 
 interface JournalEntry {
@@ -87,7 +88,7 @@ export async function runCampaign(
   options: { concurrency?: number; afterCapture?: (trialId: string) => void; signal?: AbortSignal } = {},
 ): Promise<CampaignRunSummary> {
   const { root, manifest, journal } = campaignFiles(campaignDirectory);
-  if (manifest.suite === 'workflow') throw new Error('Workflow execution requires the conversation adapter added in the workflow suite task.');
+  if (manifest.suite === 'workflow' && !adapter.executeWorkflow) throw new Error('Workflow campaign requires an adapter with persistent conversation support.');
   const concurrency = options.concurrency ?? manifest.concurrency;
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > manifest.concurrency) {
     throw new Error(`Campaign concurrency must be between 1 and ${manifest.concurrency}.`);
@@ -115,13 +116,27 @@ export async function runCampaign(
       try {
         const cwd = campaignScratchRoot(root, trial.trialId, attemptId);
         mkdirSync(cwd, { recursive: true });
-        result = await adapter.execute({
-          prompt: manifest.suite === 'discovery' ? arm.discoveryPrompt : arm.actorPrompt,
-          cwd,
-          timeoutMs: manifest.timeoutMs,
-          requestedSettings: manifest.execution,
-          ...(options.signal ? { signal: options.signal } : {}),
-        });
+        if (manifest.suite === 'workflow') {
+          const marker = '\n## User request\n';
+          const userBoundary = arm.actorPrompt.indexOf(marker);
+          if (userBoundary < 0 || !manifest.workflowTurns?.length) throw new Error('Workflow prompt or frozen turns are missing.');
+          const turns = manifest.workflowTurns.map((turn) => `${turn.user}${turn.evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(turn.evidence)}`}`);
+          const workflowPrelude = arm.actorPrompt.slice(0, userBoundary)
+            .replace('Use the supplied skill and references to respond to the user request. Treat the evidence below as a mock fixture, not a live tool result.', 'Use the supplied skill and references to handle the conversation. The scripted evidence is fixture data supplied only at its listed turn.')
+            .replace('Do not call tools, connectors, inference providers, or external services. If a tool action would help, record it as a proposed action only.', 'Use the available Sheg MCP tools when the user asks you to inspect, start, query, or resume a study. Do not call external services outside Sheg.')
+            .replace('Return only JSON with scenarioId, scenarioVersion, actions (objects with tool and input), finalResponse, and uncertainties.', 'Respond to the user naturally and use tools when needed.');
+          result = await adapter.executeWorkflow!({
+            initialPrompt: `${workflowPrelude}\n## Workflow turn 1\n${turns[0]}`,
+            turns: turns.slice(1), cwd, timeoutMs: manifest.timeoutMs, requestedSettings: manifest.execution,
+            ...(options.signal ? { signal: options.signal } : {}),
+          });
+        } else {
+          result = await adapter.execute({
+            prompt: manifest.suite === 'discovery' ? arm.discoveryPrompt : arm.actorPrompt,
+            cwd, timeoutMs: manifest.timeoutMs, requestedSettings: manifest.execution,
+            ...(options.signal ? { signal: options.signal } : {}),
+          });
+        }
       } catch (error) {
         append(journal, { type: 'runtime-error', trialId: trial.trialId, attemptId, error: error instanceof Error ? error.message : String(error) });
         continue;

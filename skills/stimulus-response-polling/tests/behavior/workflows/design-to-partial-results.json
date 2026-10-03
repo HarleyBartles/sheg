@@ -1,0 +1,11 @@
+{
+  "id": "design-cohort-approval-partial-follow-up",
+  "version": 1,
+  "turns": [
+    { "user": "Help me design a paragraph-selection study for this article. Ask for missing setup before starting anything.", "expectedTools": [] },
+    { "user": "Here are the article paragraphs and respondent profile choices. Build a frozen cohort and show me the study fit.", "evidence": { "article": "Seven paragraphs about buying a home.", "cohort": "Three approved reader profiles." }, "expectedTools": ["run_inspect"] },
+    { "user": "The cohort and question look right. Start the study now.", "evidence": { "approved": true }, "expectedTools": ["run_start"] },
+    { "user": "The run is partial: Q2 is answered for both readers, but Q1 failed. Report that precisely.", "evidence": { "runId": "fixture-run", "status": "partial", "answers": [{ "respondentId": "r1", "questionId": "q2", "choice": "p2" }, { "respondentId": "r2", "questionId": "q2", "choice": "p5" }], "failure": { "questionId": "q1", "code": "invalid_answer" } }, "expectedTools": ["run_query"] },
+    { "user": "Now I changed the follow-up: for each respondent who selected a paragraph, give them only that selected paragraph as material. Keep no-fit respondents visible.", "evidence": { "selectedMaterial": [{ "respondentId": "r1", "materialId": "p2" }, { "respondentId": "r2", "materialId": "p5" }], "noFit": [] }, "expectedTools": ["run_start"] }
+  ]
+}

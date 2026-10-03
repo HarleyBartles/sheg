@@ -25,18 +25,16 @@ function observe(events: string): { sessionId: string | null; settings: Record<s
   return { sessionId, settings: model ? { model } : {} };
 }
 
-export function createCodexAdapter(options: { executable?: string; args?: string[] } = {}): CampaignAdapter {
+export function createCodexAdapter(options: { executable?: string; args?: string[]; spawnProcess?: typeof spawn } = {}): CampaignAdapter {
   const executable = options.executable ?? process.env.SHEG_CODEX_EXECUTABLE ?? 'codex';
-  return {
-    async execute(input): Promise<ExecutionResult> {
+  const spawnProcess = options.spawnProcess ?? spawn;
+  const execute: CampaignAdapter['execute'] = async (input): Promise<ExecutionResult> => {
       const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'sheg-codex-trial-'));
       const finalMessagePath = path.join(temporaryRoot, 'final-message.txt');
       const requested = input.requestedSettings;
-      const args = [
-        'exec', '--json', '--ephemeral', '--skip-git-repo-check',
-        '-C', input.cwd,
-        '--output-last-message', finalMessagePath,
-      ];
+      const args = input.resumeSessionId
+        ? ['exec', 'resume', input.resumeSessionId, '--json', '--skip-git-repo-check', '-o', finalMessagePath]
+        : ['exec', '--json', ...(input.persistent ? [] : ['--ephemeral']), '--skip-git-repo-check', '-C', input.cwd, '-o', finalMessagePath];
       const model = requested.model;
       if (typeof model === 'string' && model.length > 0) args.push('--model', model);
       const reasoning = requested.reasoning;
@@ -44,7 +42,7 @@ export function createCodexAdapter(options: { executable?: string; args?: string
       args.push(...(options.args ?? []), '-');
       try {
         const result = await new Promise<{ status: ExecutionResult['status']; exitCode: number | null; rawEvents: string; rawStderr: string }>((resolve, reject) => {
-        const child = spawn(executable, args, { cwd: input.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+        const child = spawnProcess(executable, args, { cwd: input.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
         let settled = false;
@@ -88,12 +86,33 @@ export function createCodexAdapter(options: { executable?: string; args?: string
         return {
           ...result,
           rawFinalMessage: finalMessage,
-          sessionId: observation.sessionId,
+          sessionId: observation.sessionId ?? input.resumeSessionId ?? null,
           observedSettings: observation.settings,
         };
       } finally {
         rmSync(temporaryRoot, { recursive: true, force: true });
       }
-    },
+    };
+  const executeWorkflow: NonNullable<CampaignAdapter['executeWorkflow']> = async (input) => {
+    const prompts = [input.initialPrompt, ...input.turns];
+    const events: string[] = [];
+    const messages: string[] = [];
+    const errors: string[] = [];
+    let sessionId: string | null = null;
+    let observedSettings: Record<string, unknown> = {};
+    let exitCode: number | null = null;
+    for (const [index, prompt] of prompts.entries()) {
+      const result = await execute({ ...input, prompt, persistent: true, ...(sessionId ? { resumeSessionId: sessionId } : {}) });
+      if (result.rawEvents) events.push(result.rawEvents);
+      if (result.rawFinalMessage) messages.push(`## Turn ${index + 1}\n${result.rawFinalMessage}`);
+      if (result.rawStderr) errors.push(result.rawStderr);
+      sessionId = result.sessionId ?? sessionId;
+      observedSettings = { ...observedSettings, ...result.observedSettings };
+      exitCode = result.exitCode;
+      if (result.status !== 'completed') return { ...result, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: errors.join('\n'), sessionId, observedSettings };
+      if (index < prompts.length - 1 && !sessionId) return { status: 'failed', exitCode, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: `${errors.join('\n')}\nCodex did not expose a session ID; conversation cannot safely continue.`, sessionId: null, observedSettings };
+    }
+    return { status: 'completed', exitCode, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: errors.join('\n'), sessionId, observedSettings };
   };
+  return { execute, executeWorkflow };
 }
