@@ -38938,15 +38938,16 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.4",
+  version: "0.3.0-dev.5",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
-    test: 'node --import tsx --test "test/**/*.test.ts"',
+    test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
     typecheck: "tsc --noEmit",
     lint: "eslint src test scripts",
     verify: "npm run lint && npm run typecheck && npm test && node --import tsx scripts/check-generated.ts",
     "contracts:build": "node --import tsx scripts/generate-contracts.ts",
     "skill:scenario": "node --import tsx scripts/skill-scenario.ts",
+    "skill:campaign": "node --import tsx scripts/skill-testing/cli.ts",
     build: "node --import tsx scripts/build.ts",
     "plugin:package": "node scripts/package-plugin.mjs",
     start: "node dist/mcp.js"

@@ -19,6 +19,9 @@ and feature PRs target `develop`.
   these before changing an external adapter.
 - `skills/stimulus-response-polling/` is the user-facing Codex skill. Plugin
   metadata and packaged runtime are at the repository root when introduced.
+- `.agents/doctrine/skill-behavior-testing.md` defines skill-owned behavior
+  tests, transient campaign outputs, and the limits of observed tool evidence.
+  Follow it before changing skill behavior or its scenario fixtures.
 - `docs/decisions/README.md` indexes durable architecture decisions;
   `docs/decisions/template.md` is the starting point for a new record.
 

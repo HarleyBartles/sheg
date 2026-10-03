@@ -1,0 +1,24 @@
+{
+  "scenarioId": "selected-material-isolation-no-fit",
+  "version": 1,
+  "cases": [
+    {
+      "id": "valid-per-respondent-selection",
+      "label": "good",
+      "expected": { "per-respondent-selection": "pass", "honest-current-limit": "pass", "preserves-no-fit": "pass", "valid-proposed-actions": "pass" },
+      "rationale": "Maps each eligible response to its own selected material, retains no-fit rows, and does not invent executable batching fields."
+    },
+    {
+      "id": "plausible-invalid-batch-request",
+      "label": "bad",
+      "expected": { "per-respondent-selection": "pass", "honest-current-limit": "fail", "preserves-no-fit": "uncertain", "valid-proposed-actions": "fail" },
+      "rationale": "Uses accurate product vocabulary but claims one request can route distinct material per respondent and proposes an unsupported batch property."
+    },
+    {
+      "id": "clarify-unavailable-source-selections",
+      "label": "borderline",
+      "expected": { "per-respondent-selection": "uncertain", "honest-current-limit": "pass", "preserves-no-fit": "uncertain", "valid-proposed-actions": "pass" },
+      "rationale": "Correctly describes the current limitation and asks for source evaluation IDs before proposing executable actions, but does not yet establish no-fit handling."
+    }
+  ]
+}

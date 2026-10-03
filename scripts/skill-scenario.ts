@@ -10,6 +10,7 @@ const scenarioSchema = z.object({
   id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   version: z.number().int().positive(),
   ownerSkill: z.enum(['study-design', 'stimulus-response-polling']),
+  tags: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)),
   referencePaths: z.array(z.string()),
   userRequest: z.string().min(1),
   controlledEvidence: z.unknown(),
@@ -65,6 +66,13 @@ export const baselineTraceSchema = z.object({
 export type Scenario = z.infer<typeof scenarioSchema>;
 export type ActorTrace = z.infer<typeof actorTraceSchema>;
 
+export type ScenarioSelection = {
+  ownerSkill?: Scenario['ownerSkill'];
+  tags?: readonly string[];
+  guidancePaths?: readonly string[];
+  includeSharedSafeguards?: boolean;
+};
+
 export function assertReferencePathContained(ownerSkill: string, referencePath: string): string {
   const skillRoot = path.resolve(root, 'skills', ownerSkill);
   const referencesRoot = path.resolve(skillRoot, 'references');
@@ -116,6 +124,23 @@ export function loadScenarioCatalog(): Scenario[] {
     }
   }
   return scenarios;
+}
+
+export function selectScenarios(selection: ScenarioSelection): Scenario[] {
+  const hasFilter = Boolean(selection.ownerSkill || selection.tags?.length || selection.guidancePaths?.length);
+  if (!hasFilter && !selection.includeSharedSafeguards) {
+    throw new Error('Select scenarios by owner, tag, or guidance path.');
+  }
+  const scenarios = loadScenarioCatalog();
+  const matches = scenarios.filter((scenario) =>
+    (!selection.ownerSkill || scenario.ownerSkill === selection.ownerSkill) &&
+    (!selection.tags?.length || selection.tags.some((tag) => scenario.tags.includes(tag))) &&
+    (!selection.guidancePaths?.length || selection.guidancePaths.some((reference) => scenario.referencePaths.includes(reference))));
+  if (selection.includeSharedSafeguards) {
+    const shared = scenarios.filter((scenario) => scenario.tags.includes('shared-safeguard'));
+    return [...new Map([...matches, ...shared].map((scenario) => [scenario.id, scenario])).values()];
+  }
+  return matches;
 }
 
 export function loadEvaluatorCatalog() {

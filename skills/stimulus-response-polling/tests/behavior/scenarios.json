@@ -3,6 +3,7 @@
     "id": "selected-material-isolation-no-fit",
     "version": 5,
     "ownerSkill": "stimulus-response-polling",
+    "tags": ["selected-material", "material-history", "shared-safeguard"],
     "referencePaths": [
       "references/run-and-recovery.md"
     ],
@@ -134,6 +135,7 @@
     "id": "partial-run-selected-question",
     "version": 3,
     "ownerSkill": "stimulus-response-polling",
+    "tags": ["partial-run", "failure", "lifecycle", "shared-safeguard"],
     "referencePaths": [
       "references/interpret-results.md",
       "references/run-and-recovery.md"
@@ -221,6 +223,7 @@
     "id": "typed-answer-failure",
     "version": 5,
     "ownerSkill": "stimulus-response-polling",
+    "tags": ["failure", "lifecycle", "shared-safeguard"],
     "referencePaths": [
       "references/interpret-results.md",
       "references/run-and-recovery.md"
@@ -281,6 +284,7 @@
     "id": "cumulative-journey-material",
     "version": 1,
     "ownerSkill": "stimulus-response-polling",
+    "tags": ["journey", "material-history", "shared-safeguard"],
     "referencePaths": [],
     "userRequest": "Build a reading journey where everyone sees paragraph A and answers whether they would continue. Readers who continue see paragraph B, rate how clearly it follows A, then see paragraph A again and answer whether the later evidence changes their view. Readers who stop see paragraph C and answer why. Tell me what material and prior answers each question receives, whether sequence or graph fits, and how repeated exposure and answer history work.",
     "controlledEvidence": {
@@ -297,5 +301,73 @@
       },
       "mockOnly": true
     }
+  },
+  {
+    "id": "cumulative-journey-material-heldout",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["journey", "material-history", "shared-safeguard"],
+    "referencePaths": [],
+    "userRequest": "Map this editorial reading path. Everyone starts with paragraph A. Readers who continue see B, judge how well it follows A, revisit A, and say whether B changes their assessment. Readers who leave see C and explain their choice. Specify the material and earlier answers each question receives, including what happens when A appears again, and tell me whether a sequence or graph fits.",
+    "controlledEvidence": {
+      "paragraphs": {
+        "A": "The council said repairs to the estate were complete.",
+        "B": "Two weeks later, residents still reported leaks in several homes.",
+        "C": "The council also published a new recycling schedule."
+      },
+      "questions": {
+        "Q1": "Would you keep reading?",
+        "Q2": "How clearly does B follow the promise in A?",
+        "Q3": "Does the later evidence change your view of A?",
+        "Q4": "Why did you stop?"
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "discover-polling-positive",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["discovery", "positive"],
+    "referencePaths": [],
+    "userRequest": "A Sheg respondent run is partial: every reader answered the second question, one reader's first answer failed, and two respondents selected different paragraphs. Help me query the evidence accurately and design the selected-paragraph follow-up.",
+    "controlledEvidence": { "requestType": "Sheg execution and evidence interpretation", "mockOnly": true }
+  }
+,
+  {
+    "id": "discover-polling-frontend-near-miss",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["discovery", "near-miss"],
+    "referencePaths": [],
+    "userRequest": "The settings page has a polling interval field. Fix its responsive CSS so the choices fit on mobile; no reader study is involved.",
+    "controlledEvidence": { "requestType": "frontend CSS maintenance", "mockOnly": true }
+  },
+  {
+    "id": "isolated-storage-inspection",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["storage-health", "read-only"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Inspect the Sheg datastore's health without changing any stored runs. Report only the health fields returned by Sheg.",
+    "controlledEvidence": { "operation": "inspect", "mockOnly": true }
+  },
+  {
+    "id": "live-storage-inspection-heldout",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["storage-health", "read-only", "shared-safeguard"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Please give me a read-only storage health check for Sheg. Report its returned integrity status and record counts; do not alter the database.",
+    "controlledEvidence": { "operation": "inspect", "source": "live Sheg MCP call required", "wording": "held-out" }
+  },
+  {
+    "id": "live-storage-inspection",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["storage-health", "read-only", "shared-safeguard"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Inspect the Sheg datastore's health without changing any stored runs. Report only the health fields returned by Sheg.",
+    "controlledEvidence": { "operation": "inspect", "source": "live Sheg MCP call required" }
   }
 ]
