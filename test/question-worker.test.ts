@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import type { DecisionBatchRequest, DecisionResult } from '../src/domain/decision/decision.js';
-import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
+import { compileDecisionPacket, compileDecisionPacketForCompiler, promptContractHash, v6PromptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { runRequestSchema, type InlineRunRequest, type InlineJourneyRequest, type PreparedJourneyRun } from '../src/domain/run/request.js';
 import { prepareRun } from '../src/application/run-inspection.js';
@@ -80,15 +80,14 @@ function authoredJourney(respondentCount = 1, maxCalls = 3): InlineJourneyReques
   };
 }
 
-function preparedJourney(respondentCount = 1, maxCalls = 3): PreparedJourneyRun {
+function preparedJourney(respondentCount = 1, maxCalls = 3, compilerFingerprint = promptContractHash()): PreparedJourneyRun {
   const parsed = runRequestSchema.parse(authoredJourney(respondentCount, maxCalls));
   if (parsed.kind !== 'journey') throw new Error('Expected a journey request.');
-  const compilerFingerprint = promptContractHash();
   const requestFingerprint = hashCanonical({ request: parsed, compilerFingerprint });
   const states: JourneyRespondentState[] = [];
   const evaluations = parsed.respondents.map((respondent, ordinal) => {
     const events: PromptHistoryEvent[] = [{ type: 'exposure', sequence: 0, nodeId: 'opening', itemId: 'section-one' }];
-    const packet = compileDecisionPacket(parsed.journey, respondent, 'interest', events);
+    const packet = compileDecisionPacketForCompiler(parsed.journey, respondent, 'interest', events, compilerFingerprint);
     const evaluationId = randomUUID();
     const turnId = randomUUID();
     const contextId = randomUUID();
@@ -128,10 +127,10 @@ function preparedSequenceJourney(): PreparedJourneyRun {
   };
 }
 
-async function journeyFixture(respondentCount = 1, maxCalls = 3) {
+async function journeyFixture(respondentCount = 1, maxCalls = 3, compilerFingerprint = promptContractHash()) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-journey-worker-'));
   const store = openRunStore(root);
-  const accepted = store.acceptJourney(randomUUID(), preparedJourney(respondentCount, maxCalls));
+  const accepted = store.acceptJourney(randomUUID(), preparedJourney(respondentCount, maxCalls, compilerFingerprint));
   return { root, store, runId: accepted.run.runId, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
@@ -504,6 +503,59 @@ test('an explicit resume restarts the failed reached turn without replaying earl
     assert.equal(run.evaluations[1]!.turnId, failedTurn);
     assert.deepEqual(run.evaluations.map(({ status }) => status), ['answered', 'answered', 'answered']);
   } finally { await f.close(); }
+});
+
+test('a frozen v6 journey resumes with its original exposure window and packet identity', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-v6-journey-resume-'));
+  let store = openRunStore(root);
+  const accepted = store.acceptJourney(randomUUID(), preparedJourney(1, 5, v6PromptContractHash));
+  let clarityCalls = 0;
+  const firstClarityPacket: unknown[] = [];
+  try {
+    const initialProvider: DecisionProvider = {
+      async decide(request) {
+        if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+        if (request.question.id === 'clarity') {
+          firstClarityPacket.push(structuredClone(request));
+          clarityCalls += 1;
+          throw new LayaCallError('local service is unavailable', 1, undefined, undefined, 'run');
+        }
+        throw new Error(`Unexpected question ${request.question.id}.`);
+      },
+    };
+    await executeQuestionRun(store, accepted.run.runId, factory(initialProvider));
+    const beforeResume = store.getJourneyRun(accepted.run.runId);
+    const frozenPacket = structuredClone(beforeResume.evaluations[1]!.packet);
+    const frozenFingerprint = beforeResume.evaluations[1]!.packetFingerprint;
+    assert.equal(beforeResume.compilerFingerprint, v6PromptContractHash);
+    assert.deepEqual(frozenPacket.state.encounteredItems.map(({ id }) => id), ['section-three']);
+    assert.deepEqual(beforeResume.evaluations[0]!.packet.state.encounteredItems.map(({ id }) => id), ['section-one']);
+
+    store.close();
+    store = openRunStore(root);
+    const reopened = store.getJourneyRun(accepted.run.runId);
+    assert.deepEqual(reopened.evaluations[1]!.packet, frozenPacket);
+    assert.equal(reopened.evaluations[1]!.packetFingerprint, frozenFingerprint);
+    assert.equal(store.resume(accepted.run.runId, Date.now()).started, true);
+    const resumedProvider: DecisionProvider = {
+      async decide(request) {
+        if (request.question.id === 'clarity') assert.deepEqual(request, firstClarityPacket[0]);
+        if (request.question.type === 'score') return {
+          type: 'score', score: 1, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.8, 2: 0.1 },
+          attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+        };
+        return { type: 'noul', noul: 0.8, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
+      },
+    };
+    await executeQuestionRun(store, accepted.run.runId, factory(resumedProvider));
+    const completed = store.getJourneyRun(accepted.run.runId);
+    assert.equal(store.getStatus(accepted.run.runId).status, 'completed');
+    assert.equal(completed.compilerFingerprint, v6PromptContractHash);
+    assert.deepEqual(completed.evaluations[0]!.packet.state.encounteredItems.map(({ id }) => id), ['section-one']);
+    assert.deepEqual(completed.evaluations[1]!.packet, frozenPacket);
+    assert.equal(completed.evaluations[1]!.packetFingerprint, frozenFingerprint);
+    assert.equal(clarityCalls, 1);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('cancelling during a journey call preserves its answer and pending next turn', async () => {

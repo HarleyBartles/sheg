@@ -67,6 +67,8 @@ Do not add per-selection material reuse, lifecycle/failure projection changes, n
 
 Update the two shipped skills with a concise example that distinguishes topology from material context, explains cumulative previously exposed text, and makes answer-history inclusion explicit on a dependent follow-up. Clarify that sequence is shorthand for a linear graph and that a graph branch cannot expose unseen sibling material. Do not teach authors to edit internal compiler details.
 
+Potential later harness expansions include an immutable hook that records tool use, including subagent tool use, for inspection, and Devin trials whose actor-subagent profile frontmatter disables tool use in that runtime. These are future options only and are not part of this v0.3.0 change.
+
 Version the relevant behavior scenario and evaluator under the owning skill. Before editing the skill wording, run at least five fresh-context guided trials against the current wording; after editing, run at least five against the candidate wording with the same requests and controlled facts at the recorded model settings. Preserve both conditions' prompt digests and outputs, manually inspect every failure or disputed result, and retain the successful existing baseline criteria. The harness prompt must retain `toolUseAudit: "not-captured"`; tool isolation hooks and Devin tool-disabled profiles remain future expansion options only. Keep actor/evaluator traces under skill-owned test assets, outside the plugin package.
 
 **Verify:** Run deterministic scenario-harness tests, validate scenario/evaluator pairing and current guidance hashes, inspect trial inputs and outputs, and verify the candidate ZIP excludes all `tests/behavior/` data.

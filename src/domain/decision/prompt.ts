@@ -66,6 +66,7 @@ const promptContract = {
 } as const;
 
 export const legacyPromptContractHash = 'c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044';
+export const v6PromptContractHash = 'a39d72d1ba77b0560dac5b7ccedf07b72e80b9d7bc1330679acd9c209e831526';
 
 function finishTrajectory(body: Omit<TrajectorySummary, 'payloadUtf8Bytes'>): TrajectorySummary {
   let payloadUtf8Bytes = 0;
@@ -211,13 +212,51 @@ export function compileDecisionPacket(
   taskId: string,
   history: readonly PromptHistoryEvent[] = [],
 ): DecisionRequest & { state: PromptState } {
+  return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 'cumulative');
+}
+
+export function compileDecisionPacketForCompiler(
+  arm: JourneyDefinition,
+  profile: RespondentProfile,
+  taskId: string,
+  history: readonly PromptHistoryEvent[],
+  compilerFingerprint: string,
+): DecisionRequest & { state: PromptState } {
+  if (compilerFingerprint === v6PromptContractHash) {
+    return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 'v6');
+  }
+  if (compilerFingerprint === promptContractHash()) {
+    return compileDecisionPacket(arm, profile, taskId, history);
+  }
+  throw new Error(`Unsupported journey compiler identity ${compilerFingerprint}.`);
+}
+
+function compileDecisionPacketWithMaterialPolicy(
+  arm: JourneyDefinition,
+  profile: RespondentProfile,
+  taskId: string,
+  history: readonly PromptHistoryEvent[],
+  materialPolicy: 'v6' | 'cumulative',
+): DecisionRequest & { state: PromptState } {
   const task = arm.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`Unknown task ${taskId}.`);
 
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
-  const itemIds = [...new Set(history
-    .filter((event): event is Extract<PromptHistoryEvent, { type: 'exposure' }> => event.type === 'exposure')
-    .map((event) => event.itemId))];
+  let itemIds: string[];
+  if (materialPolicy === 'v6') {
+    if (arm.presentation.kind === 'sequence') {
+      itemIds = arm.items.map((item) => item.id);
+    } else {
+      const lastDecisionIndex = history.findLastIndex((event) => event.type === 'choice' || event.type === 'response');
+      itemIds = history.slice(lastDecisionIndex + 1)
+        .filter((event): event is Extract<PromptHistoryEvent, { type: 'exposure' }> => event.type === 'exposure')
+        .map((event) => event.itemId);
+    }
+  } else {
+    itemIds = [...new Set(history
+      .filter((event): event is Extract<PromptHistoryEvent, { type: 'exposure' }> => event.type === 'exposure')
+      .map((event) => event.itemId))];
+  }
 
   const encounteredItems = itemIds.map((id) => {
     const item = itemsById.get(id);

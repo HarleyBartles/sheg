@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { appendTrajectoryResponse, compileDecisionPacket, compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket } from '../src/domain/decision/prompt.js';
+import { appendTrajectoryResponse, compileDecisionPacket, compileDecisionPacketForCompiler, compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash, v6PromptContractHash } from '../src/domain/decision/prompt.js';
 import type { DecisionValue } from '../src/domain/decision/decision.js';
 import { fileURLToPath } from 'node:url';
 import type { PromptHistoryEvent } from '../src/domain/decision/prompt.js';
@@ -119,6 +119,26 @@ test('cumulative material survives response omission and never includes an unexp
   assert.equal(request.state.trajectory.exposureCount, 3);
   assert.equal(request.state.trajectory.eventCount, 3);
   assert.deepEqual(request.state.encounteredItems.map(({ id }) => id).filter((id) => ['repair', 'test-notes'].includes(id)), []);
+});
+
+test('compiler identity selects frozen v6 packet windows and rejects unknown journey contracts', async () => {
+  const study = await loadStudy(manifestPath, cohortPath);
+  const arm = study.manifest.arms[0]!;
+  const task = arm.tasks[1]!;
+  const history: PromptHistoryEvent[] = [
+    { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
+    { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, choice: 'continue' },
+    { type: 'exposure', sequence: 2, nodeId: 'show-investigation', itemId: 'investigation' },
+  ];
+  const oldPacket = compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history, v6PromptContractHash);
+  const newPacket = compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history, promptContractHash());
+
+  assert.notEqual(promptContractHash(), v6PromptContractHash);
+  assert.deepEqual(oldPacket.state.encounteredItems.map(({ id }) => id), ['investigation']);
+  assert.deepEqual(newPacket.state.encounteredItems.map(({ id }) => id), ['symptom', 'investigation']);
+  const sequence = { ...arm, presentation: { kind: 'sequence' as const } };
+  assert.deepEqual(compileDecisionPacketForCompiler(sequence, study.respondents[0]!, task.id, history, v6PromptContractHash).state.encounteredItems.map(({ id }) => id), arm.items.map(({ id }) => id));
+  assert.throws(() => compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history, 'unknown-contract'), /unsupported.*compiler/i);
 });
 
 test('a task can suppress prior response context without changing the same respondent journey', async () => {

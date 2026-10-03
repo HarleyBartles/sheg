@@ -19864,10 +19864,23 @@ function compactTrajectory(arm, history) {
   return finishTrajectory(body);
 }
 function compileDecisionPacket(arm, profile, taskId, history = []) {
+  return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, "cumulative");
+}
+function compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, materialPolicy) {
   const task = arm.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`Unknown task ${taskId}.`);
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
-  const itemIds = [...new Set(history.filter((event) => event.type === "exposure").map((event) => event.itemId))];
+  let itemIds;
+  if (materialPolicy === "v6") {
+    if (arm.presentation.kind === "sequence") {
+      itemIds = arm.items.map((item) => item.id);
+    } else {
+      const lastDecisionIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
+      itemIds = history.slice(lastDecisionIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
+    }
+  } else {
+    itemIds = [...new Set(history.filter((event) => event.type === "exposure").map((event) => event.itemId))];
+  }
   const encounteredItems = itemIds.map((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);

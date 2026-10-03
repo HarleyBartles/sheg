@@ -19817,11 +19817,27 @@ var decisionBatchResultSchema = external_exports.object({
 });
 
 // src/domain/decision/prompt.ts
+import { createHash as createHash2 } from "node:crypto";
 function questionForTask(task) {
   if ("options" in task) return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options }, ...task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {} };
   if ("rubric" in task) return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
   return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
 }
+var promptContract = {
+  version: 7,
+  stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
+  encounteredMaterial: "all items exposed through the current turn, unique by item ID in first-exposure order",
+  trajectory: ["prior task IDs and typed responses with meanings", "prior exposure IDs", "event counts and range"],
+  responseHistory: "per-task include or omit; omitted legacy setting includes prior responses",
+  noUnexposedOrSiblingMaterial: true,
+  preserveEncounterOrder: true,
+  historyOrder: "chronological",
+  studyMetadataExcluded: true,
+  answerKeysExcluded: true,
+  otherArmsExcluded: true,
+  decisionSemantics: "Choose exactly one offered stable option ID according to its description."
+};
+var v6PromptContractHash = "a39d72d1ba77b0560dac5b7ccedf07b72e80b9d7bc1330679acd9c209e831526";
 function finishTrajectory(body) {
   let payloadUtf8Bytes = 0;
   for (; ; ) {
@@ -19869,10 +19885,32 @@ function compactTrajectory(arm, history) {
   return finishTrajectory(body);
 }
 function compileDecisionPacket(arm, profile, taskId, history = []) {
+  return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, "cumulative");
+}
+function compileDecisionPacketForCompiler(arm, profile, taskId, history, compilerFingerprint) {
+  if (compilerFingerprint === v6PromptContractHash) {
+    return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, "v6");
+  }
+  if (compilerFingerprint === promptContractHash()) {
+    return compileDecisionPacket(arm, profile, taskId, history);
+  }
+  throw new Error(`Unsupported journey compiler identity ${compilerFingerprint}.`);
+}
+function compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, materialPolicy) {
   const task = arm.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`Unknown task ${taskId}.`);
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
-  const itemIds = [...new Set(history.filter((event) => event.type === "exposure").map((event) => event.itemId))];
+  let itemIds;
+  if (materialPolicy === "v6") {
+    if (arm.presentation.kind === "sequence") {
+      itemIds = arm.items.map((item) => item.id);
+    } else {
+      const lastDecisionIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
+      itemIds = history.slice(lastDecisionIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
+    }
+  } else {
+    itemIds = [...new Set(history.filter((event) => event.type === "exposure").map((event) => event.itemId))];
+  }
   const encounteredItems = itemIds.map((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
@@ -19910,6 +19948,9 @@ function compileDecisionRequest(parts) {
     state
   };
 }
+function promptContractHash() {
+  return createHash2("sha256").update(JSON.stringify(promptContract)).digest("hex");
+}
 
 // src/domain/journey/topology.ts
 function journeyTopology(arm) {
@@ -19946,7 +19987,7 @@ var JourneyExecutionError = class extends Error {
     this.name = "JourneyExecutionError";
   }
 };
-function advanceJourney(arm, profile, state, rawResult) {
+function advanceJourney(arm, profile, state, rawResult, compilerFingerprint) {
   const result = decisionValueSchema.parse(rawResult);
   const events = [...state.events];
   const route = [...state.route];
@@ -19987,7 +20028,8 @@ function advanceJourney(arm, profile, state, rawResult) {
       current = edge.toNodeId;
       continue;
     }
-    return { events, route, status: "active", outcome: null, next: { nodeId: node2.id, taskId: node2.taskId, pathId, packet: compileDecisionPacket(arm, profile, node2.taskId, events) } };
+    const packet = compilerFingerprint === void 0 ? compileDecisionPacket(arm, profile, node2.taskId, events) : compileDecisionPacketForCompiler(arm, profile, node2.taskId, events, compilerFingerprint);
+    return { events, route, status: "active", outcome: null, next: { nodeId: node2.id, taskId: node2.taskId, pathId, packet } };
   }
 }
 function normalizeResponse(answer, expectedType) {
@@ -20606,7 +20648,7 @@ function retryDelayMs(attempt) {
 }
 
 // src/providers/laya/context-fit.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path2 from "node:path";
 
@@ -20845,7 +20887,7 @@ async function tokenizerPromise(config2) {
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile(absolutePath);
-    const sha256 = createHash2("sha256").update(bytes).digest("hex");
+    const sha256 = createHash3("sha256").update(bytes).digest("hex");
     if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
     let raw;
     try {
@@ -21184,7 +21226,7 @@ async function executeJourney(store2, runId2, claim2, providerFactory) {
         currentNodeId: currentEvaluation.nodeId,
         events: respondentState.events,
         route: respondentState.route
-      }, value);
+      }, value, currentRun.compilerFingerprint);
       const nextEvaluation = progress.next ? {
         evaluationId: randomUUID(),
         turnId: randomUUID(),
@@ -21245,7 +21287,7 @@ function failureDetails(error62, scope) {
 }
 
 // src/infrastructure/run-store.ts
-import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash4, randomUUID as randomUUID2 } from "node:crypto";
 import { mkdirSync, statSync } from "node:fs";
 import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -22140,7 +22182,7 @@ function validatePreparedJourney(prepared) {
     const state = stateById.get(evaluation.respondentId);
     const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
     const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
-    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacket(parsedRequest.data.journey, respondent, evaluation.questionId, state.events)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
+    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
       throw new RunStoreError("invalid_prepared_run", "Prepared journey turn or context reference is invalid.");
     }
     evaluationIds.add(evaluation.evaluationId);
@@ -22737,7 +22779,7 @@ var SQLiteRunStore = class {
               text: candidate.text,
               sourceId: candidate.sourceId,
               sourceSha256: candidate.sourceSha256,
-              textSha256: createHash3("sha256").update(candidate.text, "utf8").digest("hex")
+              textSha256: createHash4("sha256").update(candidate.text, "utf8").digest("hex")
             };
           }
         }
@@ -23240,7 +23282,7 @@ var SQLiteRunStore = class {
         const nextPacket = decisionRequestSchema.safeParse(next.packet);
         const respondent = parsedRunRequest.data.respondents.find(({ id }) => id === respondentId);
         const current = this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS ordinal FROM evaluations WHERE run_id = ?").get(claim2.runId);
-        if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacket(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
+        if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
           throw new RunStoreError("invalid_journey_turn", "Next journey turn is invalid or does not follow the persisted evaluation order.");
         }
         this.database.prepare(`INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)

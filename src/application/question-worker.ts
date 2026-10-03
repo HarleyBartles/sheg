@@ -107,7 +107,7 @@ async function executeJourney(store: RunStore, runId: string, claim: import('../
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
       const progress = advanceJourney(currentRun.request.journey, profile, {
         currentNodeId: currentEvaluation.nodeId, events: respondentState.events, route: respondentState.route,
-      }, value);
+      }, value, currentRun.compilerFingerprint);
       const nextEvaluation = progress.next ? {
         evaluationId: randomUUID(), turnId: randomUUID(), contextId: randomUUID(),
         respondentId: respondentState.respondentId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,

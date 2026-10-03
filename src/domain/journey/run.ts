@@ -1,5 +1,5 @@
 import { decisionValueSchema, type DecisionRequest, type DecisionResult, type DecisionValue } from '../decision/decision.js';
-import { compileDecisionPacket, type PromptHistoryEvent } from '../decision/prompt.js';
+import { compileDecisionPacket, compileDecisionPacketForCompiler, type PromptHistoryEvent } from '../decision/prompt.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 import type { JourneyDefinition } from '../study/arm.js';
 import type { PromptState } from '../decision/prompt.js';
@@ -28,6 +28,7 @@ export function advanceJourney(
   profile: RespondentProfile,
   state: { currentNodeId: string; events: readonly JourneyEvent[]; route: readonly JourneyProgress['route'][number][] },
   rawResult: DecisionValue,
+  compilerFingerprint?: string,
 ): JourneyProgress {
   const result = decisionValueSchema.parse(rawResult);
   const events = [...state.events];
@@ -74,7 +75,10 @@ export function advanceJourney(
       current = edge.toNodeId;
       continue;
     }
-    return { events, route, status: 'active', outcome: null, next: { nodeId: node.id, taskId: node.taskId, pathId, packet: compileDecisionPacket(arm, profile, node.taskId, events) } };
+    const packet = compilerFingerprint === undefined
+      ? compileDecisionPacket(arm, profile, node.taskId, events)
+      : compileDecisionPacketForCompiler(arm, profile, node.taskId, events, compilerFingerprint);
+    return { events, route, status: 'active', outcome: null, next: { nodeId: node.id, taskId: node.taskId, pathId, packet } };
   }
 }
 
