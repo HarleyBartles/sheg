@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { campaignManifestSchema, type CampaignManifest } from './contracts.js';
+import { readFrozenCampaign, type CampaignManifest } from './contracts.js';
+import { sha256 } from './snapshots.js';
 
 export interface ExecutionResult {
   status: 'completed' | 'timed-out' | 'failed';
@@ -12,6 +13,7 @@ export interface ExecutionResult {
   rawStderr: string;
   sessionId: string | null;
   observedSettings: Record<string, unknown>;
+  workflowTurnEvents?: string[];
 }
 
 export interface CampaignAdapter {
@@ -20,7 +22,7 @@ export interface CampaignAdapter {
 }
 
 interface JournalEntry {
-  type: 'trial-added' | 'attempt-started' | 'output-captured' | 'runtime-error' | 'attempt-interrupted';
+  type: 'campaign-prepared' | 'trial-added' | 'attempt-started' | 'output-captured' | 'runtime-error' | 'attempt-interrupted';
   trialId?: string;
   attemptId?: string;
   armId?: string;
@@ -37,7 +39,7 @@ export interface CampaignRunSummary {
 
 function campaignFiles(campaignDirectory: string): { root: string; manifest: CampaignManifest; journal: string } {
   const root = path.resolve(campaignDirectory);
-  const manifest = campaignManifestSchema.parse(JSON.parse(readFileSync(path.join(root, 'campaign.json'), 'utf8')));
+  const manifest = readFrozenCampaign(root);
   return { root, manifest, journal: path.join(root, 'attempts.jsonl') };
 }
 
@@ -86,7 +88,7 @@ export function addTrial(campaignDirectory: string, armId: string): CampaignMani
 export async function runCampaign(
   campaignDirectory: string,
   adapter: CampaignAdapter,
-  options: { concurrency?: number; afterCapture?: (trialId: string) => void; signal?: AbortSignal } = {},
+  options: { concurrency?: number; afterOutputFiles?: (trialId: string) => void; afterCapture?: (trialId: string) => void; signal?: AbortSignal } = {},
 ): Promise<CampaignRunSummary> {
   const { root, manifest, journal } = campaignFiles(campaignDirectory);
   if (manifest.suite === 'workflow' && !adapter.executeWorkflow) throw new Error('Workflow campaign requires an adapter with persistent conversation support.');
@@ -102,7 +104,9 @@ export async function runCampaign(
     while (cursor < trials.length) {
       const trial = trials[cursor++];
       if (!trial) continue;
-      const before = journalEntries(journal).filter((entry) => entry.trialId === trial.trialId);
+      let before = journalEntries(journal).filter((entry) => entry.trialId === trial.trialId);
+      recoverCompleteAttemptBundles(root, trial, before, journal);
+      before = journalEntries(journal).filter((entry) => entry.trialId === trial.trialId);
       if (before.some((entry) => entry.type === 'output-captured')) continue;
       const started = before.filter((entry) => entry.type === 'attempt-started').length;
       const finished = new Set(before.filter((entry) => ['output-captured', 'runtime-error', 'attempt-interrupted'].includes(entry.type)).map((entry) => entry.attemptId));
@@ -113,10 +117,10 @@ export async function runCampaign(
       append(journal, { type: 'attempt-started', trialId: trial.trialId, attemptId, armId: trial.armId, repetition: trial.repetition });
       const arm = manifest.arms.find((candidate) => candidate.id === trial.armId);
       if (!arm) throw new Error(`Campaign manifest has no arm ${trial.armId}.`);
-      let result: ExecutionResult;
+      const cwd = campaignScratchRoot(root, trial.trialId, attemptId);
       try {
-        const cwd = campaignScratchRoot(root, trial.trialId, attemptId);
         mkdirSync(cwd, { recursive: true });
+        let result: ExecutionResult;
         if (manifest.suite === 'workflow') {
           const marker = '\n## User request\n';
           const userBoundary = arm.actorPrompt.indexOf(marker);
@@ -138,28 +142,37 @@ export async function runCampaign(
             ...(options.signal ? { signal: options.signal } : {}),
           });
         }
+        const attemptRoot = path.join(root, 'attempts', fileSegment(trial.trialId), fileSegment(attemptId));
+        mkdirSync(attemptRoot, { recursive: true });
+        const shegDataDirectory = path.join(cwd, 'sheg-data');
+        if (existsSync(shegDataDirectory)) cpSync(shegDataDirectory, path.join(attemptRoot, 'sheg-data'), { recursive: true, errorOnExist: true });
+        writeAtomic(path.join(attemptRoot, 'raw-events.jsonl'), result.rawEvents);
+        writeAtomic(path.join(attemptRoot, 'raw-final-message.txt'), result.rawFinalMessage);
+        writeAtomic(path.join(attemptRoot, 'raw-stderr.txt'), result.rawStderr);
+        writeAtomic(path.join(attemptRoot, 'result.json'), `${JSON.stringify({
+          requestedSettings: manifest.execution,
+          observedSettings: result.observedSettings,
+          retainedShegData: existsSync(path.join(attemptRoot, 'sheg-data')) ? 'sheg-data/' : null,
+          sessionId: result.sessionId,
+          exitCode: result.exitCode,
+          status: result.status,
+          ...(result.workflowTurnEvents ? { workflowTurnEvents: result.workflowTurnEvents } : {}),
+        }, null, 2)}\n`);
+        options.afterOutputFiles?.(trial.trialId);
+        if (result.status === 'completed') append(journal, { type: 'output-captured', trialId: trial.trialId, attemptId, result: resultSummary(result) });
+        else append(journal, { type: 'runtime-error', trialId: trial.trialId, attemptId, error: `Adapter ended with ${result.status} (exit ${String(result.exitCode)}).`, result: resultSummary(result) });
+        options.afterCapture?.(trial.trialId);
       } catch (error) {
-        append(journal, { type: 'runtime-error', trialId: trial.trialId, attemptId, error: error instanceof Error ? error.message : String(error) });
-        continue;
+        const attemptEntries = journalEntries(journal).filter((entry) => entry.trialId === trial.trialId && entry.attemptId === attemptId);
+        const attemptRoot = path.join(root, 'attempts', fileSegment(trial.trialId), fileSegment(attemptId));
+        const completeBundle = ['result.json', 'raw-events.jsonl', 'raw-final-message.txt', 'raw-stderr.txt'].every((name) => existsSync(path.join(attemptRoot, name)));
+        if ((options.afterOutputFiles && completeBundle) || (options.afterCapture && attemptEntries.some((entry) => entry.type === 'output-captured'))) throw error;
+        if (!attemptEntries.some((entry) => ['output-captured', 'runtime-error', 'attempt-interrupted'].includes(entry.type))) {
+          append(journal, { type: 'runtime-error', trialId: trial.trialId, attemptId, error: error instanceof Error ? error.message : String(error) });
+        }
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
       }
-      const attemptRoot = path.join(root, 'attempts', fileSegment(trial.trialId), fileSegment(attemptId));
-      mkdirSync(attemptRoot, { recursive: true });
-      const shegDataDirectory = path.join(campaignScratchRoot(root, trial.trialId, attemptId), 'sheg-data');
-      if (existsSync(shegDataDirectory)) cpSync(shegDataDirectory, path.join(attemptRoot, 'sheg-data'), { recursive: true, errorOnExist: true });
-      writeAtomic(path.join(attemptRoot, 'raw-events.jsonl'), result.rawEvents);
-      writeAtomic(path.join(attemptRoot, 'raw-final-message.txt'), result.rawFinalMessage);
-      writeAtomic(path.join(attemptRoot, 'raw-stderr.txt'), result.rawStderr);
-      writeAtomic(path.join(attemptRoot, 'result.json'), `${JSON.stringify({
-        requestedSettings: manifest.execution,
-        observedSettings: result.observedSettings,
-        retainedShegData: existsSync(path.join(attemptRoot, 'sheg-data')) ? 'sheg-data/' : null,
-        sessionId: result.sessionId,
-        exitCode: result.exitCode,
-        status: result.status,
-      }, null, 2)}\n`);
-      if (result.status === 'completed') append(journal, { type: 'output-captured', trialId: trial.trialId, attemptId, result: resultSummary(result) });
-      else append(journal, { type: 'runtime-error', trialId: trial.trialId, attemptId, error: `Adapter ended with ${result.status} (exit ${String(result.exitCode)}).`, result: resultSummary(result) });
-      options.afterCapture?.(trial.trialId);
     }
   };
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
@@ -177,7 +190,33 @@ export async function runCampaign(
   return { captured, runtimeErrors, interrupted };
 }
 
+function recoverCompleteAttemptBundles(root: string, trial: CampaignManifest['trials'][number], entries: JournalEntry[], journal: string): void {
+  const terminal = new Set(entries.filter((entry) => ['output-captured', 'runtime-error', 'attempt-interrupted'].includes(entry.type)).map((entry) => entry.attemptId));
+  for (const started of entries.filter((entry) => entry.type === 'attempt-started' && entry.attemptId && !terminal.has(entry.attemptId))) {
+    const attemptId = started.attemptId;
+    if (!attemptId) continue;
+    const attemptRoot = path.join(root, 'attempts', fileSegment(trial.trialId), fileSegment(attemptId));
+    const resultPath = path.join(attemptRoot, 'result.json');
+    const rawPaths = ['raw-events.jsonl', 'raw-final-message.txt', 'raw-stderr.txt'].map((name) => path.join(attemptRoot, name));
+    if (!existsSync(resultPath) || rawPaths.some((target) => !existsSync(target))) continue;
+    try {
+      const saved = JSON.parse(readFileSync(resultPath, 'utf8')) as { status?: unknown; exitCode?: unknown; sessionId?: unknown; observedSettings?: unknown };
+      if (!['completed', 'timed-out', 'failed'].includes(String(saved.status)) || !(saved.exitCode === null || Number.isInteger(saved.exitCode)) || !(saved.sessionId === null || typeof saved.sessionId === 'string') || typeof saved.observedSettings !== 'object' || saved.observedSettings === null || Array.isArray(saved.observedSettings)) continue;
+      const result = { status: saved.status as ExecutionResult['status'], exitCode: saved.exitCode as number | null, sessionId: saved.sessionId as string | null, observedSettings: saved.observedSettings as Record<string, unknown> };
+      if (result.status === 'completed') append(journal, { type: 'output-captured', trialId: trial.trialId, attemptId, result });
+      else append(journal, { type: 'runtime-error', trialId: trial.trialId, attemptId, error: `Recovered captured attempt status ${result.status}.`, result });
+    } catch { /* Incomplete attempt bundles remain interrupted and are retried under a new attempt ID. */ }
+  }
+}
+
 export function campaignScratchRoot(campaignDirectory: string, trialId: string, attemptId: string): string {
   const key = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 16);
   return path.join(os.tmpdir(), 'sheg-skill-campaign', key(path.resolve(campaignDirectory)), key(trialId), key(attemptId));
+}
+
+export function discardCampaign(campaignDirectory: string): void {
+  const root = path.resolve(campaignDirectory);
+  const campaignHash = sha256(root).slice(0, 16);
+  rmSync(path.join(os.tmpdir(), 'sheg-skill-campaign', campaignHash), { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
 }

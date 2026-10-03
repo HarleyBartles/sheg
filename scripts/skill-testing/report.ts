@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, write
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
-import { assertComparableManifests, campaignManifestSchema, type CampaignManifest } from './contracts.js';
+import { assertComparableManifests, readFrozenCampaign, type CampaignManifest } from './contracts.js';
 import { extractShegToolCalls, gradeTrial, type TrialGrade } from './graders.js';
 import type { CampaignAdapter } from './runner.js';
 
@@ -11,7 +11,7 @@ type TrialRecord = { trialId: string; armId: string; repetition: number; status:
 type Report = { manifest: CampaignManifest; trials: TrialRecord[]; comparisons: unknown[]; summary: Record<string, unknown> };
 function segment(value: string): string { return value.replace(/[^a-zA-Z0-9._-]/g, '-'); }
 function esc(value: string): string { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
-function readManifest(root: string): CampaignManifest { return campaignManifestSchema.parse(JSON.parse(readFileSync(path.join(root, 'campaign.json'), 'utf8'))); }
+function readManifest(root: string): CampaignManifest { return readFrozenCampaign(root); }
 
 function allTrials(manifest: CampaignManifest, entries: Entry[]): CampaignManifest['trials'] {
   const additions = entries.filter((entry) => entry.type === 'trial-added' && entry.trialId && entry.armId && entry.repetition).map((entry) => ({ trialId: entry.trialId!, armId: entry.armId!, repetition: entry.repetition!, attempts: [`${entry.trialId}:attempt-001`] }));
@@ -59,8 +59,12 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
     const actorValue = manifest.suite === 'workflow'
       ? { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: rawFinal || 'No final response was captured.', uncertainties: [] }
       : (() => { try { return JSON.parse(rawFinal) as unknown; } catch { return rawFinal; } })();
-    const expectedTools = manifest.workflowTurns?.flatMap((turn) => turn.expectedTools) ?? [];
-    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria, manifest.suite, expectedTools, extractShegToolCalls(rawEvents));
+    const rawAttemptResult = JSON.parse(readFileSync(path.join(attemptRoot, 'result.json'), 'utf8')) as { workflowTurnEvents?: unknown };
+    const expectedToolsByTurn = manifest.workflowTurns?.map((turn) => turn.expectedTools) ?? [];
+    const observedToolsByTurn = Array.isArray(rawAttemptResult.workflowTurnEvents) && rawAttemptResult.workflowTurnEvents.every((item) => typeof item === 'string')
+      ? rawAttemptResult.workflowTurnEvents.map((events) => extractShegToolCalls(events as string))
+      : undefined;
+    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria, manifest.suite, expectedToolsByTurn, observedToolsByTurn);
     if (evaluatorError) grade.semantic = { result: 'uncertain', criteria: [], error: evaluatorError };
     writeFileSync(path.join(evaluatorRoot, 'grade.json'), `${JSON.stringify(grade, null, 2)}\n`);
     appendFileSync(path.join(root, 'grades.jsonl'), `${JSON.stringify({ trialId: trial.trialId, attemptId: capture.attemptId, gradePath: path.relative(root, path.join(evaluatorRoot, 'grade.json')).replaceAll('\\', '/') })}\n`);
@@ -83,14 +87,17 @@ export function collectCampaignReport(directory: string): Report {
     const finalPath = path.join(attemptRoot, 'raw-final-message.txt');
     const resultPath = path.join(attemptRoot, 'result.json');
     const finalText = readFileSync(finalPath, 'utf8');
-    const rawEvents = readFileSync(path.join(attemptRoot, 'raw-events.jsonl'), 'utf8');
     let parsed: unknown = null;
     if (manifest.suite === 'workflow') parsed = { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: finalText || 'No final response was captured.', uncertainties: [] };
     else try { parsed = JSON.parse(finalText) as unknown; } catch { /* Malformed raw output stays preserved and grades as an actor contract failure. */ }
     const evaluatorGradePath = path.join(attemptRoot, 'evaluator', 'grade.json');
     const semanticGrade = existsSync(evaluatorGradePath) ? (JSON.parse(readFileSync(evaluatorGradePath, 'utf8')) as TrialGrade).semantic : undefined;
-    const expectedTools = manifest.workflowTurns?.flatMap((turn) => turn.expectedTools) ?? [];
-    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria, manifest.suite, expectedTools, extractShegToolCalls(rawEvents));
+    const savedAttemptResult = existsSync(resultPath) ? JSON.parse(readFileSync(resultPath, 'utf8')) as { workflowTurnEvents?: unknown } : {};
+    const expectedToolsByTurn = manifest.workflowTurns?.map((turn) => turn.expectedTools) ?? [];
+    const observedToolsByTurn = Array.isArray(savedAttemptResult.workflowTurnEvents) && savedAttemptResult.workflowTurnEvents.every((item) => typeof item === 'string')
+      ? savedAttemptResult.workflowTurnEvents.map((events) => extractShegToolCalls(events as string))
+      : undefined;
+    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria, manifest.suite, expectedToolsByTurn, observedToolsByTurn);
     if (semanticGrade) grade.semantic = semanticGrade;
     const responseExcerpt = parsed && typeof parsed === 'object' && 'finalResponse' in parsed && typeof parsed.finalResponse === 'string' ? parsed.finalResponse : finalText;
     const settings = existsSync(resultPath) ? (JSON.parse(readFileSync(resultPath, 'utf8')) as { observedSettings?: Record<string, unknown> }).observedSettings ?? {} : {};
@@ -132,18 +139,30 @@ export function collectCampaignReport(directory: string): Report {
   return { manifest, trials, comparisons, summary };
 }
 
-export function compareCampaigns(baselineDirectory: string, candidateDirectory: string): { baseline: Report; candidate: Report; criterionChanges: Array<{ criterionId: string; baseline: { pass: number; fail: number; uncertain: number }; candidate: { pass: number; fail: number; uncertain: number }; delta: { pass: number; fail: number; uncertain: number } }> } {
+type CriterionCounts = { pass: number; fail: number; uncertain: number };
+
+function criterionCountsForArm(report: Report, armId: string): Record<string, CriterionCounts> {
+  if (!report.manifest.arms.some((arm) => arm.id === armId)) throw new Error(`Campaign ${report.manifest.campaignId} has no comparison arm ${armId}.`);
+  const trials = report.trials.filter((trial) => trial.armId === armId && trial.status === 'captured');
+  return Object.fromEntries(report.manifest.evaluationBasis.criteria.map(({ id }) => [id, {
+    pass: trials.filter((trial) => trial.grade?.semantic.criteria.find((grade) => grade.criterionId === id)?.result === 'pass').length,
+    fail: trials.filter((trial) => trial.grade?.semantic.criteria.find((grade) => grade.criterionId === id)?.result === 'fail').length,
+    uncertain: trials.filter((trial) => trial.grade?.semantic.criteria.find((grade) => grade.criterionId === id)?.result === 'uncertain').length,
+  }]));
+}
+
+export function compareCampaigns(baselineDirectory: string, candidateDirectory: string, arms: { baselineArmId: string; candidateArmId: string }): { baseline: Report; candidate: Report; baselineArmId: string; candidateArmId: string; criterionChanges: Array<{ criterionId: string; baseline: CriterionCounts; candidate: CriterionCounts; delta: CriterionCounts }> } {
   const baseline = collectCampaignReport(baselineDirectory);
   const candidate = collectCampaignReport(candidateDirectory);
   assertComparableManifests(baseline.manifest, candidate.manifest);
-  const baselineCounts = baseline.summary.criterionCounts as Record<string, { pass: number; fail: number; uncertain: number }>;
-  const candidateCounts = candidate.summary.criterionCounts as Record<string, { pass: number; fail: number; uncertain: number }>;
+  const baselineCounts = criterionCountsForArm(baseline, arms.baselineArmId);
+  const candidateCounts = criterionCountsForArm(candidate, arms.candidateArmId);
   const criterionChanges = baseline.manifest.evaluationBasis.criteria.map(({ id }) => {
     const before = baselineCounts[id] ?? { pass: 0, fail: 0, uncertain: 0 };
     const after = candidateCounts[id] ?? { pass: 0, fail: 0, uncertain: 0 };
     return { criterionId: id, baseline: before, candidate: after, delta: { pass: after.pass - before.pass, fail: after.fail - before.fail, uncertain: after.uncertain - before.uncertain } };
   });
-  return { baseline, candidate, criterionChanges };
+  return { baseline, candidate, baselineArmId: arms.baselineArmId, candidateArmId: arms.candidateArmId, criterionChanges };
 }
 
 const comparisonGradeSchema = z.object({
@@ -151,14 +170,14 @@ const comparisonGradeSchema = z.object({
   notes: z.string(),
 }).strict();
 
-export async function gradeBlindComparisons(baselineDirectory: string, candidateDirectory: string, adapter: CampaignAdapter): Promise<unknown[]> {
-  const { baseline, candidate } = compareCampaigns(baselineDirectory, candidateDirectory);
+export async function gradeBlindComparisons(baselineDirectory: string, candidateDirectory: string, arms: { baselineArmId: string; candidateArmId: string }, adapter: CampaignAdapter): Promise<unknown[]> {
+  const { baseline, candidate } = compareCampaigns(baselineDirectory, candidateDirectory, arms);
   const baseRoot = path.resolve(baselineDirectory);
   const candidateRoot = path.resolve(candidateDirectory);
   const criteria = candidate.manifest.evaluationBasis.criteria;
   const outcomes: unknown[] = [];
-  for (const baselineTrial of baseline.trials.filter((trial) => trial.status === 'captured')) {
-    const candidateTrial = candidate.trials.find((trial) => trial.status === 'captured' && trial.repetition === baselineTrial.repetition);
+  for (const baselineTrial of baseline.trials.filter((trial) => trial.status === 'captured' && trial.armId === arms.baselineArmId)) {
+    const candidateTrial = candidate.trials.find((trial) => trial.status === 'captured' && trial.armId === arms.candidateArmId && trial.repetition === baselineTrial.repetition);
     if (!candidateTrial || !baselineTrial.outputPath || !candidateTrial.outputPath) continue;
     const pairSeed = `${baseline.manifest.basis.requestSha256}:${baselineTrial.repetition}`;
     const mappingHash = createHash('sha256').update(pairSeed).digest('hex');

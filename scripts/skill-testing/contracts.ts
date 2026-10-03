@@ -80,6 +80,8 @@ export const campaignManifestSchema = z.object({
 
 export type CampaignManifest = z.infer<typeof campaignManifestSchema>;
 
+const campaignPreparedSchema = z.object({ type: z.literal('campaign-prepared'), manifestSha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+
 function actorPrompt(base: string, snapshot: GuidanceSnapshot): string {
   const marker = '\n## Current skill and declared references\n';
   const boundary = base.indexOf(marker);
@@ -143,6 +145,12 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
       discoveryPromptSha256: sha256(discovery),
     };
   });
+  const evaluationBasis: CampaignManifest['evaluationBasis'] = {
+    userRequest: scenario.userRequest,
+    controlledEvidence: scenario.controlledEvidence,
+    criteria: [...evaluator.criteria, ...(config.workflowTurns ? [{ id: 'workflow-tool-checkpoints', condition: config.workflowTurns.map((turn, index) => `Turn ${index + 1}: use ${turn.expectedTools.join(', ') || 'no Sheg tool'}${turn.criteria.length ? `; ${turn.criteria.join('; ')}` : ''}`).join('\n') }] : [])],
+    prohibitedClaims: evaluator.prohibitedClaims,
+  };
   const manifest: CampaignManifest = campaignManifestSchema.parse({
     schemaVersion: 1,
     campaignId: config.id,
@@ -155,16 +163,11 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
     timeoutMs: config.timeoutMs,
     execution: config.execution,
     ...(config.workflowTurns ? { workflowTurns: config.workflowTurns } : {}),
-    evaluationBasis: {
-      userRequest: scenario.userRequest,
-      controlledEvidence: scenario.controlledEvidence,
-      criteria: [...evaluator.criteria, ...(config.workflowTurns ? [{ id: 'workflow-tool-checkpoints', condition: config.workflowTurns.map((turn, index) => `Turn ${index + 1}: use ${turn.expectedTools.join(', ') || 'no Sheg tool'}${turn.criteria.length ? `; ${turn.criteria.join('; ')}` : ''}`).join('\n') }] : [])],
-      prohibitedClaims: evaluator.prohibitedClaims,
-    },
+    evaluationBasis,
     basis: {
       requestSha256: sha256(scenario.userRequest),
       evidenceSha256: sha256(stableJson({ controlledEvidence: scenario.controlledEvidence, workflowTurns: config.workflowTurns ?? null })),
-      criteriaSha256: sha256(stableJson(evaluator.criteria)),
+      criteriaSha256: sha256(stableJson(evaluationBasis.criteria)),
       suite: config.suite,
       classification: config.classification,
       repetitions: config.repetitions,
@@ -184,11 +187,41 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
   try {
     mkdirSync(staging, { recursive: false });
     for (const { arm, snapshot } of snapshots) if (snapshot) freezeSnapshot(staging, arm.id, snapshot);
-    writeFileSync(path.join(staging, 'campaign.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
+    const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+    writeFileSync(path.join(staging, 'campaign.json'), manifestText, { flag: 'wx' });
+    const prepared = campaignPreparedSchema.parse({ type: 'campaign-prepared', manifestSha256: sha256(manifestText) });
+    writeFileSync(path.join(staging, 'attempts.jsonl'), `${JSON.stringify(prepared)}\n`, { flag: 'wx' });
     renameSync(staging, outputRoot);
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
     throw error;
+  }
+  return manifest;
+}
+
+export function readFrozenCampaign(campaignDirectory: string): CampaignManifest {
+  const root = path.resolve(campaignDirectory);
+  const manifestText = readFileSync(path.join(root, 'campaign.json'), 'utf8');
+  const manifest = campaignManifestSchema.parse(JSON.parse(manifestText) as unknown);
+  const journal = readFileSync(path.join(root, 'attempts.jsonl'), 'utf8').split(/\r?\n/).filter(Boolean);
+  const prepared = journal[0] ? campaignPreparedSchema.safeParse(JSON.parse(journal[0]) as unknown) : undefined;
+  if (!prepared?.success || prepared.data.manifestSha256 !== sha256(manifestText)) throw new Error('Frozen campaign manifest changed after preparation.');
+  if (manifest.basis.requestSha256 !== sha256(manifest.evaluationBasis.userRequest) ||
+      manifest.basis.evidenceSha256 !== sha256(stableJson({ controlledEvidence: manifest.evaluationBasis.controlledEvidence, workflowTurns: manifest.workflowTurns ?? null })) ||
+      manifest.basis.criteriaSha256 !== sha256(stableJson(manifest.evaluationBasis.criteria)) ||
+      manifest.basis.executionSha256 !== sha256(stableJson(manifest.execution)) ||
+      manifest.basis.suite !== manifest.suite || manifest.basis.classification !== manifest.classification || manifest.basis.repetitions !== manifest.repetitions) {
+    throw new Error('Frozen campaign basis does not match its recorded hashes.');
+  }
+  for (const arm of manifest.arms) {
+    if (arm.actorPromptSha256 !== sha256(arm.actorPrompt) || arm.discoveryPromptSha256 !== sha256(arm.discoveryPrompt)) throw new Error(`Frozen prompt hash mismatch for arm ${arm.id}.`);
+    const snapshotRoot = path.resolve(root, 'snapshots', arm.id);
+    for (const [relative, expected] of Object.entries(arm.skillReferenceHashes)) {
+      const target = path.resolve(snapshotRoot, relative);
+      const within = path.relative(snapshotRoot, target);
+      if (!within || within === '..' || within.startsWith(`..${path.sep}`) || path.isAbsolute(within)) throw new Error(`Frozen snapshot path escapes arm ${arm.id}: ${relative}`);
+      if (sha256(readFileSync(target, 'utf8')) !== expected) throw new Error(`Frozen snapshot hash mismatch for arm ${arm.id}: ${relative}`);
+    }
   }
   return manifest;
 }

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { prepareCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
-import { addTrial, campaignScratchRoot, runCampaign, type CampaignAdapter, type ExecutionResult } from '../../scripts/skill-testing/runner.js';
+import { addTrial, campaignScratchRoot, discardCampaign, runCampaign, type CampaignAdapter, type ExecutionResult } from '../../scripts/skill-testing/runner.js';
 
 function setup(): { root: string; campaign: string; config: CampaignConfig; cleanup: () => void } {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-runner-'));
@@ -50,6 +50,49 @@ test('runner retains outputs and resume never dispatches an already captured tri
   } finally { input.cleanup(); }
 });
 
+test('resume recovers a complete output bundle written before the journal capture record', async () => {
+  const input = setup();
+  let calls = 0;
+  try {
+    const backend = adapter(async () => { calls += 1; return result(`trial ${calls}`); });
+    await assert.rejects(runCampaign(input.campaign, backend, { afterOutputFiles: () => { throw new Error('simulated crash before journal capture'); } }), /simulated crash/);
+    assert.equal(calls, 1);
+    const resumed = await runCampaign(input.campaign, backend);
+    assert.equal(resumed.captured, 2);
+    assert.equal(calls, 2, 'The recovered first trial must not be dispatched again; only the second planned trial runs.');
+    const journal = readFileSync(path.join(input.campaign, 'attempts.jsonl'), 'utf8');
+    assert.equal(journal.match(/attempt-started.*selected-material-isolation-no-fit@v5:candidate:001/g)?.length, 1);
+    assert.match(journal, /output-captured.*selected-material-isolation-no-fit@v5:candidate:001/);
+  } finally { input.cleanup(); }
+});
+
+test('resume rejects a modified frozen actor prompt before dispatching any trial', async () => {
+  const input = setup();
+  let calls = 0;
+  try {
+    const manifest = JSON.parse(readFileSync(path.join(input.campaign, 'campaign.json'), 'utf8')) as { arms: Array<{ actorPrompt: string }> };
+    manifest.arms[0]!.actorPrompt += '\nChanged after preparation.';
+    writeFileSync(path.join(input.campaign, 'campaign.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    await assert.rejects(runCampaign(input.campaign, adapter(async () => { calls += 1; return result('must not run'); })), /frozen campaign manifest/i);
+    assert.equal(calls, 0);
+  } finally { input.cleanup(); }
+});
+
+test('discard removes campaign output and campaign-scoped scratch data', () => {
+  const input = setup();
+  try {
+    const manifest = JSON.parse(readFileSync(path.join(input.campaign, 'campaign.json'), 'utf8')) as { trials: Array<{ trialId: string }> };
+    const trial = manifest.trials[0]!;
+    const scratch = campaignScratchRoot(input.campaign, trial.trialId, `${trial.trialId}:attempt-001`);
+    mkdirSync(scratch, { recursive: true });
+    writeFileSync(path.join(scratch, 'actor-data.json'), '{}');
+    assert.equal(existsSync(scratch), true);
+    discardCampaign(input.campaign);
+    assert.equal(existsSync(input.campaign), false);
+    assert.equal(existsSync(scratch), false);
+  } finally { input.cleanup(); }
+});
+
 test('resume retries runtime failures under a new attempt ID and preserves the failed attempt', async () => {
   const input = setup();
   let calls = 0;
@@ -61,6 +104,8 @@ test('resume retries runtime failures under a new attempt ID and preserves the f
     });
     const first = await runCampaign(input.campaign, backend);
     assert.equal(first.runtimeErrors, 1);
+    const firstTrial = JSON.parse(readFileSync(path.join(input.campaign, 'campaign.json'), 'utf8')) as { trials: Array<{ trialId: string }> };
+    assert.equal(existsSync(campaignScratchRoot(input.campaign, firstTrial.trials[0]!.trialId, `${firstTrial.trials[0]!.trialId}:attempt-001`)), false, 'Runtime failures must not leave attempt scratch behind.');
     const second = await runCampaign(input.campaign, backend);
     assert.equal(second.captured, 2);
     assert.equal(calls, 3);
@@ -135,5 +180,6 @@ test('runner snapshots per-attempt Sheg MCP data for tool evidence inspection', 
     const trialPart = trial.trialId.replace(/[^a-zA-Z0-9._-]/g, '-');
     const copiedEvidence = path.join(input.campaign, 'attempts', trialPart, `${trial.trialId}:attempt-001`.replace(/[^a-zA-Z0-9._-]/g, '-'), 'sheg-data', 'run-evidence.json');
     assert.equal(readFileSync(copiedEvidence, 'utf8'), '{"tool":"run_inspect"}');
+    assert.equal(existsSync(campaignScratchRoot(input.campaign, trial.trialId, `${trial.trialId}:attempt-001`)), false);
   } finally { input.cleanup(); }
 });

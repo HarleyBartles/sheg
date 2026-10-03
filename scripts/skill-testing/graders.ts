@@ -27,7 +27,7 @@ export function extractShegToolCalls(rawEvents: string): string[] {
   return calls;
 }
 
-export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[], suite: 'focused' | 'discovery' | 'workflow' = 'focused', expectedTools: readonly string[] = [], observedTools: readonly string[] = []): TrialGrade {
+export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[], suite: 'focused' | 'discovery' | 'workflow' = 'focused', expectedToolsByTurn: readonly (readonly string[])[] = [], observedToolsByTurn?: readonly (readonly string[])[]): TrialGrade {
   const scenario = loadScenarioCatalog().find((item) => item.id === scenarioId);
   const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId);
   if (!scenario || !evaluator) throw new Error(`Unknown scenario: ${scenarioId}`);
@@ -42,13 +42,17 @@ export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValu
   if (actor.success && (actor.data.scenarioId !== scenario.id || actor.data.scenarioVersion !== scenario.version)) actorIssues.push('Actor scenario identity does not match the frozen scenario.');
   const requestIssues: string[] = [];
   if (suite === 'workflow') {
-    const observedCounts = new Map<string, number>();
-    for (const tool of observedTools) observedCounts.set(tool, (observedCounts.get(tool) ?? 0) + 1);
-    const requiredCounts = new Map<string, number>();
-    for (const tool of expectedTools) requiredCounts.set(tool, (requiredCounts.get(tool) ?? 0) + 1);
-    for (const [tool, required] of requiredCounts) {
-      const observed = observedCounts.get(tool) ?? 0;
-      if (observed < required) requestIssues.push(`Expected Sheg MCP tool ${tool} at least ${required} time(s), but the call was not observed often enough (${observed} observed).`);
+    if (!observedToolsByTurn) requestIssues.push('Per-turn Sheg MCP event boundaries were not captured, so workflow tool checkpoints cannot be verified.');
+    else {
+      const turnCount = Math.max(expectedToolsByTurn.length, observedToolsByTurn.length);
+      for (let index = 0; index < turnCount; index += 1) {
+        const expected = expectedToolsByTurn[index] ?? [];
+        const observed = observedToolsByTurn[index] ?? [];
+        if (expected.length !== observed.length || expected.some((tool, toolIndex) => observed[toolIndex] !== tool)) {
+          requestIssues.push(`Workflow turn ${index + 1} expected Sheg tools [${expected.join(', ')}] in order, observed [${observed.join(', ')}].`);
+        }
+      }
+      if (expectedToolsByTurn.length !== observedToolsByTurn.length) requestIssues.push(`Expected ${expectedToolsByTurn.length} workflow turns with event records, observed ${observedToolsByTurn.length}.`);
     }
   }
   if (actor.success) for (const [index, action] of actor.data.actions.entries()) {

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { campaignScratchRoot } from '../../scripts/skill-testing/runner.js';
 
 test('campaign CLI prepares and inspects off-repository campaign data without dispatching', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-cli-'));
@@ -22,7 +23,19 @@ test('campaign CLI prepares and inspects off-repository campaign data without di
     const status = execFileSync(process.execPath, ['--import', 'tsx', cli, 'status', '--campaign', outputPath], { encoding: 'utf8' });
     assert.match(status, /"trialCount": 1/);
     assert.throws(() => execFileSync(process.execPath, ['--import', 'tsx', cli, 'run', '--campaign', outputPath], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), /explicit --backend codex/);
+    const scratch = campaignScratchRoot(outputPath, 'cli-smoke-trial', 'cli-smoke-attempt');
+    mkdirSync(scratch, { recursive: true });
+    writeFileSync(path.join(scratch, 'retained.json'), '{}');
+    const discarded = execFileSync(process.execPath, ['--import', 'tsx', cli, 'discard', '--campaign', outputPath], { encoding: 'utf8' });
+    assert.match(discarded, /"discarded": true/);
+    assert.equal(existsSync(outputPath), false);
+    assert.equal(existsSync(scratch), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('comparison CLI requires explicit baseline and candidate arms', () => {
+  const cli = path.resolve('scripts/skill-testing/cli.ts');
+  assert.throws(() => execFileSync(process.execPath, ['--import', 'tsx', cli, 'compare', '--backend', 'codex', '--baseline', 'baseline', '--candidate', 'candidate'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), /--baseline-arm/);
 });
 
 test('campaign CLI selects affected scenarios by owner and guidance with shared safeguards', () => {

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { assertComparableManifests, prepareCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
+import { assertComparableManifests, prepareCampaign, readFrozenCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
 
 function fixture(): { root: string; config: CampaignConfig; cleanup: () => void } {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-skill-campaign-contracts-'));
@@ -44,6 +44,23 @@ test('preparation freezes each guidance arm and renders prompts from the frozen 
     assert.match(oldArm.actorPrompt, /old reference/);
     assert.doesNotMatch(oldArm.actorPrompt, /mutated after preparation/);
     assert.equal(readFileSync(path.join(output, 'snapshots', 'old', 'references', 'policy.md'), 'utf8'), 'old reference');
+  } finally { input.cleanup(); }
+});
+
+test('frozen campaign loading rejects changed prompt, criteria, execution, and snapshot content', () => {
+  const input = fixture();
+  try {
+    const changedPrompt = path.join(input.root, 'changed-prompt');
+    prepareCampaign(input.config, changedPrompt);
+    const promptJson = JSON.parse(readFileSync(path.join(changedPrompt, 'campaign.json'), 'utf8')) as { arms: Array<{ actorPrompt: string }> };
+    promptJson.arms[0]!.actorPrompt += '\nMutation';
+    writeFileSync(path.join(changedPrompt, 'campaign.json'), `${JSON.stringify(promptJson, null, 2)}\n`);
+    assert.throws(() => readFrozenCampaign(changedPrompt), /frozen campaign manifest/i);
+
+    const changedSnapshot = path.join(input.root, 'changed-snapshot');
+    prepareCampaign(input.config, changedSnapshot);
+    writeFileSync(path.join(changedSnapshot, 'snapshots', 'old', 'references', 'policy.md'), 'Mutation');
+    assert.throws(() => readFrozenCampaign(changedSnapshot), /snapshot.*hash/i);
   } finally { input.cleanup(); }
 });
 

@@ -148,6 +148,7 @@ export function createCodexAdapter(options: { executable?: string; args?: string
   const executeWorkflow: NonNullable<CampaignAdapter['executeWorkflow']> = async (input) => {
     const prompts = [input.initialPrompt, ...input.turns];
     const events: string[] = [];
+    const workflowTurnEvents: string[] = [];
     const messages: string[] = [];
     const errors: string[] = [];
     let sessionId: string | null = null;
@@ -155,16 +156,17 @@ export function createCodexAdapter(options: { executable?: string; args?: string
     let exitCode: number | null = null;
     for (const [index, prompt] of prompts.entries()) {
       const result = await execute({ ...input, prompt, persistent: true, ...(sessionId ? { resumeSessionId: sessionId } : {}) });
+      workflowTurnEvents.push(result.rawEvents);
       if (result.rawEvents) events.push(result.rawEvents);
       if (result.rawFinalMessage) messages.push(`## Turn ${index + 1}\n${result.rawFinalMessage}`);
       if (result.rawStderr) errors.push(result.rawStderr);
       sessionId = result.sessionId ?? sessionId;
       observedSettings = { ...observedSettings, ...result.observedSettings };
       exitCode = result.exitCode;
-      if (result.status !== 'completed') return { ...result, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: errors.join('\n'), sessionId, observedSettings };
-      if (index < prompts.length - 1 && !sessionId) return { status: 'failed', exitCode, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: `${errors.join('\n')}\nCodex did not expose a session ID; conversation cannot safely continue.`, sessionId: null, observedSettings };
+      if (result.status !== 'completed') return { ...result, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: errors.join('\n'), sessionId, observedSettings, workflowTurnEvents };
+      if (index < prompts.length - 1 && !sessionId) return { status: 'failed', exitCode, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: `${errors.join('\n')}\nCodex did not expose a session ID; conversation cannot safely continue.`, sessionId: null, observedSettings, workflowTurnEvents };
     }
-    return { status: 'completed', exitCode, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: errors.join('\n'), sessionId, observedSettings };
+    return { status: 'completed', exitCode, rawEvents: events.join(''), rawFinalMessage: messages.join('\n\n'), rawStderr: errors.join('\n'), sessionId, observedSettings, workflowTurnEvents };
   };
   return { execute, executeWorkflow };
 }

@@ -48,6 +48,9 @@ test('Codex workflow resumes the exact session and sends turns in order without 
   assert.ok(invocations.every((args) => args.some((arg) => arg.startsWith('mcp_servers.sheg={') && arg.includes('PLUGIN_DATA=') && arg.includes('SHEG_DATA_DIR='))));
   assert.equal(result.sessionId, '11111111-1111-4111-8111-111111111111');
   assert.match(result.rawFinalMessage, /Turn 3/);
+  assert.equal(result.workflowTurnEvents?.length, 3);
+  assert.match(result.workflowTurnEvents?.[0] ?? '', /thread.started/);
+  assert.ok(result.workflowTurnEvents?.slice(1).every((events) => events.includes('turn.completed')));
 });
 
 test('Codex stdout pipe errors become retained attempt failures instead of unhandled process errors', async () => {

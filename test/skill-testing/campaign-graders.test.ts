@@ -37,16 +37,26 @@ test('unknown Sheg tools fail the actor contract even when the final prose is pl
 test('workflow checkpoints require actual Sheg MCP tool events, not actor claims', () => {
   const scenario = loadScenarioCatalog().find((item) => item.id === 'isolated-storage-inspection')!;
   const semanticValue = semantic();
-  const noCall = gradeTrial(scenario.id, actor(), semanticValue, [{ id: 'workflow-tool-checkpoints', condition: 'Calls run_storage.' }], 'workflow', ['run_storage'], []);
+  const noCall = gradeTrial(scenario.id, actor(), semanticValue, [{ id: 'workflow-tool-checkpoints', condition: 'Calls run_storage.' }], 'workflow', [['run_storage']], [[]]);
   assert.equal(noCall.deterministic.result, 'fail');
-  assert.match(noCall.deterministic.issues.join(' '), /run_storage.*not observed/i);
+  assert.match(noCall.deterministic.issues.join(' '), /turn 1.*run_storage/i);
   const events = [
     JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call', server: 'sheg', tool: 'run_storage' } }),
     JSON.stringify({ type: 'item.completed', item: { type: 'mcp_tool_call', server: 'sheg', tool: 'run_storage' } }),
   ].join('\n');
   assert.deepEqual(extractShegToolCalls(events), ['run_storage']);
-  const observed = gradeTrial(scenario.id, actor(), semanticValue, [{ id: 'workflow-tool-checkpoints', condition: 'Calls run_storage.' }], 'workflow', ['run_storage'], extractShegToolCalls(events));
+  const observed = gradeTrial(scenario.id, actor(), semanticValue, [{ id: 'workflow-tool-checkpoints', condition: 'Calls run_storage.' }], 'workflow', [['run_storage']], [extractShegToolCalls(events)]);
   assert.equal(observed.deterministic.result, 'pass');
+});
+
+test('workflow checkpoints preserve turn order and reject extra calls on turns with no expected tool', () => {
+  const scenario = loadScenarioCatalog().find((item) => item.id === 'isolated-storage-inspection')!;
+  const criteria = [{ id: 'workflow-tool-checkpoints', condition: 'Turn one inspects; turn two uses prior evidence without another call.' }];
+  const grade = gradeTrial(scenario.id, actor(), semantic(), criteria, 'workflow', [['run_storage'], []], [['run_storage'], ['run_storage']]);
+  assert.equal(grade.deterministic.result, 'fail');
+  assert.ok(grade.deterministic.issues.join(' ').includes('Workflow turn 2 expected Sheg tools [] in order, observed [run_storage].'));
+  const missingBoundaries = gradeTrial(scenario.id, actor(), semantic(), criteria, 'workflow', [['run_storage'], []]);
+  assert.match(missingBoundaries.deterministic.issues.join(' '), /per-turn.*boundaries/i);
 });
 
 test('calibration reports disagreement rather than forcing a passing judgment', () => {
