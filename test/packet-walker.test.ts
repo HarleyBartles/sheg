@@ -70,6 +70,42 @@ test('preserves distinct histories at a reconverged decision node', () => {
   assert.deepEqual(mergedPackets.map((packet) => packet.request.state.encounteredItems.map((item) => item.id)), [['symptom'], ['investigation']]);
 });
 
+test('preflight packets accumulate unique exposed material in first-exposure order', () => {
+  const firstChoice = arm.tasks[0]!;
+  if (!('options' in firstChoice)) throw new Error('Expected a Choice fixture task.');
+  const linearArm: StudyArm = {
+    ...arm,
+    tasks: [arm.tasks[0]!, { ...arm.tasks[0]!, id: 'middle' }, { ...arm.tasks[0]!, id: 'last' }],
+    presentation: {
+      kind: 'graph', entryNodeId: 'show-a', maxDecisions: 3,
+      nodes: [
+        { id: 'show-a', kind: 'expose', itemId: 'symptom' },
+        { id: 'first', kind: 'ask', taskId: arm.tasks[0]!.id },
+        { id: 'show-b', kind: 'expose', itemId: 'investigation' },
+        { id: 'second', kind: 'ask', taskId: 'middle' },
+        { id: 'show-a-again', kind: 'expose', itemId: 'symptom' },
+        { id: 'third', kind: 'ask', taskId: 'last' },
+        { id: 'done', kind: 'terminal', outcome: 'done' },
+      ],
+      transitions: [
+        { fromNodeId: 'show-a', toNodeId: 'first' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'first', optionId, toNodeId: 'show-b' })),
+        { fromNodeId: 'show-b', toNodeId: 'second' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'second', optionId, toNodeId: 'show-a-again' })),
+        { fromNodeId: 'show-a-again', toNodeId: 'third' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'third', optionId, toNodeId: 'done' })),
+      ],
+    },
+  };
+  const packets: PreflightPacket[] = [];
+  const result = walkStudyPackets([linearArm], [profile], (packet) => packets.push(packet));
+  const finalPackets = packets.filter(({ nodeId }) => nodeId === 'third');
+
+  assert.equal(result.status, 'complete');
+  assert.equal(finalPackets.length, 4);
+  assert.ok(finalPackets.every(({ request }) => request.state.encounteredItems.map(({ id }) => id).join(',') === 'symptom,investigation'));
+});
+
 test('enumerates every sequence response history and keeps all stimuli in each packet', () => {
   const sequenceArm: StudyArm = {
     ...arm,

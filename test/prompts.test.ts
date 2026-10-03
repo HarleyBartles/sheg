@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { appendTrajectoryResponse, compileDecisionPacket, compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket } from '../src/domain/decision/prompt.js';
+import { appendTrajectoryResponse, compileDecisionPacket, compileDecisionPacketForCompiler, compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash, v6PromptContractHash } from '../src/domain/decision/prompt.js';
 import type { DecisionValue } from '../src/domain/decision/decision.js';
 import { fileURLToPath } from 'node:url';
 import type { PromptHistoryEvent } from '../src/domain/decision/prompt.js';
@@ -52,7 +52,7 @@ test('follow-on context modes preserve or replace only the promised respondent s
   assert.throws(() => prepareFollowOnPacket({ source, mode: 'continue', question: nextQuestion }), /completed answer/i);
 });
 
-test('graph packet retains compact prior choices but only current stimulus text', async () => {
+test('graph packet retains compact prior choices and every encountered stimulus once', async () => {
   const study = await loadStudy(manifestPath, cohortPath);
   const arm = study.manifest.arms[0]!;
   const task = arm.tasks[1]!;
@@ -64,7 +64,7 @@ test('graph packet retains compact prior choices but only current stimulus text'
     { type: 'exposure', sequence: 2, nodeId: 'show-investigation', itemId: 'investigation' },
   ];
   const request = compileDecisionPacket(arm, study.respondents[0]!, task.id, history);
-  assert.deepEqual(request.state.encounteredItems.map((item) => item.id), ['investigation']);
+  assert.deepEqual(request.state.encounteredItems.map((item) => item.id), ['symptom', 'investigation']);
   assert.equal(request.state.respondent.profile.intent, study.respondents[0]!.intent);
   assert.equal(JSON.stringify(request).includes('answerKeyOptionId'), false);
   assert.equal(JSON.stringify(request).includes(study.manifest.study.purpose), false);
@@ -78,10 +78,10 @@ test('graph packet retains compact prior choices but only current stimulus text'
   assert.equal(request.state.trajectory.eventCount, 3);
   assert.equal(request.state.trajectory.exposureCount, 2);
   assert.equal(request.state.trajectory.decisionCount, 1);
-  assert.equal(JSON.stringify(request).includes(arm.items[0]!.text), false);
+  assert.equal(JSON.stringify(request).includes(arm.items[0]!.text), true);
   assert.ok(request.state.trajectory.payloadUtf8Bytes > 0);
 });
-test('sequence packets retain all stimuli and graph packets include explicit re-exposure', async () => {
+test('sequence and graph packets share cumulative material and deduplicate explicit re-exposure', async () => {
   const study = await loadStudy(manifestPath, cohortPath);
   const graphArm = study.manifest.arms[0]!;
   const history: PromptHistoryEvent[] = [
@@ -92,11 +92,53 @@ test('sequence packets retain all stimuli and graph packets include explicit re-
     { type: 'exposure', sequence: 4, nodeId: 'show-symptom-again', itemId: 'symptom' },
   ];
   const graphRequest = compileDecisionPacket(graphArm, study.respondents[0]!, graphArm.tasks[2]!.id, history);
-  assert.deepEqual(graphRequest.state.encounteredItems.map((item) => item.id), ['symptom']);
+  assert.deepEqual(graphRequest.state.encounteredItems.map((item) => item.id), ['symptom', 'investigation']);
 
   const sequenceArm = { ...graphArm, presentation: { kind: 'sequence' as const } };
   const sequenceRequest = compileDecisionPacket(sequenceArm, study.respondents[0]!, graphArm.tasks[1]!.id, history);
-  assert.deepEqual(sequenceRequest.state.encounteredItems.map((item) => item.id), graphArm.items.map((item) => item.id));
+  assert.deepEqual(sequenceRequest.state.encounteredItems, graphRequest.state.encounteredItems);
+});
+
+test('cumulative material survives response omission and never includes an unexposed sibling', async () => {
+  const study = await loadStudy(manifestPath, cohortPath);
+  const arm = structuredClone(study.manifest.arms[0]!);
+  const target = arm.tasks[2]!;
+  target.responseHistory = 'omit';
+  const history: PromptHistoryEvent[] = [
+    { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
+    { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, choice: 'continue' },
+    { type: 'exposure', sequence: 2, nodeId: 'show-investigation', itemId: 'investigation' },
+    { type: 'choice', sequence: 3, nodeId: 'choose-investigation', taskId: arm.tasks[1]!.id, choice: 'open-notes' },
+    { type: 'exposure', sequence: 4, nodeId: 'show-symptom-again', itemId: 'symptom' },
+  ];
+
+  const request = compileDecisionPacket(arm, study.respondents[0]!, target.id, history);
+  assert.deepEqual(request.state.encounteredItems.map(({ id }) => id), ['symptom', 'investigation']);
+  assert.deepEqual(request.state.trajectory.responses, []);
+  assert.deepEqual(request.state.trajectory.choices, []);
+  assert.equal(request.state.trajectory.exposureCount, 3);
+  assert.equal(request.state.trajectory.eventCount, 3);
+  assert.deepEqual(request.state.encounteredItems.map(({ id }) => id).filter((id) => ['repair', 'test-notes'].includes(id)), []);
+});
+
+test('compiler identity selects frozen v6 packet windows and rejects unknown journey contracts', async () => {
+  const study = await loadStudy(manifestPath, cohortPath);
+  const arm = study.manifest.arms[0]!;
+  const task = arm.tasks[1]!;
+  const history: PromptHistoryEvent[] = [
+    { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
+    { type: 'choice', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, choice: 'continue' },
+    { type: 'exposure', sequence: 2, nodeId: 'show-investigation', itemId: 'investigation' },
+  ];
+  const oldPacket = compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history, v6PromptContractHash);
+  const newPacket = compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history, promptContractHash());
+
+  assert.notEqual(promptContractHash(), v6PromptContractHash);
+  assert.deepEqual(oldPacket.state.encounteredItems.map(({ id }) => id), ['investigation']);
+  assert.deepEqual(newPacket.state.encounteredItems.map(({ id }) => id), ['symptom', 'investigation']);
+  const sequence = { ...arm, presentation: { kind: 'sequence' as const } };
+  assert.deepEqual(compileDecisionPacketForCompiler(sequence, study.respondents[0]!, task.id, history, v6PromptContractHash).state.encounteredItems.map(({ id }) => id), arm.items.map(({ id }) => id));
+  assert.throws(() => compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history, 'unknown-contract'), /unsupported.*compiler/i);
 });
 
 test('a task can suppress prior response context without changing the same respondent journey', async () => {
@@ -115,7 +157,7 @@ test('a task can suppress prior response context without changing the same respo
   const request = compileDecisionPacket(arm, study.respondents[0]!, task.id, history);
   assert.equal(request.state.trajectory.decisionCount, 0);
   assert.deepEqual(request.state.trajectory.choices, []);
-  assert.deepEqual(request.state.encounteredItems.map((item) => item.id), ['investigation']);
+  assert.deepEqual(request.state.encounteredItems.map((item) => item.id), ['symptom', 'investigation']);
 });
 
 test('decision packet compilation rejects unknown task and stimulus references', async () => {
@@ -150,6 +192,7 @@ test('explicit packet parts compile to the same validated request as the study a
       friction_cues: profile.friction_cues,
     },
     encounteredItems: [
+      { id: 'symptom', text: arm.items.find((item) => item.id === 'symptom')!.text },
       { id: 'investigation', text: arm.items.find((item) => item.id === 'investigation')!.text },
     ],
     trajectory: fromArm.state.trajectory,
@@ -157,7 +200,7 @@ test('explicit packet parts compile to the same validated request as the study a
   });
 
   assert.deepEqual(fromParts, fromArm);
-  assert.deepEqual(fromParts.state.encounteredItems.map((item) => item.id), ['investigation']);
+  assert.deepEqual(fromParts.state.encounteredItems.map((item) => item.id), ['symptom', 'investigation']);
   assert.deepEqual(fromParts.state.respondent.profile, {
     intent: profile.intent,
     context: profile.context,

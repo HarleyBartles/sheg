@@ -11,6 +11,7 @@ import type { PreparedJourneyRun } from '../domain/run/request.js';
 import { hashCanonical } from '../infrastructure/identity.js';
 import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
 import { estimateRunDecisionCalls } from '../domain/journey/route-bounds.js';
+import { journeyTopology } from '../domain/journey/topology.js';
 
 export type { Inspection } from '../domain/run/lifecycle.js';
 export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/run/request.js';
@@ -154,19 +155,16 @@ export function materializeJourneyRun(admission: PreparedJourneyAdmission): Prep
 
 function initialJourneyEvents(arm: ParsedInlineJourneyRequest['journey']): JourneyRespondentState['events'] {
   const events: JourneyRespondentState['events'] = [];
-  if (arm.presentation.kind === 'sequence') {
-    for (const item of arm.items) events.push({ type: 'exposure', sequence: events.length, nodeId: `sequence-expose-${item.id}`, itemId: item.id });
-    return events;
-  }
-  const nodes = new Map(arm.presentation.nodes.map((node) => [node.id, node]));
-  let current = arm.presentation.entryNodeId;
+  const graph = journeyTopology(arm);
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  let current = graph.entryNodeId;
   while (true) {
     const node = nodes.get(current);
     if (!node) throw new Error(`Journey points to unknown node ${current}.`);
     if (node.kind === 'ask') return events;
     if (node.kind === 'terminal') throw new Error('Journey must reach an ask node before a terminal node.');
     events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
-    const edge = arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node.id);
+    const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id);
     if (!edge) throw new Error(`Exposure node ${node.id} has no transition.`);
     current = edge.toNodeId;
   }

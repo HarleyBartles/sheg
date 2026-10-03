@@ -10,7 +10,7 @@ Keep `package.json`, both root version fields in `package-lock.json`, and
 `plugin.json` on the same version. Do not change them on ordinary feature
 merges to `develop`.
 
-The root `package.json` version is the product-version authority, and the MCP initialization version must agree with it. Deliberate dogfood checkpoints on `develop` may use `MAJOR.MINOR.PATCH-dev.N`; prepared release candidates may use `MAJOR.MINOR.PATCH-rc.N`. Increment only at intentional checkpoints, not every merge. The current dogfood roadmap assigns `0.3.0-dev.2` to its next develop merge. See [ADR-0023](../decisions/0023-identify-development-and-candidate-builds.md).
+The root `package.json` version is the product-version authority, and the MCP initialization version must agree with it. Deliberate dogfood checkpoints on `develop` may use `MAJOR.MINOR.PATCH-dev.N`; prepared release candidates may use `MAJOR.MINOR.PATCH-rc.N`. Increment only at intentional checkpoints, not every merge. The dogfood roadmap assigns the next checkpoint version before implementation, and the develop manifests advertise that candidate identity without creating a release tag. See [ADR-0023](../decisions/0023-identify-development-and-candidate-builds.md).
 
 Before `1.0.0`:
 

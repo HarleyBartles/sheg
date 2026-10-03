@@ -50,6 +50,61 @@ test('previews sequence stimuli before the authored questions and routes every c
   }
 });
 
+test('sequence preview matches the equivalent all-items-first linear graph for typed routes', () => {
+  const sequenceArm: StudyArm = {
+    ...arm,
+    tasks: [
+      { id: 'tone', type: 'score', instructions: 'How professional?', rubric: ['casual', 'balanced', 'professional'] },
+      { id: 'interest', type: 'noul', instructions: 'Does this hold interest?' },
+      arm.tasks[0]!,
+    ],
+    presentation: { kind: 'sequence' },
+  };
+  const graphArm = linearGraphEquivalent(sequenceArm);
+  const sequencePreview = previewStudyJourney([sequenceArm]).arms[0]!;
+  const graphPreview = previewStudyJourney([graphArm]).arms[0]!;
+
+  assert.deepEqual(sequencePreview.entryNodeId, graphPreview.entryNodeId);
+  assert.deepEqual(sequencePreview.nodes, graphPreview.nodes);
+});
+
+test('preview route contexts retain unique material across repeated exposure events', () => {
+  const firstChoice = arm.tasks[0]!;
+  if (!('options' in firstChoice)) throw new Error('Expected a Choice fixture task.');
+  const tasks = [arm.tasks[0]!, { ...arm.tasks[0]!, id: 'middle' }, { ...arm.tasks[0]!, id: 'last' }];
+  const graphArm: StudyArm = {
+    ...arm,
+    tasks,
+    presentation: {
+      kind: 'graph', entryNodeId: 'show-symptom', maxDecisions: 3,
+      nodes: [
+        { id: 'show-symptom', kind: 'expose', itemId: 'symptom' },
+        { id: 'first', kind: 'ask', taskId: tasks[0]!.id },
+        { id: 'show-investigation', kind: 'expose', itemId: 'investigation' },
+        { id: 'show-symptom-again', kind: 'expose', itemId: 'symptom' },
+        { id: 'second', kind: 'ask', taskId: tasks[1]!.id },
+        { id: 'third', kind: 'ask', taskId: tasks[2]!.id },
+        { id: 'done', kind: 'terminal', outcome: 'done' },
+      ],
+      transitions: [
+        { fromNodeId: 'show-symptom', toNodeId: 'first' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'first', optionId, toNodeId: 'show-investigation' })),
+        { fromNodeId: 'show-investigation', toNodeId: 'show-symptom-again' },
+        { fromNodeId: 'show-symptom-again', toNodeId: 'second' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'second', optionId, toNodeId: 'third' })),
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'third', optionId, toNodeId: 'done' })),
+      ],
+    },
+  };
+  const preview = previewStudyJourney([graphArm]).arms[0]!;
+  const questions = preview.nodes.filter((node) => node.kind === 'question');
+
+  assert.ok(questions[1]?.kind === 'question' && questions[1].routeContexts.every(({ exposedStimulusIds }) => exposedStimulusIds.join(',') === 'symptom,investigation'));
+  assert.ok(questions[2]?.kind === 'question' && questions[2].routeContexts.every(({ exposedStimulusIds }) => exposedStimulusIds.join(',') === 'symptom,investigation'));
+  assert.ok(questions[2]?.kind === 'question' && questions[2].routeContexts.every(({ priorChoices }) =>
+    priorChoices[1]?.exposedItemIds.join(',') === 'symptom,investigation,symptom'));
+});
+
 test('previews every graph branch and represents a shared continuation node once', () => {
   const entryTask = arm.tasks[0]!;
   assert.ok('options' in entryTask);
@@ -173,3 +228,34 @@ test('rejects a journey whose route-context count exceeds the preview bound', ()
 
   assert.throws(() => previewStudyJourney([manyChoiceTasks]), /10,?000-context limit.*no partial preview/i);
 });
+
+function linearGraphEquivalent(arm: StudyArm): StudyArm {
+  const itemNodes = arm.items.map((item) => ({ id: `sequence-expose-${item.id}`, kind: 'expose' as const, itemId: item.id }));
+  const askNodes = arm.tasks.map((task) => ({ id: `sequence-ask-${task.id}`, kind: 'ask' as const, taskId: task.id }));
+  const terminal = { id: `sequence-terminal-${arm.id}`, kind: 'terminal' as const, outcome: 'complete' };
+  const nodes = [...itemNodes, ...askNodes, terminal];
+  const transitions: Extract<StudyArm['presentation'], { kind: 'graph' }>['transitions'] = [];
+  const nextAfterItems = askNodes[0]!.id;
+
+  for (const [index, node] of itemNodes.entries()) {
+    transitions.push({ fromNodeId: node.id, toNodeId: itemNodes[index + 1]?.id ?? nextAfterItems });
+  }
+  for (const [index, task] of arm.tasks.entries()) {
+    const nodeId = askNodes[index]!.id;
+    const nextNodeId = askNodes[index + 1]?.id ?? terminal.id;
+    if ('options' in task) {
+      for (const optionId of Object.keys(task.options)) transitions.push({ fromNodeId: nodeId, optionId, toNodeId: nextNodeId });
+    } else {
+      transitions.push({ fromNodeId: nodeId, when: {
+        type: 'rubric' in task ? 'score' : 'noul',
+        minimum: 0,
+        maximum: 'rubric' in task ? task.rubric.length - 1 : 1,
+        minimumInclusive: true,
+        maximumInclusive: true,
+      }, toNodeId: nextNodeId });
+    }
+  }
+  return { ...arm, presentation: {
+    kind: 'graph', entryNodeId: itemNodes[0]!.id, maxDecisions: arm.tasks.length, nodes, transitions,
+  } };
+}

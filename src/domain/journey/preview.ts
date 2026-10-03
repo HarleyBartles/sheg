@@ -1,5 +1,6 @@
 import { studyArmSchema, type StudyArm } from '../study/arm.js';
 import type { ResponseInterval } from '../study/presentation.js';
+import { journeyTopology } from './topology.js';
 
 export const MAX_JOURNEY_PREVIEW_CONTEXTS = 10_000;
 
@@ -60,61 +61,25 @@ export function previewStudyJourney(arms: readonly StudyArm[]): StudyJourneyPrev
 }
 
 function previewArm(arm: StudyArm, budget: { contexts: number }): StudyArmJourneyPreview {
-  if (arm.presentation.kind === 'sequence') {
-    const stimulusNodes: JourneyPreviewNode[] = arm.items.map((item, index) => ({
-      id: `sequence-expose-${item.id}`,
-      kind: 'stimulus',
-      stimulusId: item.id,
-      text: item.text,
-      nextNodeId: index + 1 < arm.items.length ? `sequence-expose-${arm.items[index + 1]!.id}` : `sequence-ask-${arm.tasks[0]!.id}`,
-    }));
-    const questionNodes: JourneyPreviewNode[] = arm.tasks.map((task, index) => {
-      const routeContexts = sequenceRouteContexts(arm, index, budget);
-      return {
-        id: `sequence-ask-${task.id}`,
-        kind: 'question',
-        taskId: task.id,
-        instructions: task.instructions,
-        responseType: responseType(task),
-        responseHistory: task.responseHistory === 'omit' ? 'omit' : 'include',
-        options: taskOutcomeEntries(task).flatMap((entry) => entry.optionId === undefined ? [] : [{
-          optionId: entry.optionId,
-          description: entry.meaning,
-          nextNodeId: index + 1 < arm.tasks.length ? `sequence-ask-${arm.tasks[index + 1]!.id}` : `sequence-terminal-${arm.id}`,
-        }]),
-        routes: [],
-        routeContexts,
-      };
-    });
-    return {
-      armId: arm.id,
-      label: arm.label,
-      presentation: 'sequence',
-      entryNodeId: stimulusNodes[0]!.id,
-      nodes: [...stimulusNodes, ...questionNodes, { id: `sequence-terminal-${arm.id}`, kind: 'terminal', outcome: 'completed' }],
-    };
-  }
-
+  const graph = journeyTopology(arm);
   const tasksById = new Map(arm.tasks.map((task) => [task.id, task]));
   const itemsById = new Map(arm.items.map((item) => [item.id, item]));
   const routeContextsByNode = graphRouteContexts(arm, budget);
-  const nodes: JourneyPreviewNode[] = arm.presentation.nodes.map((node) => {
+  const nodes: JourneyPreviewNode[] = graph.nodes.map((node) => {
     if (node.kind === 'terminal') return { id: node.id, kind: 'terminal', outcome: node.outcome };
     if (node.kind === 'expose') {
       const item = itemsById.get(node.itemId)!;
-      const edge = arm.presentation.kind === 'graph'
-        ? arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node.id)!
-        : undefined;
-      return { id: node.id, kind: 'stimulus', stimulusId: item.id, text: item.text, nextNodeId: edge!.toNodeId };
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id)!;
+      return { id: node.id, kind: 'stimulus', stimulusId: item.id, text: item.text, nextNodeId: edge.toNodeId };
     }
     const task = tasksById.get(node.taskId)!;
     const options: JourneyPreviewOption[] = 'options' in task
       ? Object.entries(task.options).map(([optionId, description]) => {
-        const edge = arm.presentation.kind === 'graph' ? arm.presentation.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === optionId) : undefined;
-        return { optionId, description, nextNodeId: edge!.toNodeId };
+        const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === optionId)!;
+        return { optionId, description, nextNodeId: edge.toNodeId };
       })
       : [];
-    const routes: JourneyPreviewRoute[] = 'options' in task || arm.presentation.kind !== 'graph' ? [] : arm.presentation.transitions
+    const routes: JourneyPreviewRoute[] = 'options' in task ? [] : graph.transitions
       .filter((candidate) => candidate.fromNodeId === node.id && candidate.when !== undefined)
       .map((edge) => ({ when: edge.when!, description: intervalLabel(edge.when!), nextNodeId: edge.toNodeId }));
     return { id: node.id, kind: 'question', taskId: task.id, responseType: responseType(task), instructions: task.instructions, options, routes, responseHistory: task.responseHistory === 'omit' ? 'omit' : 'include', routeContexts: routeContextsByNode.get(node.id) ?? [] };
@@ -123,83 +88,50 @@ function previewArm(arm: StudyArm, budget: { contexts: number }): StudyArmJourne
   return {
     armId: arm.id,
     label: arm.label,
-    presentation: 'graph',
-    entryNodeId: arm.presentation.entryNodeId,
+    presentation: arm.presentation.kind,
+    entryNodeId: graph.entryNodeId,
     nodes,
   };
 }
 
-function sequenceRouteContexts(arm: StudyArm, taskIndex: number, budget: { contexts: number }): JourneyPreviewRouteContext[] {
-  const priorTasks = arm.tasks.slice(0, taskIndex);
-  let contextCount = 1;
-  for (const task of priorTasks) {
-    const optionCount = taskOutcomeEntries(task).length;
-    if (contextCount > MAX_JOURNEY_PREVIEW_CONTEXTS / optionCount) throw contextLimitError();
-    contextCount *= optionCount;
-  }
-  reserveContexts(budget, contextCount);
-
-  const exposedStimulusIds = arm.items.map(({ id }) => id);
-  let contexts: JourneyPreviewRouteContext[] = [{ path: arm.items.map((item) => ({ nodeId: `sequence-expose-${item.id}` })), exposedStimulusIds, priorChoices: [], priorResponses: [] }];
-  for (const task of priorTasks) {
-    contexts = contexts.flatMap((context) => taskOutcomeEntries(task).map((entry) => ({
-      path: [...context.path, { nodeId: `sequence-ask-${task.id}`, ...(entry.optionId ? { optionId: entry.optionId } : {}), ...(entry.response ? { response: entry.response } : {}) }],
-      exposedStimulusIds,
-      priorChoices: entry.optionId ? [...context.priorChoices, {
-        nodeId: `sequence-ask-${task.id}`,
-        taskId: task.id,
-        optionId: entry.optionId,
-        meaning: entry.meaning,
-        exposedItemIds: [...exposedStimulusIds],
-      }] : context.priorChoices,
-      priorResponses: entry.response ? [...context.priorResponses, { nodeId: `sequence-ask-${task.id}`, taskId: task.id, response: entry.response, exposedItemIds: [...exposedStimulusIds] }] : context.priorResponses,
-    })));
-  }
-  return contexts.map((context) => ({
-    ...context,
-    path: [...context.path, { nodeId: `sequence-ask-${arm.tasks[taskIndex]!.id}` }],
-  }));
-}
-
 function graphRouteContexts(arm: StudyArm, budget: { contexts: number }): Map<string, JourneyPreviewRouteContext[]> {
-  if (arm.presentation.kind !== 'graph') throw new Error('Graph route contexts require a graph presentation.');
-  const graph = arm.presentation;
+  const graph = journeyTopology(arm);
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   const tasks = new Map(arm.tasks.map((task) => [task.id, task]));
   const items = new Map(arm.items.map((item) => [item.id, item]));
   const contexts = new Map<string, JourneyPreviewRouteContext[]>();
 
-  const visit = (nodeId: string, path: JourneyPreviewRouteContext['path'], exposedSinceDecision: string[], allExposures: string[], priorChoices: JourneyPreviewRouteContext['priorChoices'], priorResponses: JourneyPreviewRouteContext['priorResponses']): void => {
+  const visit = (nodeId: string, path: JourneyPreviewRouteContext['path'], exposureOccurrences: string[], priorChoices: JourneyPreviewRouteContext['priorChoices'], priorResponses: JourneyPreviewRouteContext['priorResponses']): void => {
     const node = nodes.get(nodeId)!;
     if (node.kind === 'terminal') return;
     if (node.kind === 'expose') {
       const item = items.get(node.itemId)!;
       const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id)!;
-      visit(edge.toNodeId, [...path, { nodeId }], [...exposedSinceDecision, item.id], [...allExposures, item.id], priorChoices, priorResponses);
+      visit(edge.toNodeId, [...path, { nodeId }], [...exposureOccurrences, item.id], priorChoices, priorResponses);
       return;
     }
 
     const task = tasks.get(node.taskId)!;
     reserveContexts(budget, 1);
     const nodeContexts = contexts.get(node.id) ?? [];
-    nodeContexts.push({ path: [...path, { nodeId }], exposedStimulusIds: [...exposedSinceDecision], priorChoices, priorResponses });
+    nodeContexts.push({ path: [...path, { nodeId }], exposedStimulusIds: [...new Set(exposureOccurrences)], priorChoices, priorResponses });
     contexts.set(node.id, nodeContexts);
     const branches: Array<{ optionId?: string; meaning: string; response?: { type: 'score' | 'noul'; when?: ResponseInterval; value?: number; meaning: string }; edge: { toNodeId: string } }> = 'options' in task
       ? taskOutcomeEntries(task).map((entry) => ({ ...entry, edge: graph.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === entry.optionId)! }))
       : graph.transitions.filter((candidate) => candidate.fromNodeId === node.id && candidate.when !== undefined).map((edge) => ({ meaning: intervalLabel(edge.when!), response: { type: edge.when!.type, when: edge.when!, meaning: intervalLabel(edge.when!) }, edge }));
     for (const branch of branches) {
       const step = branch.optionId !== undefined ? { nodeId, optionId: branch.optionId } : { nodeId, response: branch.response! };
-      visit(branch.edge.toNodeId, [...path, step], [], allExposures, branch.optionId !== undefined ? [...priorChoices, {
+      visit(branch.edge.toNodeId, [...path, step], exposureOccurrences, branch.optionId !== undefined ? [...priorChoices, {
         nodeId,
         taskId: task.id,
         optionId: branch.optionId,
         meaning: branch.meaning,
-        exposedItemIds: [...allExposures],
-      }] : priorChoices, branch.response ? [...priorResponses, { nodeId, taskId: task.id, response: branch.response, exposedItemIds: [...allExposures] }] : priorResponses);
+        exposedItemIds: [...exposureOccurrences],
+      }] : priorChoices, branch.response ? [...priorResponses, { nodeId, taskId: task.id, response: branch.response, exposedItemIds: [...exposureOccurrences] }] : priorResponses);
     }
   };
 
-  visit(graph.entryNodeId, [], [], [], [], []);
+  visit(graph.entryNodeId, [], [], [], []);
   return contexts;
 }
 
