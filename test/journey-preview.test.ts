@@ -81,17 +81,17 @@ test('preview route contexts retain unique material across repeated exposure eve
         { id: 'show-symptom', kind: 'expose', itemId: 'symptom' },
         { id: 'first', kind: 'ask', taskId: tasks[0]!.id },
         { id: 'show-investigation', kind: 'expose', itemId: 'investigation' },
-        { id: 'second', kind: 'ask', taskId: tasks[1]!.id },
         { id: 'show-symptom-again', kind: 'expose', itemId: 'symptom' },
+        { id: 'second', kind: 'ask', taskId: tasks[1]!.id },
         { id: 'third', kind: 'ask', taskId: tasks[2]!.id },
         { id: 'done', kind: 'terminal', outcome: 'done' },
       ],
       transitions: [
         { fromNodeId: 'show-symptom', toNodeId: 'first' },
         ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'first', optionId, toNodeId: 'show-investigation' })),
-        { fromNodeId: 'show-investigation', toNodeId: 'second' },
-        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'second', optionId, toNodeId: 'show-symptom-again' })),
-        { fromNodeId: 'show-symptom-again', toNodeId: 'third' },
+        { fromNodeId: 'show-investigation', toNodeId: 'show-symptom-again' },
+        { fromNodeId: 'show-symptom-again', toNodeId: 'second' },
+        ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'second', optionId, toNodeId: 'third' })),
         ...Object.keys(firstChoice.options).map((optionId) => ({ fromNodeId: 'third', optionId, toNodeId: 'done' })),
       ],
     },
@@ -101,6 +101,8 @@ test('preview route contexts retain unique material across repeated exposure eve
 
   assert.ok(questions[1]?.kind === 'question' && questions[1].routeContexts.every(({ exposedStimulusIds }) => exposedStimulusIds.join(',') === 'symptom,investigation'));
   assert.ok(questions[2]?.kind === 'question' && questions[2].routeContexts.every(({ exposedStimulusIds }) => exposedStimulusIds.join(',') === 'symptom,investigation'));
+  assert.ok(questions[2]?.kind === 'question' && questions[2].routeContexts.every(({ priorChoices }) =>
+    priorChoices[1]?.exposedItemIds.join(',') === 'symptom,investigation,symptom'));
 });
 
 test('previews every graph branch and represents a shared continuation node once', () => {

@@ -101,33 +101,33 @@ function graphRouteContexts(arm: StudyArm, budget: { contexts: number }): Map<st
   const items = new Map(arm.items.map((item) => [item.id, item]));
   const contexts = new Map<string, JourneyPreviewRouteContext[]>();
 
-  const visit = (nodeId: string, path: JourneyPreviewRouteContext['path'], allExposures: string[], priorChoices: JourneyPreviewRouteContext['priorChoices'], priorResponses: JourneyPreviewRouteContext['priorResponses']): void => {
+  const visit = (nodeId: string, path: JourneyPreviewRouteContext['path'], exposureOccurrences: string[], priorChoices: JourneyPreviewRouteContext['priorChoices'], priorResponses: JourneyPreviewRouteContext['priorResponses']): void => {
     const node = nodes.get(nodeId)!;
     if (node.kind === 'terminal') return;
     if (node.kind === 'expose') {
       const item = items.get(node.itemId)!;
       const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id)!;
-      visit(edge.toNodeId, [...path, { nodeId }], allExposures.includes(item.id) ? allExposures : [...allExposures, item.id], priorChoices, priorResponses);
+      visit(edge.toNodeId, [...path, { nodeId }], [...exposureOccurrences, item.id], priorChoices, priorResponses);
       return;
     }
 
     const task = tasks.get(node.taskId)!;
     reserveContexts(budget, 1);
     const nodeContexts = contexts.get(node.id) ?? [];
-    nodeContexts.push({ path: [...path, { nodeId }], exposedStimulusIds: [...allExposures], priorChoices, priorResponses });
+    nodeContexts.push({ path: [...path, { nodeId }], exposedStimulusIds: [...new Set(exposureOccurrences)], priorChoices, priorResponses });
     contexts.set(node.id, nodeContexts);
     const branches: Array<{ optionId?: string; meaning: string; response?: { type: 'score' | 'noul'; when?: ResponseInterval; value?: number; meaning: string }; edge: { toNodeId: string } }> = 'options' in task
       ? taskOutcomeEntries(task).map((entry) => ({ ...entry, edge: graph.transitions.find((candidate) => candidate.fromNodeId === node.id && candidate.optionId === entry.optionId)! }))
       : graph.transitions.filter((candidate) => candidate.fromNodeId === node.id && candidate.when !== undefined).map((edge) => ({ meaning: intervalLabel(edge.when!), response: { type: edge.when!.type, when: edge.when!, meaning: intervalLabel(edge.when!) }, edge }));
     for (const branch of branches) {
       const step = branch.optionId !== undefined ? { nodeId, optionId: branch.optionId } : { nodeId, response: branch.response! };
-      visit(branch.edge.toNodeId, [...path, step], allExposures, branch.optionId !== undefined ? [...priorChoices, {
+      visit(branch.edge.toNodeId, [...path, step], exposureOccurrences, branch.optionId !== undefined ? [...priorChoices, {
         nodeId,
         taskId: task.id,
         optionId: branch.optionId,
         meaning: branch.meaning,
-        exposedItemIds: [...allExposures],
-      }] : priorChoices, branch.response ? [...priorResponses, { nodeId, taskId: task.id, response: branch.response, exposedItemIds: [...allExposures] }] : priorResponses);
+        exposedItemIds: [...exposureOccurrences],
+      }] : priorChoices, branch.response ? [...priorResponses, { nodeId, taskId: task.id, response: branch.response, exposedItemIds: [...exposureOccurrences] }] : priorResponses);
     }
   };
 
