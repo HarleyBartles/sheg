@@ -34998,19 +34998,27 @@ var followOnSelectionSchema = external_exports.union([
     }
   })
 ]);
+var followOnContextSchema = external_exports.object({
+  mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
+  materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional(),
+  includeSelectedMaterial: external_exports.boolean().optional()
+}).strict().superRefine((contextInput, context) => {
+  if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
+    context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
+  }
+  if (contextInput.mode === "recorded" && contextInput.materialIds) {
+    context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
+  }
+  if (contextInput.includeSelectedMaterial && contextInput.mode !== "fresh-material" && contextInput.mode !== "omit-history") {
+    context.addIssue({ code: "custom", path: ["includeSelectedMaterial"], message: "Selected Choice material requires fresh-material or omit-history context." });
+  }
+});
 var followOnRunRequestSchema = external_exports.object({
   kind: external_exports.literal("follow-on"),
   label: external_exports.string().min(1).max(120).optional(),
   sourceRunId: external_exports.string().uuid(),
   selection: followOnSelectionSchema,
-  context: external_exports.object({ mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]), materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional() }).strict().superRefine((contextInput, context) => {
-    if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
-      context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
-    }
-    if (contextInput.mode === "recorded" && contextInput.materialIds) {
-      context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
-    }
-  }),
+  context: followOnContextSchema,
   material: external_exports.array(materialItemSchema).min(1).optional(),
   questions: external_exports.array(decisionQuestionSchema).min(1),
   provider: providerConfigSchema,
@@ -35020,7 +35028,15 @@ var followOnRunRequestSchema = external_exports.object({
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
   }
-  const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
+  if (request.context.includeSelectedMaterial && "criteria" in request.selection) {
+    if (!request.selection.criteria.questionId) {
+      context.addIssue({ code: "custom", path: ["selection", "criteria", "questionId"], message: "Selected-material criteria must identify the source Choice question." });
+    }
+    if (request.selection.criteria.answer) {
+      context.addIssue({ code: "custom", path: ["selection", "criteria", "answer"], message: "Selected-material criteria must include all answers to report mapped and unmapped selections." });
+    }
+  }
+  const hasMaterial = Boolean(request.context.includeSelectedMaterial || request.material?.length || request.context.materialIds?.length);
   if ((request.context.mode === "fresh-material" || request.context.mode === "omit-history") && !hasMaterial) {
     context.addIssue({ code: "custom", path: ["context", "materialIds"], message: `${request.context.mode} context requires explicit material or material references.` });
   }
@@ -35035,6 +35051,32 @@ var followOnRunRequestSchema = external_exports.object({
   }
 });
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
+var sourceEvaluationStatuses = ["pending", "answered", "failed", "unreached"];
+var followOnExclusionSchema = external_exports.object({
+  sourceEvaluationId: external_exports.string().uuid(),
+  sourceContextId: external_exports.string().uuid(),
+  respondentId: external_exports.string().min(1),
+  status: external_exports.enum(sourceEvaluationStatuses),
+  reason: external_exports.enum(["pending", "failed", "unreached", "nonChoice", "unmappedChoice"]),
+  choiceId: external_exports.string().min(1).optional(),
+  choiceMeaning: external_exports.string().min(1).optional()
+}).strict();
+var selectionCoverageSchema = external_exports.object({
+  matched: external_exports.number().int().nonnegative(),
+  eligible: external_exports.number().int().nonnegative(),
+  excluded: external_exports.object({
+    pending: external_exports.number().int().nonnegative(),
+    failed: external_exports.number().int().nonnegative(),
+    unreached: external_exports.number().int().nonnegative(),
+    nonChoice: external_exports.number().int().nonnegative(),
+    unmappedChoice: external_exports.number().int().nonnegative()
+  }).strict()
+}).strict().superRefine((coverage, context) => {
+  const excludedCount = Object.values(coverage.excluded).reduce((sum, count) => sum + count, 0);
+  if (coverage.eligible > coverage.matched || coverage.eligible + excludedCount !== coverage.matched) {
+    context.addIssue({ code: "custom", path: ["excluded"], message: "Eligible and excluded counts must account for every matched source evaluation." });
+  }
+});
 var followOnLineageSchema = external_exports.object({
   sourceRunId: external_exports.string().uuid(),
   sourceStatusAtAcceptance: external_exports.enum(runStatuses),
@@ -35042,6 +35084,8 @@ var followOnLineageSchema = external_exports.object({
   sourceVersion: external_exports.object({ status: external_exports.enum(runStatuses), usedCalls: external_exports.number().int().nonnegative(), reservedCalls: external_exports.number().int().nonnegative(), maxOrdinal: external_exports.number().int().min(-1) }).strict(),
   sourceAvailable: external_exports.boolean().optional(),
   sourceRecordState: external_exports.enum(["live", "historical"]).optional(),
+  selectionCoverage: selectionCoverageSchema.optional(),
+  excludedSelections: external_exports.array(followOnExclusionSchema).default([]),
   selections: external_exports.array(external_exports.object({ sourceEvaluationId: external_exports.string().uuid(), sourceContextId: external_exports.string().uuid(), respondentId: external_exports.string().min(1), evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict()),
   materialSnapshots: external_exports.array(external_exports.object({ contextId: external_exports.string().uuid(), respondentId: external_exports.string().min(1), materials: external_exports.array(materialItemSchema) }).strict()).default([])
 }).strict();
@@ -35835,7 +35879,8 @@ async function prepareFollowOnRun(request, source, provider) {
     sourceCompleteAtAcceptance: source.sourceComplete,
     sourceVersion: source.version,
     selections,
-    materialSnapshots
+    materialSnapshots,
+    excludedSelections: []
   };
   return {
     sourceVersion: source.version,

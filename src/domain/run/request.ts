@@ -97,19 +97,28 @@ const followOnSelectionSchema = z.union([
   }),
 ]);
 
+const followOnContextSchema = z.object({
+  mode: z.enum(['recorded', 'fresh-material', 'omit-history', 'continue']),
+  materialIds: z.array(materialItemSchema.shape.id).min(1).optional(),
+  includeSelectedMaterial: z.boolean().optional(),
+}).strict().superRefine((contextInput, context) => {
+  if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
+    context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Material references must be unique and ordered.' });
+  }
+  if (contextInput.mode === 'recorded' && contextInput.materialIds) {
+    context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Recorded context does not allow material changes.' });
+  }
+  if (contextInput.includeSelectedMaterial && contextInput.mode !== 'fresh-material' && contextInput.mode !== 'omit-history') {
+    context.addIssue({ code: 'custom', path: ['includeSelectedMaterial'], message: 'Selected Choice material requires fresh-material or omit-history context.' });
+  }
+});
+
 export const followOnRunRequestSchema = z.object({
   kind: z.literal('follow-on'),
   label: z.string().min(1).max(120).optional(),
   sourceRunId: z.string().uuid(),
   selection: followOnSelectionSchema,
-  context: z.object({ mode: z.enum(['recorded', 'fresh-material', 'omit-history', 'continue']), materialIds: z.array(materialItemSchema.shape.id).min(1).optional() }).strict().superRefine((contextInput, context) => {
-    if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
-      context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Material references must be unique and ordered.' });
-    }
-    if (contextInput.mode === 'recorded' && contextInput.materialIds) {
-      context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Recorded context does not allow material changes.' });
-    }
-  }),
+  context: followOnContextSchema,
   material: z.array(materialItemSchema).min(1).optional(),
   questions: z.array(decisionQuestionSchema).min(1),
   provider: providerConfigSchema,
@@ -119,7 +128,15 @@ export const followOnRunRequestSchema = z.object({
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a run.' });
   }
-  const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
+  if (request.context.includeSelectedMaterial && 'criteria' in request.selection) {
+    if (!request.selection.criteria.questionId) {
+      context.addIssue({ code: 'custom', path: ['selection', 'criteria', 'questionId'], message: 'Selected-material criteria must identify the source Choice question.' });
+    }
+    if (request.selection.criteria.answer) {
+      context.addIssue({ code: 'custom', path: ['selection', 'criteria', 'answer'], message: 'Selected-material criteria must include all answers to report mapped and unmapped selections.' });
+    }
+  }
+  const hasMaterial = Boolean(request.context.includeSelectedMaterial || request.material?.length || request.context.materialIds?.length);
   if ((request.context.mode === 'fresh-material' || request.context.mode === 'omit-history') && !hasMaterial) {
     context.addIssue({ code: 'custom', path: ['context', 'materialIds'], message: `${request.context.mode} context requires explicit material or material references.` });
   }
@@ -135,6 +152,35 @@ export const followOnRunRequestSchema = z.object({
 });
 
 const runStatuses = ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] as const;
+const sourceEvaluationStatuses = ['pending', 'answered', 'failed', 'unreached'] as const;
+const followOnExclusionSchema = z.object({
+  sourceEvaluationId: z.string().uuid(),
+  sourceContextId: z.string().uuid(),
+  respondentId: z.string().min(1),
+  status: z.enum(sourceEvaluationStatuses),
+  reason: z.enum(['pending', 'failed', 'unreached', 'nonChoice', 'unmappedChoice']),
+  choiceId: z.string().min(1).optional(),
+  choiceMeaning: z.string().min(1).optional(),
+}).strict();
+
+export const selectionCoverageSchema = z.object({
+  matched: z.number().int().nonnegative(),
+  eligible: z.number().int().nonnegative(),
+  excluded: z.object({
+    pending: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    unreached: z.number().int().nonnegative(),
+    nonChoice: z.number().int().nonnegative(),
+    unmappedChoice: z.number().int().nonnegative(),
+  }).strict(),
+}).strict().superRefine((coverage, context) => {
+  const excludedCount = Object.values(coverage.excluded).reduce((sum, count) => sum + count, 0);
+  if (coverage.eligible > coverage.matched || coverage.eligible + excludedCount !== coverage.matched) {
+    context.addIssue({ code: 'custom', path: ['excluded'], message: 'Eligible and excluded counts must account for every matched source evaluation.' });
+  }
+});
+export type SelectionCoverage = z.infer<typeof selectionCoverageSchema>;
+
 export const followOnLineageSchema = z.object({
   sourceRunId: z.string().uuid(),
   sourceStatusAtAcceptance: z.enum(runStatuses),
@@ -142,6 +188,8 @@ export const followOnLineageSchema = z.object({
   sourceVersion: z.object({ status: z.enum(runStatuses), usedCalls: z.number().int().nonnegative(), reservedCalls: z.number().int().nonnegative(), maxOrdinal: z.number().int().min(-1) }).strict(),
   sourceAvailable: z.boolean().optional(),
   sourceRecordState: z.enum(['live', 'historical']).optional(),
+  selectionCoverage: selectionCoverageSchema.optional(),
+  excludedSelections: z.array(followOnExclusionSchema).default([]),
   selections: z.array(z.object({ sourceEvaluationId: z.string().uuid(), sourceContextId: z.string().uuid(), respondentId: z.string().min(1), evaluationId: z.string().uuid(), contextId: z.string().uuid() }).strict()),
   materialSnapshots: z.array(z.object({ contextId: z.string().uuid(), respondentId: z.string().min(1), materials: z.array(materialItemSchema) }).strict()).default([]),
 }).strict();

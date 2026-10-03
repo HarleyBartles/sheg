@@ -118,7 +118,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const inspection: Inspection = { valid: problems.length === 0, respondentCount: groups.size, minimumCalls, problems, fits,
     ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
-    sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections, materialSnapshots };
+    sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections, materialSnapshots, excludedSelections: [] };
   return { sourceVersion: source.version, inspection,
     prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, groups: preparedGroups, lineage } };
 }

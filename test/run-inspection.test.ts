@@ -273,6 +273,7 @@ test('follow-on batching groups distinct source contexts and never includes sele
   const admission = await prepareFollowOnRun(followOn, source, provider);
 
   assert.equal(admission.inspection.valid, true);
+  assert.deepEqual(admission.prepared.lineage?.excludedSelections, []);
   assert.equal(admission.inspection.respondentCount, 2);
   assert.equal(admission.inspection.minimumCalls, 2);
   assert.deepEqual(measured.map(({ questions: grouped }) => grouped.map(({ id }) => id)), [
