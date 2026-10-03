@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,8 @@ test('workflow actor gets one conversation with Sheg tools and only incrementall
     assert.equal(summary.captured, 1);
     assert.ok(input);
     assert.match(input.initialPrompt, /Sheg MCP tools are available/);
+    assert.match(input.initialPrompt, /## Current skill and declared references/);
+    assert.match(input.initialPrompt, /Use a graph to interleave questions with material/);
     assert.doesNotMatch(input.initialPrompt, /Use available Sheg MCP tools when the user asks/);
     assert.doesNotMatch(input.initialPrompt, /Do not call tools, connectors|Return only JSON|The cohort is approved/);
     assert.doesNotMatch(input.initialPrompt, /intended reader cohort|workflow-tool-checkpoints|expectedTools/);
@@ -44,6 +47,11 @@ test('workflow actor gets one conversation with Sheg tools and only incrementall
     assert.deepEqual(input.turns.map((turn) => turn.split('\n')[0]), turns.slice(1).map(({ user }) => user));
     assert.doesNotMatch(input.turns[0]!, /Q2 is answered|selected paragraph/);
     assert.match(input.turns[1]!, /approved/);
+    const manifest = JSON.parse(readFileSync(path.join(campaign, 'campaign.json'), 'utf8')) as { trials: Array<{ trialId: string }> };
+    const trialPart = manifest.trials[0]!.trialId.replace(/[^a-zA-Z0-9._-]/g, '-');
+    const attemptPart = `${manifest.trials[0]!.trialId}:attempt-001`.replace(/[^a-zA-Z0-9._-]/g, '-');
+    const captured = JSON.parse(readFileSync(path.join(campaign, 'attempts', trialPart, attemptPart, 'result.json'), 'utf8')) as { dispatchedPromptSha256: string };
+    assert.equal(captured.dispatchedPromptSha256, createHash('sha256').update(JSON.stringify([input.initialPrompt, ...input.turns])).digest('hex'));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

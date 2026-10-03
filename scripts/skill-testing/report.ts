@@ -5,13 +5,26 @@ import { z } from 'zod';
 import { assertComparableManifests, readFrozenCampaign, type CampaignManifest } from './contracts.js';
 import { extractShegToolCalls, gradeTrial, type TrialGrade } from './graders.js';
 import type { CampaignAdapter } from './runner.js';
+import { sha256, stableJson } from './snapshots.js';
 
-type Entry = { type: string; trialId?: string; attemptId?: string; armId?: string; repetition?: number };
+type Entry = { type: string; trialId?: string; attemptId?: string; armId?: string; repetition?: number; runtimeIdentitySha256?: string };
 type TrialRecord = { trialId: string; armId: string; repetition: number; status: 'captured' | 'runtime-error' | 'interrupted' | 'not-run'; grade?: TrialGrade; outputPath?: string; responseExcerpt?: string; settings: Record<string, unknown>; evaluatorSettings?: Record<string, unknown> };
 type Report = { manifest: CampaignManifest; trials: TrialRecord[]; comparisons: unknown[]; summary: Record<string, unknown> };
 function segment(value: string): string { return value.replace(/[^a-zA-Z0-9._-]/g, '-'); }
 function esc(value: string): string { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 function readManifest(root: string): CampaignManifest { return readFrozenCampaign(root); }
+
+async function retainGraderRuntimeIdentity(root: string, manifest: CampaignManifest, adapter: CampaignAdapter): Promise<void> {
+  const identity = adapter.preflight
+    ? await adapter.preflight()
+    : { adapter: typeof manifest.execution.adapter === 'string' ? manifest.execution.adapter : 'custom', executionSha256: manifest.basis.executionSha256 };
+  const identitySha256 = sha256(stableJson(identity));
+  const journalPath = path.join(root, 'attempts.jsonl');
+  const entries: Entry[] = existsSync(journalPath) ? readFileSync(journalPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as Entry) : [];
+  const recorded = entries.find((entry) => entry.type === 'grader-runtime-preflight');
+  if (recorded?.runtimeIdentitySha256 && recorded.runtimeIdentitySha256 !== identitySha256) throw new Error('Campaign grader runtime identity changed since its first grading attempt.');
+  if (!recorded) appendFileSync(journalPath, `${JSON.stringify({ type: 'grader-runtime-preflight', runtimeIdentitySha256: identitySha256 })}\n`);
+}
 
 function allTrials(manifest: CampaignManifest, entries: Entry[]): CampaignManifest['trials'] {
   const additions = entries.filter((entry) => entry.type === 'trial-added' && entry.trialId && entry.armId && entry.repetition).map((entry) => ({ trialId: entry.trialId!, armId: entry.armId!, repetition: entry.repetition!, attempts: [`${entry.trialId}:attempt-001`] }));
@@ -21,6 +34,7 @@ function allTrials(manifest: CampaignManifest, entries: Entry[]): CampaignManife
 export async function gradeCampaign(directory: string, adapter: CampaignAdapter): Promise<number> {
   const root = path.resolve(directory);
   const manifest = readManifest(root);
+  await retainGraderRuntimeIdentity(root, manifest, adapter);
   const journalPath = path.join(root, 'attempts.jsonl');
   const entries: Entry[] = existsSync(journalPath) ? readFileSync(journalPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as Entry) : [];
   let graded = 0;
@@ -30,32 +44,41 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
     const attemptRoot = path.join(root, 'attempts', segment(trial.trialId), segment(capture.attemptId));
     const evaluatorRoot = path.join(attemptRoot, 'evaluator');
     const resultPath = path.join(evaluatorRoot, 'result.json');
-    if (existsSync(resultPath)) continue;
+    const gradePath = path.join(evaluatorRoot, 'grade.json');
+    if (existsSync(gradePath)) continue;
     mkdirSync(path.join(evaluatorRoot, 'scratch'), { recursive: true });
-    const rawEvents = readFileSync(path.join(attemptRoot, 'raw-events.jsonl'), 'utf8');
-    const rawFinal = readFileSync(path.join(attemptRoot, 'raw-final-message.txt'), 'utf8');
-    const prompt = [
-      'Judge this Sheg agent output independently against the frozen criteria. Do not infer an arm, version, or expected result from the output path.',
-      'Return only JSON with scenarioId, criterionResults (criterionId, result: pass|fail|uncertain, evidence), and notes as one string. Use this shape: {"scenarioId":"...","criterionResults":[{"criterionId":"...","result":"pass","evidence":"..."}],"notes":"..."}. Cite observed output for each criterion.',
-      `scenarioId: ${manifest.scenarioId}`,
-      `\n## User request\n${manifest.evaluationBasis.userRequest}`,
-      ...(manifest.workflowTurns ? [`\n## Ordered workflow turns and hidden checkpoint expectations\n${JSON.stringify(manifest.workflowTurns, null, 2)}`] : []),
-      `\n## Controlled evidence\n${JSON.stringify(manifest.evaluationBasis.controlledEvidence, null, 2)}`,
-      `\n## Private evaluation criteria\n${JSON.stringify(manifest.evaluationBasis.criteria, null, 2)}`,
-      `\n## Prohibited claims\n${JSON.stringify(manifest.evaluationBasis.prohibitedClaims, null, 2)}`,
-      `\n## Raw actor events and final output\n${JSON.stringify({ rawEvents, rawFinalMessage: rawFinal }, null, 2)}`,
-    ].join('\n');
     let evaluatorError: string | undefined;
     let semantic: unknown;
-    try {
-      const run = await adapter.execute({ prompt, cwd: path.join(evaluatorRoot, 'scratch'), timeoutMs: manifest.timeoutMs, requestedSettings: manifest.execution });
-      if (run.status !== 'completed') evaluatorError = `Evaluator ended with ${run.status} (exit ${String(run.exitCode)}).`;
-      else { try { semantic = JSON.parse(run.rawFinalMessage) as unknown; } catch { evaluatorError = 'Evaluator output was not valid JSON.'; } }
-      writeFileSync(path.join(evaluatorRoot, 'raw-events.jsonl'), run.rawEvents);
-      writeFileSync(path.join(evaluatorRoot, 'raw-final-message.txt'), run.rawFinalMessage);
-      writeFileSync(path.join(evaluatorRoot, 'raw-stderr.txt'), run.rawStderr);
-      writeFileSync(resultPath, `${JSON.stringify({ status: run.status, requestedSettings: manifest.execution, observedSettings: run.observedSettings, sessionId: run.sessionId }, null, 2)}\n`);
-    } catch (error) { evaluatorError = error instanceof Error ? error.message : String(error); }
+    let rawFinal = '';
+    if (existsSync(resultPath) && existsSync(path.join(evaluatorRoot, 'raw-final-message.txt'))) {
+      const saved = JSON.parse(readFileSync(resultPath, 'utf8')) as { status?: string; exitCode?: number | null };
+      rawFinal = readFileSync(path.join(evaluatorRoot, 'raw-final-message.txt'), 'utf8');
+      if (saved.status !== 'completed') evaluatorError = `Evaluator ended with ${String(saved.status)} (exit ${String(saved.exitCode)}).`;
+      else { try { semantic = JSON.parse(rawFinal) as unknown; } catch { evaluatorError = 'Evaluator output was not valid JSON.'; } }
+    } else {
+      const rawEvents = readFileSync(path.join(attemptRoot, 'raw-events.jsonl'), 'utf8');
+      rawFinal = readFileSync(path.join(attemptRoot, 'raw-final-message.txt'), 'utf8');
+      const prompt = [
+        'Judge this Sheg agent output independently against the frozen criteria. Do not infer an arm, version, or expected result from the output path.',
+        'Return only JSON with scenarioId, criterionResults (criterionId, result: pass|fail|uncertain, evidence), and notes as one string. Use this shape: {"scenarioId":"...","criterionResults":[{"criterionId":"...","result":"pass","evidence":"..."}],"notes":"..."}. Cite observed output for each criterion.',
+        `scenarioId: ${manifest.scenarioId}`,
+        `\n## User request\n${manifest.evaluationBasis.userRequest}`,
+        ...(manifest.workflowTurns ? [`\n## Ordered workflow turns and hidden checkpoint expectations\n${JSON.stringify(manifest.workflowTurns, null, 2)}`] : []),
+        `\n## Controlled evidence\n${JSON.stringify(manifest.evaluationBasis.controlledEvidence, null, 2)}`,
+        `\n## Private evaluation criteria\n${JSON.stringify(manifest.evaluationBasis.criteria, null, 2)}`,
+        `\n## Prohibited claims\n${JSON.stringify(manifest.evaluationBasis.prohibitedClaims, null, 2)}`,
+        `\n## Raw actor events and final output\n${JSON.stringify({ rawEvents, rawFinalMessage: rawFinal }, null, 2)}`,
+      ].join('\n');
+      try {
+        const run = await adapter.execute({ prompt, cwd: path.join(evaluatorRoot, 'scratch'), timeoutMs: manifest.timeoutMs, requestedSettings: manifest.execution });
+        if (run.status !== 'completed') evaluatorError = `Evaluator ended with ${run.status} (exit ${String(run.exitCode)}).`;
+        else { try { semantic = JSON.parse(run.rawFinalMessage) as unknown; } catch { evaluatorError = 'Evaluator output was not valid JSON.'; } }
+        writeFileSync(path.join(evaluatorRoot, 'raw-events.jsonl'), run.rawEvents);
+        writeFileSync(path.join(evaluatorRoot, 'raw-final-message.txt'), run.rawFinalMessage);
+        writeFileSync(path.join(evaluatorRoot, 'raw-stderr.txt'), run.rawStderr);
+        writeFileSync(resultPath, `${JSON.stringify({ status: run.status, requestedSettings: manifest.execution, observedSettings: run.observedSettings, sessionId: run.sessionId }, null, 2)}\n`);
+      } catch (error) { evaluatorError = error instanceof Error ? error.message : String(error); }
+    }
     const actorValue = manifest.suite === 'workflow'
       ? { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: rawFinal || 'No final response was captured.', uncertainties: [] }
       : (() => { try { return JSON.parse(rawFinal) as unknown; } catch { return rawFinal; } })();
@@ -64,7 +87,7 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
     const observedToolsByTurn = Array.isArray(rawAttemptResult.workflowTurnEvents) && rawAttemptResult.workflowTurnEvents.every((item) => typeof item === 'string')
       ? rawAttemptResult.workflowTurnEvents.map((events) => extractShegToolCalls(events as string))
       : undefined;
-    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria, manifest.suite, expectedToolsByTurn, observedToolsByTurn);
+    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria, manifest.suite, expectedToolsByTurn, observedToolsByTurn, { id: manifest.scenarioId, version: manifest.scenarioVersion, controlledEvidence: manifest.evaluationBasis.controlledEvidence });
     if (evaluatorError) grade.semantic = { result: 'uncertain', criteria: [], error: evaluatorError };
     writeFileSync(path.join(evaluatorRoot, 'grade.json'), `${JSON.stringify(grade, null, 2)}\n`);
     appendFileSync(path.join(root, 'grades.jsonl'), `${JSON.stringify({ trialId: trial.trialId, attemptId: capture.attemptId, gradePath: path.relative(root, path.join(evaluatorRoot, 'grade.json')).replaceAll('\\', '/') })}\n`);
@@ -97,7 +120,7 @@ export function collectCampaignReport(directory: string): Report {
     const observedToolsByTurn = Array.isArray(savedAttemptResult.workflowTurnEvents) && savedAttemptResult.workflowTurnEvents.every((item) => typeof item === 'string')
       ? savedAttemptResult.workflowTurnEvents.map((events) => extractShegToolCalls(events as string))
       : undefined;
-    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria, manifest.suite, expectedToolsByTurn, observedToolsByTurn);
+    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria, manifest.suite, expectedToolsByTurn, observedToolsByTurn, { id: manifest.scenarioId, version: manifest.scenarioVersion, controlledEvidence: manifest.evaluationBasis.controlledEvidence });
     if (semanticGrade) grade.semantic = semanticGrade;
     const responseExcerpt = parsed && typeof parsed === 'object' && 'finalResponse' in parsed && typeof parsed.finalResponse === 'string' ? parsed.finalResponse : finalText;
     const settings = existsSync(resultPath) ? (JSON.parse(readFileSync(resultPath, 'utf8')) as { observedSettings?: Record<string, unknown> }).observedSettings ?? {} : {};
@@ -142,7 +165,9 @@ export function collectCampaignReport(directory: string): Report {
 type CriterionCounts = { pass: number; fail: number; uncertain: number };
 
 function criterionCountsForArm(report: Report, armId: string): Record<string, CriterionCounts> {
-  if (!report.manifest.arms.some((arm) => arm.id === armId)) throw new Error(`Campaign ${report.manifest.campaignId} has no comparison arm ${armId}.`);
+  const arm = report.manifest.arms.find((candidate) => candidate.id === armId);
+  if (!arm) throw new Error(`Campaign ${report.manifest.campaignId} has no comparison arm ${armId}.`);
+  if (!Object.keys(arm.skillReferenceHashes).length) throw new Error(`Comparison arm ${armId} is not a guided skill arm.`);
   const trials = report.trials.filter((trial) => trial.armId === armId && trial.status === 'captured');
   return Object.fromEntries(report.manifest.evaluationBasis.criteria.map(({ id }) => [id, {
     pass: trials.filter((trial) => trial.grade?.semantic.criteria.find((grade) => grade.criterionId === id)?.result === 'pass').length,
@@ -155,6 +180,15 @@ export function compareCampaigns(baselineDirectory: string, candidateDirectory: 
   const baseline = collectCampaignReport(baselineDirectory);
   const candidate = collectCampaignReport(candidateDirectory);
   assertComparableManifests(baseline.manifest, candidate.manifest);
+  const runtimeHash = (directory: string, type: 'actor-runtime-preflight' | 'grader-runtime-preflight'): string | undefined => {
+    const journal = path.join(path.resolve(directory), 'attempts.jsonl');
+    if (!existsSync(journal)) return undefined;
+    const events = readFileSync(journal, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as Entry);
+    return events.find((event) => event.type === type)?.runtimeIdentitySha256;
+  };
+  for (const type of ['actor-runtime-preflight', 'grader-runtime-preflight'] as const) {
+    if (runtimeHash(baselineDirectory, type) !== runtimeHash(candidateDirectory, type)) throw new Error(`Campaigns do not share the same ${type.startsWith('actor') ? 'actor' : 'grader'} adapter and ambient runtime identity.`);
+  }
   const baselineCounts = criterionCountsForArm(baseline, arms.baselineArmId);
   const candidateCounts = criterionCountsForArm(candidate, arms.candidateArmId);
   const criterionChanges = baseline.manifest.evaluationBasis.criteria.map(({ id }) => {

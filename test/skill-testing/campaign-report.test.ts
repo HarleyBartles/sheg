@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -63,6 +63,25 @@ test('campaign comparison blocks changed execution inputs', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('campaign comparison blocks changed evaluator adapter and ambient runtime identities', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-runtime-'));
+  try {
+    const baseline = path.join(root, 'baseline');
+    const candidate = path.join(root, 'candidate');
+    prepareCampaign({ ...config('runtime-baseline'), repetitions: 1 }, baseline);
+    prepareCampaign({ ...config('runtime-candidate'), repetitions: 1 }, candidate);
+    const adapter = (version: string): CampaignAdapter => ({
+      async preflight() { return { adapter: 'codex', version, shegMcpConfigSha256: 'fixed-config' }; },
+      async execute() { return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: actor('Captured.'), rawStderr: '', sessionId: null, observedSettings: {} }; },
+    });
+    await runCampaign(baseline, adapter('actor-runtime'));
+    await runCampaign(candidate, adapter('actor-runtime'));
+    await gradeCampaign(baseline, adapter('judge-runtime-1'));
+    await gradeCampaign(candidate, adapter('judge-runtime-2'));
+    assert.throws(() => compareCampaigns(baseline, candidate, { baselineArmId: 'candidate', candidateArmId: 'candidate' }), /adapter and ambient runtime identity/i);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('reporting and comparison reject a campaign manifest edited after preparation', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-manifest-integrity-'));
   try {
@@ -119,6 +138,26 @@ test('evaluator timeouts are uncertain judgments and remain separate from actor 
     assert.equal(report.summary.semanticNotRun, 0);
     assert.equal(report.trials[0]!.grade?.semantic.result, 'uncertain');
     assert.match(report.trials[0]!.grade?.semantic.error ?? '', /timed-out/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('grading resumes from retained evaluator output when the grade file is missing', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-grade-recovery-'));
+  try {
+    const campaign = path.join(root, 'campaign');
+    const manifest = prepareCampaign({ ...config('grade-recovery'), repetitions: 1 }, campaign);
+    await runCampaign(campaign, { async execute() { return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: actor('The request needs a clarification.'), rawStderr: '', sessionId: 'actor', observedSettings: {} }; } });
+    const judged = { scenarioId: manifest.scenarioId, criterionResults: manifest.evaluationBasis.criteria.map(({ id }) => ({ criterionId: id, result: 'pass', evidence: 'Observed output.' })), notes: '' };
+    await gradeCampaign(campaign, { async execute() { return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: JSON.stringify(judged), rawStderr: '', sessionId: 'judge', observedSettings: {} }; } });
+    const trialDirectory = readdirSync(path.join(campaign, 'attempts'))[0]!;
+    const attemptDirectory = readdirSync(path.join(campaign, 'attempts', trialDirectory))[0]!;
+    const evaluatorDirectory = path.join(campaign, 'attempts', trialDirectory, attemptDirectory, 'evaluator');
+    rmSync(path.join(evaluatorDirectory, 'grade.json'));
+    let redispatched = 0;
+    const resumed = await gradeCampaign(campaign, { async execute() { redispatched += 1; throw new Error('must reuse captured evaluator output'); } });
+    assert.equal(redispatched, 0);
+    assert.equal(resumed, 1);
+    assert.ok(existsSync(path.join(evaluatorDirectory, 'grade.json')));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -230,5 +269,6 @@ test('comparison requires explicit arms and excludes attribution-control results
     assert.ok(blindPrompts[0]!.includes('candidate-candidate'));
     assert.ok(!blindPrompts[0]!.includes('baseline-no-guidance'));
     assert.throws(() => compareCampaigns(baseline, candidate, { baselineArmId: 'absent', candidateArmId: 'candidate' }), /no comparison arm/i);
+    assert.throws(() => compareCampaigns(baseline, candidate, { baselineArmId: 'no-guidance', candidateArmId: 'candidate' }), /guided/i);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

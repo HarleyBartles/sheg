@@ -9,6 +9,37 @@ export type TrialGrade = {
   semantic: { result: 'pass' | 'fail' | 'uncertain' | 'not-run'; criteria: CriterionGrade[]; error?: string };
 };
 
+export interface FrozenScenarioForGrading {
+  id: string;
+  version: number;
+  controlledEvidence: unknown;
+}
+
+function selectedMaterialIssues(requestValue: unknown, controlledEvidence: unknown): string[] {
+  if (!requestValue || typeof requestValue !== 'object' || (requestValue as { kind?: unknown }).kind !== 'follow-on') return [];
+  if (!controlledEvidence || typeof controlledEvidence !== 'object') return [];
+  const queryResult = (controlledEvidence as { queryResult?: { items?: unknown } }).queryResult;
+  if (!queryResult || !Array.isArray(queryResult.items)) return [];
+  const items = queryResult.items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
+  const request = requestValue as { selection?: { criteria?: Record<string, unknown>; references?: Array<{ evaluationId: string; contextId: string }> }; context?: { mode?: string; materialIds?: string[] }; material?: Array<{ id: string; text: string }> };
+  const selected = request.selection?.references
+    ? items.filter((item) => request.selection!.references!.some((reference) => reference.evaluationId === item.evaluationId && reference.contextId === item.contextId))
+    : items.filter((item) => Object.entries(request.selection?.criteria ?? {}).every(([key, value]) => {
+      if (key === 'answer' && value && typeof value === 'object') return (item.result as { choice?: unknown } | undefined)?.choice === (value as { choiceId?: unknown }).choiceId;
+      if (key === 'materialId') return (item.selectedMaterial as { materialId?: unknown } | undefined)?.materialId === value;
+      return item[key] === value;
+    }));
+  if (selected.some((item) => !item.selectedMaterial)) return ['Follow-on selection includes a respondent whose frozen evidence has no selected material (including no-fit results).'];
+  if (selected.length && selected.some((item) => item.sourceRunId !== (queryResult as { sourceRunId?: unknown }).sourceRunId)) return ['Follow-on request does not target the source run in the frozen evidence.'];
+  const materialIds = [...new Set(selected.map((item) => (item.selectedMaterial as { materialId: string }).materialId))];
+  if (materialIds.length > 1) return ['The selected respondents have different material, which one shared follow-on request cannot provide individually.'];
+  if (materialIds.length === 1) {
+    if (request.context?.mode !== 'fresh-material') return ['Selected material must be supplied as fresh material to isolate it from the source context.'];
+    if (request.context.materialIds?.length !== 1 || request.context.materialIds[0] !== materialIds[0]) return [`Follow-on material must contain only selected material ${materialIds[0]}.`];
+  }
+  return [];
+}
+
 export const discoveryTraceSchema = z.object({
   scenarioId: z.string(),
   scenarioVersion: z.number().int().positive(),
@@ -27,10 +58,10 @@ export function extractShegToolCalls(rawEvents: string): string[] {
   return calls;
 }
 
-export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[], suite: 'focused' | 'discovery' | 'workflow' = 'focused', expectedToolsByTurn: readonly (readonly string[])[] = [], observedToolsByTurn?: readonly (readonly string[])[]): TrialGrade {
-  const scenario = loadScenarioCatalog().find((item) => item.id === scenarioId);
-  const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId);
-  if (!scenario || !evaluator) throw new Error(`Unknown scenario: ${scenarioId}`);
+export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[], suite: 'focused' | 'discovery' | 'workflow' = 'focused', expectedToolsByTurn: readonly (readonly string[])[] = [], observedToolsByTurn?: readonly (readonly string[])[], frozenScenario?: FrozenScenarioForGrading): TrialGrade {
+  const scenario = frozenScenario ?? loadScenarioCatalog().find((item) => item.id === scenarioId);
+  const evaluator = frozenCriteria ? undefined : loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId);
+  if (!scenario || scenario.id !== scenarioId || (!frozenCriteria && !evaluator)) throw new Error(`Unknown scenario: ${scenarioId}`);
   const discovery = suite === 'discovery' ? discoveryTraceSchema.safeParse(actorValue) : undefined;
   const normalizedActorValue = suite === 'discovery' && discovery?.success ? {
     scenarioId: discovery.data.scenarioId, scenarioVersion: discovery.data.scenarioVersion, actions: [],
@@ -61,11 +92,13 @@ export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValu
       continue;
     }
     if (!['run_inspect', 'run_start'].includes(action.tool)) continue;
-    const request = runRequestSchema.safeParse(action.input.request ?? action.input);
+    const requestValue = action.input.request ?? action.input;
+    const request = runRequestSchema.safeParse(requestValue);
     if (!request.success) requestIssues.push(`actions.${index}: ${request.error.issues.map((issue) => issue.message).join('; ')}`);
+    else requestIssues.push(...selectedMaterialIssues(request.data, scenario.controlledEvidence).map((issue) => `actions.${index}: ${issue}`));
   }
   const semantic = semanticValue === undefined ? undefined : evaluatorResultSchema.safeParse(semanticValue);
-  const criteriaBasis = frozenCriteria ?? evaluator.criteria;
+  const criteriaBasis = frozenCriteria ?? evaluator!.criteria;
   if (semantic?.success && (semantic.data.scenarioId !== scenario.id || semantic.data.criterionResults.length !== criteriaBasis.length || criteriaBasis.some((criterion) => !semantic.data.criterionResults.some((grade) => grade.criterionId === criterion.id)))) {
     return { actorContract: { result: actorIssues.length ? 'fail' : 'pass', issues: actorIssues }, deterministic: { result: requestIssues.length ? 'fail' : actor.success ? 'pass' : 'not-applicable', issues: requestIssues }, semantic: { result: 'uncertain', criteria: [], error: 'Evaluator output does not match the frozen scenario criteria.' } };
   }

@@ -15,6 +15,49 @@ test('deterministic grader rejects plausible prose with an invalid executable re
   assert.equal(grade.semantic.result, 'pass');
 });
 
+test('deterministic grader rejects selected-material follow-ons that include a no-fit respondent', () => {
+  const selectedScenario = loadScenarioCatalog().find((item) => item.id === 'selected-material-isolation-no-fit')!;
+  const selectedEvaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === selectedScenario.id)!;
+  const request = {
+    kind: 'follow-on', sourceRunId: '00000000-0000-4000-8000-000000000017',
+    selection: { criteria: { respondentId: 'r2' } }, context: { mode: 'fresh-material', materialIds: ['p2'] },
+    questions: [{ type: 'noul', id: 'quote-fit', instructions: 'Does this paragraph express the pull quote?' }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  };
+  const selectedActor = { scenarioId: selectedScenario.id, scenarioVersion: selectedScenario.version, actions: [{ tool: 'run_start', input: { request } }], finalResponse: 'A respondent without a selected paragraph must be excluded.', uncertainties: [] };
+  const selectedSemantic = { scenarioId: selectedScenario.id, criterionResults: selectedEvaluator.criteria.map(({ id }) => ({ criterionId: id, result: 'pass' as const, evidence: 'Observed in the response.' })), notes: '' };
+  const grade = gradeTrial(selectedScenario.id, selectedActor, selectedSemantic, selectedEvaluator.criteria, 'focused', [], undefined, { id: selectedScenario.id, version: selectedScenario.version, controlledEvidence: selectedScenario.controlledEvidence });
+  assert.equal(grade.deterministic.result, 'fail');
+  assert.match(grade.deterministic.issues.join(' '), /no selected material|no-fit/i);
+});
+
+test('deterministic grader accepts only the exact selected material in an isolated follow-on', () => {
+  const selectedScenario = loadScenarioCatalog().find((item) => item.id === 'selected-material-isolation-no-fit')!;
+  const selectedEvaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === selectedScenario.id)!;
+  const followOn = (materialId: string) => ({
+    kind: 'follow-on', sourceRunId: '00000000-0000-4000-8000-000000000017',
+    selection: { criteria: { respondentId: 'r1' } }, context: { mode: 'fresh-material', materialIds: [materialId] },
+    questions: [{ type: 'noul', id: 'quote-fit', instructions: 'Does this paragraph express the pull quote?' }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  });
+  const grade = (materialId: string) => gradeTrial(selectedScenario.id, {
+    scenarioId: selectedScenario.id, scenarioVersion: selectedScenario.version,
+    actions: [{ tool: 'run_start', input: { request: followOn(materialId) } }], finalResponse: 'I selected the respondent and their paragraph.', uncertainties: [],
+  }, undefined, selectedEvaluator.criteria, 'focused', [], undefined, { id: selectedScenario.id, version: selectedScenario.version, controlledEvidence: selectedScenario.controlledEvidence });
+  assert.equal(grade('p2').deterministic.result, 'pass');
+  assert.match(grade('p5').deterministic.issues.join(' '), /must contain only selected material p2/i);
+});
+
+test('historical grading uses its frozen scenario identity after the live catalog changes', () => {
+  const id = 'scenario-no-longer-in-catalog';
+  const frozenCriteria = [{ id: 'historical', condition: 'Use the frozen contract.' }];
+  const historicalActor = { scenarioId: id, scenarioVersion: 3, actions: [], finalResponse: 'Captured response.', uncertainties: [] };
+  const historicalJudge = { scenarioId: id, criterionResults: [{ criterionId: 'historical', result: 'pass', evidence: 'Captured evidence.' }], notes: '' };
+  const grade = gradeTrial(id, historicalActor, historicalJudge, frozenCriteria, 'focused', [], undefined, { id, version: 3, controlledEvidence: {} });
+  assert.equal(grade.actorContract.result, 'pass');
+  assert.equal(grade.semantic.result, 'pass');
+});
+
 test('incomplete proposals can be evaluated for clarification without fabricating a complete request', () => {
   const grade = gradeTrial(scenario.id, actor(), semantic());
   assert.equal(grade.deterministic.result, 'not-applicable');

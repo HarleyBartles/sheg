@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import type { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import test from 'node:test';
 import { createCodexAdapter } from '../../scripts/skill-testing/codex-adapter.js';
+
+const supportedProbe = ((_: string, args: readonly string[]) => ({
+  status: 0, error: undefined,
+  stdout: args[0] === '--version' ? 'codex 1.0.0' : 'Usage: codex exec [--json] [--ephemeral] --skip-git-repo-check -C <DIR> -o <FILE>',
+  stderr: '',
+})) as unknown as typeof spawnSync;
 
 test('Codex workflow resumes the exact session and sends turns in order without --last or ephemeral mode', async () => {
   const invocations: string[][] = [];
@@ -31,9 +38,13 @@ test('Codex workflow resumes the exact session and sends turns in order without 
     return child as unknown as ChildProcess;
   }) as unknown as typeof import('node:child_process').spawn;
   const adapter = createCodexAdapter({
-    executable: 'codex-test', spawnProcess: fakeSpawn,
+    executable: 'codex-test', spawnProcess: fakeSpawn, spawnSyncProcess: supportedProbe,
     shegMcpConfig: { enabled: true, transport: { type: 'stdio', command: 'node', args: ['sheg-mcp.js'], cwd: process.cwd(), env: { PLUGIN_DATA: 'default-data', PLUGIN_ROOT: 'plugin-root' } } },
   });
+  const identity = await adapter.preflight?.();
+  assert.equal(identity?.codexVersion, 'codex 1.0.0');
+  assert.match(String(identity?.shegMcpConfigSha256), /^[a-f0-9]{64}$/);
+  assert.match(String(identity?.customArgumentsSha256), /^[a-f0-9]{64}$/);
   const result = await adapter.executeWorkflow!({
     initialPrompt: 'first prompt', turns: ['second prompt', 'third prompt'], cwd: process.cwd(), timeoutMs: 5000,
     requestedSettings: { model: 'test-model', reasoning: 'medium' },
@@ -65,10 +76,42 @@ test('Codex stdout pipe errors become retained attempt failures instead of unhan
     return child as unknown as ChildProcess;
   }) as unknown as typeof import('node:child_process').spawn;
   const adapter = createCodexAdapter({
-    executable: 'codex-test', spawnProcess: fakeSpawn,
+    executable: 'codex-test', spawnProcess: fakeSpawn, spawnSyncProcess: supportedProbe,
     shegMcpConfig: { enabled: true, transport: { type: 'stdio', command: 'node', args: ['sheg-mcp.js'], cwd: process.cwd() } },
   });
   const result = await adapter.execute({ prompt: 'inspect', cwd: process.cwd(), timeoutMs: 5000, requestedSettings: {} });
   assert.equal(result.status, 'failed');
   assert.match(result.rawStderr, /stdout stream error.*ENOTCONN/i);
+});
+
+test('Codex preflight rejects missing required flags before launching an actor', async () => {
+  let actorLaunches = 0;
+  const probe = ((_: string, args: readonly string[]) => ({
+    status: 0, error: undefined,
+    stdout: args[0] === '--version' ? 'codex 1.0.0' : args[1] === 'resume' ? 'Usage: codex exec resume [--json] -o <FILE>' : 'Usage: codex exec [--json] -o <FILE>',
+    stderr: '',
+  })) as unknown as typeof spawnSync;
+  const actorSpawn = (() => { actorLaunches += 1; throw new Error('actor must not start'); }) as unknown as typeof import('node:child_process').spawn;
+  const adapter = createCodexAdapter({
+    executable: 'codex-test', spawnSyncProcess: probe, spawnProcess: actorSpawn,
+    shegMcpConfig: { enabled: true, transport: { type: 'stdio', command: 'node', args: [], cwd: process.cwd() } },
+  });
+  await assert.rejects(adapter.execute({ prompt: 'x', cwd: process.cwd(), timeoutMs: 1000, requestedSettings: {} }), /--ephemeral.*unsupported/i);
+  assert.equal(actorLaunches, 0);
+});
+
+test('Codex preflight checks resume capabilities before launching workflow actors', async () => {
+  let actorLaunches = 0;
+  const probe = ((_: string, args: readonly string[]) => ({
+    status: 0, error: undefined,
+    stdout: args[0] === '--version' ? 'codex 1.0.0' : args[1] === 'resume' ? 'Usage: codex exec resume -o <FILE>' : 'Usage: codex exec --json --ephemeral --skip-git-repo-check -C <DIR> -o <FILE>',
+    stderr: '',
+  })) as unknown as typeof spawnSync;
+  const actorSpawn = (() => { actorLaunches += 1; throw new Error('actor must not start'); }) as unknown as typeof import('node:child_process').spawn;
+  const adapter = createCodexAdapter({
+    executable: 'codex-test', spawnSyncProcess: probe, spawnProcess: actorSpawn,
+    shegMcpConfig: { enabled: true, transport: { type: 'stdio', command: 'node', args: [], cwd: process.cwd() } },
+  });
+  await assert.rejects(adapter.executeWorkflow!({ initialPrompt: 'x', turns: ['y'], cwd: process.cwd(), timeoutMs: 1000, requestedSettings: {} }), /resume.*--json.*unsupported/i);
+  assert.equal(actorLaunches, 0);
 });

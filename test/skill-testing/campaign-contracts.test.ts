@@ -76,6 +76,17 @@ test('comparison rejects changes to scenario evidence, criteria, or execution se
   } finally { input.cleanup(); }
 });
 
+test('comparison rejects changed timeout and concurrency settings', () => {
+  const input = fixture();
+  try {
+    const first = prepareCampaign(input.config, path.join(input.root, 'first-limits'));
+    const longer = prepareCampaign({ ...input.config, timeoutMs: 3600000 }, path.join(input.root, 'longer'));
+    const wider = prepareCampaign({ ...input.config, concurrency: 2 }, path.join(input.root, 'wider'));
+    assert.throws(() => assertComparableManifests(first, longer), /timeoutMs/i);
+    assert.throws(() => assertComparableManifests(first, wider), /concurrency/i);
+  } finally { input.cleanup(); }
+});
+
 test('preparation rejects missing guidance references and output collisions', () => {
   const input = fixture();
   try {

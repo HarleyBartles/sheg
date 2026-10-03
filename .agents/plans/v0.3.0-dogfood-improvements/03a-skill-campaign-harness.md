@@ -31,6 +31,9 @@ Plan 4 has completed Tasks 1-3 through `f09978f`, with 366 tests passing at that
 - Invalid JSON, wrong scenario identity, timeout, judge failure, and an actual behavior failure must retain separate outcomes.
 - A persuasive explanation with an invalid request must fail the deterministic grader without hiding useful semantic observations.
 - Discovery and workflow trials must not accidentally receive evaluator rubrics, hidden future turns, or old/new labels.
+- Guided workflow actors must receive their frozen selected guidance while future turns remain hidden, and the hash must represent the exact dispatched prompt sequence.
+- Deterministic selected-material checks must reject no-fit and mismatched material packets; historical grading must use the frozen scenario basis and recover from retained evaluator output.
+- Comparisons must include timeout, concurrency, adapter/runtime identity, and guided-arm constraints; Codex capability gaps must fail preflight before actor dispatch.
 
 ## Task 1: Freeze campaign contracts and snapshots
 
@@ -93,7 +96,7 @@ For the Codex adapter, use `codex exec --json` to start workflow trials, capture
 
 **Files:** Live campaign inputs in the owning skill, version manifests, generated runtime, roadmap, and the paused Plan 4 handoff. Campaign outputs remain transient and off-repository.
 
-- [x] Close the whole-branch review findings in the runner, manifests, workflow grader, comparison API, and scratch lifecycle. Resume recovers complete captures without redispatching, frozen inputs are verified at execution/reporting boundaries, workflow tool checks preserve turn boundaries, comparisons require explicit arms, and discard removes campaign outputs and campaign-scoped scratch data. Deterministic tests cover each boundary.
+- [x] Close whole-branch review findings in workflow prompt construction, selected-material grading, grade recovery, frozen historical grading, comparison invariants, Codex capability preflight, and runtime identity. Deterministic tests cover these behavior boundaries; workflow prompts retain guidance and hash the sent turns, and comparisons include execution limits and runtime identity.
 
 - [ ] Prepare a small live smoke campaign with explicit runtime/model settings under existing account-backed Codex access. No paid Sheg provider calls. Use frozen old/candidate guidance with a deliberate narrowly scoped test mutation, a no-guidance attribution arm, known calibration cases, discovery near-misses, and one scripted workflow. Restore authored guidance after the mutation; record it only as a campaign snapshot.
 - [ ] Pressure-test workflow actors should call the Sheg MCP tools required by their frozen checkpoints. Preserve raw CLI events and have the harness deterministically verify observed Sheg calls. Tool isolation and universal tool-use auditing remain ambient Agent Capability Pack concerns; do not add Sheg-owned hooks, telemetry, or isolation, and do not infer tool absence from actor claims.

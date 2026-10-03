@@ -69,10 +69,12 @@ export const campaignManifestSchema = z.object({
     requestSha256: z.string(),
     evidenceSha256: z.string(),
     criteriaSha256: z.string(),
-    suite: z.string(),
-    classification: z.string(),
-    repetitions: z.number().int(),
-    executionSha256: z.string(),
+  suite: z.string(),
+  classification: z.string(),
+  repetitions: z.number().int(),
+  concurrency: z.number().int(),
+  timeoutMs: z.number().int(),
+  executionSha256: z.string(),
   }).strict(),
   arms: z.array(armSchema).min(1),
   trials: z.array(trialSchema),
@@ -171,6 +173,8 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
       suite: config.suite,
       classification: config.classification,
       repetitions: config.repetitions,
+      concurrency: config.concurrency,
+      timeoutMs: config.timeoutMs,
       executionSha256: sha256(stableJson(config.execution)),
     },
     arms,
@@ -210,7 +214,8 @@ export function readFrozenCampaign(campaignDirectory: string): CampaignManifest 
       manifest.basis.evidenceSha256 !== sha256(stableJson({ controlledEvidence: manifest.evaluationBasis.controlledEvidence, workflowTurns: manifest.workflowTurns ?? null })) ||
       manifest.basis.criteriaSha256 !== sha256(stableJson(manifest.evaluationBasis.criteria)) ||
       manifest.basis.executionSha256 !== sha256(stableJson(manifest.execution)) ||
-      manifest.basis.suite !== manifest.suite || manifest.basis.classification !== manifest.classification || manifest.basis.repetitions !== manifest.repetitions) {
+      manifest.basis.suite !== manifest.suite || manifest.basis.classification !== manifest.classification || manifest.basis.repetitions !== manifest.repetitions ||
+      manifest.basis.concurrency !== manifest.concurrency || manifest.basis.timeoutMs !== manifest.timeoutMs) {
     throw new Error('Frozen campaign basis does not match its recorded hashes.');
   }
   for (const arm of manifest.arms) {
