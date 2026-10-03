@@ -596,7 +596,10 @@ test('a copied MCP splits local independent questions and resumes without replay
 
 async function killMcpConnection(client: Client, transport: StdioClientTransport): Promise<void> {
   const pid = transport.pid;
-  if (pid && isPidAlive(pid)) killPid(pid);
+  if (pid && isPidAlive(pid)) {
+    killPid(pid);
+    await waitForPidExit(pid);
+  }
   try { await client.close(); } catch { /* A deliberately terminated process closes its transport with an error. */ }
   try { await transport.close(); } catch { /* Process is already gone. */ }
 }
