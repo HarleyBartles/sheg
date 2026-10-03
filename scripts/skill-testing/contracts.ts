@@ -14,7 +14,7 @@ const armConfigSchema = z.object({
   if (arm.id === 'no-guidance' && arm.guidanceRoot) context.addIssue({ code: 'custom', path: ['guidanceRoot'], message: 'The no-guidance arm cannot load a skill body.' });
 });
 
-const workflowTurnSchema = z.object({ user: z.string().min(1), evidence: z.unknown().optional() }).strict();
+const workflowTurnSchema = z.object({ user: z.string().min(1), evidence: z.unknown().optional(), expectedTools: z.array(z.string()).default([]), criteria: z.array(z.string().min(1)).default([]) }).strict();
 
 export const campaignConfigSchema = z.object({
   id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
@@ -34,9 +34,15 @@ export const campaignConfigSchema = z.object({
   if (new Set(ids).size !== ids.length) context.addIssue({ code: 'custom', path: ['arms'], message: 'Campaign arm IDs must be unique.' });
 });
 
-export type CampaignConfig = z.infer<typeof campaignConfigSchema>;
+export type CampaignConfig = z.input<typeof campaignConfigSchema>;
 
 const trialSchema = z.object({ trialId: z.string(), armId: z.string(), repetition: z.number().int().positive(), attempts: z.array(z.string()) }).strict();
+const evaluationBasisSchema = z.object({
+  userRequest: z.string(),
+  controlledEvidence: z.unknown(),
+  criteria: z.array(z.object({ id: z.string(), condition: z.string() }).strict()),
+  prohibitedClaims: z.array(z.string()),
+}).strict();
 const armSchema = z.object({
   id: z.string(),
   skillReferenceHashes: z.record(z.string(), z.string()),
@@ -58,6 +64,7 @@ export const campaignManifestSchema = z.object({
   timeoutMs: z.number().int().positive(),
   execution: z.record(z.string(), z.unknown()),
   workflowTurns: z.array(workflowTurnSchema).optional(),
+  evaluationBasis: evaluationBasisSchema,
   basis: z.object({
     requestSha256: z.string(),
     evidenceSha256: z.string(),
@@ -148,6 +155,12 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
     timeoutMs: config.timeoutMs,
     execution: config.execution,
     ...(config.workflowTurns ? { workflowTurns: config.workflowTurns } : {}),
+    evaluationBasis: {
+      userRequest: scenario.userRequest,
+      controlledEvidence: scenario.controlledEvidence,
+      criteria: [...evaluator.criteria, ...(config.workflowTurns ? [{ id: 'workflow-tool-checkpoints', condition: config.workflowTurns.map((turn, index) => `Turn ${index + 1}: use ${turn.expectedTools.join(', ') || 'no Sheg tool'}${turn.criteria.length ? `; ${turn.criteria.join('; ')}` : ''}`).join('\n') }] : [])],
+      prohibitedClaims: evaluator.prohibitedClaims,
+    },
     basis: {
       requestSha256: sha256(scenario.userRequest),
       evidenceSha256: sha256(stableJson({ controlledEvidence: scenario.controlledEvidence, workflowTurns: config.workflowTurns ?? null })),

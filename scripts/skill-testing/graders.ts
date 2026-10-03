@@ -8,7 +8,7 @@ export type TrialGrade = {
   semantic: { result: 'pass' | 'fail' | 'uncertain' | 'not-run'; criteria: CriterionGrade[]; error?: string };
 };
 
-export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown): TrialGrade {
+export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[]): TrialGrade {
   const scenario = loadScenarioCatalog().find((item) => item.id === scenarioId);
   const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId);
   if (!scenario || !evaluator) throw new Error(`Unknown scenario: ${scenarioId}`);
@@ -17,12 +17,17 @@ export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValu
   if (actor.success && (actor.data.scenarioId !== scenario.id || actor.data.scenarioVersion !== scenario.version)) actorIssues.push('Actor scenario identity does not match the frozen scenario.');
   const requestIssues: string[] = [];
   if (actor.success) for (const [index, action] of actor.data.actions.entries()) {
+    if (!['run_inspect', 'run_start', 'run_list', 'run_query', 'run_get', 'run_cancel', 'run_resume', 'run_delete', 'run_storage'].includes(action.tool)) {
+      actorIssues.push(`actions.${index}: unknown Sheg tool ${action.tool}.`);
+      continue;
+    }
     if (!['run_inspect', 'run_start'].includes(action.tool)) continue;
-    const request = runRequestSchema.safeParse(action.input);
+    const request = runRequestSchema.safeParse(action.input.request ?? action.input);
     if (!request.success) requestIssues.push(`actions.${index}: ${request.error.issues.map((issue) => issue.message).join('; ')}`);
   }
   const semantic = semanticValue === undefined ? undefined : evaluatorResultSchema.safeParse(semanticValue);
-  if (semantic?.success && (semantic.data.scenarioId !== scenario.id || semantic.data.criterionResults.length !== evaluator.criteria.length || evaluator.criteria.some((criterion) => !semantic.data.criterionResults.some((grade) => grade.criterionId === criterion.id)))) {
+  const criteriaBasis = frozenCriteria ?? evaluator.criteria;
+  if (semantic?.success && (semantic.data.scenarioId !== scenario.id || semantic.data.criterionResults.length !== criteriaBasis.length || criteriaBasis.some((criterion) => !semantic.data.criterionResults.some((grade) => grade.criterionId === criterion.id)))) {
     return { actorContract: { result: actorIssues.length ? 'fail' : 'pass', issues: actorIssues }, deterministic: { result: requestIssues.length ? 'fail' : actor.success ? 'pass' : 'not-applicable', issues: requestIssues }, semantic: { result: 'uncertain', criteria: [], error: 'Evaluator output does not match the frozen scenario criteria.' } };
   }
   if (semantic && !semantic.success) return { actorContract: { result: actorIssues.length ? 'fail' : 'pass', issues: actorIssues }, deterministic: { result: requestIssues.length ? 'fail' : actor.success ? 'pass' : 'not-applicable', issues: requestIssues }, semantic: { result: 'uncertain', criteria: [], error: semantic.error.issues.map((issue) => issue.message).join('; ') } };

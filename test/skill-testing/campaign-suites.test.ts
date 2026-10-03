@@ -7,11 +7,11 @@ import { prepareCampaign } from '../../scripts/skill-testing/contracts.js';
 import { runCampaign, type CampaignAdapter, type ExecutionResult } from '../../scripts/skill-testing/runner.js';
 
 const turns = [
-  { user: 'Help design a paragraph-selection study. Ask for missing setup before starting.', evidence: { article: 'Seven paragraphs.' } },
-  { user: 'The cohort is approved. Inspect fit.', evidence: { cohort: ['reader-a', 'reader-b'] } },
-  { user: 'Start the study now.', evidence: { approved: true } },
-  { user: 'Q2 is answered, Q1 failed. Report partial status.', evidence: { status: 'partial' } },
-  { user: 'For each paragraph selector, ask about only their selected paragraph.', evidence: { selectedMaterial: ['p2', 'p5'] } },
+  { user: 'Help design a paragraph-selection study. Ask for missing setup before starting.', evidence: { article: 'Seven paragraphs.' }, expectedTools: [], criteria: ['Ask for the intended reader cohort and confirm the article stimulus before proposing execution.'] },
+  { user: 'The cohort is approved. Inspect fit.', evidence: { cohort: ['reader-a', 'reader-b'] }, expectedTools: ['run_inspect'], criteria: ['Inspect the typed request before starting it.'] },
+  { user: 'Start the study now.', evidence: { approved: true }, expectedTools: ['run_start'], criteria: ['Start only after explicit approval.'] },
+  { user: 'Q2 is answered, Q1 failed. Report partial status.', evidence: { status: 'partial' }, expectedTools: ['run_query'], criteria: ['Preserve the overall partial status and separate failed sibling.'] },
+  { user: 'For each paragraph selector, ask about only their selected paragraph.', evidence: { selectedMaterial: ['p2', 'p5'] }, expectedTools: ['run_query'], criteria: ['Check that the current contract supports the requested selection before starting.'] },
 ];
 function setup() {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-workflow-'));
@@ -36,8 +36,9 @@ test('workflow actor gets one conversation with Sheg tools and only incrementall
     const summary = await runCampaign(campaign, adapter);
     assert.equal(summary.captured, 1);
     assert.ok(input);
-    assert.match(input.initialPrompt, /Use the available Sheg MCP tools/);
-    assert.doesNotMatch(input.initialPrompt, /Do not call tools|Return only JSON|The cohort is approved/);
+    assert.match(input.initialPrompt, /Use available Sheg MCP tools/);
+    assert.doesNotMatch(input.initialPrompt, /Do not call tools, connectors|Return only JSON|The cohort is approved/);
+    assert.doesNotMatch(input.initialPrompt, /intended reader cohort|workflow-tool-checkpoints|expectedTools/);
     assert.match(input.initialPrompt, /Seven paragraphs/);
     assert.deepEqual(input.turns.map((turn) => turn.split('\n')[0]), turns.slice(1).map(({ user }) => user));
     assert.doesNotMatch(input.turns[0]!, /Q2 is answered|selected paragraph/);
@@ -62,7 +63,7 @@ test('scripted workflow evidence is frozen into the comparison basis', () => {
 
 test('owning-skill workflow fixture requires real Sheg actions at the relevant checkpoints', () => {
   const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/design-to-partial-results.json', 'utf8')) as { turns: Array<{ user: string; expectedTools: string[] }> };
-  assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [[], ['run_inspect'], ['run_start'], ['run_query'], ['run_start']]);
+  assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [[], ['run_inspect'], ['run_start'], ['run_query'], ['run_query']]);
   assert.match(fixture.turns[2]!.user, /Start the study/);
   assert.match(fixture.turns[4]!.user, /selected paragraph/);
 });

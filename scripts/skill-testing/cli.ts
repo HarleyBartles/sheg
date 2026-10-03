@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { prepareCampaign, campaignManifestSchema, type CampaignConfig } from './contracts.js';
 import { createCodexAdapter } from './codex-adapter.js';
 import { runCampaign } from './runner.js';
+import { compareCampaigns, gradeBlindComparisons, gradeCampaign, writeCampaignReport } from './report.js';
+import { calibrationAgreement, type CriterionGrade } from './graders.js';
 
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -46,6 +48,36 @@ export async function main(args: string[]): Promise<void> {
     process.stdout.write(`${JSON.stringify({ campaignId: manifest.campaignId, trialCount: manifest.trials.length + entries.filter((entry) => entry.type === 'trial-added').length, journalEntries: entries.length }, null, 2)}\n`);
     return;
   }
+  if (command === 'grade') {
+    const directory = path.resolve(required(rest, '--campaign'));
+    if (option(rest, '--backend') !== 'codex') throw new Error('Semantic evaluation requires explicit --backend codex.');
+    const graded = await gradeCampaign(directory, createCodexAdapter());
+    const report = writeCampaignReport(directory);
+    process.stdout.write(`${JSON.stringify({ command, campaignId: report.manifest.campaignId, graded, summary: report.summary }, null, 2)}\n`);
+    return;
+  }
+  if (command === 'report') {
+    const directory = path.resolve(required(rest, '--campaign'));
+    const report = writeCampaignReport(directory);
+    process.stdout.write(`${JSON.stringify({ command, campaignId: report.manifest.campaignId, summary: report.summary }, null, 2)}\n`);
+    return;
+  }
+  if (command === 'compare') {
+    if (option(rest, '--backend') !== 'codex') throw new Error('Blind comparison requires explicit --backend codex.');
+    const baseline = path.resolve(required(rest, '--baseline'));
+    const candidate = path.resolve(required(rest, '--candidate'));
+    const comparison = compareCampaigns(baseline, candidate);
+    const judgments = await gradeBlindComparisons(baseline, candidate, createCodexAdapter());
+    process.stdout.write(`${JSON.stringify({ baseline: comparison.baseline.summary, candidate: comparison.candidate.summary, comparisons: judgments.length }, null, 2)}\n`);
+    return;
+  }
+  if (command === 'calibrate') {
+    const reference = JSON.parse(readFileSync(path.resolve(required(rest, '--reference')), 'utf8')) as CriterionGrade[];
+    const observed = JSON.parse(readFileSync(path.resolve(required(rest, '--observed')), 'utf8')) as CriterionGrade[];
+    const result = calibrationAgreement(reference, observed);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
   if (command === 'run' || command === 'resume') {
     const directory = path.resolve(required(rest, '--campaign'));
     if (option(rest, '--backend') !== 'codex') throw new Error('Live campaign execution requires explicit --backend codex.');
@@ -56,7 +88,7 @@ export async function main(args: string[]): Promise<void> {
     process.stdout.write(`${JSON.stringify({ command, campaignId: JSON.parse(readFileSync(path.join(directory, 'campaign.json'), 'utf8')).campaignId, ...result }, null, 2)}\n`);
     return;
   }
-  throw new Error('Usage: skill:campaign -- prepare --config <file> --output <off-repo-dir> | status --campaign <dir> | run|resume --campaign <dir> --backend codex [--concurrency N]');
+  throw new Error('Usage: skill:campaign -- prepare --config <file> --output <off-repo-dir> | status|report --campaign <dir> | grade --campaign <dir> --backend codex | compare --baseline <dir> --candidate <dir> --backend codex | calibrate --reference <file> --observed <file> | run|resume --campaign <dir> --backend codex [--concurrency N]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

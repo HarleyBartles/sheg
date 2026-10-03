@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -107,5 +107,23 @@ test('timed out provider execution is retained as a runtime error rather than a 
     assert.equal(summary.runtimeErrors, 2);
     const journal = readFileSync(path.join(input.campaign, 'attempts.jsonl'), 'utf8');
     assert.match(journal, /timed-out/);
+  } finally { input.cleanup(); }
+});
+
+test('runner snapshots per-attempt Sheg MCP data for tool evidence inspection', async () => {
+  const input = setup();
+  try {
+    const backend = adapter(async (call) => {
+      const data = path.join(call.cwd, 'sheg-data');
+      mkdirSync(data, { recursive: true });
+      writeFileSync(path.join(data, 'run-evidence.json'), '{"tool":"run_inspect"}');
+      return result('captured');
+    });
+    await runCampaign(input.campaign, backend);
+    const manifest = JSON.parse(readFileSync(path.join(input.campaign, 'campaign.json'), 'utf8')) as { trials: Array<{ trialId: string }> };
+    const trial = manifest.trials[0]!;
+    const trialPart = trial.trialId.replace(/[^a-zA-Z0-9._-]/g, '-');
+    const copiedEvidence = path.join(input.campaign, 'attempts', trialPart, `${trial.trialId}:attempt-001`.replace(/[^a-zA-Z0-9._-]/g, '-'), 'sheg-data', 'run-evidence.json');
+    assert.equal(readFileSync(copiedEvidence, 'utf8'), '{"tool":"run_inspect"}');
   } finally { input.cleanup(); }
 });

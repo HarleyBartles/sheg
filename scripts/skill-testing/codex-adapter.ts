@@ -42,7 +42,7 @@ export function createCodexAdapter(options: { executable?: string; args?: string
       args.push(...(options.args ?? []), '-');
       try {
         const result = await new Promise<{ status: ExecutionResult['status']; exitCode: number | null; rawEvents: string; rawStderr: string }>((resolve, reject) => {
-        const child = spawnProcess(executable, args, { cwd: input.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+        const child = spawnProcess(executable, args, { cwd: input.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, SHEG_DATA_DIR: path.join(input.cwd, 'sheg-data') } });
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
         let settled = false;

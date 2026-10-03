@@ -28,6 +28,12 @@ test('wrong scenario identity and malformed evaluator output remain separate con
   assert.equal(badEvaluator.semantic.result, 'uncertain');
 });
 
+test('unknown Sheg tools fail the actor contract even when the final prose is plausible', () => {
+  const grade = gradeTrial(scenario.id, actor([{ tool: 'run_magic', input: {} }]), semantic());
+  assert.equal(grade.actorContract.result, 'fail');
+  assert.match(grade.actorContract.issues.join(' '), /unknown Sheg tool/);
+});
+
 test('calibration reports disagreement rather than forcing a passing judgment', () => {
   const expected = [{ criterionId: 'validity', result: 'fail' as const, evidence: 'Schema rejects invented field.' }];
   const observed = [{ criterionId: 'validity', result: 'pass' as const, evidence: 'Prose sounded plausible.' }];

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { campaignManifestSchema, type CampaignManifest } from './contracts.js';
@@ -123,7 +123,7 @@ export async function runCampaign(
           const turns = manifest.workflowTurns.map((turn) => `${turn.user}${turn.evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(turn.evidence)}`}`);
           const workflowPrelude = arm.actorPrompt.slice(0, userBoundary)
             .replace('Use the supplied skill and references to respond to the user request. Treat the evidence below as a mock fixture, not a live tool result.', 'Use the supplied skill and references to handle the conversation. The scripted evidence is fixture data supplied only at its listed turn.')
-            .replace('Do not call tools, connectors, inference providers, or external services. If a tool action would help, record it as a proposed action only.', 'Use the available Sheg MCP tools when the user asks you to inspect, start, query, or resume a study. Do not call external services outside Sheg.')
+            .replace('Do not call tools, connectors, inference providers, or external services. If a tool action would help, record it as a proposed action only.', 'Use available Sheg MCP tools when the user asks you to inspect, start, query, or resume a study. Do not call tools outside Sheg or use hosted inference. Never invent a tool result; report unavailable local services clearly.')
             .replace('Return only JSON with scenarioId, scenarioVersion, actions (objects with tool and input), finalResponse, and uncertainties.', 'Respond to the user naturally and use tools when needed.');
           result = await adapter.executeWorkflow!({
             initialPrompt: `${workflowPrelude}\n## Workflow turn 1\n${turns[0]}`,
@@ -143,12 +143,15 @@ export async function runCampaign(
       }
       const attemptRoot = path.join(root, 'attempts', fileSegment(trial.trialId), fileSegment(attemptId));
       mkdirSync(attemptRoot, { recursive: true });
+      const shegDataDirectory = path.join(campaignScratchRoot(root, trial.trialId, attemptId), 'sheg-data');
+      if (existsSync(shegDataDirectory)) cpSync(shegDataDirectory, path.join(attemptRoot, 'sheg-data'), { recursive: true, errorOnExist: true });
       writeAtomic(path.join(attemptRoot, 'raw-events.jsonl'), result.rawEvents);
       writeAtomic(path.join(attemptRoot, 'raw-final-message.txt'), result.rawFinalMessage);
       writeAtomic(path.join(attemptRoot, 'raw-stderr.txt'), result.rawStderr);
       writeAtomic(path.join(attemptRoot, 'result.json'), `${JSON.stringify({
         requestedSettings: manifest.execution,
         observedSettings: result.observedSettings,
+        retainedShegData: existsSync(path.join(attemptRoot, 'sheg-data')) ? 'sheg-data/' : null,
         sessionId: result.sessionId,
         exitCode: result.exitCode,
         status: result.status,
