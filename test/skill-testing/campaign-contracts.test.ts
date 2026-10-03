@@ -93,3 +93,21 @@ test('trial identities are unique and discovery snapshots descriptions without s
     assert.deepEqual(noGuidance.arms[0]!.skillReferenceHashes, {});
   } finally { input.cleanup(); }
 });
+
+test('discovery prompt has a distinct skill-selection result contract and no skill-body injection', () => {
+  const input = fixture();
+  try {
+    const config: CampaignConfig = {
+      ...input.config, id: 'discovery-contract', scenarioId: 'discover-polling-vocabulary-near-miss', suite: 'discovery',
+      arms: [{ id: 'candidate', guidanceRoot: path.join(input.root, 'candidate'), referencePaths: [] }],
+    };
+    const manifest = prepareCampaign(config, path.join(input.root, 'discovery-contract'));
+    const prompt = manifest.arms[0]!.discoveryPrompt;
+    assert.match(prompt, /selectedSkill \(study-design, stimulus-response-polling, or null\)/);
+    assert.match(prompt, /candidate guidance/);
+    assert.match(prompt, /querying recorded evidence/);
+    assert.match(prompt, /study-design/);
+    assert.doesNotMatch(prompt, /candidate skill body|# Stimulus-response polling|# Study design/);
+    assert.match(prompt, /responsive CSS/);
+  } finally { input.cleanup(); }
+});

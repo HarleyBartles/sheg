@@ -112,4 +112,6 @@
       "A task can include Q1's answer while omitting Q2's answer when both are prior answers on the same path."
     ]
   }
+,
+  {"scenarioId":"discover-polling-positive","version":1,"criteria":[{"id":"skill-selection","condition":"Selects stimulus-response-polling because the user needs help with a Sheg run, typed evidence, partial completion, and a follow-on."},{"id":"trigger-rationale","condition":"Explains the polling workflow trigger based on run/evidence operations, not merely article subject matter."}],"prohibitedClaims":[]}
 ]

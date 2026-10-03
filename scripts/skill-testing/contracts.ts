@@ -88,7 +88,7 @@ function actorPrompt(base: string, snapshot: GuidanceSnapshot): string {
   return `${base.slice(0, boundary)}${marker}${material}`;
 }
 
-function discoveryPrompt(base: string, ownerSkill: string, description: string): string {
+function discoveryPrompt(base: string, scenarioId: string, scenarioVersion: number, ownerSkill: string, description: string): string {
   const marker = '\n## User request\n';
   const boundary = base.indexOf(marker);
   if (boundary < 0) throw new Error('Scenario renderer did not expose its request boundary.');
@@ -96,7 +96,7 @@ function discoveryPrompt(base: string, ownerSkill: string, description: string):
     .map((scenario) => scenario.ownerSkill)
     .filter((skill, index, all) => all.indexOf(skill) === index)
     .map((skill) => ({ name: skill, description: skill === ownerSkill ? description : readDescription(skill) }));
-  const intro = 'Select which available skill, if any, should guide this request. Return the selected skill name or none and explain the trigger. Do not use skill bodies or references in this discovery trial.';
+  const intro = `Select which available skill, if any, should guide this request. Return only JSON with scenarioId, scenarioVersion, selectedSkill (study-design, stimulus-response-polling, or null), and rationale. Use descriptions only; do not use skill bodies or references. scenarioId: ${scenarioId}; scenarioVersion: ${scenarioVersion}.`;
   return `${intro}\n\n## Available skills\n${JSON.stringify(candidates, null, 2)}${base.slice(boundary)}`;
 }
 
@@ -133,7 +133,7 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
   }));
   const arms = snapshots.map(({ arm, snapshot }) => {
     const prompt = snapshot ? actorPrompt(rendered, snapshot) : control;
-    const discovery = discoveryPrompt(control, scenario.ownerSkill, snapshot?.description ?? readDescription(scenario.ownerSkill));
+    const discovery = discoveryPrompt(control, scenario.id, scenario.version, scenario.ownerSkill, snapshot?.description ?? readDescription(scenario.ownerSkill));
     return {
       id: arm.id,
       skillReferenceHashes: snapshot?.hashes ?? {},

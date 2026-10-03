@@ -1,5 +1,6 @@
 import { evaluatorResultSchema, actorTraceSchema, loadEvaluatorCatalog, loadScenarioCatalog } from '../skill-scenario.js';
 import { runRequestSchema } from '../../src/domain/run/request.js';
+import { z } from 'zod';
 
 export type CriterionGrade = { criterionId: string; result: 'pass' | 'fail' | 'uncertain'; evidence: string };
 export type TrialGrade = {
@@ -8,12 +9,25 @@ export type TrialGrade = {
   semantic: { result: 'pass' | 'fail' | 'uncertain' | 'not-run'; criteria: CriterionGrade[]; error?: string };
 };
 
-export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[]): TrialGrade {
+export const discoveryTraceSchema = z.object({
+  scenarioId: z.string(),
+  scenarioVersion: z.number().int().positive(),
+  selectedSkill: z.enum(['study-design', 'stimulus-response-polling']).nullable(),
+  rationale: z.string().min(1),
+}).strict();
+
+export function gradeTrial(scenarioId: string, actorValue: unknown, semanticValue?: unknown, frozenCriteria?: readonly { id: string; condition: string }[], suite: 'focused' | 'discovery' | 'workflow' = 'focused'): TrialGrade {
   const scenario = loadScenarioCatalog().find((item) => item.id === scenarioId);
   const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenarioId);
   if (!scenario || !evaluator) throw new Error(`Unknown scenario: ${scenarioId}`);
-  const actor = actorTraceSchema.safeParse(actorValue);
+  const discovery = suite === 'discovery' ? discoveryTraceSchema.safeParse(actorValue) : undefined;
+  const normalizedActorValue = suite === 'discovery' && discovery?.success ? {
+    scenarioId: discovery.data.scenarioId, scenarioVersion: discovery.data.scenarioVersion, actions: [],
+    finalResponse: JSON.stringify({ selectedSkill: discovery.data.selectedSkill, rationale: discovery.data.rationale }), uncertainties: [],
+  } : actorValue;
+  const actor = actorTraceSchema.safeParse(normalizedActorValue);
   const actorIssues = actor.success ? [] : actor.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
+  if (suite === 'discovery' && !discovery?.success) actorIssues.push(...(discovery?.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`) ?? ['Discovery result is invalid.']));
   if (actor.success && (actor.data.scenarioId !== scenario.id || actor.data.scenarioVersion !== scenario.version)) actorIssues.push('Actor scenario identity does not match the frozen scenario.');
   const requestIssues: string[] = [];
   if (actor.success) for (const [index, action] of actor.data.actions.entries()) {

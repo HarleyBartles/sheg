@@ -20,6 +20,9 @@ import {
 const expectedScenarioIds = [
   'changed-rubric-comparison',
   'cumulative-journey-material',
+  'discover-polling-positive',
+  'discover-polling-vocabulary-near-miss',
+  'discover-study-design-positive',
   'independent-dependent-questions',
   'partial-run-selected-question',
   'selected-material-isolation-no-fit',

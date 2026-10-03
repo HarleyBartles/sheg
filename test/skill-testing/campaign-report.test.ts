@@ -42,6 +42,7 @@ test('report separates runtime errors from behavioral denominators and escapes a
     assert.equal(report.summary.sampleSize, 2);
     assert.equal(report.summary.completeTrialPasses, 1);
     assert.equal(report.summary.semanticNotRun, 0);
+    assert.equal((report.summary.criterionCounts as Record<string, { pass: number }>)[manifest.evaluationBasis.criteria[0]!.id]!.pass, 1);
     assert.doesNotMatch(judgePrompt, /candidate skill body|Arm: candidate|candidate label/);
     assert.match(judgePrompt, /Private evaluation criteria/);
     assert.match(rendered.html, /&lt;script&gt;nope&lt;\/script&gt;/);

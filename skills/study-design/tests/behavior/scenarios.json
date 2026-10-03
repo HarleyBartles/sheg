@@ -35,4 +35,21 @@
       "mockOnly": true
     }
   }
+,
+  {
+    "id": "discover-study-design-positive",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "referencePaths": [],
+    "userRequest": "I'm testing an article with seven paragraphs and one pull quote. I want readers to choose the paragraph that best represents it, then assess that chosen paragraph on its own. How should I structure the study?",
+    "controlledEvidence": { "requestType": "study-design", "mockOnly": true }
+  },
+  {
+    "id": "discover-polling-vocabulary-near-miss",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "referencePaths": [],
+    "userRequest": "The headline says our neighborhood poll is open. Please fix the responsive CSS for the poll banner so it wraps on mobile.",
+    "controlledEvidence": { "requestType": "frontend-copy-and-css", "mockOnly": true }
+  }
 ]

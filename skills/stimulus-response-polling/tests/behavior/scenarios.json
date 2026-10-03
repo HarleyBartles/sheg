@@ -298,4 +298,13 @@
       "mockOnly": true
     }
   }
+,
+  {
+    "id": "discover-polling-positive",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "referencePaths": [],
+    "userRequest": "A Sheg respondent run is partial: every reader answered the second question, one reader's first answer failed, and two respondents selected different paragraphs. Help me query the evidence accurately and design the selected-paragraph follow-up.",
+    "controlledEvidence": { "requestType": "Sheg execution and evidence interpretation", "mockOnly": true }
+  }
 ]

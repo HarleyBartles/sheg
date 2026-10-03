@@ -59,7 +59,7 @@ export async function gradeCampaign(directory: string, adapter: CampaignAdapter)
     const actorValue = manifest.suite === 'workflow'
       ? { scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion, actions: [], finalResponse: rawFinal || 'No final response was captured.', uncertainties: [] }
       : (() => { try { return JSON.parse(rawFinal) as unknown; } catch { return rawFinal; } })();
-    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria);
+    const grade = gradeTrial(manifest.scenarioId, actorValue, evaluatorError ? undefined : semantic, manifest.evaluationBasis.criteria, manifest.suite);
     if (evaluatorError) grade.semantic = { result: 'uncertain', criteria: [], error: evaluatorError };
     writeFileSync(path.join(evaluatorRoot, 'grade.json'), `${JSON.stringify(grade, null, 2)}\n`);
     appendFileSync(path.join(root, 'grades.jsonl'), `${JSON.stringify({ trialId: trial.trialId, attemptId: capture.attemptId, gradePath: path.relative(root, path.join(evaluatorRoot, 'grade.json')).replaceAll('\\', '/') })}\n`);
@@ -87,7 +87,7 @@ export function collectCampaignReport(directory: string): Report {
     else try { parsed = JSON.parse(finalText) as unknown; } catch { /* Malformed raw output stays preserved and grades as an actor contract failure. */ }
     const evaluatorGradePath = path.join(attemptRoot, 'evaluator', 'grade.json');
     const semanticGrade = existsSync(evaluatorGradePath) ? (JSON.parse(readFileSync(evaluatorGradePath, 'utf8')) as TrialGrade).semantic : undefined;
-    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria);
+    const grade = gradeTrial(manifest.scenarioId, parsed, undefined, manifest.evaluationBasis.criteria, manifest.suite);
     if (semanticGrade) grade.semantic = semanticGrade;
     const responseExcerpt = parsed && typeof parsed === 'object' && 'finalResponse' in parsed && typeof parsed.finalResponse === 'string' ? parsed.finalResponse : finalText;
     const settings = existsSync(resultPath) ? (JSON.parse(readFileSync(resultPath, 'utf8')) as { observedSettings?: Record<string, unknown> }).observedSettings ?? {} : {};
@@ -101,6 +101,11 @@ export function collectCampaignReport(directory: string): Report {
     return existsSync(file) ? [JSON.parse(readFileSync(file, 'utf8')) as unknown] : [];
   }) : [];
   const captured = trials.filter((trial) => trial.status === 'captured');
+  const criterionCounts = Object.fromEntries(manifest.evaluationBasis.criteria.map(({ id }) => [id, {
+    pass: captured.filter((trial) => trial.grade?.semantic.criteria.find((grade) => grade.criterionId === id)?.result === 'pass').length,
+    fail: captured.filter((trial) => trial.grade?.semantic.criteria.find((grade) => grade.criterionId === id)?.result === 'fail').length,
+    uncertain: captured.filter((trial) => trial.grade?.semantic.criteria.find((grade) => grade.criterionId === id)?.result === 'uncertain').length,
+  }]));
   const summary = {
     campaignId: manifest.campaignId, scenarioId: manifest.scenarioId, scenarioVersion: manifest.scenarioVersion,
     suite: manifest.suite, classification: manifest.classification, sampleSize: trials.length,
@@ -116,6 +121,7 @@ export function collectCampaignReport(directory: string): Report {
     missingObservedEvaluatorModel: captured.filter((trial) => typeof trial.evaluatorSettings?.model !== 'string').length,
     usageAndTiming: 'unavailable unless captured by the execution adapter',
     guidanceHashes: Object.fromEntries(manifest.arms.map((arm) => [arm.id, arm.skillReferenceHashes])),
+    criterionCounts,
   };
   return { manifest, trials, comparisons, summary };
 }

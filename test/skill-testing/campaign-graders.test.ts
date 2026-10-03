@@ -48,3 +48,13 @@ test('owning-skill calibration retains labeled good, bad, and borderline cases w
   const observed = Object.entries(expected).map(([criterionId, result]) => ({ criterionId, result, evidence: 'Calibration reference judgment.' }));
   assert.deepEqual(calibrationAgreement(observed, observed), { agreement: 1, disputed: [] });
 });
+
+test('discovery grades a distinct skill-selection output and rejects stale or malformed selections', () => {
+  const id = 'discover-polling-vocabulary-near-miss';
+  const good = { scenarioId: id, scenarioVersion: 1, selectedSkill: null, rationale: 'This is a frontend CSS task; poll is incidental.' };
+  const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === id)!;
+  const judged = { scenarioId: id, criterionResults: evaluator.criteria.map(({ id: criterionId }) => ({ criterionId, result: 'pass', evidence: 'The output identifies the CSS task.' })), notes: '' };
+  assert.equal(gradeTrial(id, good, judged, evaluator.criteria, 'discovery').actorContract.result, 'pass');
+  assert.equal(gradeTrial(id, { ...good, scenarioVersion: 2 }, judged, evaluator.criteria, 'discovery').actorContract.result, 'fail');
+  assert.equal(gradeTrial(id, { ...good, selectedSkill: 'made-up' }, judged, evaluator.criteria, 'discovery').actorContract.result, 'fail');
+});
