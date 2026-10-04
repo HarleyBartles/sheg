@@ -38508,7 +38508,11 @@ var jevModelMetadata = {
   },
   typesafe: {
     "jev-latest": {
-      contextLimit: null,
+      contextLimit: 32e3,
+      contextEvidence: {
+        sourceUrl: "https://docs.typesafe.ai/models",
+        checkedOn: "2026-10-04"
+      },
       inputUsdPerMillion: 0.042,
       outputUsdPerMillion: 0,
       priceEvidence: {
@@ -38550,15 +38554,24 @@ var choiceAnswerSchema = external_exports.object({
 var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
 var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
 var answerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
+var wireUsageSchema = external_exports.object({
+  input_tokens: external_exports.number().int().nonnegative().optional(),
+  output_tokens: external_exports.number().int().nonnegative().optional(),
+  cost: external_exports.number().finite().nonnegative().optional()
+}).passthrough();
+var nativeWireUsageSchema = wireUsageSchema.extend({
+  input_tokens: external_exports.number().int().nonnegative(),
+  output_tokens: external_exports.number().int().nonnegative()
+});
 var wireResponseSchema = external_exports.object({
   model: external_exports.string().min(1),
   answers: external_exports.record(external_exports.string(), external_exports.unknown()),
-  usage: external_exports.object({
-    input_tokens: external_exports.number().int().nonnegative().optional(),
-    output_tokens: external_exports.number().int().nonnegative().optional(),
-    cost: external_exports.number().finite().nonnegative().optional()
-  }).passthrough()
+  usage: wireUsageSchema
 }).passthrough();
+var nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
+function parseWireResponse(payload, route) {
+  return (route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
+}
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
@@ -38667,7 +38680,7 @@ var JevProvider = class {
       } catch {
         throw new JevCallError("Jev returned an unreadable response.", attempts);
       }
-      const parsedResponse = wireResponseSchema.safeParse(payload);
+      const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) {
         throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
       }
@@ -38756,7 +38769,7 @@ var JevProvider = class {
       } catch {
         throw new JevCallError("Jev returned an unreadable response.", attempts);
       }
-      const parsedResponse = wireResponseSchema.safeParse(payload);
+      const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
@@ -39298,7 +39311,7 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.7",
+  version: "0.3.0-dev.8",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',

@@ -29,7 +29,7 @@ TypeSafe documents parallel independent questions in one System One request. She
 
 OpenRouter's Decisions endpoint is an alpha API. Its response may include `usage.cost`; when present, Sheg records that as provider-reported evidence. TypeSafe's published rate is $0.042 per million input tokens, with output tokens listed as free. Sheg may estimate per-decision cost from complete response token counts using a rate recorded for the served model and label it as a published-rate estimate. Account-specific billing remains visible in the selected provider's dashboard. Sheg does not present a cumulative bill or spend ceiling.
 
-Context fit is model-specific. OpenRouter's pinned `typesafe/jev-1.13` path retains the existing 32,768-token context assumption and estimates request tokens as serialized UTF-8 bytes divided by three, rounded up, with a 20% reserve. TypeSafe's native docs and model metadata do not publish a context limit, so native preflight reports fit as unverified and a paid request is blocked until that evidence exists. The OpenRouter limit is not transferred to the native route by analogy.
+Context fit is route- and model-specific. OpenRouter's pinned `typesafe/jev-1.13` path retains its existing 32,768-token context ceiling and estimates request tokens as serialized UTF-8 bytes divided by three, rounded up, with a 20% reserve. For native `jev-latest`, TypeSafe's official model reference reports that Jev 1.13 (`jev-1.13.0`) accepts 64k tokens per request and separately limits the combined state and longest question to 32k; the API schema reports the served model and usage but no context metadata. Checked 2026-10-04. Sheg conservatively applies the stricter 32,000-token bound to the complete serialized request, including all questions, then applies the same estimate and reserve for an effective estimated threshold of 25,600 tokens. This estimate is not tokenizer-exact and does not guarantee provider acceptance; an actual refusal is reported as a safe provider failure. Unknown native model names remain unavailable until route-specific evidence is added. TypeSafe documents `jev-latest` as a moving alias, so re-check official model documentation before a stable release and retain the actual served model in run evidence. The OpenRouter limit is not transferred to the native route by analogy.
 
 ## Attempts and recovery
 
@@ -44,6 +44,7 @@ Route, model, and effective endpoint are part of execution identity. Changing an
 - [TypeSafe JavaScript SDK guide](https://docs.typesafe.ai/sdk/javascript)
 - [TypeSafe JavaScript SDK v0.6.0 client](https://github.com/typesafe-ai/typesafe-sdk-js/blob/v0.6.0/src/client.ts)
 - [TypeSafe OpenAPI](https://api.typesafe.ai/openapi.json)
+- [TypeSafe model reference](https://docs.typesafe.ai/models)
 - [TypeSafe pricing announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
 - [OpenRouter Decisions API reference](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request)
 - [Microsoft CredWrite](https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credwritea)
