@@ -159,6 +159,45 @@ test('partial-journey workflow fixture seeds the real isolated Sheg store for ea
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('selected-material workflow replaces its sourceRunId token with each attempt-owned run', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-selected-workflow-runner-'));
+  try {
+    const config: CampaignConfig = {
+      id: 'selected-material-workflow-runner', scenarioId: 'selected-material-follow-on', suite: 'workflow',
+      classification: 'capability', repetitions: 1, concurrency: 1, timeoutMs: 60_000,
+      execution: { adapter: 'codex', model: 'test-model' },
+      arms: [{ id: 'candidate', guidanceRoot: path.resolve('skills/stimulus-response-polling'), referencePaths: ['references/run-and-recovery.md'] }],
+    };
+    const campaign = path.join(root, 'campaign');
+    const manifest = prepareCampaign(config, campaign);
+    assert.deepEqual(manifest.workflowSetup, { kind: 'selected-material-follow-on', version: 1 });
+    let observedSourceRunId: string | undefined;
+    const result = await runCampaign(campaign, {
+      async preflight() { return { adapter: 'workflow-test' }; },
+      async execute() { throw new Error('Selected-material fixture must use workflow execution.'); },
+      async executeWorkflow(input) {
+        assert.deepEqual(input.workflowSetup, { kind: 'selected-material-follow-on', version: 1 });
+        const prompts = [input.initialPrompt, ...input.turns];
+        assert.ok(prompts.every((prompt) => !prompt.includes('{{sourceRunId}}')));
+        const sourceRunId = /Use run_query on source run ([0-9a-f-]{36})/i.exec(prompts[0]!)?.[1];
+        assert.ok(sourceRunId);
+        observedSourceRunId = sourceRunId;
+        const store = openRunStore(path.join(input.cwd, 'sheg-data'));
+        try {
+          const status = store.getStatus(sourceRunId);
+          assert.equal(status.status, 'completed');
+          assert.equal(status.usedCalls, 3);
+          assert.equal(store.queryEvidence({ sourceRunId, criteria: { questionId: 'q-transit-claim' } }).items.length, 3);
+        } finally { store.close(); }
+        return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: 'workflow fixture accepted', rawStderr: '', sessionId: 'workflow-test', observedSettings: {}, workflowTurnEvents: [] };
+      },
+    });
+    assert.ok(observedSourceRunId);
+    assert.equal(result.runtimeErrors, 0);
+    assert.equal(result.captured, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('controlled recovery provider exists only in its harness and accepts its frozen route', async () => {
   assert.throws(() => assertControlledRecoveryEnvironment({}), /explicit isolated test environment/i);
   assertControlledRecoveryEnvironment({ NODE_ENV: 'test', SHEG_TEST_PROVIDER: 'partial-journey-recovery' });

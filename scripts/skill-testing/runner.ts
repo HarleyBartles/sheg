@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readFrozenCampaign, type CampaignManifest } from './contracts.js';
+import { readFrozenCampaign, type CampaignManifest, type WorkflowSetup } from './contracts.js';
 import { sha256, stableJson } from './snapshots.js';
 import { seedWorkflowState } from './workflow-seeds.js';
+
+export type { WorkflowSetup } from './contracts.js';
 
 export interface ExecutionResult {
   status: 'completed' | 'timed-out' | 'failed';
@@ -16,8 +18,6 @@ export interface ExecutionResult {
   observedSettings: Record<string, unknown>;
   workflowTurnEvents?: string[];
 }
-
-export type WorkflowSetup = { kind: 'partial-journey-recovery'; version: 1 };
 
 export interface CampaignAdapter {
   preflight?(workflowSetup?: WorkflowSetup): Promise<Record<string, unknown>>;
@@ -68,13 +68,16 @@ function fileSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
-function substituteRunId(value: unknown, runId: string | undefined): unknown {
+function substituteWorkflowIds(value: unknown, ids: Record<string, string | undefined>): unknown {
   if (typeof value === 'string') {
-    if (value.includes('{{runId}}') && !runId) throw new Error('Workflow fixture requires a seeded run ID.');
-    return runId ? value.replaceAll('{{runId}}', runId) : value;
+    return value.replace(/\{\{([a-zA-Z][a-zA-Z0-9]*)\}\}/g, (token, key: string) => {
+      const id = ids[key];
+      if (!id) throw new Error(`Workflow fixture requires seeded ${key}.`);
+      return id;
+    });
   }
-  if (Array.isArray(value)) return value.map((entry) => substituteRunId(entry, runId));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substituteRunId(entry, runId)]));
+  if (Array.isArray(value)) return value.map((entry) => substituteWorkflowIds(entry, ids));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substituteWorkflowIds(entry, ids)]));
   return value;
 }
 
@@ -152,12 +155,12 @@ export async function runCampaign(
           const guidanceMarker = '\n## Current skill and declared references\n';
           const guidanceBoundary = arm.actorPrompt.indexOf(guidanceMarker);
           if (userBoundary < 0 || (guidanceBoundary < 0 && Object.keys(arm.skillReferenceHashes).length > 0) || !manifest.workflowTurns?.length) throw new Error('Workflow prompt, frozen guidance, or turns are missing.');
-          const workflowRunId = manifest.workflowSetup
-            ? (await seedWorkflowState(manifest.workflowSetup, path.join(cwd, 'sheg-data'))).runId
-            : undefined;
+          const workflowIds: Record<string, string> = manifest.workflowSetup
+            ? await seedWorkflowState(manifest.workflowSetup, path.join(cwd, 'sheg-data'))
+            : {};
           const turns = manifest.workflowTurns.map((turn) => {
-            const user = substituteRunId(turn.user, workflowRunId) as string;
-            const evidence = substituteRunId(turn.evidence, workflowRunId);
+            const user = substituteWorkflowIds(turn.user, workflowIds) as string;
+            const evidence = substituteWorkflowIds(turn.evidence, workflowIds);
             return `${user}${evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(evidence)}`}`;
           });
           const guidance = guidanceBoundary >= 0 ? arm.actorPrompt.slice(guidanceBoundary) : '';

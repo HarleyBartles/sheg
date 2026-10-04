@@ -6,7 +6,7 @@ import { generatePluginPackage } from './generate-plugin-package.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const generatedDirectories = ['dist', 'skills/stimulus-response-polling/assets', 'plugins/sheg'];
-const generatedFiles = ['plugin.json'];
+const generatedFiles = ['package-lock.json', 'plugin.json'];
 
 async function snapshot(): Promise<Map<string, Buffer>> {
   const files = new Map<string, Buffer>();

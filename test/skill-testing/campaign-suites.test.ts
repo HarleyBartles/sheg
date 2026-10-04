@@ -107,8 +107,15 @@ test('live workflow fixture is read-only and changes state by interpreting the c
   assert.doesNotMatch(fixture.turns.map(({ user }) => user).join(' '), /start the study|run_start/i);
 });
 
-test('selected-material workflow fixture uses real Sheg checkpoints without starting inference', () => {
-  const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/selected-material-follow-on.json', 'utf8')) as { turns: Array<{ user: string; expectedTools: string[] }> };
+test('selected-material workflow fixture seeds source evidence and uses real Sheg checkpoints without starting inference', () => {
+  const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/selected-material-follow-on.json', 'utf8')) as { id: string; version: number; setup: { kind: string; version: number }; turns: Array<{ user: string; expectedTools: string[] }> };
+  const scenario = loadScenarioCatalog().find(({ id }) => id === fixture.id);
+  const evaluator = loadEvaluatorCatalog().find(({ scenarioId }) => scenarioId === fixture.id);
+  assert.equal(fixture.id, 'selected-material-follow-on');
+  assert.equal(fixture.version, 1);
+  assert.equal(scenario?.version, fixture.version);
+  assert.equal(evaluator?.version, fixture.version);
+  assert.deepEqual(fixture.setup, { kind: 'selected-material-follow-on', version: 1 });
   assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [['run_query'], ['run_inspect'], []]);
   assert.match(fixture.turns[0]!.user, /\{\{sourceRunId\}\}/);
   assert.match(fixture.turns[1]!.user, /Inspect fit and coverage only; do not start/);

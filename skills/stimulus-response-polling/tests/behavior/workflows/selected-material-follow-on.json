@@ -1,6 +1,7 @@
 {
   "id": "selected-material-follow-on",
-  "version": 2,
+  "version": 1,
+  "setup": { "kind": "selected-material-follow-on", "version": 1 },
   "turns": [
     {
       "user": "Use run_query on source run {{sourceRunId}} for question q-transit-claim. Report each respondent's choice and saved selectedMaterial. Do not start or inspect a follow-on yet.",

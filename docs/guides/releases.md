@@ -6,11 +6,9 @@ The repository remains private to npm and is not published as an npm package.
 
 ## Version policy
 
-Keep `package.json`, both root version fields in `package-lock.json`, and
-`plugin.json` on the same version. Do not change them on ordinary feature
-merges to `develop`.
+The root `package.json` `version` is the only authored product-version value. Change it to the version assigned to the planned develop merge or release, then run `npm run build` to regenerate the lockfile root fields, `plugin.json`, bundled MCP runtime, and `plugins/sheg/` metadata. Inspect generated diffs and run release validation; do not hand-edit generated version copies. The MCP initialization version must agree with the package identity.
 
-The root `package.json` version is the product-version authority, and the MCP initialization version must agree with it. Deliberate dogfood checkpoints on `develop` may use `MAJOR.MINOR.PATCH-dev.N`; prepared release candidates may use `MAJOR.MINOR.PATCH-rc.N`. Increment only at intentional checkpoints, not every merge. The dogfood roadmap assigns the next checkpoint version before implementation, and the develop manifests advertise that candidate identity without creating a release tag. See [ADR-0023](../decisions/0023-identify-development-and-candidate-builds.md).
+Planned dogfood feature merges to `develop` use their assigned `MAJOR.MINOR.PATCH-dev.N`; commits within one pull request do not increment it. Prepared release candidates may use `MAJOR.MINOR.PATCH-rc.N`. The roadmap assigns each planned develop merge its candidate identity, and these manifests do not create a release tag. See [ADR-0023](../decisions/0023-identify-development-and-candidate-builds.md).
 
 Before `1.0.0`:
 
@@ -95,7 +93,7 @@ verify an identity without creating an archive, use:
 python3 scripts/package-plugin.py --tag v0.1.0 --validate-only
 ```
 
-For local candidate inspection, omit the release tag and use an explicit candidate filename. This creates a local ZIP and does not publish it. Record the candidate version and SHA-256 digest with dogfood evidence. Stable publication accepts only `vMAJOR.MINOR.PATCH` tags with matching stable manifests; prerelease tags do not publish. Promote a candidate by removing its suffix on the release branch and aligning all version surfaces before tagging.
+For local candidate inspection, omit the release tag and use an explicit candidate filename. This creates a local ZIP and does not publish it. Stable publication accepts only `vMAJOR.MINOR.PATCH` tags with matching stable manifests; prerelease tags do not publish. Promote a candidate by removing its suffix on the release branch, changing root `package.json`, and rebuilding before tagging.
 
 On Windows, the npm wrapper uses the Python launcher (`py -3`). By default the
 ZIP is written to `release-artifacts/sheg-v<version>.zip`.

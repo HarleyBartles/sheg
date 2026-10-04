@@ -1,13 +1,13 @@
 [
   {
     "id": "selected-material-isolation-no-fit",
-    "version": 9,
+    "version": 10,
     "ownerSkill": "stimulus-response-polling",
     "tags": ["selected-material", "material-history", "shared-safeguard"],
     "referencePaths": [
       "references/run-and-recovery.md"
     ],
-    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent only the paragraph they picked plus the shared pull quote, then ask whether that paragraph expresses the quote. Some may choose no fit. Show me the exact shape of one follow-on request and what happens to those respondents. I want rich results: should I repeat the same inputs or use the smallest cohort? What should I vary?",
+    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent only the paragraph they picked plus the shared pull quote, then ask whether that paragraph expresses the quote. Some may choose no fit. Show me the exact shape of one follow-on request and what happens to those respondents. I want useful differences in the results: should I repeat the same inputs or minimize the cohort? What should I vary?",
     "controlledEvidence": {
       "pullQuote": "A city is a promise people keep making to each other.",
       "sourceQuestion": { "id": "q-pull-quote", "type": "choice", "prompt": "Which paragraph best represents the pull quote?", "options": ["p2", "p5", "no-fit"] },
@@ -144,6 +144,22 @@
           "selectedMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 }
         }
       },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "selected-material-follow-on",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["selected-material", "workflow", "shared-safeguard"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Use my saved paragraph-selection run to inspect one follow-on: each respondent who selected a paragraph should get that exact paragraph with the shared transit claim and be asked whether it supports the claim. Keep the no-fit person in coverage and leave the follow-on unstarted. Then explain what the inspection did and did not establish.",
+    "controlledEvidence": {
+      "sourceQuestion": {"id": "q-transit-claim", "type": "choice", "prompt": "Which paragraph best represents the pull quote?"},
+      "respondents": ["reader-renter", "reader-parent", "reader-resident"],
+      "selectedMaterials": ["p2", "p5"],
+      "noFitChoice": "no-fit",
+      "followOnState": {"mode": "fresh-material", "priorTurnVisibility": "empty", "includeSelectedMaterial": true},
       "mockOnly": true
     }
   },

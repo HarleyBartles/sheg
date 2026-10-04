@@ -25,6 +25,22 @@
     }
   },
   {
+    "id": "purposeful-input-variation",
+    "version": 2,
+    "ownerSkill": "study-design",
+    "tags": ["study-design", "input-variation", "shared-safeguard"],
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "I have one pull quote, seven paragraphs, and three different kinds of readers I care about. I can spend up to six provider calls. Should I run the exact same readers, quote, question, and state twice to get richer results, or keep the cohort as small as possible? Help me plan useful coverage without changing what I am trying to learn.",
+    "controlledEvidence": {
+      "respondentPerspectives": ["first-time renter", "school-run parent", "long-time resident"],
+      "stimulus": {"pullQuote": "A city is a promise people keep making to each other.", "paragraphs": 7},
+      "questionResponse": {"type": "choice", "question": "Which paragraph best represents the pull quote?", "options": ["seven exact paragraphs", "no fit"]},
+      "state": "fresh exposure, no prior answer history",
+      "maxCalls": 6,
+      "mockOnly": true
+    }
+  },
+  {
     "id": "changed-rubric-comparison",
     "version": 1,
     "ownerSkill": "study-design",
