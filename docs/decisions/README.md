@@ -24,7 +24,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
 
 | [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
-| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Accepted |
+| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Superseded by 0027 |
 | [0019](0019-own-execution-in-detached-workers.md) | Own accepted run execution in detached workers | Accepted |
 | [0020](0020-snapshot-follow-on-contexts.md) | Snapshot follow-on contexts with separate lineage | Accepted |
 | [0021](0021-independent-question-groups-and-batched-attempts.md) | Independent question groups share context and separate evidence | Accepted |
@@ -33,6 +33,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0024](0024-normalize-journeys-and-version-packet-context.md) | Normalize journeys and version packet context | Accepted |
 | [0025](0025-bound-native-typesafe-context-admission.md) | Bound native TypeSafe context admission with published evidence | Accepted |
 | [0026](0026-resume-failed-journey-turns.md) | Resume respondent-local failures in partial journeys | Accepted |
+| [0027](0027-migrate-supported-datastore-schemas.md) | Migrate supported datastore schemas forward | Accepted |
 
 ## Writing and changing decisions
 
