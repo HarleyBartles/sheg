@@ -32,6 +32,10 @@ choices as one decision per ADR. Update the index in the same change. When an
 accepted decision changes, add a superseding ADR rather than rewriting its
 history. Routine implementation details belong in code or the active plan.
 
+## Planning artifact residency
+
+Plans, specifications, roadmaps, and similar planning artifacts are temporary Git-resident work files on `develop`; remove `.agents/plans/` and `.agents/specs/` from the release branch before promotion to `main`, and preserve active planning work on `develop` when reconciling the release.
+
 ## Local verification
 
 Run `npm run verify` before publishing changes. The tracked

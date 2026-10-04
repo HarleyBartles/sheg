@@ -30,6 +30,8 @@ Ordinary feature branches start from the latest `develop` and PRs target `develo
 
 Develop may carry deliberate dogfood checkpoints identified by aligned prerelease versions. Do not bump the version for every arbitrary merge. A planned checkpoint updates `package.json`, both root lockfile version fields, `plugin.json`, and the MCP initialization identity together. Stable releases continue through the release branch and use only `vMAJOR.MINOR.PATCH` tags after stable manifests are aligned and existing main-ancestry checks pass. A prerelease candidate is not a stable publication. Local no-tag packaging is for inspection and dogfooding only. See [ADR-0023](../../docs/decisions/0023-identify-development-and-candidate-builds.md).
 
+Plans, specifications, roadmaps, and similar planning artifacts have short-lived Git residency on `develop`. Before promoting a release branch to `main`, move durable decisions and operating rules into their maintained documentation, then ensure `.agents/plans/` and `.agents/specs/` contain no planning files. During release reconciliation, preserve active or mixed-scope planning artifacts from the pre-reconciliation `develop` tree; completed or retired artifacts stay retired. See [ADR-0028](../../docs/decisions/0028-keep-planning-artifacts-off-main.md).
+
 ## Local commands and paths
 
 CI validates pull requests targeting `develop`, `main`, and `release/**`. GitHub rules require pull requests and the `sheg-verify` status check on the stable and integration branches.

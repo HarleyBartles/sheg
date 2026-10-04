@@ -51,6 +51,7 @@ the v1 condition.
 - Cut `release/<version>` from `develop` when a coherent bundle is ready. Make
   only version, release-note, packaging, and stabilization fixes on that
   branch. The release pull request targets `main`.
+- Plans, specifications, roadmaps, and similar planning artifacts are temporary work files tracked on `develop`, not part of the stable repository tree. Before opening a release pull request, promote durable decisions and operating rules to their maintained homes, then remove all contents of `.agents/plans/` and `.agents/specs/` from the release branch. Do not carry completed or future planning artifacts into `main`.
 - Feature pull requests may use squash merge. Release and hotfix pull requests
   use a merge commit, as does release/hotfix reconciliation into `develop`, so
   Gitflow ancestry stays explicit.
@@ -62,9 +63,7 @@ the v1 condition.
   before installing dependencies. It builds the ZIP in a read-only job; a
   separate publication job receives only that ZIP and the minimum release
   permission needed to create the GitHub Release with generated notes.
-- After promotion, reconcile the release branch into `develop` so release
-  fixes and version metadata remain in the integration line. Close the release
-  branch after reconciliation.
+- After promotion, reconcile the release branch into `develop` so release fixes and version metadata remain in the integration line. Preserve active or mixed-scope planning artifacts from the pre-reconciliation `develop` tree; completed or retired artifacts stay retired. Close the release branch after reconciliation.
 - For an urgent production fix, start `hotfix/<version>` from `main`, make only
   the fix and version update, then open a reviewed pull request to `main`. Tag
   the verified merge and reconcile the hotfix into `develop`.

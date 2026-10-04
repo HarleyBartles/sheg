@@ -34,9 +34,10 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0025](0025-bound-native-typesafe-context-admission.md) | Bound native TypeSafe context admission with published evidence | Accepted |
 | [0026](0026-resume-failed-journey-turns.md) | Resume respondent-local failures in partial journeys | Accepted |
 | [0027](0027-migrate-supported-datastore-schemas.md) | Migrate supported datastore schemas forward | Accepted |
+| [0028](0028-keep-planning-artifacts-off-main.md) | Keep planning artifacts off the stable release tree | Accepted |
 
 ## Writing and changing decisions
 
-Create one numbered record for each consequential decision. Include its status, context, considered options, decision, and consequences. Keep implementation plans as temporary working files; this directory records why the durable choices were made. Completed plans remain in Git history. When a decision changes, add a new record that supersedes the old one instead of rewriting history. Update this index in the same change.
+Create one numbered record for each consequential decision. Include its status, context, considered options, decision, and consequences. Keep plans, specifications, roadmaps, and similar artifacts as temporary work files on `develop`, and remove them from the release branch before promotion to `main`. This directory records durable choices, not plans. Git history remains available for historical context. When a decision changes, add a new record that supersedes the old one instead of rewriting history. Update this index in the same change.
 
 Use [the template](template.md) for new records. Not every implementation choice needs an ADR; record choices that constrain future architecture, interfaces, distribution, or operations.
