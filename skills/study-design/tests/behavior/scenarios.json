@@ -26,7 +26,7 @@
   },
   {
     "id": "purposeful-input-variation",
-    "version": 1,
+    "version": 2,
     "ownerSkill": "study-design",
     "tags": ["study-design", "input-variation", "shared-safeguard"],
     "referencePaths": ["references/primitives-and-tools.md"],
