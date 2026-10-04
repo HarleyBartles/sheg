@@ -89,6 +89,14 @@ test('deterministic grader accepts one isolated follow-on that reuses each selec
   const wrongSharedFrame = gradeRequest({ ...request, material: [{ id: 'pull-quote', text: 'A different quote.' }] });
   assert.equal(wrongSharedFrame.deterministic.result, 'fail');
   assert.match(wrongSharedFrame.deterministic.issues.join(' '), /shared pull quote/i);
+
+  const conflictingSharedId = gradeRequest({ ...request, material: [{ id: 'p2', text: 'A city is a promise people keep making to each other.' }] });
+  assert.equal(conflictingSharedId.deterministic.result, 'fail');
+  assert.match(conflictingSharedId.deterministic.issues.join(' '), /shared material ID.*selected paragraph/i);
+
+  const unresolvedSharedReference = gradeRequest({ ...request, context: { mode: 'fresh-material', includeSelectedMaterial: true, materialIds: ['unresolved-original-article'] } });
+  assert.equal(unresolvedSharedReference.deterministic.result, 'fail');
+  assert.match(unresolvedSharedReference.deterministic.issues.join(' '), /cannot resolve shared material references/i);
 });
 
 test('deterministic grader resolves frozen Score and Noul follow-on filters', () => {

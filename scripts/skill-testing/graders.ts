@@ -76,7 +76,8 @@ function selectedMaterialIssues(requestValue: unknown, controlledEvidence: unkno
   const pullQuote = (controlledEvidence as { pullQuote?: unknown }).pullQuote;
   const inlineMaterials = request.material ?? [];
   if (inlineMaterials.length !== 1 || inlineMaterials[0]?.text !== pullQuote || typeof inlineMaterials[0]?.id !== 'string') return ['The shared pull quote must be the only explicit inline material; respondent-specific paragraphs come from the saved Choice mappings.'];
-  if (request.context.materialIds?.some((id) => materialIds.includes(id))) return ['Do not pass selected paragraph IDs as shared material; includeSelectedMaterial resolves them per source answer.'];
+  if (materialIds.includes(inlineMaterials[0]!.id)) return ['The shared material ID must not collide with a selected paragraph ID.'];
+  if (request.context.materialIds?.length) return ['This frozen scenario cannot resolve shared material references; provide the pull quote inline and let includeSelectedMaterial resolve respondent-specific paragraphs.'];
   return [];
 }
 
