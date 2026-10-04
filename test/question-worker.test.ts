@@ -618,6 +618,39 @@ test('journey resume lifecycle refuses a failed evaluation without a failed resp
   } finally { database.close(); await f.close(); }
 });
 
+test('journey resume lifecycle refuses a failed respondent with no failed evaluation', async () => {
+  const f = await journeyFixture(2, 8);
+  const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      throw new Error('respondent-local evaluation failure');
+    } }));
+    const failures = f.store.getJourneyRun(f.runId).evaluations.filter(({ status }) => status === 'failed');
+    assert.equal(failures.length, 2);
+    database.prepare("UPDATE evaluations SET status = 'pending', failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(failures[1]!.evaluationId);
+
+    assert.deepEqual(f.store.getStatus(f.runId).lifecycle.resume, { eligible: false, reason: 'partial_journey' });
+    assert.throws(() => f.store.resume(f.runId, Date.now()), /partial journey run cannot be resumed/i);
+  } finally { database.close(); await f.close(); }
+});
+
+test('journey resume lifecycle refuses a failed evaluation with no saved turn checkpoint', async () => {
+  const f = await journeyFixture(1, 5);
+  const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      throw new Error('respondent-local evaluation failure');
+    } }));
+    const failed = f.store.getJourneyRun(f.runId).evaluations.find(({ status }) => status === 'failed')!;
+    database.prepare('UPDATE evaluations SET turn_id = NULL, node_id = NULL, path_id = NULL, occurrence = NULL WHERE evaluation_id = ?').run(failed.evaluationId);
+
+    assert.deepEqual(f.store.getStatus(f.runId).lifecycle.resume, { eligible: false, reason: 'partial_journey' });
+    assert.throws(() => f.store.resume(f.runId, Date.now()), /partial journey run cannot be resumed/i);
+  } finally { database.close(); await f.close(); }
+});
+
 test('an explicit resume restarts the failed reached turn without replaying earlier answers', async () => {
   const f = await journeyFixture(1, 5);
   let calls = 0;

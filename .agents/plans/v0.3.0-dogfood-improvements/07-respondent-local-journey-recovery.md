@@ -164,3 +164,37 @@ Commit guidance, skill-owned scenario/evaluator, deterministic harness coverage,
 
 Run: `bash scripts/task-done <plan-file> 2 <BASE_FROM_TASK_START> -- node --import tsx --test test/skill-testing/campaign-suites.test.ts`
 Expected: ledger records Task 2 complete after the focused deterministic fixture-contract test passes; the commit hook is the canonical full gate.
+
+### Task 3: Close whole-branch review findings
+
+**Files:**
+- Modify: `src/infrastructure/run-store.ts` and `test/question-worker.test.ts` for checkpoint bijection and exact restoration
+- Modify: `skills/stimulus-response-polling/tests/behavior/scenarios.json` and `skills/stimulus-response-polling/tests/behavior/workflows/partial-journey-recovery.json`
+- Modify: `scripts/skill-testing/contracts.ts` and `scripts/skill-testing/runner.ts`
+- Create: `scripts/skill-testing/workflow-seeds.ts`
+- Test: `test/skill-testing/campaign-contracts.test.ts` and `test/skill-testing/campaign-suites.test.ts`
+
+- [x] **Step 1: Prove malformed checkpoint states are refused**
+
+Add durable-store tests for a failed respondent with no corresponding failed evaluation and for a failed evaluation missing its saved turn/node checkpoint. Assert lifecycle reports `partial_journey` and `resume()` refuses each state. Run both tests and observe the current incorrect eligible result before changing production code.
+
+- [x] **Step 2: Enforce checkpoint bijection and restore exact rows**
+
+Require exactly one failed evaluation for every failed respondent, require every failed evaluation to belong to a failed respondent, and require nonempty turn, node, path, packet and fingerprint checkpoint fields. In the same transaction, reopen only the selected failed evaluation and restore that respondent's pointers from that exact row; do not select an arbitrary pending evaluation by ordinal.
+
+- [x] **Step 3: Prove the scenario gets real trial-local MCP data**
+
+Add a campaign contract test that prepares the partial journey workflow without copied inline turns, runs it through a deterministic adapter, and inspects the actual Sheg store under that trial's isolated data directory. Assert the adapter receives a generated run ID in every scripted turn and the seeded run is partial with the completed sibling, saved prior answer/route, failed reached turn, three used calls, eight original calls, and no unresolved attempt.
+
+- [x] **Step 4: Add explicit fixture setup and trial-local seeding**
+
+Add a versioned `partial-journey-recovery` setup descriptor to the owning workflow fixture and replace its fixed UUID with `{{runId}}`. `prepareCampaign` must load the owning scenario's version-matched workflow fixture when workflow turns are not supplied, freeze the fixture setup and turns into the campaign manifest and evidence digest, and preserve compatibility for existing explicit inline workflow configurations. Before each workflow attempt, seed a real Sheg SQLite store at the exact isolated data path used by the Codex MCP adapter, using a deterministic local provider to create one completed respondent and one respondent-local failed reached turn. Substitute the generated run ID into all scripted turn text/evidence. The actor still calls the Sheg MCP tools; controlled evidence alone is not a substitute for tool results.
+
+- [x] **Step 5: Run the focused campaign and store tests**
+
+Run: `node --import tsx --test test/skill-testing/campaign-contracts.test.ts test/skill-testing/campaign-suites.test.ts test/question-worker.test.ts`
+Expected: PASS; the deterministic adapter observes a genuine durable partial run in its isolated store and malformed checkpoints remain ineligible.
+
+- [x] **Step 6: Commit and mark the review corrections complete**
+
+Commit with message `fix: validate and seed partial journey recovery`; run `task-done` against this task's exact start base and the focused command. The commit hook runs `npm run verify` over the staged snapshot. Do not run live actors or judges in CI or pre-commit.

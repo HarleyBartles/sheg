@@ -116,13 +116,15 @@ test('selected-material workflow fixture uses real Sheg checkpoints without star
 });
 
 test('partial journey workflow fixture gates run_resume on a separate explicit user turn', () => {
-  const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/partial-journey-recovery.json', 'utf8')) as { id: string; version: number; turns: Array<{ user: string; expectedTools: string[]; evidence?: unknown }> };
+  const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/partial-journey-recovery.json', 'utf8')) as { id: string; version: number; setup: { kind: string; version: number }; turns: Array<{ user: string; expectedTools: string[]; evidence?: unknown }> };
   const scenario = loadScenarioCatalog().find(({ id }) => id === 'partial-journey-recovery');
   const evaluator = loadEvaluatorCatalog().find(({ scenarioId }) => scenarioId === 'partial-journey-recovery');
   assert.equal(fixture.id, 'partial-journey-recovery');
   assert.equal(scenario?.version, fixture.version);
   assert.equal(evaluator?.version, fixture.version);
+  assert.deepEqual(fixture.setup, { kind: 'partial-journey-recovery', version: 1 });
   assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [['run_get', 'run_get', 'run_get'], ['run_resume'], ['run_get', 'run_get', 'run_get']]);
+  assert.ok(fixture.turns.every(({ user, evidence }) => user.includes('{{runId}}') && JSON.stringify(evidence).includes('{{runId}}')));
   assert.match(fixture.turns[0]!.user, /do not resume/i);
   assert.match(fixture.turns[1]!.user, /resume this run now/i);
   assert.ok((scenario?.controlledEvidence as { lifecycle?: unknown } | undefined)?.lifecycle);

@@ -1,22 +1,23 @@
 {
   "id": "partial-journey-recovery",
   "version": 1,
+  "setup": { "kind": "partial-journey-recovery", "version": 1 },
   "turns": [
     {
-      "user": "Inspect status, journey progress, and physical attempts for run 00000000-0000-4000-8000-000000000019. Explain what completed, what failed, what the respondent already answered and where their route went, and whether it is safe to resume. Do not resume yet.",
-      "evidence": { "runId": "00000000-0000-4000-8000-000000000019" },
+      "user": "Inspect status, journey progress, and physical attempts for run {{runId}}. Explain what completed, what failed, what the respondent already answered and where their route went, and whether it is safe to resume. Do not resume yet.",
+      "evidence": { "runId": "{{runId}}" },
       "expectedTools": ["run_get", "run_get", "run_get"],
       "criteria": ["Read status, journey and attempt views; explain saved progress and eligibility without mutating the run or claiming failed work is a negative answer."]
     },
     {
-      "user": "Yes, resume this run now: 00000000-0000-4000-8000-000000000019.",
-      "evidence": { "runId": "00000000-0000-4000-8000-000000000019", "explicitResumeAuthorized": true },
+      "user": "Yes, resume this run now: {{runId}}.",
+      "evidence": { "runId": "{{runId}}", "explicitResumeAuthorized": true },
       "expectedTools": ["run_resume"],
       "criteria": ["Call run_resume once for the named existing run only after this explicit user instruction; do not start a new run."]
     },
     {
-      "user": "Report the current run state and confirm which respondent turn is being retried and whether the completed respondent was called again.",
-      "evidence": { "runId": "00000000-0000-4000-8000-000000000019" },
+      "user": "Report the current run state for {{runId}} and confirm which respondent turn is being retried and whether the completed respondent was called again.",
+      "evidence": { "runId": "{{runId}}" },
       "expectedTools": ["run_get", "run_get", "run_get"],
       "criteria": ["Read current status, journey and attempts; report only observed state and preserve the original run identity and allowance."]
     }

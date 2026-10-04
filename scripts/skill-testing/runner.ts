@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFrozenCampaign, type CampaignManifest } from './contracts.js';
 import { sha256, stableJson } from './snapshots.js';
+import { seedWorkflowState } from './workflow-seeds.js';
 
 export interface ExecutionResult {
   status: 'completed' | 'timed-out' | 'failed';
@@ -63,6 +64,16 @@ function writeAtomic(filePath: string, value: string): void {
 
 function fileSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function substituteRunId(value: unknown, runId: string | undefined): unknown {
+  if (typeof value === 'string') {
+    if (value.includes('{{runId}}') && !runId) throw new Error('Workflow fixture requires a seeded run ID.');
+    return runId ? value.replaceAll('{{runId}}', runId) : value;
+  }
+  if (Array.isArray(value)) return value.map((entry) => substituteRunId(entry, runId));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substituteRunId(entry, runId)]));
+  return value;
 }
 
 function resultSummary(result: ExecutionResult): NonNullable<JournalEntry['result']> {
@@ -139,7 +150,14 @@ export async function runCampaign(
           const guidanceMarker = '\n## Current skill and declared references\n';
           const guidanceBoundary = arm.actorPrompt.indexOf(guidanceMarker);
           if (userBoundary < 0 || (guidanceBoundary < 0 && Object.keys(arm.skillReferenceHashes).length > 0) || !manifest.workflowTurns?.length) throw new Error('Workflow prompt, frozen guidance, or turns are missing.');
-          const turns = manifest.workflowTurns.map((turn) => `${turn.user}${turn.evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(turn.evidence)}`}`);
+          const workflowRunId = manifest.workflowSetup
+            ? (await seedWorkflowState(manifest.workflowSetup, path.join(cwd, 'sheg-data'))).runId
+            : undefined;
+          const turns = manifest.workflowTurns.map((turn) => {
+            const user = substituteRunId(turn.user, workflowRunId) as string;
+            const evidence = substituteRunId(turn.evidence, workflowRunId);
+            return `${user}${evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(evidence)}`}`;
+          });
           const guidance = guidanceBoundary >= 0 ? arm.actorPrompt.slice(guidanceBoundary) : '';
           const workflowPrelude = `${arm.actorPrompt.slice(0, userBoundary)}${guidance}`
             .replace('Use the supplied skill and references to respond to the user request. Treat the evidence below as a mock fixture, not a live tool result.', 'Use the supplied skill and references to handle the conversation. The scripted evidence is fixture data supplied only at its listed turn.')

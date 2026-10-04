@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { assertComparableManifests, prepareCampaign, readFrozenCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
+import { runCampaign } from '../../scripts/skill-testing/runner.js';
+import { openRunStore } from '../../src/infrastructure/run-store.js';
 
 function fixture(): { root: string; config: CampaignConfig; cleanup: () => void } {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-skill-campaign-contracts-'));
@@ -85,6 +87,59 @@ test('comparison rejects changed timeout and concurrency settings', () => {
     assert.throws(() => assertComparableManifests(first, longer), /timeoutMs/i);
     assert.throws(() => assertComparableManifests(first, wider), /concurrency/i);
   } finally { input.cleanup(); }
+});
+
+test('partial-journey workflow fixture seeds the real isolated Sheg store for each trial', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-partial-workflow-seed-'));
+  try {
+    const skill = path.resolve('skills/stimulus-response-polling');
+    const config: CampaignConfig = {
+      id: 'partial-journey-workflow', scenarioId: 'partial-journey-recovery', suite: 'workflow',
+      classification: 'regression', repetitions: 2, concurrency: 1, timeoutMs: 60_000,
+      execution: { adapter: 'codex', model: 'test-model' },
+      arms: [{ id: 'candidate', guidanceRoot: skill, referencePaths: ['references/run-and-recovery.md', 'references/interpret-results.md'] }],
+    };
+    const campaign = path.join(root, 'campaign');
+    const manifest = prepareCampaign(config, campaign);
+    assert.deepEqual(manifest.workflowSetup, { kind: 'partial-journey-recovery', version: 1 });
+    assert.ok(manifest.workflowTurns?.length === 3);
+
+    const observedRunIds: string[] = [];
+    const result = await runCampaign(campaign, {
+      async execute() { throw new Error('Workflow fixture must use persistent execution.'); },
+      async executeWorkflow(input) {
+        const prompts = [input.initialPrompt, ...input.turns];
+        const turnPrompts = prompts.map((prompt, index) => index === 0 ? prompt.split('## Workflow turn 1\n').at(-1)! : prompt);
+        const runIds = turnPrompts.map((prompt) => /\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b/i.exec(prompt)?.[0]);
+        assert.ok(runIds.every((runId) => runId && runId !== '{{runId}}'), `Expected a generated run ID in every turn: ${JSON.stringify(runIds)}`);
+        assert.equal(new Set(runIds).size, 1, `Expected one run ID across all turns: ${JSON.stringify(runIds)}`);
+        const runId = runIds[0]!;
+        observedRunIds.push(runId);
+        const store = openRunStore(path.join(input.cwd, 'sheg-data'));
+        try {
+          const status = store.getStatus(runId);
+          const journey = store.getJourneyRun(runId);
+          const attempts = store.attempts(runId).items;
+          assert.equal(status.status, 'partial');
+          assert.deepEqual(status.lifecycle.resume, { eligible: true });
+          assert.equal(status.usedCalls, 3, JSON.stringify(status));
+          assert.equal(status.maxCalls, 8);
+          assert.deepEqual(journey.respondents.map(({ respondentId, status }) => [respondentId, status]), [['reader-a', 'completed'], ['reader-b', 'failed']]);
+          assert.equal(journey.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.events.filter(({ type }) => type === 'response').length, 1, JSON.stringify(journey.respondents));
+          assert.equal(journey.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.route.length, 1, JSON.stringify(journey.respondents));
+          assert.ok(journey.evaluations.some(({ respondentId, questionId, status }) => respondentId === 'reader-b' && questionId === 'clarity' && status === 'failed'));
+          assert.equal(attempts.length, 3, JSON.stringify(attempts));
+          assert.deepEqual(attempts.map(({ status }) => status), ['answered', 'answered', 'failed']);
+          assert.ok(attempts.every(({ status }) => status !== 'reserved' && status !== 'uncertain'));
+        } finally { store.close(); }
+        return { status: 'completed', exitCode: 0, rawEvents: '', rawFinalMessage: 'inspected', rawStderr: '', sessionId: 'workflow-test', observedSettings: {}, workflowTurnEvents: [] };
+      },
+    });
+    assert.equal(result.runtimeErrors, 0, readFileSync(path.join(campaign, 'attempts.jsonl'), 'utf8'));
+    assert.equal(result.captured, 2);
+    assert.equal(new Set(observedRunIds).size, 2);
+    assert.ok(observedRunIds.every((runId) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(runId)));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('preparation rejects missing guidance references and output collisions', () => {

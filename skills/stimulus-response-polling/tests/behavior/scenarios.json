@@ -603,7 +603,7 @@
     "referencePaths": ["references/run-and-recovery.md", "references/interpret-results.md"],
     "userRequest": "A reading journey stopped partway through. Inspect what happened, explain whether it can safely continue, and wait for my decision before resuming.",
     "controlledEvidence": {
-      "runId": "00000000-0000-4000-8000-000000000019",
+      "runId": "{{runId}}",
       "status": "partial",
       "lifecycle": { "state": "stopped", "resume": { "eligible": true } },
       "usedCalls": 3,
