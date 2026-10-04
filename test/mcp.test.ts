@@ -141,6 +141,45 @@ test('MCP inspects and accepts an inline journey, then exposes its initial durab
   } finally { await f.close(); }
 });
 
+test('MCP reports eligible respondent-local journey recovery and resumes only on run_resume', async () => {
+  const f = await connectedFixture();
+  try {
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: journeyRequest() } });
+    const runId = (started.structuredContent as { runId: string }).runId;
+    const claim = f.store.claim(runId, Date.now(), 1234);
+    assert.ok(claim);
+    const reservation = f.store.reserveNext(claim, Date.now());
+    assert.ok(reservation);
+    const journey = f.store.getJourneyRun(runId);
+    const failedTurn = journey.evaluations[0]!.turnId;
+    const respondent = journey.respondents[0]!;
+    f.store.settleJourney(claim, reservation.attemptId, { kind: 'failed', code: 'decision_failed', message: 'The answer did not validate.', scope: 'evaluation' }, {
+      respondentId: respondent.respondentId,
+      expectedRevision: respondent.revision,
+      state: { ...respondent, status: 'failed', currentNodeId: null, currentTurnId: null, currentContextId: null, revision: respondent.revision + 1 },
+    });
+    assert.equal(f.store.finish(claim).status, 'partial');
+
+    const before = await f.client.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+    const beforeData = before.structuredContent as { status: string; lifecycle: { resume: { eligible: boolean } } };
+    assert.equal(beforeData.status, 'partial');
+    assert.deepEqual(beforeData.lifecycle.resume, { eligible: true });
+    assert.equal(f.store.getJourneyRun(runId).respondents[0]?.status, 'failed');
+
+    const resumed = await f.client.callTool({ name: 'run_resume', arguments: { runId } });
+    const resumedData = resumed.structuredContent as { runId: string; status: string };
+    assert.equal(resumedData.runId, runId);
+    assert.equal(resumedData.status, 'prepared');
+    const after = f.store.getJourneyRun(runId);
+    assert.equal(after.respondents[0]?.status, 'active');
+    assert.equal(after.respondents[0]?.currentTurnId, failedTurn);
+    assert.equal(after.evaluations[0]?.status, 'pending');
+    assert.deepEqual(f.store.attempts(runId).items.map(({ status }) => status), ['failed']);
+  } finally {
+    await f.close();
+  }
+});
+
 test('MCP queries typed evidence and starts a context-preserving follow-on', async () => {
   const f = await connectedFixture();
   try {

@@ -24,6 +24,7 @@ export type RunLifecycleFacts = {
   hasPendingEvaluations: boolean;
   hasFailedEvaluations: boolean;
   canRetrySharedFailure: boolean;
+  hasRetryableJourneyFailure: boolean;
 };
 
 export function deriveRunLifecycle(facts: RunLifecycleFacts): RunLifecycle {
@@ -33,13 +34,13 @@ export function deriveRunLifecycle(facts: RunLifecycleFacts): RunLifecycle {
   if (facts.status === 'prepared' || facts.status === 'running') return refuse('already_active');
   if (facts.status === 'completed') return refuse('already_completed');
   if (facts.status === 'cancelled') return refuse('cancelled');
-  if (facts.status === 'partial' && facts.kind === 'journey') return refuse('partial_journey');
   if (facts.status !== 'interrupted' && facts.status !== 'failed' && facts.status !== 'partial') return refuse('unsupported_status');
   if (facts.cancelRequested) return refuse('cancellation_requested');
   if (facts.reservedCalls > 0) return refuse('attempt_unresolved');
   if (facts.usedCalls >= facts.maxCalls) return refuse('call_allowance_exhausted');
+  if (facts.status === 'partial' && facts.kind === 'journey' && !facts.hasRetryableJourneyFailure) return refuse('partial_journey');
   const hasResumableWork = facts.status === 'interrupted' && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) ||
-    facts.status === 'partial' && facts.hasFailedEvaluations ||
+    facts.status === 'partial' && (facts.kind === 'journey' ? facts.hasRetryableJourneyFailure : facts.hasFailedEvaluations) ||
     facts.status === 'failed' && facts.failureScope === 'run' && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
   if (!hasResumableWork) return refuse('no_unfinished_work');
   return { state, resume: { eligible: true } };

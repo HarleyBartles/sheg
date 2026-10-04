@@ -4,7 +4,7 @@
 
 **Goal:** Allow an author to explicitly resume a partial journey at a safely retryable respondent-local failed turn while preserving all successful work and the original call limit.
 
-**Architecture:** Reuse the existing failed journey evaluation and frozen packet as the retry checkpoint. Keep the respondent's current turn identity and event/route history when a local failure settles, derive eligibility from persisted failed-turn and run safety state, then atomically reopen only that evaluation and restore its respondent as active. Preserve each failed physical attempt as history, and let the existing worker continue from the retried answer's valid route.
+**Architecture:** Reuse the existing failed journey evaluation and frozen packet as the retry checkpoint. The v7 datastore requires failed respondents to have null current-turn pointers, so the failed evaluation supplies the turn/node/context checkpoint while the respondent's completed event and route history remains stored; explicit resume reopens only that evaluation and restores active pointers from it. Derive eligibility from persisted failure and run safety state, retain each failed physical attempt, and let the existing worker continue from a valid retried answer.
 
 **Tech Stack:** TypeScript, SQLite, Node test runner, Sheg polling skill behavior fixtures.
 
@@ -18,7 +18,7 @@
 
 - Keep the same run ID, frozen request, compiler identity, and original `maxCalls` on resume.
 - Preserve answered evaluations, each respondent's events, route and reached-turn order, and every prior physical attempt.
-- Retry only a known respondent-local failed evaluation whose respondent state still identifies that exact turn.
+- Retry only a known respondent-local failed evaluation matched to one failed respondent with no ambiguous checkpoint.
 - Never retry an unresolved or uncertain attempt, resume after cancellation, exceed the original call allowance, or replay a completed respondent or successful turn.
 - Reads and lifecycle inspection never launch work; only explicit `run_resume` launches the resumed worker.
 - Report refusal reasons from the same durable facts enforced by the resume transaction.
@@ -28,10 +28,10 @@
 
 ## Review Focus
 
-- A failed turn resumes with its original evaluation, packet fingerprint, compiler identity, respondent event history and route; cover in Task 1's store and worker tests.
+- A failed turn resumes with its original evaluation, packet fingerprint, compiler identity, respondent event history and route; cover in Task 1's worker test.
 - A successful respondent and successful earlier turns are never dispatched again; cover in Task 1's end-to-end worker test.
-- Eligibility cannot overstate the actual transition for cancellation, unresolved attempts, exhausted allowance or a missing failed-turn checkpoint; cover in Task 1's lifecycle and resume tests.
-- A failed retry remains a visible partial journey with both attempts retained; cover in Task 1's attempt-history test and Task 2's scenario expectations.
+- Eligibility cannot overstate the actual transition for cancellation, unresolved attempts, exhausted allowance or a missing/ambiguous failed-turn checkpoint; cover in Task 1's lifecycle and resume tests.
+- A failed retry remains a visible partial journey with both attempts retained; cover in Task 1's attempt-history test and Task 2's scenario criteria.
 
 ---
 
@@ -39,60 +39,57 @@
 
 **Files:**
 - Modify: `src/domain/run/lifecycle.ts`
-- Modify: `src/domain/run/request.ts`
 - Modify: `src/infrastructure/run-store.ts`
-- Modify: `src/application/question-worker.ts`
-- Test: `test/run-store.test.ts`
-- Test: `test/run-service.test.ts`
+- Test: `test/run-lifecycle.test.ts`
 - Test: `test/mcp.test.ts`
 - Test: `test/question-worker.test.ts`
 - Create: `docs/decisions/0026-resume-failed-journey-turns.md`
 - Modify: `docs/decisions/README.md`
 
 **Interfaces:**
-- `RunLifecycleFacts` must receive sufficient durable facts to identify a partial journey with an eligible failed respondent turn, in addition to existing cancellation, reserved-call, allowance and retryable-work facts.
-- The journey respondent's `currentNodeId`, `currentTurnId`, and `currentContextId` identify the failed turn when its status is `failed`; its `events` and `route` remain unchanged by failure and resume.
-- `RunStore.resume(runId, nowMs)` remains the atomic enforcement point. For an eligible partial journey it reopens only the persisted failed evaluation for the respondent checkpoint, restores that respondent to `active`, retains its failed attempts, and leaves every other row and the original call limit intact.
+- `RunLifecycleFacts` receives sufficient durable facts to identify a partial journey whose failed evaluations map one-to-one to failed respondents, in addition to existing cancellation, reserved-call, allowance and retryable-work facts.
+- A failed journey respondent has null current-turn pointers by the v7 datastore constraint; its single failed evaluation identifies the exact saved turn, packet and compiler context, while its events and route retain all completed journey history.
+- `RunStore.resume(runId, nowMs)` remains the atomic enforcement point. For an eligible partial journey it reopens only failed evaluations belonging to failed respondents with exactly one failed turn each, restores their active pointers from those evaluation rows, retains their failed attempts, and leaves every other row and the original call limit intact.
 - The worker reserves that same evaluation and uses its frozen packet. After a valid answer, the normal journey transition records the answer and route, then appends the next reached turn. A retry failure leaves the same checkpoint available only if the normal safety gates still hold.
 
 - [ ] **Step 1: Add a failing lifecycle test for a partial journey checkpoint**
 
-In `test/run-store.test.ts`, build an accepted durable journey, settle one respondent-local failure after recording a previous answered turn, then finish the run. Assert that `status` is `partial`, `lifecycle.state` is `stopped`, `lifecycle.resume` is eligible when allowance remains, and its refusal reasons remain accurate for cancellation, reserved calls, exhausted allowance and absent failed work. Run the focused test and confirm the intended failure is the existing `partial_journey` refusal.
+In `test/question-worker.test.ts`, run a durable journey where one respondent answers and routes through an earlier turn before a later local failure, while another respondent completes. Assert that status is `partial`, the failed respondent has null current-turn pointers as required by storage v7, and `lifecycle.resume` is eligible when allowance remains. Assert its completed route and response history remain intact. The test must fail specifically because current lifecycle projection returns `partial_journey`.
 
 - [ ] **Step 2: Add failing transactional resume assertions**
 
-Extend the same store behavior test to capture the failed evaluation ID, context ID, packet fingerprint, respondent events and route, successful sibling state, and failed attempt page before resume. After `store.resume`, assert that the same run and maxCalls remain, only the failed evaluation becomes pending, the failed respondent becomes active at the exact prior turn/context/node with revision advanced, every answer/event/route and successful sibling is unchanged, and the original failed attempt remains visible. Also assert `reserveNext` returns only that original failed evaluation and its original frozen packet.
+Extend the same worker behavior test to capture the failed evaluation ID, context ID, packet fingerprint, respondent events and route, successful sibling state, and failed attempt page before resume. After resume, assert that the same run and maxCalls remain, only the failed evaluation becomes pending, the failed respondent becomes active at the exact turn/context/node from that evaluation with revision advanced, every prior answer/event/route and successful sibling is unchanged, and the original failed attempt remains visible. Resume the worker and assert it dispatches only that failed respondent's saved turn and later reached work.
 
 - [ ] **Step 3: Run the store tests and witness the expected failures**
 
-Run: `node --import tsx --test --test-name-pattern="partial journey|journey.*resume" test/run-store.test.ts`
-Expected: the new eligibility assertion fails on `partial_journey`; the transactional assertions fail because failed journey state currently discards the current turn and resume does not reactivate it.
+Run: `node --import tsx --test --test-name-pattern="partial journey failure retains" test/question-worker.test.ts`
+Expected: the new eligibility assertion fails with the existing `partial_journey` refusal; prior route and response history remain present.
 
 - [ ] **Step 4: Implement the smallest durable checkpoint and eligibility change**
 
-Update respondent-local settlement in `question-worker.ts` to preserve the failed evaluation's current turn, node and context IDs while marking the respondent failed. Extend lifecycle facts/projection and the schema union with a specific partial-journey refusal where needed, deriving eligibility only when the run has a respondent-local failed evaluation with a matching failed respondent checkpoint. In `run-store.ts`, atomically reopen only that exact failed evaluation and restore its respondent to active; retain evaluation identity, packet fields, event/route JSON, attempts and maxCalls. Refuse partial journeys whose failed row has no matching checkpoint. Keep run-scoped and interrupted recovery behavior unchanged.
+Extend lifecycle facts/projection to allow a partial journey only when every failed evaluation belongs to a failed respondent and each such respondent has exactly one failed evaluation; keep the existing `partial_journey` reason for a missing or ambiguous checkpoint. In `run-store.ts`, atomically reopen those failed evaluation rows, restore each failed respondent's current node/turn/context from its exact frozen evaluation, and retain evaluation identity, packet fields, event/route JSON, attempts and maxCalls. Do not change the v7 table constraint, respondent-local settlement, run-scoped recovery or interrupted recovery.
 
 - [ ] **Step 5: Run the focused store tests and verify they pass**
 
-Run: `node --import tsx --test --test-name-pattern="partial journey|journey.*resume" test/run-store.test.ts`
-Expected: PASS for exact failed-turn eligibility and reactivation, with refusal for cancellation, unresolved attempts, exhausted allowance and missing checkpoint.
+Run: `node --import tsx --test --test-name-pattern="partial journey failure retains|failed retry stays partial|original allowance is exhausted|journey resume lifecycle refuses" test/question-worker.test.ts test/run-lifecycle.test.ts`
+Expected: PASS for exact failed-turn reactivation and attempt retention, with refusal for cancellation, unresolved attempts, exhausted allowance and missing checkpoint.
 
 - [ ] **Step 6: Add a failing durable worker continuation test**
 
-- Extend `test/question-worker.test.ts` using the real run store and worker with a deterministic provider: respondent A answers an earlier node then fails at a reached node; respondent B completes its path; explicit service resume retries A's failed node successfully and follows the returned branch. Assert only A's failed node is dispatched on resume, B is never called again, earlier successful A nodes are not repeated, A's previous events/route remain in order, the resumed packet and compiler identity are unchanged, the new branch appears only after retry success, the run ID/maxCalls remain the originals, and both the failed and successful retry attempts remain readable. Add a second case where the retry fails and the run remains partial with both attempts exposed.
+- Extend `test/question-worker.test.ts` using the real run store and worker with a deterministic provider: respondent A answers an earlier node then fails at a reached node; respondent B completes its path; explicit store resume retries A's failed node successfully and follows the returned branch. Assert only A's failed node is dispatched on resume, B is never called again, earlier successful A nodes are not repeated, A's previous events/route remain in order, the resumed packet and compiler identity are unchanged, a next turn appears only after retry success, the run ID/maxCalls remain the originals, and both the failed and successful retry attempts remain readable. Add a second case where the retry fails and the run remains partial with both attempts exposed; the public `run_resume` service boundary is covered in the MCP test.
 
 - [ ] **Step 7: Run the worker test and witness the expected failure**
 
-Run: `node --import tsx --test --test-name-pattern="resumes only the failed journey turn|failed journey retry" test/question-worker.test.ts`
-Expected: FAIL because the current worker cannot claim a failed respondent's preserved turn and partial journeys are refused.
+Run: `node --import tsx --test --test-name-pattern="partial journey failure retains" test/question-worker.test.ts`
+Expected: FAIL because partial journey lifecycle currently refuses the otherwise safe failed evaluation; the test's checkpoint assertions pass under the existing schema.
 
 - [ ] **Step 8: Complete lifecycle schema and MCP-visible resume behavior**
 
-Adjust lifecycle reason schemas and MCP tests only as needed so status, query, and explicit `run_resume` expose a consistent eligible/refusal state. Verify readiness checks happen before the resume transition; simultaneous resume requests launch at most one worker; a rejected or unavailable credential does not mutate the checkpoint; and a resumed launch failure remains visible under the same run ID. Do not add automatic retry on reads.
+Keep the existing lifecycle reason schema and test through MCP that status exposes eligible state while the respondent remains failed, reads do not mutate it, and only explicit `run_resume` restores the saved checkpoint. Verify provider readiness remains ahead of the transition, simultaneous resume requests still launch at most one worker, a rejected or unavailable credential does not mutate the checkpoint, and a resumed launch failure remains visible under the same run ID. Do not add automatic retry on reads.
 
 - [ ] **Step 9: Run focused service, MCP, and worker tests**
 
-Run: `node --import tsx --test test/run-store.test.ts test/run-service.test.ts test/mcp.test.ts test/question-worker.test.ts`
+Run: `node --import tsx --test test/mcp.test.ts test/question-worker.test.ts test/run-lifecycle.test.ts test/run-store.test.ts test/run-service.test.ts`
 Expected: PASS with existing poll resume semantics unchanged and partial journey recovery covered through the public tool contract.
 
 - [ ] **Step 10: Record the durable recovery contract**
@@ -101,11 +98,11 @@ Create ADR-0026 with status Accepted and date `2026-10-04`. Record the context, 
 
 - [ ] **Step 11: Commit Task 1**
 
-Commit the tested lifecycle, storage, worker, MCP, tests and ADR together with message `feat: resume respondent-local journey failures`.
+Commit the tested lifecycle projection, storage transition, MCP and worker tests, and ADR together with message `feat: resume respondent-local journey failures`.
 
 - [ ] **Step 12: Mark Task 1 done against its commit base**
 
-Run: `bash scripts/task-done <plan-file> 1 <BASE_FROM_TASK_START> -- npm test -- test/run-store.test.ts test/run-service.test.ts test/mcp.test.ts test/journey-worker.test.ts`
+Run: `bash scripts/task-done <plan-file> 1 <BASE_FROM_TASK_START> -- node --import tsx --test test/mcp.test.ts test/question-worker.test.ts test/run-lifecycle.test.ts test/run-store.test.ts test/run-service.test.ts`
 Expected: ledger records Task 1 complete after the exact focused command passes.
 
 ### Task 2: Teach and pressure-test explicit partial-journey recovery

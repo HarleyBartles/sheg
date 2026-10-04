@@ -34406,12 +34406,12 @@ function deriveRunLifecycle(facts) {
   if (facts.status === "prepared" || facts.status === "running") return refuse("already_active");
   if (facts.status === "completed") return refuse("already_completed");
   if (facts.status === "cancelled") return refuse("cancelled");
-  if (facts.status === "partial" && facts.kind === "journey") return refuse("partial_journey");
   if (facts.status !== "interrupted" && facts.status !== "failed" && facts.status !== "partial") return refuse("unsupported_status");
   if (facts.cancelRequested) return refuse("cancellation_requested");
   if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
   if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
-  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && facts.hasFailedEvaluations || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
+  if (facts.status === "partial" && facts.kind === "journey" && !facts.hasRetryableJourneyFailure) return refuse("partial_journey");
+  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && (facts.kind === "journey" ? facts.hasRetryableJourneyFailure : facts.hasFailedEvaluations) || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
   if (!hasResumableWork) return refuse("no_unfinished_work");
   return { state, resume: { eligible: true } };
 }
@@ -37912,20 +37912,42 @@ var SQLiteRunStore = class {
       if (!statusView.lifecycle.resume.eligible) {
         throw new RunStoreError("run_not_resumable", resumeRefusalMessage(statusView.lifecycle.resume.reason));
       }
-      const run = this.database.prepare("SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls FROM runs WHERE run_id = ?").get(runId);
+      const run = this.database.prepare("SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls, request_json FROM runs WHERE run_id = ?").get(runId);
       if (!run) throw this.notFound();
       const status = asText(run.status, "run status");
+      const storedRequest = parseJson(run.request_json, "run request");
+      const parsedRequest = runRequestSchema.safeParse(storedRequest.request);
+      if (!parsedRequest.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+      const isJourney = parsedRequest.data.kind === "journey";
       const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId);
+      const canRetryJourneyFailures = status === "partial" && this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations e
+        JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        WHERE e.run_id = ? AND e.status = 'failed' AND jr.status = 'failed'`).get(runId);
+      const journeyFailureCount = canRetryJourneyFailures ? asNumber(canRetryJourneyFailures.count, "retryable journey evaluation count") : 0;
       const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId);
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
       const failedEvaluation = failedRunEvaluationId ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId, failedRunEvaluationId) : void 0;
       const canRetrySharedFailure = status === "failed" && asText(run.failure_scope, "failure scope") === "run" && failedEvaluation !== void 0 && asText(failedEvaluation.status, "evaluation status") === "failed";
-      const canRetryQuestionFailures = status === "partial" && asNumber(failed.count, "failed evaluation count") > 0;
+      const canRetryQuestionFailures = status === "partial" && asNumber(failed.count, "failed evaluation count") > 0 && !isJourney;
       if (canRetrySharedFailure && runFailure) {
         this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
           WHERE run_id = ? AND status = 'failed' AND evaluation_id IN (SELECT evaluation_id FROM attempt_evaluations WHERE attempt_id = ?)`).run(runId, asText(runFailure.attempt_id, "failed attempt ID"));
       }
       if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE run_id = ? AND status = 'failed'").run(runId);
+      if (journeyFailureCount > 0) {
+        this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
+          WHERE run_id = ? AND status = 'failed' AND EXISTS (
+            SELECT 1 FROM journey_respondents jr WHERE jr.run_id = evaluations.run_id AND jr.respondent_id = evaluations.respondent_id
+              AND jr.status = 'failed')`).run(runId);
+        this.database.prepare(`UPDATE journey_respondents SET status = 'active',
+          current_node_id = (SELECT e.node_id FROM evaluations e WHERE e.run_id = journey_respondents.run_id AND e.respondent_id = journey_respondents.respondent_id AND e.status = 'pending' ORDER BY e.ordinal DESC LIMIT 1),
+          current_turn_id = (SELECT e.turn_id FROM evaluations e WHERE e.run_id = journey_respondents.run_id AND e.respondent_id = journey_respondents.respondent_id AND e.status = 'pending' ORDER BY e.ordinal DESC LIMIT 1),
+          current_context_id = (SELECT e.context_id FROM evaluations e WHERE e.run_id = journey_respondents.run_id AND e.respondent_id = journey_respondents.respondent_id AND e.status = 'pending' ORDER BY e.ordinal DESC LIMIT 1),
+          revision = revision + 1
+          WHERE run_id = ? AND status = 'failed' AND EXISTS (
+            SELECT 1 FROM evaluations e WHERE e.run_id = journey_respondents.run_id AND e.respondent_id = journey_respondents.respondent_id
+              AND e.status = 'pending')`).run(runId);
+      }
       this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
         failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
         WHERE run_id = ? AND status IN ('interrupted', 'failed', 'partial')`).run(nowMs + LEASE_MS, runId);
@@ -38388,7 +38410,13 @@ var SQLiteRunStore = class {
       EXISTS (SELECT 1 FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
         JOIN evaluations e ON e.run_id = a.run_id AND e.evaluation_id = ae.evaluation_id
         WHERE a.run_id = r.run_id AND a.status = 'failed' AND a.failure_scope = 'run' AND e.status = 'failed'
-          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure
+          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure,
+      (EXISTS (SELECT 1 FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = r.run_id AND e.status = 'failed' AND jr.status = 'failed') AND
+       NOT EXISTS (SELECT 1 FROM evaluations e LEFT JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = r.run_id AND e.status = 'failed' AND (jr.respondent_id IS NULL OR jr.status <> 'failed')) AND
+       NOT EXISTS (SELECT e.respondent_id FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed'
+          GROUP BY e.respondent_id HAVING COUNT(*) <> 1)) AS retryable_journey_failure
       FROM runs r WHERE r.run_id = ?`).get(runId);
     if (!row) throw this.notFound();
     const stored = parseJson(row.request_json, "run request");
@@ -38419,7 +38447,8 @@ var SQLiteRunStore = class {
         maxCalls,
         hasPendingEvaluations: asNumber(row.pending_evaluations, "pending evaluation count") > 0,
         hasFailedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count") > 0,
-        canRetrySharedFailure: asNumber(row.retryable_shared_failure, "retryable shared failure") === 1
+        canRetrySharedFailure: asNumber(row.retryable_shared_failure, "retryable shared failure") === 1,
+        hasRetryableJourneyFailure: asNumber(row.retryable_journey_failure, "retryable journey failure") === 1
       }),
       ...row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, "failure code"), message: asText(row.failure_message, "failure message") } }
     };
