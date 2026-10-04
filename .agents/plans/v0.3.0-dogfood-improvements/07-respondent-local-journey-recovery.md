@@ -31,6 +31,7 @@
 - A failed turn resumes with its original evaluation, packet fingerprint, compiler identity, respondent event history and route; cover in Task 1's worker test.
 - A successful respondent and successful earlier turns are never dispatched again; cover in Task 1's end-to-end worker test.
 - Eligibility cannot overstate the actual transition for cancellation, unresolved attempts, exhausted allowance or a missing/ambiguous failed-turn checkpoint; cover in Task 1's lifecycle and resume tests.
+- Resuming several failed respondents with only one call remaining never exceeds the original global allowance; cover in Task 1's worker test.
 - A failed retry remains a visible partial journey with both attempts retained; cover in Task 1's attempt-history test and Task 2's scenario criteria.
 
 ---
@@ -248,9 +249,9 @@ Keep deterministic fixture-provider selection, inline worker launch, and readine
 
 Have the runner pass its frozen workflow setup into adapter preflight. In the recovery fixture only, resolve and validate the current candidate package and plugin metadata, fingerprint the candidate source tree and harness, and use `process.execPath --import tsx` with the source harness and worktree root. Preserve the configured MCP command for other suites. Never infer candidate identity from the installed plugin or checked-in generated bundles.
 
-- [x] **Step 5: Run focused proofs, build, and the full repository gate**
+- [ ] **Step 5: Run focused proofs, build, and the full repository gate**
 
-Run Codex adapter, campaign contract, MCP, provider, lifecycle and worker tests, `npm run build`, then commit so the tracked hook validates the staged snapshot with `npm run verify`. Do not run the skill actor/judge campaign or hosted inference in CI or pre-commit.
+Run Codex adapter, campaign contract, MCP, provider, lifecycle and worker tests, including several failed respondents sharing a one-call remaining allowance, then `npm run build` and commit so the tracked hook validates the staged snapshot with `npm run verify`. Do not run the skill actor/judge campaign or hosted inference in CI or pre-commit.
 
 - [x] **Step 6: Re-run fresh reviews and open PR #19**
 

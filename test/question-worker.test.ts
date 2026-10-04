@@ -603,6 +603,53 @@ test('a partial journey whose original allowance is exhausted refuses resume', a
   } finally { await f.close(); }
 });
 
+test('resuming multiple failed respondents never exceeds the one call left in the original allowance', async () => {
+  const f = await journeyFixture(2, 5);
+  let retryPhase = false;
+  let retryCalls = 0;
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      if (!retryPhase) throw new Error('respondent-local evaluation failure');
+      retryCalls += 1;
+      if (retryCalls > 1) throw new Error('worker exceeded the remaining physical-call allowance');
+      return {
+        type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 },
+        attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+      };
+    } }));
+    const before = f.store.getStatus(f.runId);
+    assert.equal(before.status, 'partial');
+    assert.equal(before.usedCalls, 4);
+    assert.equal(before.maxCalls, 5);
+    assert.deepEqual(before.lifecycle.resume, { eligible: true });
+    assert.equal(f.store.getJourneyRun(f.runId).evaluations.filter(({ questionId, status }) => questionId === 'clarity' && status === 'failed').length, 2);
+
+    retryPhase = true;
+    assert.equal(f.store.resume(f.runId, Date.now()).started, true);
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      retryCalls += 1;
+      if (retryCalls > 1) throw new Error('worker exceeded the remaining physical-call allowance');
+      return {
+        type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 },
+        attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+      };
+    } }));
+    const after = f.store.getJourneyRun(f.runId);
+    const status = f.store.getStatus(f.runId);
+    assert.equal(retryCalls, 1);
+    assert.equal(status.usedCalls, status.maxCalls);
+    assert.equal(status.status, 'partial');
+    assert.deepEqual(status.lifecycle.resume, { eligible: false, reason: 'call_allowance_exhausted' });
+    assert.equal(after.evaluations.filter(({ questionId, status: evaluationStatus }) => questionId === 'clarity' && evaluationStatus === 'answered').length, 1);
+    const unresolved = after.evaluations.find(({ respondentId, questionId, status: evaluationStatus }) => respondentId === 'reader-b' && questionId === 'clarity' && evaluationStatus === 'unreached');
+    assert.ok(unresolved);
+    assert.deepEqual(f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(unresolved.evaluationId)).map(({ status: attemptStatus }) => attemptStatus), ['failed']);
+    assert.equal(f.store.attempts(f.runId).items.length, 5);
+  } finally { await f.close(); }
+});
+
 test('journey resume lifecycle refuses a failed evaluation without a failed respondent checkpoint', async () => {
   const f = await journeyFixture(1, 5);
   const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
