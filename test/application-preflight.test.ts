@@ -57,7 +57,7 @@ test('an unknown Jev context window is unverified even after complete path trave
   assert.ok((result.providers[0]?.unavailable.length ?? 0) > 0);
 });
 
-test('native TypeSafe preflight reports its credential and keeps unknown context evidence unavailable', async () => {
+test('native TypeSafe preflight exposes packet measurements separately from variable-history coverage', async () => {
   const result = await preflightStudy({
     manifestPath: path.join(fixtures, 'article.json'), cohortPath: path.join(fixtures, 'cohort.json'),
     providers: [{ kind: 'jev', route: 'typesafe' }],
@@ -67,7 +67,10 @@ test('native TypeSafe preflight reports its credential and keeps unknown context
   assert.equal(result.providers[0]?.route, 'typesafe');
   assert.equal(result.providers[0]?.credentialAvailability, 'available');
   assert.equal(result.providers[0]?.status, 'unverified');
-  assert.ok(result.providers[0]?.unavailable.some(({ reason }) => reason === 'typesafe-model-context-unverified'));
+  assert.equal(result.providers[0]?.complete, true);
+  assert.deepEqual(result.providers[0]?.unavailable, []);
+  assert.equal(result.providers[0]?.effectiveLimit, 25_600);
+  assert.match(result.providers[0]?.incompleteReason ?? '', /variable serialized size/i);
 });
 
 test('maximum-profile mode exercises the full aggregate prose allowance and labels results provisional', async () => {

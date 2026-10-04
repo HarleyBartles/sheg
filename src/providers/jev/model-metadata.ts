@@ -26,7 +26,11 @@ export const jevModelMetadata: Record<JevRoute, Record<string, JevModelMetadata>
   },
   typesafe: {
     'jev-latest': {
-      contextLimit: null,
+      contextLimit: 32_000,
+      contextEvidence: {
+        sourceUrl: 'https://docs.typesafe.ai/models',
+        checkedOn: '2026-10-04',
+      },
       inputUsdPerMillion: 0.042,
       outputUsdPerMillion: 0,
       priceEvidence: {

@@ -20287,7 +20287,11 @@ var jevModelMetadata = {
   },
   typesafe: {
     "jev-latest": {
-      contextLimit: null,
+      contextLimit: 32e3,
+      contextEvidence: {
+        sourceUrl: "https://docs.typesafe.ai/models",
+        checkedOn: "2026-10-04"
+      },
       inputUsdPerMillion: 0.042,
       outputUsdPerMillion: 0,
       priceEvidence: {

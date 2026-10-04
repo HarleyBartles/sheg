@@ -5,6 +5,8 @@ import type { DecisionProvider, ProviderContextFit } from '../src/domain/decisio
 import { compileDecisionRequest, emptyTrajectory } from '../src/domain/decision/prompt.js';
 import type { DecisionBatchRequest, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
 import { followOnRunRequestSchema, type FollowOnSourceSet, type FollowOnSourceTurn, type InlineRunRequest } from '../src/domain/run/request.js';
+import { JevProvider } from '../src/providers/jev.js';
+import { defaultJevConfig } from '../src/providers/jev/config.js';
 
 const fit = (status: ProviderContextFit['status'] = 'fits'): ProviderContextFit => ({
   provider: 'laya', status, method: 'test-fixture', modelIdentity: 'test-model',
@@ -109,6 +111,16 @@ test('preparation compiles one frozen, metadata-free packet per respondent witho
   assert.notEqual(result.prepared!.evaluations[0]!.contextId, result.prepared!.evaluations[1]!.contextId);
   assert.equal(JSON.stringify(result.prepared).includes('selectionRationale'), false);
   assert.equal(fixture.decisions, 0);
+});
+
+test('native TypeSafe direct inspection reports context fit without reading credentials or inferring', async () => {
+  const provider = new JevProvider(defaultJevConfig('typesafe'));
+  const input = { ...request(), provider: { kind: 'jev' as const, route: 'typesafe' as const } };
+  const result = await prepareRun(input, provider);
+
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.fits.length, 2);
+  assert.ok(result.inspection.fits.every(({ fit: measured }) => measured.status === 'fits' && measured.effectiveLimit === 25_600));
 });
 
 test('direct poll keeps source provenance in the run catalog but removes it from respondent provider state', async () => {

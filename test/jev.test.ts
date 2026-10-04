@@ -60,12 +60,7 @@ test('estimates the exact request with fixed context reserve and refuses unknown
   assert.equal(fit.contextLimit, 32_768);
   assert.equal(fit.effectiveLimit, 26_214);
   assert.equal(measureJevContext(request, 'typesafe/jev-latest').status, 'unavailable');
-  const nativeFit = measureJevContext(request, 'jev-latest', 'typesafe');
-  assert.equal(nativeFit.status, 'unavailable');
-  assert.equal(nativeFit.contextLimit, null);
-  assert.equal(nativeFit.effectiveLimit, null);
   assert.equal(measureJevBatchContext({ state: request.state, questions: [request.question, { type: 'noul', id: 'trust', instructions: 'Credible?' }] }, config.model).status, 'fits');
-  assert.equal(measureJevBatchContext({ state: request.state, questions: [request.question, { type: 'noul', id: 'trust', instructions: 'Credible?' }] }, 'jev-latest', 'typesafe').status, 'unavailable');
 
   const oversized = { ...request, state: { text: 'x'.repeat(100_000) } };
   assert.equal(measureJevContext(oversized, config.model).status, 'overflow');
@@ -76,6 +71,46 @@ test('estimates the exact request with fixed context reserve and refuses unknown
     await assert.rejects(provider.decide(oversized, 1), /estimated-context-over-limit/);
     assert.equal(calls, 0);
   } finally { restore(); }
+});
+
+test('native TypeSafe admission applies the full-request estimate and reserve at its published boundary', async () => {
+  const native = defaultJevConfig('typesafe');
+  const emptyBody = JSON.stringify({
+    model: native.model,
+    state: { content: '' },
+    questions: { [request.question.id]: { type: 'choice', instructions: request.question.instructions, criteria: request.question.options } },
+  });
+  const bytesAtEffectiveLimit = 25_600 * 3;
+  const fill = (byteCount: number) => ({ content: 'x'.repeat(byteCount - Buffer.byteLength(emptyBody, 'utf8')) });
+  const edge = measureJevContext({ ...request, state: fill(bytesAtEffectiveLimit) }, native.model, native.route);
+  const over = measureJevContext({ ...request, state: fill(bytesAtEffectiveLimit + 1) }, native.model, native.route);
+
+  assert.equal(edge.status, 'fits');
+  assert.equal(edge.tokens, 25_600);
+  assert.equal(edge.details.serializedUtf8Bytes, 76_800);
+  assert.equal(over.status, 'overflow');
+  assert.equal(over.tokens, 25_601);
+  assert.equal(over.reason, 'estimated-context-over-limit');
+  assert.equal(measureJevContext(request, 'unknown-native-model', native.route).status, 'unavailable');
+
+  const longQuestions = ['first', 'second', 'third'].map((id) => ({
+    type: 'choice' as const, id, instructions: 'q'.repeat(26_000), options: { yes: 'Yes', no: 'No' },
+  }));
+  assert.ok(longQuestions.every((question) => measureJevContext({ state: { content: 'shared state' }, question, optionIds: ['yes', 'no'] }, native.model, native.route).status === 'fits'));
+  assert.equal(measureJevBatchContext({ state: { content: 'shared state' }, questions: longQuestions }, native.model, native.route).status, 'overflow');
+
+  let credentialReads = 0;
+  let requests = 0;
+  const provider = new JevProvider(native, fakeFetch(async () => { requests += 1; return response(); }), {
+    credentialStore: {
+      availability: async () => 'available',
+      readForAuthentication: async () => { credentialReads += 1; return 'never-read-for-overflow'; },
+    },
+  });
+  await assert.rejects(provider.decide({ ...request, state: fill(bytesAtEffectiveLimit + 1) }, 1), (error: unknown) =>
+    error instanceof JevCallError && error.attempts === 0 && error.contextFit?.status === 'overflow');
+  assert.equal(credentialReads, 0);
+  assert.equal(requests, 0);
 });
 
 function fakeFetch(handler: (url: string, init: RequestInit) => Promise<Response>): typeof fetch {
