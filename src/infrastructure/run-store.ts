@@ -1,3 +1,4 @@
+import { providerFailureEvidenceSchema, type ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
@@ -48,7 +49,7 @@ function encounteredMaterialsFromState(state: Record<string, unknown>): Array<{ 
 
 export type AttemptOutcome =
   | { kind: 'answered'; result: import('../domain/decision/decision.js').DecisionResult }
-  | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run'; detail?: DecisionFailureDetail; providerAttempts?: number };
+  | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run'; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence; providerAttempts?: number };
 
 export type RunListQuery = RunListQueryInput;
 export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean; retainedFollowOnRunIds: string[] }>; blockedByActiveWork: boolean };
@@ -180,18 +181,26 @@ function parseJson<T>(value: SQLOutputValue | undefined, label: string): T {
   }
 }
 
-function failureDetailFromStorage(value: SQLOutputValue | undefined): DecisionFailureDetail | undefined {
-  if (value === null || value === undefined) return undefined;
-  return decisionFailureDetailSchema.parse(parseJson(value, 'typed-answer failure detail'));
+function failureEvidenceFromStorage(value: SQLOutputValue | undefined): Pick<import('../domain/run/lifecycle.js').EvaluationFailure, 'detail' | 'providerFailure'> {
+  if (value === null || value === undefined) return {};
+  const parsed = parseJson<Record<string, unknown>>(value, 'evaluation failure evidence');
+  // Original schema-8 records contain a bare typed-answer detail. Preserve their bytes and meaning.
+  if ('reason' in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
+  return { ...(parsed.detail === undefined ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
+}
+
+function failureEvidenceJson(failure: import('../domain/run/lifecycle.js').EvaluationFailure): string | null {
+  if (failure.providerFailure) return JSON.stringify({ ...(failure.detail ? { detail: failure.detail } : {}), providerFailure: providerFailureEvidenceSchema.parse(failure.providerFailure) });
+  return failure.detail ? JSON.stringify(failure.detail) : null;
 }
 
 function storedEvaluationFailure(row: DatabaseRow): import('../domain/run/lifecycle.js').EvaluationFailure | undefined {
   if (row.failure_code === null) return undefined;
-  const detail = failureDetailFromStorage(row.failure_detail_json);
+  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
   return {
     code: asText(row.failure_code, 'failure code'),
     message: asText(row.failure_message, 'failure message'),
-    ...(detail ? { detail } : {}),
+    ...evidence,
   };
 }
 
@@ -204,7 +213,7 @@ function evaluationFailureFromJson(value: SQLOutputValue | undefined): import('.
   const parsed = parseJson<Record<string, unknown>>(value, 'attempt evaluation failure');
   if (typeof parsed.code !== 'string' || typeof parsed.message !== 'string') throw new RunStoreError('data_integrity_error', 'Stored attempt evaluation failure is invalid.');
   const detail = parsed.detail === undefined ? undefined : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...(detail ? { detail } : {}) };
+  return { code: parsed.code, message: parsed.message, ...(detail ? { detail } : {}), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
 }
 
 function encodeCursor(value: object): string {
@@ -1803,9 +1812,9 @@ class SQLiteRunStore implements RunStore {
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, 'evaluation ID');
           this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-            .run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-          if (outcome.detail) this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-            .run(evaluationFailureJson({ code: outcome.code, message: outcome.message, detail: outcome.detail }), attemptId, evaluationId);
+            .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+          if (outcome.detail || outcome.providerFailure) this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
+            .run(evaluationFailureJson({ code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) }), attemptId, evaluationId);
         }
         if (outcome.scope === 'run') this.database.prepare('UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?').run(outcome.scope, outcome.code, outcome.message, claim.runId);
       } else {
@@ -1877,8 +1886,8 @@ class SQLiteRunStore implements RunStore {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
           .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-          .run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) };
+          .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
         this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
           .run(evaluationFailureJson(failure), attemptId, evaluationId);
         if (outcome.scope === 'run') {
@@ -1969,8 +1978,8 @@ class SQLiteRunStore implements RunStore {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
           .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-          .run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) };
+          .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
         this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
           .run(evaluationFailureJson(failure), attemptId, evaluationId);
         if (outcome.scope === 'run') {

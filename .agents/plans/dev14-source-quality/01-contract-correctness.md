@@ -41,10 +41,10 @@ Preserve request compatibility, migration paths, original compiler fingerprints,
 
 **Interfaces:** A domain-owned provider error/failure contract carries attempts, scope, safe category and optional context-fit evidence. Existing public provider error exports remain compatible wrappers if callers depend on them. Application code handles the shared contract instead of concrete adapter classes.
 
-- [ ] Add an execution behavior case for zero-attempt known context overflow, checking recalled answer/attempt diagnostics and unchanged call use. Add a safe HTTP authentication case that stops subsequent respondents and never exposes provider payloads.
-- [ ] Run node --import tsx --test test/question-worker.test.ts and witness the missing diagnostics.
-- [ ] Implement typed provider failure evidence at the actual throw boundaries; extend persisted failure validation with optional fields without rewriting historical records or enlarging migration scope.
-- [ ] Run node --import tsx --test test/question-worker.test.ts test/jev.test.ts test/laya.test.ts and npm run typecheck; inspect and commit.
+- [x] Add an execution behavior case for zero-attempt known context overflow, checking recalled answer/attempt diagnostics and unchanged call use. Add a safe HTTP authentication case that stops subsequent respondents and never exposes provider payloads.
+- [x] Run node --import tsx --test test/question-worker.test.ts and witness the missing diagnostics.
+- [x] Implement typed provider failure evidence at the actual throw boundaries; extend persisted failure validation with optional fields without rewriting historical records or enlarging migration scope.
+- [x] Run node --import tsx --test test/question-worker.test.ts test/jev.test.ts test/laya.test.ts and npm run typecheck; inspect and commit.
 
 ### Task 3: Make evidence pagination authoritative
 

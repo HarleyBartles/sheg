@@ -337,6 +337,7 @@ test('a typed provider validation failure gives safe reasons and the worker cont
     assert.deepEqual(f.store.answers(f.runId).items[0]?.failure, {
       code: 'invalid_answer', message: 'The selected option was not offered by this question.',
       detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+      providerFailure: { category: 'answer', attempts: 1, scope: 'evaluation' },
     });
     assert.deepEqual(f.store.attempts(f.runId).items[0]?.evaluationFailures?.[0]?.failure, f.store.answers(f.runId).items[0]?.failure);
     assert.equal(status.usedCalls, 2);
@@ -356,6 +357,25 @@ test('provider authentication failure ends the run without dispatching sibling r
     assert.equal(calls, 1);
     assert.equal(f.store.answers(f.runId).items[1]?.status, 'pending');
     assert.equal(status.failure?.message.includes('secret detail'), false);
+  } finally { await f.close(); }
+});
+
+test('known pre-dispatch context refusal retains fit evidence through query and attempt recall without charging a call', async () => {
+  const f = await fixture(request(1));
+  const fit = { provider: 'jev' as const, status: 'overflow' as const, method: 'estimated-json', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 1200, contextLimit: 1000, headroomTokens: 200, effectiveLimit: 800, details: {}, reason: 'estimated-context-over-limit' };
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide() { throw new JevCallError('Raw diagnostic must not escape', 0, fit); } }));
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 0);
+    const evidence = f.store.queryEvidence({ sourceRunId: f.runId, criteria: {} }).items[0]?.failure;
+    assert.equal(evidence?.code, 'provider_context_overflow');
+    assert.deepEqual((evidence as { providerFailure?: unknown })?.providerFailure, { category: 'admission', attempts: 0, scope: 'evaluation', contextFit: fit });
+    const attempt = f.store.attempts(f.runId).items[0]?.evaluationFailures?.[0]?.failure;
+    assert.deepEqual(attempt, evidence);
+    assert.doesNotMatch(JSON.stringify(evidence), /Raw diagnostic/);
+    f.store.close();
+    const reopened = openRunStore(f.root);
+    try { assert.deepEqual(reopened.queryEvidence({ sourceRunId: f.runId, criteria: {} }).items[0]?.failure, evidence); }
+    finally { reopened.close(); }
   } finally { await f.close(); }
 });
 

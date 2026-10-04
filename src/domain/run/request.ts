@@ -1,3 +1,4 @@
+import { providerFailureEvidenceSchema } from '../decision/provider-failure.js';
 import { z } from 'zod';
 import { decisionFailureDetailSchema, decisionQuestionSchema } from '../decision/decision.js';
 import { respondentProfileSchema } from '../respondents/profile.js';
@@ -233,7 +234,7 @@ export const runEvidenceItemSchema = z.object({
     questionId: z.string().min(1),
     status: z.enum(['pending', 'answered', 'failed', 'unreached']),
     result: decisionResultSchema.optional(),
-    failure: z.object({ code: z.string().min(1), message: z.string().min(1), detail: decisionFailureDetailSchema.optional() }).strict().optional(),
+    failure: z.object({ code: z.string().min(1), message: z.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
     execution: providerExecutionEvidenceSchema.optional(),
     turnId: z.string().min(1).optional(),

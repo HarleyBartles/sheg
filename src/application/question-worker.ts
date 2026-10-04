@@ -4,11 +4,11 @@ import type { RunStore } from '../infrastructure/run-store.js';
 import { hashCanonical } from '../infrastructure/identity.js';
 import { advanceJourney, normalizeResponse } from '../domain/journey/run.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
-import { JevCallError } from '../providers/jev.js';
-import { LayaCallError } from '../providers/laya.js';
+import { ProviderCallError } from '../domain/decision/provider-failure.js';
+import type { EvaluationFailure } from '../domain/run/lifecycle.js';
 import type { ProviderFactory } from './run-service.js';
 import { decisionValueFromResult } from '../domain/decision/decision.js';
-import type { DecisionBatchRequest, DecisionBatchResult, DecisionFailureDetail } from '../domain/decision/decision.js';
+import type { DecisionBatchRequest, DecisionBatchResult } from '../domain/decision/decision.js';
 
 const HEARTBEAT_MS = 2_000;
 export async function executeQuestionRun(store: RunStore, runId: string, providerFactory: ProviderFactory): Promise<void> {
@@ -144,16 +144,14 @@ async function executeJourney(store: RunStore, runId: string, claim: import('../
 }
 
 function failureScope(error: unknown): 'evaluation' | 'run' {
-  return error instanceof JevCallError || error instanceof LayaCallError ? error.failureScope : 'evaluation';
+  return error instanceof ProviderCallError ? error.failureScope : 'evaluation';
 }
 
-function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: string; message: string; detail?: DecisionFailureDetail; providerAttempts?: number } {
-  const validationFailure = error instanceof JevCallError || error instanceof LayaCallError ? error.validationFailure : undefined;
-  if (validationFailure) return { ...validationFailure, ...(error instanceof JevCallError || error instanceof LayaCallError ? { providerAttempts: error.attempts } : {}) };
-  const code = scope === 'run' && error instanceof JevCallError ? error.failureCode : scope === 'run' ? 'provider_unavailable' : 'decision_failed';
-  const message = scope === 'run' && error instanceof JevCallError && error.failureCode.startsWith('credential_')
-    ? error.message
-    : scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
-  const providerAttempts = error instanceof JevCallError || error instanceof LayaCallError ? error.attempts : undefined;
-  return { code, message, ...(providerAttempts === undefined ? {} : { providerAttempts }) };
+function failureDetails(error: unknown, scope: 'evaluation' | 'run'): EvaluationFailure & { providerAttempts?: number } {
+  if (!(error instanceof ProviderCallError)) return { code: scope === 'run' ? 'provider_unavailable' : 'decision_failed', message: 'The respondent evaluation did not produce a valid answer.' };
+  const evidence = { providerAttempts: error.attempts, providerFailure: error.evidence };
+  if (error.validationFailure) return { ...error.validationFailure, ...evidence };
+  if (error.contextFit) return { code: error.contextFit.status === 'overflow' ? 'provider_context_overflow' : 'provider_context_unavailable', message: error.contextFit.status === 'overflow' ? 'The decision packet exceeds the provider context allowance.' : 'Provider context fit could not be verified.', ...evidence };
+  const code = scope === 'run' ? error.failureCode : `provider_${error.evidence.category}_failed`;
+  return { code, message: scope === 'run' ? 'Provider authentication or service access failed.' : 'The provider could not complete this evaluation.', ...evidence };
 }

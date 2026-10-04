@@ -1,3 +1,4 @@
+import { ProviderCallError, type ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { decisionBatchRequestSchema, decisionRequestSchema, decisionValueFromResult, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
@@ -9,17 +10,18 @@ import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/
 
 export { jevConfigInputSchema, jevConfigSchema, type JevConfigInput, type JevConfig, type JevRoute } from './jev/config.js';
 
-export class JevCallError extends Error {
+export class JevCallError extends ProviderCallError {
   constructor(
     message: string,
-    readonly attempts: number,
-    readonly contextFit?: ProviderContextFit,
+    attempts: number,
+    contextFit?: ProviderContextFit,
     readonly decisionId?: string,
-    readonly failureScope: 'evaluation' | 'run' = 'evaluation',
-    readonly failureCode = 'provider_unavailable',
-    readonly validationFailure?: { code: string; message: string; detail: DecisionFailureDetail },
+    failureScope: 'evaluation' | 'run' = 'evaluation',
+    failureCode = 'provider_unavailable',
+    validationFailure?: { code: string; message: string; detail: DecisionFailureDetail },
+    evidence?: { category: ProviderFailureEvidence['category']; httpStatus?: number },
   ) {
-    super(message);
+    super(message, { attempts, ...(contextFit ? { contextFit } : {}), scope: failureScope, code: failureCode, ...(validationFailure ? { validationFailure } : {}), ...evidence });
     this.name = 'JevCallError';
   }
 }
@@ -130,7 +132,7 @@ export class JevProvider implements DecisionProvider {
     try { apiKey = await this.credentialStore.readForAuthentication(this.config.route); }
     catch (error) {
       if (error instanceof CredentialStoreError) throw new JevCallError(error.message, 0, undefined, undefined, 'run', error.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, undefined, undefined, 'run', 'credential_unavailable');
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, undefined, undefined, 'run', 'credential_unavailable', undefined, { category: 'credential' });
     }
 
     const { question } = parsedRequest.data;
@@ -157,7 +159,7 @@ export class JevProvider implements DecisionProvider {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError('Jev request failed at the transport boundary.', attempts);
+        throw new JevCallError('Jev request failed at the transport boundary.', attempts, undefined, undefined, 'evaluation', 'provider_unavailable', undefined, { category: 'transport' });
       }
 
       if (!response.ok) {
@@ -165,19 +167,19 @@ export class JevProvider implements DecisionProvider {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation');
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation', 'provider_unavailable', undefined, { category: 'http', httpStatus: response.status });
       }
 
       let payload: unknown;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError('Jev returned an unreadable response.', attempts);
+        throw new JevCallError('Jev returned an unreadable response.', attempts, undefined, undefined, 'evaluation', 'provider_unavailable', undefined, { category: 'envelope' });
       }
 
       const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) {
-        throw new JevCallError('Jev response is missing required identity or usage fields.', attempts);
+        throw new JevCallError('Jev response is missing required identity or usage fields.', attempts, undefined, undefined, 'evaluation', 'provider_unavailable', undefined, { category: 'envelope' });
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
@@ -234,7 +236,7 @@ export class JevProvider implements DecisionProvider {
     try { apiKey = await this.credentialStore.readForAuthentication(this.config.route); }
     catch (error) {
       if (error instanceof CredentialStoreError) throw new JevCallError(error.message, 0, undefined, undefined, 'run', error.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, undefined, undefined, 'run', 'credential_unavailable');
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, undefined, undefined, 'run', 'credential_unavailable', undefined, { category: 'credential' });
     }
 
     const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
@@ -251,17 +253,17 @@ export class JevProvider implements DecisionProvider {
         });
       } catch {
         if (attempts < maxAttempts) { await wait(retryDelayMs(attempts)); continue; }
-        throw new JevCallError('Jev request failed at the transport boundary.', attempts);
+        throw new JevCallError('Jev request failed at the transport boundary.', attempts, undefined, undefined, 'evaluation', 'provider_unavailable', undefined, { category: 'transport' });
       }
       if (!response.ok) {
         if (retryableStatuses.has(response.status) && attempts < maxAttempts) { await wait(retryDelayMs(attempts)); continue; }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation');
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation', 'provider_unavailable', undefined, { category: 'http', httpStatus: response.status });
       }
       let payload: unknown;
       try { payload = await response.json(); }
-      catch { throw new JevCallError('Jev returned an unreadable response.', attempts); }
+      catch { throw new JevCallError('Jev returned an unreadable response.', attempts, undefined, undefined, 'evaluation', 'provider_unavailable', undefined, { category: 'envelope' }); }
       const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) throw new JevCallError('Jev response is missing required identity or usage fields.', attempts);
+      if (!parsedResponse.success) throw new JevCallError('Jev response is missing required identity or usage fields.', attempts, undefined, undefined, 'evaluation', 'provider_unavailable', undefined, { category: 'envelope' });
 
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;

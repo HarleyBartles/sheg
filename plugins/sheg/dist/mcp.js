@@ -34438,6 +34438,52 @@ function resumeRefusalMessage(reason) {
   }
 }
 
+// src/domain/decision/provider-failure.ts
+var providerContextFitSchema = external_exports.object({
+  provider: external_exports.enum(["jev", "laya"]),
+  status: external_exports.enum(["fits", "overflow", "unavailable"]),
+  method: external_exports.string().min(1),
+  modelIdentity: external_exports.string().min(1),
+  tokenCount: external_exports.enum(["measured", "estimated"]),
+  tokens: external_exports.number().finite().nonnegative(),
+  contextLimit: external_exports.number().finite().nonnegative().nullable(),
+  headroomTokens: external_exports.number().finite().nullable(),
+  effectiveLimit: external_exports.number().finite().nonnegative().nullable(),
+  details: external_exports.record(external_exports.string(), external_exports.union([external_exports.number().finite(), external_exports.string()])),
+  reason: external_exports.string().optional()
+}).strict();
+var providerFailureEvidenceSchema = external_exports.object({
+  category: external_exports.enum(["admission", "credential", "transport", "http", "envelope", "answer", "execution"]),
+  attempts: external_exports.number().int().nonnegative(),
+  scope: external_exports.enum(["evaluation", "run"]),
+  httpStatus: external_exports.number().int().min(100).max(599).optional(),
+  contextFit: providerContextFitSchema.optional()
+}).strict();
+var ProviderCallError = class extends Error {
+  attempts;
+  failureScope;
+  failureCode;
+  contextFit;
+  validationFailure;
+  evidence;
+  constructor(message, options2) {
+    super(message);
+    this.name = "ProviderCallError";
+    this.attempts = options2.attempts;
+    this.failureScope = options2.scope ?? "evaluation";
+    this.failureCode = options2.code ?? "provider_unavailable";
+    this.contextFit = options2.contextFit;
+    this.validationFailure = options2.validationFailure;
+    this.evidence = providerFailureEvidenceSchema.parse({
+      category: options2.category ?? (options2.contextFit ? "admission" : options2.validationFailure ? "answer" : options2.code?.startsWith("credential_") ? "credential" : "execution"),
+      attempts: options2.attempts,
+      scope: this.failureScope,
+      ...options2.contextFit ? { contextFit: options2.contextFit } : {},
+      ...options2.httpStatus === void 0 ? {} : { httpStatus: options2.httpStatus }
+    });
+  }
+};
+
 // src/domain/decision/decision.ts
 var identifier = external_exports.string().min(1);
 var prose = external_exports.string().min(1);
@@ -35189,7 +35235,7 @@ var runEvidenceItemSchema = external_exports.object({
   questionId: external_exports.string().min(1),
   status: external_exports.enum(["pending", "answered", "failed", "unreached"]),
   result: decisionResultSchema.optional(),
-  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional() }).strict().optional(),
+  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
   selectedMaterial: selectedMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
   turnId: external_exports.string().min(1).optional(),
@@ -36875,17 +36921,23 @@ function parseJson(value, label) {
     throw new RunStoreError("data_integrity_error", `Stored ${label} is not valid JSON.`, { cause: error62 });
   }
 }
-function failureDetailFromStorage(value) {
-  if (value === null || value === void 0) return void 0;
-  return decisionFailureDetailSchema.parse(parseJson(value, "typed-answer failure detail"));
+function failureEvidenceFromStorage(value) {
+  if (value === null || value === void 0) return {};
+  const parsed = parseJson(value, "evaluation failure evidence");
+  if ("reason" in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
+  return { ...parsed.detail === void 0 ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
+}
+function failureEvidenceJson(failure2) {
+  if (failure2.providerFailure) return JSON.stringify({ ...failure2.detail ? { detail: failure2.detail } : {}, providerFailure: providerFailureEvidenceSchema.parse(failure2.providerFailure) });
+  return failure2.detail ? JSON.stringify(failure2.detail) : null;
 }
 function storedEvaluationFailure(row) {
   if (row.failure_code === null) return void 0;
-  const detail = failureDetailFromStorage(row.failure_detail_json);
+  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
   return {
     code: asText(row.failure_code, "failure code"),
     message: asText(row.failure_message, "failure message"),
-    ...detail ? { detail } : {}
+    ...evidence
   };
 }
 function evaluationFailureJson(failure2) {
@@ -36896,7 +36948,7 @@ function evaluationFailureFromJson(value) {
   const parsed = parseJson(value, "attempt evaluation failure");
   if (typeof parsed.code !== "string" || typeof parsed.message !== "string") throw new RunStoreError("data_integrity_error", "Stored attempt evaluation failure is invalid.");
   const detail = parsed.detail === void 0 ? void 0 : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {} };
+  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {}, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
 }
 function encodeCursor(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -38524,8 +38576,8 @@ var SQLiteRunStore = class {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, "evaluation ID");
-          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-          if (outcome.detail) this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: outcome.code, message: outcome.message, detail: outcome.detail }), attemptId, evaluationId);
+          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+          if (outcome.detail || outcome.providerFailure) this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} }), attemptId, evaluationId);
         }
         if (outcome.scope === "run") this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
       } else {
@@ -38583,8 +38635,8 @@ var SQLiteRunStore = class {
         this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
@@ -38654,8 +38706,8 @@ var SQLiteRunStore = class {
           throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
         }
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
@@ -38963,23 +39015,13 @@ function jevMetadata(route, model) {
 }
 
 // src/providers/jev.ts
-var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure) {
-    super(message);
-    this.attempts = attempts;
-    this.contextFit = contextFit;
+var JevCallError = class extends ProviderCallError {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
+    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope, code: failureCode, ...validationFailure ? { validationFailure } : {}, ...evidence });
     this.decisionId = decisionId;
-    this.failureScope = failureScope;
-    this.failureCode = failureCode;
-    this.validationFailure = validationFailure;
     this.name = "JevCallError";
   }
-  attempts;
-  contextFit;
   decisionId;
-  failureScope;
-  failureCode;
-  validationFailure;
 };
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -39076,7 +39118,7 @@ var JevProvider = class {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
     } catch (error62) {
       if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -39101,24 +39143,24 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
       if (!response.ok) {
         if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts);
+        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
+        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
@@ -39169,7 +39211,7 @@ var JevProvider = class {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
     } catch (error62) {
       if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
     }
     const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
     const startedAt = performance.now();
@@ -39190,23 +39232,23 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
       if (!response.ok) {
         if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts);
+        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
+      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
       const outputTokens = parsedResponse.data.usage.output_tokens;
@@ -39575,21 +39617,13 @@ async function measureLayaContext(request, config2) {
 
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
-var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", validationFailure) {
-    super(message);
-    this.attempts = attempts;
-    this.contextFit = contextFit;
+var LayaCallError = class extends ProviderCallError {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", validationFailure, evidence) {
+    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope, ...validationFailure ? { validationFailure } : {}, ...evidence });
     this.decisionId = decisionId;
-    this.failureScope = failureScope;
-    this.validationFailure = validationFailure;
     this.name = "LayaCallError";
   }
-  attempts;
-  contextFit;
   decisionId;
-  failureScope;
-  validationFailure;
 };
 var choiceAnswerSchema2 = external_exports.object({
   type: external_exports.literal("choice"),
@@ -39671,21 +39705,21 @@ var LayaProvider = class {
         signal: AbortSignal.timeout(this.config.timeoutMs)
       });
     } catch {
-      throw new LayaCallError("Laya local service request failed.", 1);
+      throw new LayaCallError("Laya local service request failed.", 1, void 0, void 0, "evaluation", void 0, { category: "transport" });
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", void 0, { category: "http", httpStatus: response.status });
     let payload;
     try {
       payload = await response.json();
     } catch {
-      throw new LayaCallError("Laya local service returned unreadable JSON.", 1);
+      throw new LayaCallError("Laya local service returned unreadable JSON.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
     const parsedResponse = responseSchema.safeParse(payload);
     if (!parsedResponse.success) {
-      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1);
+      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
-      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
+      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
     const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
     if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
