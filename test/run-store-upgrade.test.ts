@@ -27,10 +27,16 @@ test('schema 7 migrates to the v0.3.0 schema 8 baseline without changing run evi
       runs: await rows(root, 'SELECT * FROM runs ORDER BY run_id'),
       groups: await rows(root, 'SELECT * FROM question_groups ORDER BY group_id'),
       evaluations: await rows(root, 'SELECT * FROM evaluations ORDER BY evaluation_id'),
+      journeyRespondents: await rows(root, 'SELECT * FROM journey_respondents ORDER BY run_id, respondent_id'),
       attempts: await rows(root, 'SELECT * FROM attempts ORDER BY attempt_sequence'),
       attemptEvaluations: await rows(root, 'SELECT * FROM attempt_evaluations ORDER BY attempt_id, evaluation_id'),
       answerAttempts: await rows(root, 'SELECT * FROM evaluation_answer_attempts ORDER BY evaluation_id'),
     };
+    assert.equal(before.runs.length, 3);
+    assert.equal(before.evaluations.length, 5);
+    assert.equal(before.journeyRespondents.length, 1);
+    assert.deepEqual(new Set(before.evaluations.map(({ result_json }) => JSON.parse(String(result_json)).type)), new Set(['choice', 'score', 'noul']));
+    assert.ok(String(before.runs.find(({ run_id }) => run_id === 'run-follow-on')?.request_json).includes('evaluation-source'));
     const store = openRunStore(root);
     store.close();
     const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
@@ -43,6 +49,7 @@ test('schema 7 migrates to the v0.3.0 schema 8 baseline without changing run evi
     assert.deepEqual(await rows(root, 'SELECT * FROM runs ORDER BY run_id'), before.runs);
     assert.deepEqual(await rows(root, 'SELECT * FROM question_groups ORDER BY group_id'), before.groups);
     assert.deepEqual(await rows(root, 'SELECT * FROM evaluations ORDER BY evaluation_id'), before.evaluations);
+    assert.deepEqual(await rows(root, 'SELECT * FROM journey_respondents ORDER BY run_id, respondent_id'), before.journeyRespondents);
     assert.deepEqual(await rows(root, 'SELECT * FROM attempts ORDER BY attempt_sequence'), before.attempts);
     assert.deepEqual(await rows(root, 'SELECT * FROM attempt_evaluations ORDER BY attempt_id, evaluation_id'), before.attemptEvaluations);
     assert.deepEqual(await rows(root, 'SELECT * FROM evaluation_answer_attempts ORDER BY evaluation_id'), before.answerAttempts);
@@ -89,7 +96,7 @@ test('a failed schema step leaves the source at version 7 and retains a verified
       assert.equal((source.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 7);
       assert.equal((backup.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 7);
       assert.equal((backup.prepare('PRAGMA integrity_check').get() as { integrity_check: string }).integrity_check, 'ok');
-      assert.equal((backup.prepare('SELECT COUNT(*) AS count FROM attempts').get() as { count: number }).count, 1);
+      assert.equal((backup.prepare('SELECT COUNT(*) AS count FROM attempts').get() as { count: number }).count, 5);
     } finally { source.close(); backup.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

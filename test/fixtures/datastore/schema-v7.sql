@@ -69,3 +69,37 @@ INSERT INTO attempts (attempt_sequence, attempt_id, run_id, group_id, evaluation
 VALUES (4, 'attempt-1', 'run-follow-on', 'group-1', 'evaluation-1', 'packet-hash', 'owner-1', 'answered', 1791028800001, 1791028800002, '{"type":"score","score":0.75}', '{"provider":"typesafe","model":"jev-latest","physicalAttempts":1}');
 INSERT INTO attempt_evaluations (attempt_id, evaluation_id, failure_json) VALUES ('attempt-1', 'evaluation-1', NULL);
 INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES ('evaluation-1', 'attempt-1');
+INSERT INTO runs (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls, used_calls, reserved_calls)
+VALUES ('run-source', 'submission-source', 'source-request-hash', '2026-10-03T11:00:00.000Z', 1791025200000, 'Source study', 'completed', '{"request":{"kind":"poll"}}', 1, 2, 1, 0);
+INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
+VALUES ('group-source', 'run-source', 0, 'context-source', 'reader-1', '{"profile":"source-reader"}', '["selection"]');
+INSERT INTO evaluations (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, packet_json, packet_fingerprint, status, result_json)
+VALUES ('evaluation-source', 'run-source', 0, 'context-source', 'reader-1', 'selection', 'group-source', '{"question":{"type":"choice","id":"selection"}}', 'source-packet-hash', 'answered', '{"type":"choice","choice":"quote-1","confidence":0.9}');
+INSERT INTO attempts (attempt_sequence, attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms, settled_ms, result_json, execution_json)
+VALUES (3, 'attempt-source', 'run-source', 'group-source', 'evaluation-source', 'source-packet-hash', 'owner-source', 'answered', 1791025200001, 1791025200002, '{"type":"choice","choice":"quote-1"}', '{"provider":"typesafe","model":"jev-latest","physicalAttempts":1}');
+INSERT INTO attempt_evaluations (attempt_id, evaluation_id, failure_json) VALUES ('attempt-source', 'evaluation-source', NULL);
+INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES ('evaluation-source', 'attempt-source');
+UPDATE runs SET evaluation_count = 3, max_calls = 5, used_calls = 3 WHERE run_id = 'run-follow-on';
+UPDATE question_groups SET question_ids_json = '["clarity","choice-check","noul-check"]' WHERE group_id = 'group-1';
+INSERT INTO evaluations (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, packet_json, packet_fingerprint, status, result_json)
+VALUES
+  ('evaluation-choice', 'run-follow-on', 1, 'context-1', 'reader-1', 'choice-check', 'group-1', '{"question":{"type":"choice","id":"choice-check"}}', 'choice-packet-hash', 'answered', '{"type":"choice","choice":"yes","confidence":0.8}'),
+  ('evaluation-noul', 'run-follow-on', 2, 'context-1', 'reader-1', 'noul-check', 'group-1', '{"question":{"type":"noul","id":"noul-check"}}', 'noul-packet-hash', 'answered', '{"type":"noul","noul":0.7}');
+INSERT INTO attempts (attempt_sequence, attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms, settled_ms, result_json, execution_json)
+VALUES
+  (5, 'attempt-choice', 'run-follow-on', 'group-1', 'evaluation-choice', 'choice-packet-hash', 'owner-1', 'answered', 1791028800003, 1791028800004, '{"type":"choice","choice":"yes"}', '{"provider":"typesafe","model":"jev-latest","physicalAttempts":1}'),
+  (6, 'attempt-noul', 'run-follow-on', 'group-1', 'evaluation-noul', 'noul-packet-hash', 'owner-1', 'answered', 1791028800005, 1791028800006, '{"type":"noul","noul":0.7}', '{"provider":"typesafe","model":"jev-latest","physicalAttempts":1}');
+INSERT INTO attempt_evaluations (attempt_id, evaluation_id, failure_json) VALUES ('attempt-choice', 'evaluation-choice', NULL), ('attempt-noul', 'evaluation-noul', NULL);
+INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES ('evaluation-choice', 'attempt-choice'), ('evaluation-noul', 'attempt-noul');
+INSERT INTO runs (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls, used_calls, reserved_calls)
+VALUES ('run-journey', 'submission-journey', 'journey-request-hash', '2026-10-03T13:00:00.000Z', 1791032400000, 'Journey study', 'completed', '{"request":{"kind":"journey"}}', 1, 2, 1, 0);
+INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
+VALUES ('group-journey', 'run-journey', 0, 'context-journey', 'reader-journey', '{"stage":"wrap-up"}', '["journey-score"]');
+INSERT INTO evaluations (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status, result_json)
+VALUES ('evaluation-journey', 'run-journey', 0, 'context-journey', 'reader-journey', 'journey-score', 'group-journey', 'turn-journey', 'ask-wrap-up', 'path-journey', 1, '{"question":{"type":"score","id":"journey-score"}}', 'journey-packet-hash', 'answered', '{"type":"score","score":0.6,"confidence":0.7}');
+INSERT INTO journey_respondents (run_id, respondent_id, status, revision, events_json, route_json, outcome)
+VALUES ('run-journey', 'reader-journey', 'completed', 2, '[{"kind":"exposed","itemId":"opening"},{"kind":"answered","questionId":"journey-score"}]', '["start","ask-wrap-up","done"]', 'completed');
+INSERT INTO attempts (attempt_sequence, attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms, settled_ms, result_json, execution_json)
+VALUES (7, 'attempt-journey', 'run-journey', 'group-journey', 'evaluation-journey', 'journey-packet-hash', 'owner-journey', 'answered', 1791032400001, 1791032400002, '{"type":"score","score":0.6}', '{"provider":"typesafe","model":"jev-latest","physicalAttempts":1}');
+INSERT INTO attempt_evaluations (attempt_id, evaluation_id, failure_json) VALUES ('attempt-journey', 'evaluation-journey', NULL);
+INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES ('evaluation-journey', 'attempt-journey');

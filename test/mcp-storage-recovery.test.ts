@@ -157,6 +157,30 @@ test('a damaged current-version schema enters recovery and preserves a verified 
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('a current-version datastore missing a required column enters recovery before normal queries fail', async () => {
+  const root = await temporaryRoot();
+  await seedSchemaV7(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    database.exec(await readFile(new URL('./fixtures/datastore/schema-v8.sql', import.meta.url), 'utf8'));
+    database.exec('ALTER TABLE runs DROP COLUMN label');
+  } finally { database.close(); }
+  const f = await connectDefault(root);
+  try {
+    const inspection = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
+    assert.equal(inspection.isError ?? false, false);
+    assert.deepEqual((inspection.structuredContent as { compatibility: { status: string; schemaVersion: number | null } }).compatibility, { status: 'unreadable', schemaVersion: null });
+    assert.equal((inspection.structuredContent as { issue: { code: string } }).issue.code, 'datastore_schema_invalid');
+    const blocked = await f.client.callTool({ name: 'run_list', arguments: {} });
+    assert.equal(blocked.isError, true);
+    assert.equal((blocked.structuredContent as { error: { code: string } }).error.code, 'datastore_recovery_required');
+    const reset = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'reset', confirmation: resetConfirmation } });
+    assert.equal(reset.isError ?? false, false);
+    assert.equal((reset.structuredContent as { preservation: string }).preservation, 'verified-sqlite-backup');
+    assert.equal((await f.client.callTool({ name: 'run_list', arguments: {} })).isError ?? false, false);
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('a failed migration leaves inspection and explicitly confirmed reset available with verified backups', async () => {
   const root = await temporaryRoot();
   await seedSchemaV7(root, { migrationFailure: true });

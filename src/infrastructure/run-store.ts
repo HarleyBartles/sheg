@@ -11,6 +11,7 @@ import { decisionFailureDetailForReason, decisionFailureDetailSchema, decisionRe
 import { followOnLineageSchema, followOnRunRequestSchema, runEvidenceQuerySchema, runLifecycleSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput, type RunMaterialItem } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 import { journeyTopology } from '../domain/journey/topology.js';
+import { hasSequentialMigrationPath } from './schema-migration-path.js';
 
 const SCHEMA_VERSION = 8;
 const LEASE_MS = 30_000;
@@ -266,22 +267,29 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [{
 }];
 
 function hasMigrationPath(fromVersion: number, targetVersion = SCHEMA_VERSION): boolean {
-  let version = fromVersion;
-  while (version < targetVersion) {
-    const migration = SCHEMA_MIGRATIONS.find(({ fromVersion: candidate }) => candidate === version);
-    if (!migration || migration.toVersion <= version || migration.toVersion > targetVersion) return false;
-    version = migration.toVersion;
-  }
-  return version === targetVersion;
+  return hasSequentialMigrationPath(fromVersion, targetVersion, SCHEMA_MIGRATIONS);
 }
 
-const REQUIRED_SCHEMA_TABLES = ['runs', 'question_groups', 'evaluations', 'journey_respondents', 'attempts', 'attempt_evaluations', 'evaluation_answer_attempts', 'schema_migrations'] as const;
+const REQUIRED_SCHEMA_COLUMNS = {
+  runs: ['run_id', 'submission_id', 'request_fingerprint', 'created_at', 'created_ms', 'label', 'status', 'request_json', 'evaluation_count', 'max_calls', 'used_calls', 'reserved_calls', 'cancel_requested', 'owner_token', 'owner_pid', 'lease_expires_ms', 'failure_scope', 'failure_code', 'failure_message'],
+  question_groups: ['group_id', 'run_id', 'ordinal', 'context_id', 'respondent_id', 'state_json', 'question_ids_json'],
+  evaluations: ['evaluation_id', 'run_id', 'ordinal', 'context_id', 'respondent_id', 'question_id', 'group_id', 'turn_id', 'node_id', 'path_id', 'occurrence', 'packet_json', 'packet_fingerprint', 'status', 'result_json', 'failure_code', 'failure_message', 'failure_detail_json'],
+  journey_respondents: ['run_id', 'respondent_id', 'status', 'current_node_id', 'current_turn_id', 'current_context_id', 'revision', 'events_json', 'route_json', 'outcome'],
+  attempts: ['attempt_sequence', 'attempt_id', 'run_id', 'group_id', 'evaluation_id', 'packet_fingerprint', 'owner_token', 'status', 'started_ms', 'settled_ms', 'result_json', 'execution_json', 'failure_code', 'failure_message', 'failure_scope'],
+  attempt_evaluations: ['attempt_id', 'evaluation_id', 'failure_json'],
+  evaluation_answer_attempts: ['evaluation_id', 'attempt_id'],
+  schema_migrations: ['version', 'migration_id', 'applied_at'],
+} as const;
 
 function validateSchemaShape(database: DatabaseSync): void {
   const rows = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as DatabaseRow[];
   const actual = new Set(rows.map((row) => asText(row.name, 'schema table name')));
-  const missing = REQUIRED_SCHEMA_TABLES.filter((name) => !actual.has(name));
-  if (missing.length > 0) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
+  for (const [table, requiredColumns] of Object.entries(REQUIRED_SCHEMA_COLUMNS)) {
+    if (!actual.has(table)) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
+    const columns = database.prepare(`PRAGMA table_info("${table}")`).all() as DatabaseRow[];
+    const columnNames = new Set(columns.map((column) => asText(column.name, `${table} column name`)));
+    if (requiredColumns.some((column) => !columnNames.has(column))) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
+  }
   const migration = database.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?').get(SCHEMA_VERSION) as DatabaseRow | undefined;
   if (asNumber(migration?.count, 'current schema migration count') !== 1) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore has no applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.');
 }
@@ -324,7 +332,7 @@ function migrate(database: DatabaseSync, dataRoot: string, startingVersion: numb
   let version = startingVersion;
   while (version < SCHEMA_VERSION) {
     const step = SCHEMA_MIGRATIONS.find(({ fromVersion }) => fromVersion === version);
-    if (!step || step.toVersion <= step.fromVersion || step.toVersion > SCHEMA_VERSION) {
+    if (!step || step.toVersion !== step.fromVersion + 1 || step.toVersion > SCHEMA_VERSION) {
       throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema ${version} has no supported migration path to ${SCHEMA_VERSION}. Preserve the database and use run_storage to inspect recovery options.`);
     }
     const liveVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
