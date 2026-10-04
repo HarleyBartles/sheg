@@ -159,7 +159,7 @@ test('evaluator rejects malformed stored wrappers instead of treating them as ra
 test('evaluator requires a guided actor when replaying a stored wrapper without a control selector', () => {
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
-    scenarioVersion: 5,
+    scenarioVersion: 6,
     controls: [{
       actor: { finalResponse: 'Control output.' },
       evaluator: { notes: 'PRIVATE_OLD_VERDICT' },
@@ -170,7 +170,7 @@ test('evaluator requires a guided actor when replaying a stored wrapper without 
 test('evaluator prompts can select a stored no-guidance control without including the guided actor or prior judgment', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
-    scenarioVersion: 5,
+    scenarioVersion: 6,
     guided: { actor: { scenarioId: 'typed-answer-failure', finalResponse: 'Guided actor.' } },
     controls: [{
       actor: { answer: 'Control actor without a scenario ID.' },
@@ -198,7 +198,7 @@ test('scenario CLI replays a stored no-guidance control by one-based index', () 
   const tracePath = path.join(scratch, 'synthetic-trace.json');
   try {
     writeFileSync(tracePath, JSON.stringify({
-      scenarioId: 'typed-answer-failure', scenarioVersion: 5,
+      scenarioId: 'typed-answer-failure', scenarioVersion: 6,
       controls: [{ actor: { scenarioId: 'typed-answer-failure', finalResponse: 'The response failed with invalid_answer.' } }],
     }));
     const prompt = execFileSync(process.execPath, [
@@ -222,7 +222,7 @@ test('evaluator refuses to replay a control whose actor scenario ID conflicts wi
 
 test('evaluator prompt control selector validates the stored one-based index', () => {
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {
-    scenarioId: 'typed-answer-failure', scenarioVersion: 5, controls: [],
+    scenarioId: 'typed-answer-failure', scenarioVersion: 6, controls: [],
   }, { controlIndex: 1 }), /no control at index 1/);
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', {}, { controlIndex: 0 }), /positive one-based integer/);
   assert.throws(() => renderEvaluatorPrompt('typed-answer-failure', { scenarioId: 'another-scenario', finalResponse: 'Mismatch.' }), /does not match scenario/);
@@ -249,13 +249,13 @@ test('evaluator rejects raw actors that declare a stale scenario version', () =>
     scenarioId: 'typed-answer-failure',
     scenarioVersion: 2,
     finalResponse: 'Stale actor output.',
-  }), /version 2.*current version 5/);
+  }), /version 2.*current version 6/);
 });
 
 test('evaluator can inspect a JSON trace that violates the actor output schema', () => {
   const prompt = renderEvaluatorPrompt('typed-answer-failure', {
     scenarioId: 'typed-answer-failure',
-    scenarioVersion: 5,
+    scenarioVersion: 6,
     actions: [{ tool: 4 }],
     finalResponse: 'The failure was described.',
   });
@@ -317,9 +317,12 @@ test('partial selected-question fixture separates complete Q2 evidence from a fa
 
   assert.equal(queryResult.sourceStatus, 'partial');
   assert.equal(queryResult.sourceComplete, false);
+  assert.deepEqual(queryResult.lifecycle, { state: 'stopped', resume: { eligible: true } });
   assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'answered']);
   assert.deepEqual(queryResult.items.map((item) => item.result?.type === 'choice' ? item.result.choice : undefined), ['A', 'B']);
   assert.equal(queryResult.totalMatches, queryResult.items.length);
+  assert.deepEqual(queryResult.matchedCoverage, { evaluations: { total: 2, pending: 0, answered: 2, failed: 0, unreached: 0 },
+    representedRespondents: 2, selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
   assert.deepEqual(queryResult.coverage, {
     totalEvaluations: 3,
     completedEvaluations: 2,
@@ -333,16 +336,18 @@ test('partial selected-question fixture separates complete Q2 evidence from a fa
 test('typed answer recovery fixture has a precise failure and an exhausted original call allowance', () => {
   const scenario = loadScenarioCatalog().find((item) => item.id === 'typed-answer-failure')!;
   const evidence = scenario.controlledEvidence as {
-    statusView: { status: string; usedCalls: number; maxCalls: number };
-    answersView: { items: Array<{ status: string; failure?: { code: string; message: string } }> };
+    statusView: { status: string; usedCalls: number; maxCalls: number; lifecycle: unknown };
+    answersView: { items: Array<{ status: string; failure?: { code: string; message: string; detail?: unknown } }> };
   };
   const failedAnswer = evidence.answersView.items.find((item) => item.status === 'failed');
 
   assert.equal(evidence.statusView.status, 'partial');
   assert.equal(evidence.statusView.usedCalls, evidence.statusView.maxCalls);
+  assert.deepEqual(evidence.statusView.lifecycle, { state: 'stopped', resume: { eligible: false, reason: 'call_allowance_exhausted' } });
   assert.deepEqual(failedAnswer?.failure, {
     code: 'invalid_answer',
-    message: 'The provider returned an invalid answer for this question.',
+    message: 'The selected option was not offered by this question.',
+    detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
   });
 });
 
@@ -353,6 +358,8 @@ test('selected-material fixture matches the current run query contract and omits
 
   assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'answered', 'answered']);
   assert.deepEqual(queryResult.items.map((item) => item.selectedMaterial?.materialId), ['p2', undefined, 'p5']);
+  assert.deepEqual(queryResult.matchedCoverage, { evaluations: { total: 3, pending: 0, answered: 3, failed: 0, unreached: 0 },
+    representedRespondents: 3, selectedMaterials: { evaluations: 2, respondents: 2, distinctMaterials: 2 } });
   assert.equal(new Set(evidence.respondentProfiles.map(({ profile }) => profile)).size, 3);
   assert.equal(new Set(queryResult.items.flatMap((item) => item.selectedMaterial ? [item.selectedMaterial.materialId] : [])).size, 2);
   assert.equal(evidence.pullQuote, 'A city is a promise people keep making to each other.');

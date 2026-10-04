@@ -81,6 +81,26 @@ test('provider accepts the routed checkpoint while preserving Laya confidence se
   assert.equal(result.cost, undefined);
 });
 
+test('Laya validation errors carry safe typed failure evidence without echoing the answer', async () => {
+  const provider = new LayaProvider(config, {
+    measureFit: async () => fit(20),
+    fetchRequest: async () => Response.json({
+      model: 'laya-rl-agent',
+      answers: { continue: { type: 'choice', choice: 'private-unoffered-value', probabilities: { continue: 0.8, stop: 0.2 } } },
+      usage: {}, routing: { model: config.checkpoint },
+    }),
+  });
+  await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+    assert.equal(error instanceof Error ? error.message : '', 'Laya response failed decision validation.');
+    assert.deepEqual((error as { validationFailure?: unknown }).validationFailure, {
+      code: 'invalid_answer', message: 'The selected option was not offered by this question.',
+      detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+    });
+    assert.equal(JSON.stringify(error).includes('private-unoffered-value'), false);
+    return true;
+  });
+});
+
 test('Laya receives linked candidate text as Choice options without Sheg material identifiers', async () => {
   let body: Record<string, unknown> | undefined;
   const linkedRequest: DecisionRequest = { ...request, question: { ...request.question, materialOptions: { continue: 'section-three' } } };

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { decisionQuestionSchema } from '../decision/decision.js';
+import { decisionFailureDetailSchema, decisionQuestionSchema } from '../decision/decision.js';
 import { respondentProfileSchema } from '../respondents/profile.js';
 import { providerConfigSchema } from '../../providers/config.js';
 import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js';
@@ -233,6 +233,7 @@ export const runEvidenceItemSchema = z.object({
     questionId: z.string().min(1),
     status: z.enum(['pending', 'answered', 'failed', 'unreached']),
     result: decisionResultSchema.optional(),
+    failure: z.object({ code: z.string().min(1), message: z.string().min(1), detail: decisionFailureDetailSchema.optional() }).strict().optional(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
     execution: providerExecutionEvidenceSchema.optional(),
     turnId: z.string().min(1).optional(),
@@ -242,17 +243,31 @@ export const runEvidenceItemSchema = z.object({
     provenance: z.object({ provider: z.enum(['jev', 'laya']), model: z.string().min(1), endpoint: z.string().optional(), compilerFingerprint: z.string().min(1), contextFingerprint: z.string().min(1) }).strict(),
   }).strict();
 
+export const runLifecycleSchema = z.object({
+  state: z.enum(['active', 'stopped', 'complete']),
+  resume: z.discriminatedUnion('eligible', [
+    z.object({ eligible: z.literal(true) }).strict(),
+    z.object({ eligible: z.literal(false), reason: z.enum(['already_active', 'already_completed', 'cancelled', 'unsupported_status', 'partial_journey', 'cancellation_requested', 'attempt_unresolved', 'call_allowance_exhausted', 'no_unfinished_work']) }).strict(),
+  ]),
+}).strict();
+
 export const runEvidencePageSchema = z.object({
   items: z.array(runEvidenceItemSchema),
   totalMatches: z.number().int().nonnegative(),
   sourceRunId: z.string().uuid(),
   sourceStatus: z.enum(runStatuses),
   sourceComplete: z.boolean(),
+  lifecycle: runLifecycleSchema,
   coverage: z.object({
     totalEvaluations: z.number().int().nonnegative(),
     completedEvaluations: z.number().int().nonnegative(),
     failedEvaluations: z.number().int().nonnegative(),
     respondents: z.object({ total: z.number().int().nonnegative(), active: z.number().int().nonnegative(), completed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), unreached: z.number().int().nonnegative() }).strict(),
+  }).strict(),
+  matchedCoverage: z.object({
+    evaluations: z.object({ total: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), answered: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), unreached: z.number().int().nonnegative() }).strict(),
+    representedRespondents: z.number().int().nonnegative(),
+    selectedMaterials: z.object({ evaluations: z.number().int().nonnegative(), respondents: z.number().int().nonnegative(), distinctMaterials: z.number().int().nonnegative() }).strict(),
   }).strict(),
   nextCursor: z.string().min(1).optional(),
 }).strict();

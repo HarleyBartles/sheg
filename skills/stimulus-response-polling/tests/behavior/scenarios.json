@@ -125,6 +125,7 @@
         "sourceRunId": "00000000-0000-4000-8000-000000000017",
         "sourceStatus": "completed",
         "sourceComplete": true,
+        "lifecycle": { "state": "complete", "resume": { "eligible": false, "reason": "already_completed" } },
         "coverage": {
           "totalEvaluations": 3,
           "completedEvaluations": 3,
@@ -136,6 +137,11 @@
             "failed": 0,
             "unreached": 0
           }
+        },
+        "matchedCoverage": {
+          "evaluations": { "total": 3, "pending": 0, "answered": 3, "failed": 0, "unreached": 0 },
+          "representedRespondents": 3,
+          "selectedMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 }
         }
       },
       "mockOnly": true
@@ -207,6 +213,7 @@
         "sourceRunId": "00000000-0000-4000-8000-000000000017",
         "sourceStatus": "partial",
         "sourceComplete": false,
+        "lifecycle": { "state": "stopped", "resume": { "eligible": true } },
         "coverage": {
           "totalEvaluations": 3,
           "completedEvaluations": 2,
@@ -218,6 +225,11 @@
             "failed": 0,
             "unreached": 0
           }
+        },
+        "matchedCoverage": {
+          "evaluations": { "total": 2, "pending": 0, "answered": 2, "failed": 0, "unreached": 0 },
+          "representedRespondents": 2,
+          "selectedMaterials": { "evaluations": 0, "respondents": 0, "distinctMaterials": 0 }
         }
       },
       "siblingFailure": {
@@ -231,7 +243,7 @@
   },
   {
     "id": "typed-answer-failure",
-    "version": 5,
+    "version": 6,
     "ownerSkill": "stimulus-response-polling",
     "tags": ["failure", "lifecycle", "shared-safeguard"],
     "referencePaths": [
@@ -250,7 +262,8 @@
         "usedCalls": 2,
         "reservedCalls": 0,
         "maxCalls": 2,
-        "cancelRequested": false
+        "cancelRequested": false,
+        "lifecycle": { "state": "stopped", "resume": { "eligible": false, "reason": "call_allowance_exhausted" } }
       },
       "answersView": {
         "items": [
@@ -282,7 +295,8 @@
             "status": "failed",
             "failure": {
               "code": "invalid_answer",
-              "message": "The provider returned an invalid answer for this question."
+              "message": "The selected option was not offered by this question.",
+              "detail": { "reason": "unknown_option", "field": "choice", "constraint": "offered_option" }
             }
           }
         ]
@@ -559,6 +573,7 @@
         "sourceRunId": "00000000-0000-4000-8000-000000000027",
         "sourceStatus": "completed",
         "sourceComplete": true,
+        "lifecycle": { "state": "complete", "resume": { "eligible": false, "reason": "already_completed" } },
         "coverage": {
           "totalEvaluations": 4,
           "completedEvaluations": 4,
@@ -570,6 +585,11 @@
             "failed": 0,
             "unreached": 0
           }
+        },
+        "matchedCoverage": {
+          "evaluations": { "total": 4, "pending": 0, "answered": 4, "failed": 0, "unreached": 0 },
+          "representedRespondents": 4,
+          "selectedMaterials": { "evaluations": 3, "respondents": 3, "distinctMaterials": 3 }
         }
       },
       "mockOnly": true

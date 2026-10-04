@@ -5,6 +5,7 @@ import { buildPlugin } from './build.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const generatedDirectories = ['dist', 'skills/stimulus-response-polling/assets'];
+const generatedFiles = ['plugin.json'];
 
 async function snapshot(): Promise<Map<string, Buffer>> {
   const files = new Map<string, Buffer>();
@@ -16,6 +17,7 @@ async function snapshot(): Promise<Map<string, Buffer>> {
       files.set(path.relative(root, absolutePath), await readFile(absolutePath));
     }
   }
+  for (const file of generatedFiles) files.set(file, await readFile(path.join(root, file)));
   return files;
 }
 

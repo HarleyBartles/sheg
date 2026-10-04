@@ -19,6 +19,7 @@
 - Keep a page's lifecycle projection and query coverage tied to its captured source snapshot. Cursor validation, stale-run detection and subsequent pages must use that same snapshot; do not turn a cursor into a claim about current live state.
 - Teach the polling skill how to distinguish stopped execution from incomplete selected evidence, how to interpret query-scoped and run-wide denominators, how to read safe failure reasons, and when an explicit resume can or cannot add evidence. Explain that repeated identical inputs do not create substantive coverage and that call totals are not input diversity.
 - Do not change worker scheduling, silently resume on read, silently retry, alter existing answer meaning, or add a runtime duplicate detector. Skill campaigns remain explicit, transient, and outside CI/pre-commit. Ship source-owned behavior tests, not campaign results.
+- Keep `package.json` as the only authored version value. Generate the checked-in plugin manifest from a versionless plugin template and `package.json` during the canonical build; the bundled MCP already derives its identity from `package.json`, and npm owns lockfile version synchronization. A test must prove a changed package version flows into both plugin manifest and copied runtime without an independent edit.
 
 ## Implementation sequence
 
@@ -27,11 +28,12 @@
 3. Preserve safe typed-answer validation reasons from decision validation through evaluation persistence, answers, query and attempt records as applicable. Add behavior tests for at least two distinct validation reasons and a successful sibling in the same provider group. Verify raw malformed provider payloads and secret-like values are not copied into public evidence.
 4. Extend query evidence with filter-scoped evaluation status counts and represented respondents, retaining the current run-wide coverage. Freeze the added projection in cursor snapshots and validate that later pages remain tied to the original source version. Include selected-material representation only where exact saved linked material exists; do not infer content from an answer.
 5. Update the stimulus-response-polling skill and its existing `partial-run-selected-question` and `typed-answer-failure` behavior scenarios. Make the agent explain what happened, which selected answers remain usable, whether explicit recovery is possible, and the relevant denominators. Keep scenario assertions about useful behavior and contract accuracy, not rewritten phrases.
-6. Regenerate request/runtime/package outputs from source, update relevant MCP descriptions, and verify copied-package behavior. Bump `package.json`, both root `package-lock.json` version fields, `plugin.json`, and runtime identity to `0.3.0-dev.7` using the repository's version playbook.
+6. Regenerate request/runtime/package outputs from source, update relevant MCP descriptions, and verify copied-package behavior. Set `package.json` to `0.3.0-dev.7`, use npm's version/lockfile workflow, and build the plugin manifest/runtime from that single authored identity.
 
 ## Likely files
 
 - `src/domain/run/lifecycle.ts`, `src/domain/run/request.ts`, `src/domain/decision/decision.ts`, `src/domain/decision/validate.ts`
+- `plugin.template.json`, generated `plugin.json`, `scripts/build.ts`, the plugin-manifest generator, and product/package identity tests
 - `src/application/run-service.ts`, `src/infrastructure/run-store.ts`, `src/entrypoints/mcp.ts`
 - `test/run-store.test.ts`, `test/run-service.test.ts`, `test/decision.test.ts`, `test/mcp.test.ts`, `test/package.test.ts`, plus the narrowest existing query/cursor tests
 - `skills/stimulus-response-polling/SKILL.md`, relevant references and behavior scenario/evaluator fixtures under `skills/stimulus-response-polling/tests/`

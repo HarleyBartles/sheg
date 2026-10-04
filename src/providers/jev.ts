@@ -1,8 +1,8 @@
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
-import { decisionBatchRequestSchema, decisionRequestSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
+import { decisionBatchRequestSchema, decisionRequestSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
-import { DecisionError, validateDecision, validateDecisionBatch } from '../domain/decision/validate.js';
+import { DecisionError, decisionValidationFailure, validateDecision, validateDecisionBatch } from '../domain/decision/validate.js';
 import { jevConfigSchema, type JevConfigInput, type JevConfig } from './jev/config.js';
 import { jevMetadata } from './jev/model-metadata.js';
 import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
@@ -17,6 +17,7 @@ export class JevCallError extends Error {
     readonly decisionId?: string,
     readonly failureScope: 'evaluation' | 'run' = 'evaluation',
     readonly failureCode = 'provider_unavailable',
+    readonly validationFailure?: { code: string; message: string; detail: DecisionFailureDetail },
   ) {
     super(message);
     this.name = 'JevCallError';
@@ -197,7 +198,7 @@ export class JevProvider implements DecisionProvider {
         return validateDecision(request, result, { maxAttempts, provider: 'jev' });
       } catch (error) {
         if (error instanceof DecisionError) {
-          throw new JevCallError('Jev response failed decision validation.', attempts);
+          throw new JevCallError('Jev response failed decision validation.', attempts, undefined, undefined, 'evaluation', 'decision_failed', decisionValidationFailure(error));
         }
         throw error;
       }

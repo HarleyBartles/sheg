@@ -238,3 +238,31 @@ test('isolates duplicate, missing, malformed and wrong-type batch answers by que
   const missing = validateDecisionBatch(batch, { answers: [], execution: sharedExecution });
   assert.deepEqual(missing.answers.map((answer) => 'failure' in answer ? answer.failure.code : 'answered'), ['missing_answer', 'missing_answer']);
 });
+
+test('typed-answer failures retain safe validation reasons beside successful sibling answers', () => {
+  const batch: DecisionBatchRequest = { state: request.state, questions: [request.question,
+    { type: 'choice', id: 'probability', instructions: 'Which outcome?', options: { continue: 'Continue', leave: 'Leave' } },
+    { type: 'noul', id: 'trust', instructions: 'Credible?' }] };
+  const validated = validateDecisionBatch(batch, {
+    answers: [
+      { questionId: 'attention:symptom', value: { type: 'choice', choice: 'not-offered', probabilities: { continue: 0.5, leave: 0.5 } } },
+      { questionId: 'probability', value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.4, leave: 0.4 } } },
+      { questionId: 'trust', value: { type: 'noul', noul: 0.8 } },
+    ],
+    execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+  });
+
+  const invalid = validated.answers[0]!;
+  assert.ok('failure' in invalid);
+  if ('failure' in invalid) {
+    assert.equal(invalid.failure.code, 'invalid_answer');
+    assert.equal(invalid.failure.detail?.reason, 'unknown_option');
+    assert.deepEqual(invalid.failure.detail, { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' });
+    assert.match(invalid.failure.message, /not offered/);
+    assert.equal(invalid.failure.message.includes('not-offered'), false);
+  }
+  const invalidProbability = validated.answers[1]!;
+  assert.ok('failure' in invalidProbability);
+  if ('failure' in invalidProbability) assert.equal(invalidProbability.failure.detail?.reason, 'probability_sum');
+  assert.ok('value' in validated.answers[2]!);
+});

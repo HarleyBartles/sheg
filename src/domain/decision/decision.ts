@@ -118,10 +118,30 @@ export const providerExecutionEvidenceSchema = z.object({
   cost: costEvidenceSchema.optional(),
 }).strict();
 
+export const decisionFailureDetailSchema = z.object({
+  reason: z.enum(['malformed_answer', 'answer_type_mismatch', 'unknown_option', 'probability_keys', 'probability_sum', 'score_out_of_range', 'score_legend_mismatch', 'invalid_answer']),
+  field: z.enum(['answer', 'type', 'choice', 'probabilities', 'score', 'legend']),
+  constraint: z.enum(['typed_answer_shape', 'match_question_type', 'offered_option', 'declared_outcomes', 'sum_to_one', 'declared_rubric_range', 'match_declared_rubric', 'typed_answer_contract']),
+}).strict();
+export type DecisionFailureReason = z.infer<typeof decisionFailureDetailSchema>['reason'];
+export function decisionFailureDetailForReason(reason: DecisionFailureReason): DecisionFailureDetail {
+  const rule = {
+    malformed_answer: { field: 'answer', constraint: 'typed_answer_shape' },
+    answer_type_mismatch: { field: 'type', constraint: 'match_question_type' },
+    unknown_option: { field: 'choice', constraint: 'offered_option' },
+    probability_keys: { field: 'probabilities', constraint: 'declared_outcomes' },
+    probability_sum: { field: 'probabilities', constraint: 'sum_to_one' },
+    score_out_of_range: { field: 'score', constraint: 'declared_rubric_range' },
+    score_legend_mismatch: { field: 'legend', constraint: 'match_declared_rubric' },
+    invalid_answer: { field: 'answer', constraint: 'typed_answer_contract' },
+  }[reason];
+  return { reason, ...rule } as DecisionFailureDetail;
+}
+
 export const decisionBatchResultSchema = z.object({
   answers: z.array(z.union([
     z.object({ questionId: identifier, value: decisionValueSchema }).strict(),
-    z.object({ questionId: identifier, failure: z.object({ code: identifier, message: prose }).strict() }).strict(),
+    z.object({ questionId: identifier, failure: z.object({ code: identifier, message: prose, detail: decisionFailureDetailSchema.optional() }).strict() }).strict(),
   ])),
   execution: providerExecutionEvidenceSchema,
 }).strict().superRefine((result, context) => {
@@ -135,5 +155,6 @@ export type DecisionQuestion = z.infer<typeof decisionQuestionSchema>;
 export type DecisionBatchRequest = z.infer<typeof decisionBatchRequestSchema>;
 export type ProviderExecutionEvidence = z.infer<typeof providerExecutionEvidenceSchema>;
 export type DecisionBatchResult = z.infer<typeof decisionBatchResultSchema>;
+export type DecisionFailureDetail = z.infer<typeof decisionFailureDetailSchema>;
 export type DecisionRequest = z.infer<typeof decisionRequestSchema>;
 export type DecisionResult = z.infer<typeof decisionResultSchema>;

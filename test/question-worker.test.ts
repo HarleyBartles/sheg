@@ -313,14 +313,17 @@ test('a credential failure before dispatch preserves the call allowance for expl
   } finally { await f.close(); }
 });
 
-test('a malformed answer fails only its respondent and the worker continues', async () => {
+test('a typed provider validation failure gives safe reasons and the worker continues', async () => {
   const f = await fixture();
   let calls = 0;
   try {
     const provider: DecisionProvider = {
       async decide() {
         calls += 1;
-        if (calls === 1) return { ...answer(), choice: 'not-an-option' };
+        if (calls === 1) throw new LayaCallError('Laya response failed decision validation.', 1, undefined, undefined, 'evaluation', {
+          code: 'invalid_answer', message: 'The selected option was not offered by this question.',
+          detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+        });
         return answer();
       },
     };
@@ -329,6 +332,11 @@ test('a malformed answer fails only its respondent and the worker continues', as
     assert.equal(status.status, 'partial');
     assert.equal(calls, 2);
     assert.deepEqual(f.store.answers(f.runId).items.map((item) => item.status), ['failed', 'answered']);
+    assert.deepEqual(f.store.answers(f.runId).items[0]?.failure, {
+      code: 'invalid_answer', message: 'The selected option was not offered by this question.',
+      detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+    });
+    assert.deepEqual(f.store.attempts(f.runId).items[0]?.evaluationFailures?.[0]?.failure, f.store.answers(f.runId).items[0]?.failure);
     assert.equal(status.usedCalls, 2);
   } finally { await f.close(); }
 });

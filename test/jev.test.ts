@@ -124,6 +124,24 @@ test('sends one typed choice and preserves the served model, distribution, usage
   }
 });
 
+test('single Jev validation errors retain safe typed failure evidence', async () => {
+  const restore = installTestKey();
+  try {
+    const provider = makeJevProvider(async () => response({ answers: {
+      'entry-response': { type: 'choice', choice: 'private-unoffered-value', probabilities: { continue: 0.8, leave: 0.2 } },
+    } }));
+    await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+      assert.equal(error instanceof Error ? error.message : '', 'Jev response failed decision validation.');
+      assert.deepEqual((error as { validationFailure?: unknown }).validationFailure, {
+        code: 'invalid_answer', message: 'The selected option was not offered by this question.',
+        detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+      });
+      assert.equal(JSON.stringify(error).includes('private-unoffered-value'), false);
+      return true;
+    });
+  } finally { restore(); }
+});
+
 test('Jev receives linked candidate text as Choice options without Sheg material identifiers', async () => {
   const restoreKey = installTestKey();
   try {
@@ -197,7 +215,9 @@ test('batch Jev failures stay question-scoped except malformed envelopes and rou
       const provider = makeJevProvider(fakeFetch(async () => response({ answers })));
       const result = await provider.decideBatch(batch, 1);
       assert.equal('value' in result.answers[0]!, true);
-      assert.deepEqual(result.answers[1], { questionId: 'trust', failure: { code: expected, message: expected === 'missing_answer' ? 'The provider did not return an answer for this question.' : 'The provider answer type does not match the question.' } });
+      assert.deepEqual(result.answers[1], { questionId: 'trust', failure: expected === 'missing_answer'
+        ? { code: expected, message: 'The provider did not return an answer for this question.' }
+        : { code: expected, message: 'The answer type does not match the question type.', detail: { reason: expected, field: 'type', constraint: 'match_question_type' } } });
       assert.equal(result.execution.attempts, 1);
     }
     const malformed = makeJevProvider(fakeFetch(async () => Response.json({ answers: {}, usage: {} })));
