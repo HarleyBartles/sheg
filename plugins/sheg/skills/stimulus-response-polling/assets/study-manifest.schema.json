@@ -1,0 +1,520 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "study": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "title",
+        "purpose"
+      ],
+      "additionalProperties": false
+    },
+    "arms": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "items": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                },
+                "sourceSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f\\d]{64}$"
+                }
+              },
+              "required": [
+                "id",
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tasks": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    },
+                    "instructions": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "comparisonKey": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    },
+                    "responseHistory": {
+                      "type": "string",
+                      "enum": [
+                        "include",
+                        "omit"
+                      ]
+                    },
+                    "options": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minProperties": 1
+                    },
+                    "materialOptions": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                      }
+                    },
+                    "answerKeyOptionId": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "instructions",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonKey": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "responseHistory": {
+                          "type": "string",
+                          "enum": [
+                            "include",
+                            "omit"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "choice"
+                        },
+                        "options": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                          },
+                          "additionalProperties": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "minProperties": 1
+                        },
+                        "materialOptions": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                          },
+                          "additionalProperties": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                          }
+                        },
+                        "answerKeyOptionId": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "instructions",
+                        "type",
+                        "options"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonKey": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "responseHistory": {
+                          "type": "string",
+                          "enum": [
+                            "include",
+                            "omit"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "score"
+                        },
+                        "rubric": {
+                          "minItems": 2,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "instructions",
+                        "type",
+                        "rubric"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonKey": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "responseHistory": {
+                          "type": "string",
+                          "enum": [
+                            "include",
+                            "omit"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "noul"
+                        },
+                        "criteria": {
+                          "type": "object",
+                          "properties": {
+                            "true": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "false": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "instructions",
+                        "type"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "sequence"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "graph"
+                  },
+                  "nodes": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "expose"
+                            },
+                            "itemId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "kind",
+                            "itemId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "ask"
+                            },
+                            "taskId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "kind",
+                            "taskId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "terminal"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "kind",
+                            "outcome"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "transitions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fromNodeId": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "optionId": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "when": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "score",
+                                "noul"
+                              ]
+                            },
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "minimumInclusive": {
+                              "type": "boolean"
+                            },
+                            "maximumInclusive": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "minimum",
+                            "maximum",
+                            "minimumInclusive",
+                            "maximumInclusive"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "toNodeId": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        }
+                      },
+                      "required": [
+                        "fromNodeId",
+                        "toNodeId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "entryNodeId": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "maxDecisions": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "kind",
+                  "nodes",
+                  "transitions",
+                  "entryNodeId",
+                  "maxDecisions"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "sources": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f\\d]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "items",
+          "tasks",
+          "presentation",
+          "sources"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "study",
+    "arms"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:sheg:schema:study-manifest.schema.json",
+  "title": "Study manifest",
+  "x-validation-rules": [
+    "Each study contains one or more arms, each with its own stimulus, typed tasks, and presentation.",
+    "Choice option IDs are stable response values; answer keys are never sent to providers. Score uses an ordered rubric. Noul reports P(true).",
+    "Graph transitions cover every Choice option or typed response domain exactly once; all nodes are reachable.",
+    "Per-task responseHistory controls prior answer context independently from graph routing and respondent eligibility.",
+    "Typed comparisons require matching task meanings."
+  ]
+}

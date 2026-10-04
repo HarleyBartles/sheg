@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "archetypeId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "variation": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      }
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "desired_outcome": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "engagement_cues": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "friction_cues": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "id",
+    "intent",
+    "context",
+    "desired_outcome",
+    "engagement_cues",
+    "friction_cues"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:sheg:schema:respondent-profile.schema.json",
+  "title": "Respondent profile",
+  "x-validation-rules": [
+    "Combined profile prose must not exceed 1,500 characters across intent, context, desired_outcome, engagement_cues, and friction_cues."
+  ],
+  "description": "JSON Schema validators do not enforce the aggregate 1,500-character prose limit in x-validation-rules. Include the profile in a direct request; optionally call run_inspect for a fit preview. run_start performs Sheg runtime validation."
+}

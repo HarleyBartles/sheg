@@ -1,6 +1,6 @@
 # Install the Codex plugin
 
-This repository root is both an Agent Plugin package and a local repo marketplace. The portable `plugin.json` and `mcp.json` define the plugin and its local stdio MCP server. `.agents/plugins/marketplace.json` makes the root plugin available from the Codex Plugins Directory. The built server is included under `dist/`; users need Node.js 24 but not TypeScript or `node_modules` to launch the installed server.
+The repository is a local marketplace whose `.agents/plugins/marketplace.json` points to the generated `plugins/sheg/` package. That package contains the portable `plugin.json` and `mcp.json` manifests, bundled server, shipped skills, and runtime assets. Users need Node.js 24 but not TypeScript or `node_modules` to launch the installed server.
 
 ## Personal installation
 
@@ -22,7 +22,7 @@ For OpenRouter, use `-TargetName Sheg/Jev/OpenRouter`. The helper writes directl
 
 Credential setup makes no inference request and does not authorize a paid study. The installed plugin has no generic installer secret dialog. When a user who skipped setup later selects Jev, offer this local prompt again for the selected route. Having both keys never chooses or switches routes automatically.
 
-The marketplace entry points to the repository root (`./`), where `plugin.json`, `mcp.json`, `skills/`, and `dist/` live. Codex installs a cached copy, so source edits require refreshing the marketplace and restarting Codex. Follow the current [Codex plugin installation guide](https://developers.openai.com/plugins/build/plugins) for local marketplace behavior.
+The marketplace entry points to `./plugins/sheg`, resolved from the repository root. Codex installs a cached copy, so package edits require refreshing the marketplace and restarting Codex. Follow the current [Codex plugin installation guide](https://developers.openai.com/plugins/build/plugins) for local marketplace behavior.
 
 ## Updating a development copy
 
@@ -33,7 +33,7 @@ npm ci
 npm run build
 ```
 
-Commit source and generated `dist/` together. Refresh the local marketplace plugin and restart Codex to load the updated package. The server launches as `node ${PLUGIN_ROOT}/dist/mcp.js`.
+Commit canonical source and the generated `dist/` and `plugins/sheg/` outputs together. Refresh the local marketplace plugin and restart Codex to load the updated package. The server launches as `node ${PLUGIN_ROOT}/dist/mcp.js` from the installed package root.
 
 ## Provider configuration
 

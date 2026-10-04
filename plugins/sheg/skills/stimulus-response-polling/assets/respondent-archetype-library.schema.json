@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "minItems": 1,
+  "type": "array",
+  "items": {
+    "$ref": "urn:sheg:schema:respondent-archetype.schema.json"
+  },
+  "$id": "urn:sheg:schema:respondent-archetype-library.schema.json",
+  "title": "Respondent archetype library"
+}

@@ -1,0 +1,155 @@
+[
+  {
+    "id": "hopeful-maker",
+    "intent": "See whether new tools can help me make something worthwhile without needing permission from experts.",
+    "context": "Builds or wants to build with AI, code or design tools without claiming formal mastery.",
+    "desired_outcome": "A credible path to doing more while recognising where care and competence still matter.",
+    "engagement_cues": "Respect for imperfect beginnings and examples of growing judgment through making.",
+    "friction_cues": "Gatekeeping, condescension or a demand to master every prerequisite before starting.",
+    "name": "Hopeful maker",
+    "invariants": [
+      "Wants to make something worthwhile without claiming mastery they do not have.",
+      "Welcomes practical possibility while recognizing the need for care and growing judgment."
+    ],
+    "variation_axes": [
+      {
+        "id": "making_experience",
+        "description": "How far the reader has progressed in making with relevant tools.",
+        "values": [
+          {
+            "id": "aspiring",
+            "description": "Has an idea but little hands-on experience."
+          },
+          {
+            "id": "experimenting",
+            "description": "Has made early attempts and learned from friction."
+          },
+          {
+            "id": "active",
+            "description": "Regularly builds projects while still learning."
+          }
+        ]
+      },
+      {
+        "id": "risk_posture",
+        "description": "What kind of next step feels usable.",
+        "values": [
+          {
+            "id": "cautious",
+            "description": "Wants a reversible first experiment."
+          },
+          {
+            "id": "iterative",
+            "description": "Will try a bounded approach and inspect results."
+          },
+          {
+            "id": "ambitious",
+            "description": "Can pursue a larger step with explicit safeguards."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hype-weary",
+    "intent": "Find an account of emerging technology that neither sells a miracle nor performs cynicism.",
+    "context": "Has read too many confident claims about AI and wants proportion.",
+    "desired_outcome": "A bounded claim supported by a real mechanism and its limits.",
+    "engagement_cues": "Specific evidence, costs and moments when the author changed his mind.",
+    "friction_cues": "Grand forecasts, empty buzzwords or anti-hype posturing without an alternative.",
+    "name": "Hype weary reader",
+    "invariants": [
+      "Wants proportionate treatment of emerging technology.",
+      "Rejects both miracle claims and cynicism that offers no account of how something works."
+    ],
+    "variation_axes": [
+      {
+        "id": "claim_exposure",
+        "description": "How much repeated exposure the reader has had to confident technology claims.",
+        "values": [
+          {
+            "id": "occasional",
+            "description": "Has seen a few broad claims."
+          },
+          {
+            "id": "frequent",
+            "description": "Regularly encounters promotional narratives."
+          },
+          {
+            "id": "saturated",
+            "description": "Is tired of repeated claims and familiar caveats."
+          }
+        ]
+      },
+      {
+        "id": "evidence_need",
+        "description": "What evidence most helps the reader assess a claim.",
+        "values": [
+          {
+            "id": "mechanism",
+            "description": "A clear account of how it works."
+          },
+          {
+            "id": "comparison",
+            "description": "A fair comparison against alternatives."
+          },
+          {
+            "id": "limits",
+            "description": "Specific costs, failures, and boundary conditions."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "maintainer-inheritor",
+    "intent": "Ask what this choice leaves for the next person who must operate or change it.",
+    "context": "Has inherited systems and knows the initial success is not the whole cost.",
+    "desired_outcome": "A candid account of reversibility, handover and the burden after delivery.",
+    "engagement_cues": "Migration detail, operational consequences and documentation of why a path was chosen.",
+    "friction_cues": "A clean ending at launch that transfers unresolved work to an invisible successor.",
+    "name": "Maintainer inheritor",
+    "invariants": [
+      "Looks beyond initial delivery to the person who must operate or change the result.",
+      "Values reversibility, clear reasoning, and honest treatment of unresolved work."
+    ],
+    "variation_axes": [
+      {
+        "id": "inheritance_experience",
+        "description": "How directly the reader has inherited work from others.",
+        "values": [
+          {
+            "id": "occasional",
+            "description": "Has occasionally taken over an unfamiliar project."
+          },
+          {
+            "id": "regular",
+            "description": "Frequently maintains work started by other people."
+          },
+          {
+            "id": "critical",
+            "description": "Owns systems where mistakes have costly downstream effects."
+          }
+        ]
+      },
+      {
+        "id": "maintenance_horizon",
+        "description": "Which future maintenance concern most shapes the reader’s attention.",
+        "values": [
+          {
+            "id": "operation",
+            "description": "Keeping the current system running."
+          },
+          {
+            "id": "change",
+            "description": "Adapting it as requirements evolve."
+          },
+          {
+            "id": "handover",
+            "description": "Making the reasoning legible to a successor."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { cp, mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -36,14 +37,22 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   });
   const plugin = path.join(sandbox, 'installed', 'sheg');
   await mkdir(path.dirname(plugin), { recursive: true });
-  for (const item of ['package.json', 'plugin.json', 'mcp.json', 'dist']) await cp(path.resolve(item), path.join(plugin, item), { recursive: true });
-  await cp(path.resolve('skills/stimulus-response-polling/SKILL.md'), path.join(plugin, 'skills/stimulus-response-polling/SKILL.md'), { recursive: true });
-  await cp(path.resolve('skills/stimulus-response-polling/references'), path.join(plugin, 'skills/stimulus-response-polling/references'), { recursive: true });
-  await cp(path.resolve('skills/stimulus-response-polling/assets'), path.join(plugin, 'skills/stimulus-response-polling/assets'), { recursive: true });
-  await cp(path.resolve('skills/study-design'), path.join(plugin, 'skills/study-design'), { recursive: true });
+  await cp(path.resolve('plugins/sheg'), plugin, { recursive: true });
   await assertSkillLinksResolve(path.join(plugin, 'skills/stimulus-response-polling'), plugin);
   await assertSkillLinksResolve(path.join(plugin, 'skills/study-design'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
+  const credentialHelper = path.join(plugin, 'dist/credentials/windows-credential.ps1');
+  assert.equal(await exists(credentialHelper), true);
+  if (process.platform === 'win32') {
+    const status = spawnSync('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', credentialHelper,
+      '-Operation', 'Status', '-TargetName', 'Sheg/Jev/TypeSafe',
+    ], { encoding: 'utf8', windowsHide: true, shell: false });
+    assert.equal(status.error, undefined);
+    assert.ok(status.status === 0 || status.status === 3);
+    assert.match(status.stdout.trim(), /^(AVAILABLE|MISSING)$/);
+    assert.equal(status.stderr, '');
+  }
   for (const contract of ['run-request.schema.json', 'respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
     assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets', contract)), true);
   }
@@ -51,6 +60,10 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets/reader-archetype-library.schema.json')), false);
   assert.equal(await exists(path.join(plugin, 'dist/skills/stimulus-response-polling/assets/respondent-archetypes')), false);
   assert.equal(await exists(path.join(plugin, 'node_modules')), false);
+  assert.equal(await exists(path.join(plugin, 'src')), false);
+  assert.equal(await exists(path.join(plugin, 'test')), false);
+  assert.equal(await exists(path.join(plugin, 'plans')), false);
+  assert.equal(await exists(path.join(plugin, 'LICENSE')), true);
   const manifest = JSON.parse(await readFile(path.join(plugin, 'plugin.json'), 'utf8')) as { name: string; version: string };
   const packageManifest = JSON.parse(await readFile(path.join(plugin, 'package.json'), 'utf8')) as { version: string };
   const mcp = JSON.parse(await readFile(path.join(plugin, 'mcp.json'), 'utf8')) as { mcpServers: Record<string, { type: string; command: string; args: string[]; cwd: string }> };
@@ -59,11 +72,14 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(mcp.mcpServers['sheg']?.type, 'stdio');
   assert.equal(mcp.mcpServers['sheg']?.args[0], '${PLUGIN_ROOT}/dist/mcp.js');
   assert.equal(mcp.mcpServers['sheg']?.cwd, '${PLUGIN_ROOT}');
-  const inputs = path.join(sandbox, 'user-study');
-  await mkdir(inputs);
-  const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: path.join(sandbox, 'data') };
+  const tokenizerPath = path.join(sandbox, 'laya-tokenizer.json');
+  await cp(path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerPath);
+  const pluginData = path.join(sandbox, 'plugin-data');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'SHEG_DATA_DIR')) as Record<string, string>;
+  env.PLUGIN_DATA = pluginData;
+  env.PLUGIN_ROOT = plugin;
   const client = new Client({ name: 'copied-plugin-smoke', version: '1.0.0' });
-  const transport = new StdioClientTransport({ command: 'node', args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+  const transport = new StdioClientTransport({ command: 'node', args: [path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
   cleanup.closeTransport = async () => {
     try {
       await client.close();
@@ -73,7 +89,6 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   };
   await client.connect(transport);
   assert.equal(client.getServerVersion()?.version, packageManifest.version);
-  const tokenizerPath = path.resolve('test/fixtures/laya-tokenizer.json');
   const result = await client.callTool({ name: 'run_inspect', arguments: { request: {
     kind: 'poll', respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }],
     material: [{ id: 'opening', text: 'A short passage.' }], questions: [{ type: 'choice', id: 'interest', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } }],
@@ -81,6 +96,8 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   } } });
   assert.equal(result.isError ?? false, false);
   assert.equal((result.structuredContent as { valid?: boolean }).valid, true);
+  assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), true);
+  assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
 
@@ -88,10 +105,12 @@ test('a packaged run survives its requesting MCP and can be recalled from a new 
   const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-cross-mcp-'));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
   const dataRoot = path.join(sandbox, 'data');
-  const plugin = path.join(sandbox, 'plugin');
-  await mkdir(plugin, { recursive: true });
-  await cp(path.resolve('dist'), path.join(plugin, 'dist'), { recursive: true });
-  const tokenizerPath = path.resolve('test/fixtures/laya-tokenizer.json');
+  const pluginBeforeUpdate = path.join(sandbox, 'plugin-before-update');
+  const pluginAfterUpdate = path.join(sandbox, 'plugin-after-update');
+  await cp(path.resolve('plugins/sheg'), pluginBeforeUpdate, { recursive: true });
+  await cp(path.resolve('plugins/sheg'), pluginAfterUpdate, { recursive: true });
+  const tokenizerPath = path.join(sandbox, 'laya-tokenizer.json');
+  await cp(path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerPath);
   const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerPath)).digest('hex');
   let calls = 0;
   let releaseFirst: (() => void) | undefined;
@@ -122,9 +141,10 @@ test('a packaged run survives its requesting MCP and can be recalled from a new 
     provider: { kind: 'laya', baseUrl: `http://127.0.0.1:${address.port}`, checkpoint: 'fixture-checkpoint', contextLimit: 4096, headLimit: 512, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 },
   };
   const submissionId = randomUUID();
-  const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: dataRoot };
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'SHEG_DATA_DIR')) as Record<string, string>;
+  env.PLUGIN_DATA = dataRoot;
   const clientA = new Client({ name: 'package-a', version: '1.0.0' });
-  const transportA = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+  const transportA = new StdioClientTransport({ command: process.execPath, args: [path.join(pluginBeforeUpdate, 'dist', 'mcp.js')], cwd: pluginBeforeUpdate, env });
   await clientA.connect(transportA);
   let workerPid: number | undefined;
   try {
@@ -143,7 +163,7 @@ test('a packaged run survives its requesting MCP and can be recalled from a new 
     await waitForCompleted(dataRoot, runId);
 
     const clientB = new Client({ name: 'package-b', version: '1.0.0' });
-    const transportB = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: plugin, env });
+    const transportB = new StdioClientTransport({ command: process.execPath, args: [path.join(pluginAfterUpdate, 'dist', 'mcp.js')], cwd: pluginAfterUpdate, env });
     try {
       await clientB.connect(transportB);
       const recalled = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'answers' } });
