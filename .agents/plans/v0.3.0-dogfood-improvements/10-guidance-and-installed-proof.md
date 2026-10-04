@@ -42,10 +42,10 @@
 
 ## Task 4: Add source-owned pressure scenarios and usable tool-backed fixture state
 
-- [ ] Add a `study-design` pressure scenario and evaluator for an agent tempted to repeat the same cohort/stimulus/question/state or shrink the cohort; require a concrete variation plan spanning all four dimensions and profile coverage tied to the user's decision.
-- [ ] Strengthen the polling variation scenario or add a distinct case that tests duplicate-input recognition, a one-dimension purposeful change, no-fit handling, and useful respondent-profile coverage; increment paired scenario/evaluator versions together.
-- [ ] Extend the workflow setup contract and deterministic seed support for selected-material follow-on so the scenario's exact source run, mapped Choice answers, no-fit respondent, and material snapshots exist in the attempt-owned database before the actor starts.
-- [ ] Add deterministic `test/skill-testing/` coverage for seed integrity and MCP queries against that fixture; preserve checkpoint order and assert the workflow uses `run_query` and `run_inspect` without starting inference.
+- [x] Add a `study-design` pressure scenario and evaluator for an agent tempted to repeat the same cohort/stimulus/question/state or shrink the cohort; require a concrete variation plan spanning all four dimensions and profile coverage tied to the user's decision.
+- [x] Strengthen the polling variation scenario or add a distinct case that tests duplicate-input recognition, a one-dimension purposeful change, no-fit handling, and useful respondent-profile coverage; increment paired scenario/evaluator versions together.
+- [x] Extend the workflow setup contract and deterministic seed support for selected-material follow-on so the scenario's exact source run, mapped Choice answers, no-fit respondent, and material snapshots exist in the attempt-owned database before the actor starts.
+- [x] Add deterministic `test/skill-testing/` coverage for seed integrity and MCP queries against that fixture; preserve checkpoint order and assert the workflow uses `run_query` and `run_inspect` without starting inference.
 
 ## Task 5: Run focused fresh-context pressure campaigns and inspect them
 
