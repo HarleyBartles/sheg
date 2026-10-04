@@ -38566,12 +38566,12 @@ function jevMetadata(route, model) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable", validationFailure) {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure) {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
-    this.failureScope = failureScope2;
+    this.failureScope = failureScope;
     this.failureCode = failureCode;
     this.validationFailure = validationFailure;
     this.name = "JevCallError";
@@ -39183,12 +39183,12 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", validationFailure) {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", validationFailure) {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
-    this.failureScope = failureScope2;
+    this.failureScope = failureScope;
     this.validationFailure = validationFailure;
     this.name = "LayaCallError";
   }
@@ -39322,32 +39322,8 @@ function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
-// src/testing/controlled-workflow-provider.ts
-var controlledWorkflowProviderName = "partial-journey-recovery";
-function isControlledWorkflowTestEnabled(env = process.env) {
-  return env.NODE_ENV === "test" && env.SHEG_TEST_PROVIDER === controlledWorkflowProviderName;
-}
-function createControlledWorkflowProvider() {
-  return {
-    measure() {
-      return { provider: "jev", status: "fits", method: "controlled-workflow-test", modelIdentity: "controlled/partial-journey-recovery", tokenCount: "estimated", tokens: 1, contextLimit: 32e3, headroomTokens: 0, effectiveLimit: 32e3, details: {} };
-    },
-    async decide(request) {
-      if (request.question.type !== "score" || request.question.id !== "clarity") throw new Error("Controlled recovery provider received an unexpected turn.");
-      const lastIndex = request.question.rubric.length - 1;
-      const probabilities2 = Object.fromEntries(request.question.rubric.map((_, index) => [String(index), index === lastIndex ? 1 : 0]));
-      const legend = Object.fromEntries(request.question.rubric.map((value, index) => [String(index), value]));
-      return { type: "score", score: lastIndex, legend, probabilities: probabilities2, attempts: 1, provider: "jev", model: "controlled/partial-journey-recovery", latencyMs: 0, usage: {} };
-    }
-  };
-}
-
 // src/providers/factory.ts
 function createProvider(config2) {
-  if (isControlledWorkflowTestEnabled()) {
-    if (config2.kind !== "jev" || (config2.route ?? "openrouter") !== "typesafe" || config2.model !== "jev-latest") throw new Error("Controlled recovery provider only accepts its frozen TypeSafe fixture request.");
-    return createControlledWorkflowProvider();
-  }
   if (config2.kind === "jev") {
     return new JevProvider(config2);
   }
@@ -39413,245 +39389,6 @@ var package_default = {
 // src/infrastructure/product-identity.ts
 var productVersion = package_default.version;
 
-// src/application/question-worker.ts
-import { setInterval as setInterval2, clearInterval as clearInterval2 } from "node:timers";
-import { randomUUID as randomUUID3 } from "node:crypto";
-
-// src/domain/journey/run.ts
-var JourneyExecutionError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "JourneyExecutionError";
-  }
-};
-function advanceJourney(arm, profile, state, rawResult, compilerFingerprint) {
-  const result = decisionValueSchema.parse(rawResult);
-  const events = [...state.events];
-  const route = [...state.route];
-  const nodeId = state.currentNodeId;
-  const graph = journeyTopology(arm);
-  let taskId;
-  let routeTarget;
-  {
-    const askNode = graph.nodes.find((node2) => node2.id === nodeId);
-    if (askNode?.kind !== "ask") throw new JourneyExecutionError(`Node ${nodeId} is not a journey ask node.`);
-    taskId = askNode.taskId;
-    const task = arm.tasks.find((candidate) => candidate.id === taskId);
-    if (!task) throw new JourneyExecutionError(`Ask node ${nodeId} references unknown task ${taskId}.`);
-    const edge = graph.transitions.find((candidate) => {
-      if (candidate.fromNodeId !== nodeId) return false;
-      if (result.type === "choice") return candidate.optionId === result.choice;
-      const interval = candidate.when;
-      const value = result.type === "score" ? result.score : result.noul;
-      return interval?.type === result.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
-    });
-    if (!edge) throw new JourneyExecutionError(`Task node ${nodeId} has no transition for ${result.type} response.`);
-    routeTarget = edge.toNodeId;
-  }
-  const answerEvent = { type: "response", sequence: events.length, nodeId, taskId, result };
-  events.push(answerEvent);
-  route.push({ nodeId, response: result, toNodeId: routeTarget });
-  const pathId = route.length === 0 ? "root" : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`}`).join(">");
-  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
-  let current = routeTarget;
-  while (true) {
-    const node2 = nodes.get(current);
-    if (!node2) throw new JourneyExecutionError(`Graph points to unknown node ${current}.`);
-    if (node2.kind === "terminal") return { events, route, status: "completed", outcome: node2.outcome };
-    if (node2.kind === "expose") {
-      events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
-      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
-      if (!edge) throw new JourneyExecutionError(`Exposure node ${node2.id} has no transition.`);
-      current = edge.toNodeId;
-      continue;
-    }
-    const packet = compilerFingerprint === void 0 ? compileDecisionPacket(arm, profile, node2.taskId, events) : compileDecisionPacketForCompiler(arm, profile, node2.taskId, events, compilerFingerprint);
-    return { events, route, status: "active", outcome: null, next: { nodeId: node2.id, taskId: node2.taskId, pathId, packet } };
-  }
-}
-function normalizeResponse(answer, expectedType) {
-  if (typeof answer !== "object" || answer === null) throw new JourneyExecutionError("Task returned a response that is not an object.");
-  const raw = answer;
-  const actualType = raw.type ?? expectedType;
-  if (actualType !== expectedType) throw new JourneyExecutionError(`Task returned ${String(actualType)} for a ${expectedType} question.`);
-  const value = actualType === "choice" ? { type: "choice", choice: raw.choice, ...raw.probabilities === void 0 ? {} : { probabilities: raw.probabilities }, ...raw.confidence === void 0 ? {} : { confidence: raw.confidence } } : actualType === "score" ? { type: "score", score: raw.score, legend: raw.legend, probabilities: raw.probabilities, ...raw.confidence === void 0 ? {} : { confidence: raw.confidence } } : { type: "noul", noul: raw.noul };
-  const parsed = decisionValueSchema.safeParse(value);
-  if (!parsed.success) throw new JourneyExecutionError(`Task returned an invalid ${expectedType} response.`);
-  return parsed.data;
-}
-
-// src/application/question-worker.ts
-var HEARTBEAT_MS = 2e3;
-async function executeQuestionRun(store, runId, providerFactory) {
-  const claim2 = store.claim(runId, Date.now(), process.pid);
-  if (!claim2) return;
-  const heartbeat = setInterval2(() => {
-    try {
-      if (!store.heartbeat(claim2, Date.now())) clearInterval2(heartbeat);
-    } catch {
-      clearInterval2(heartbeat);
-    }
-  }, HEARTBEAT_MS);
-  heartbeat.unref();
-  try {
-    if (store.getRequestKind(runId) === "journey") {
-      await executeJourney(store, runId, claim2, providerFactory);
-    } else {
-      await executePoll(store, runId, claim2, providerFactory);
-    }
-    store.finish(claim2);
-  } catch {
-    try {
-      store.failRun(claim2, "worker_failed", "The run worker stopped unexpectedly.");
-    } catch {
-    }
-  } finally {
-    clearInterval2(heartbeat);
-  }
-}
-async function executePoll(store, runId, claim2, providerFactory) {
-  const prepared = store.getRequest(runId);
-  const provider = providerFactory(prepared.request.provider);
-  const answers = new Map(store.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
-  for (const group of prepared.groups ?? []) {
-    const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
-    while (true) {
-      if (!store.heartbeat(claim2, Date.now())) return;
-      const pending = evaluations.filter((evaluation) => answers.get(evaluation.evaluationId) === "pending");
-      if (!pending.length) break;
-      let batchEvaluations = [pending[0]];
-      if (provider.decideBatch && provider.measureBatch) {
-        let selected = [];
-        for (let size = pending.length; size >= 1; size -= 1) {
-          const candidate = pending.slice(0, size);
-          const fit = await provider.measureBatch({ state: group.state, questions: candidate.map(({ packet }) => packet.question) });
-          if (fit.status === "fits") {
-            selected = candidate;
-            break;
-          }
-          if (fit.status === "unavailable") throw new Error("Provider could not confirm fit for the remaining question group.");
-        }
-        if (!selected.length) throw new Error("The remaining question does not fit the provider context.");
-        batchEvaluations = selected;
-      }
-      const reservation = store.reserveBatch(claim2, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
-      if (!reservation) break;
-      const batch = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
-      try {
-        let result;
-        if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
-        else {
-          const single = await provider.decide(reservation.evaluations[0].packet, 1);
-          result = { answers: [{ questionId: reservation.evaluations[0].questionId, value: valueOnly(single) }], execution: {
-            attempts: single.attempts,
-            provider: single.provider,
-            model: single.model,
-            ...single.checkpoint ? { checkpoint: single.checkpoint } : {},
-            latencyMs: single.latencyMs,
-            usage: single.usage,
-            ...single.cost ? { cost: single.cost } : {}
-          } };
-        }
-        store.settleBatch(claim2, reservation.attemptId, { kind: "answered", result });
-      } catch (error62) {
-        const scope = failureScope(error62);
-        store.settleBatch(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope });
-        if (scope === "run") return;
-      }
-      for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, "answered");
-      const latest = new Map(store.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
-      for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId));
-    }
-  }
-}
-function valueOnly(result) {
-  if (result.type === "choice") return { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
-  if (result.type === "score") return { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
-  return { type: "noul", noul: result.noul };
-}
-async function executeJourney(store, runId, claim2, providerFactory) {
-  const accepted = store.getJourneyRun(runId);
-  const provider = providerFactory(accepted.request.provider);
-  while (true) {
-    if (!store.heartbeat(claim2, Date.now())) return;
-    const reservation = store.reserveNext(claim2, Date.now());
-    if (!reservation) break;
-    const currentRun = store.getJourneyRun(runId);
-    const currentEvaluation = currentRun.evaluations.find(({ evaluationId }) => evaluationId === reservation.evaluation.evaluationId);
-    const respondentState = currentRun.respondents.find(({ respondentId }) => respondentId === reservation.evaluation.respondentId);
-    const profile = currentRun.request.respondents.find(({ id }) => id === reservation.evaluation.respondentId);
-    if (!currentEvaluation || !respondentState || !profile || respondentState.status !== "active" || respondentState.currentTurnId !== currentEvaluation.turnId) {
-      throw new Error("Reserved journey turn has no matching active respondent state.");
-    }
-    try {
-      const result = await provider.decide(reservation.evaluation.packet, 1);
-      const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
-      const progress = advanceJourney(currentRun.request.journey, profile, {
-        currentNodeId: currentEvaluation.nodeId,
-        events: respondentState.events,
-        route: respondentState.route
-      }, value, currentRun.compilerFingerprint);
-      const nextEvaluation = progress.next ? {
-        evaluationId: randomUUID3(),
-        turnId: randomUUID3(),
-        contextId: randomUUID3(),
-        respondentId: respondentState.respondentId,
-        questionId: progress.next.taskId,
-        nodeId: progress.next.nodeId,
-        pathId: progress.next.pathId,
-        occurrence: currentRun.evaluations.filter(({ respondentId, nodeId }) => respondentId === respondentState.respondentId && nodeId === progress.next.nodeId).length + 1,
-        ordinal: currentRun.evaluations.length,
-        packet: progress.next.packet,
-        packetFingerprint: hashCanonical({ packet: progress.next.packet, compilerFingerprint: currentRun.compilerFingerprint })
-      } : void 0;
-      const state = {
-        ...respondentState,
-        status: progress.status,
-        currentNodeId: nextEvaluation?.nodeId ?? null,
-        currentTurnId: nextEvaluation?.turnId ?? null,
-        currentContextId: nextEvaluation?.contextId ?? null,
-        revision: respondentState.revision + 1,
-        events: progress.events,
-        route: progress.route,
-        ...progress.outcome === null ? {} : { outcome: progress.outcome }
-      };
-      store.settleJourney(claim2, reservation.attemptId, { kind: "answered", result }, {
-        respondentId: respondentState.respondentId,
-        expectedRevision: respondentState.revision,
-        state,
-        ...nextEvaluation ? { nextEvaluation } : {}
-      });
-    } catch (error62) {
-      const scope = failureScope(error62);
-      const state = {
-        ...respondentState,
-        status: scope === "run" ? "active" : "failed",
-        currentNodeId: scope === "run" ? currentEvaluation.nodeId : null,
-        currentTurnId: scope === "run" ? currentEvaluation.turnId : null,
-        currentContextId: scope === "run" ? currentEvaluation.contextId : null,
-        revision: respondentState.revision + 1
-      };
-      store.settleJourney(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope }, {
-        respondentId: respondentState.respondentId,
-        expectedRevision: respondentState.revision,
-        state
-      });
-      if (scope === "run") break;
-    }
-  }
-}
-function failureScope(error62) {
-  return error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.failureScope : "evaluation";
-}
-function failureDetails(error62, scope) {
-  const validationFailure = error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.validationFailure : void 0;
-  if (validationFailure) return { ...validationFailure, ...error62 instanceof JevCallError || error62 instanceof LayaCallError ? { providerAttempts: error62.attempts } : {} };
-  const code = scope === "run" && error62 instanceof JevCallError ? error62.failureCode : scope === "run" ? "provider_unavailable" : "decision_failed";
-  const message = scope === "run" && error62 instanceof JevCallError && error62.failureCode.startsWith("credential_") ? error62.message : scope === "run" ? "Provider authentication or service access failed." : "The respondent evaluation did not produce a valid answer.";
-  const providerAttempts = error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.attempts : void 0;
-  return { code, message, ...providerAttempts === void 0 ? {} : { providerAttempts } };
-}
-
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
 var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
@@ -39690,12 +39427,7 @@ function createPollingServer(service = createDefaultRunService()) {
 function createDefaultRunService() {
   const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
   const store = openRunStore(dataRoot);
-  const controlledWorkflowTest = isControlledWorkflowTestEnabled();
-  const launcher = controlledWorkflowTest ? { async launch(_root, runId) {
-    await executeQuestionRun(store, runId, createProvider);
-  } } : new DetachedWorkerLauncher();
-  return createRunService(store, dataRoot, createProvider, launcher, { assertProviderReady: controlledWorkflowTest ? async () => {
-  } : assertProviderReady });
+  return createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady });
 }
 async function safeResult(operation) {
   try {

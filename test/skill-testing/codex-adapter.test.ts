@@ -66,7 +66,7 @@ test('Codex workflow resumes the exact session and sends turns in order without 
   assert.ok(result.workflowTurnEvents?.slice(1).every((events) => events.includes('turn.completed')));
 });
 
-test('partial recovery workflow preflights and launches the built candidate instead of a stale installed MCP', async () => {
+test('partial recovery workflow preflights and launches the source-bound harness instead of a stale installed MCP', async () => {
   const invocations: string[][] = [];
   const fakeSpawn = ((
     _file: string,
@@ -98,21 +98,28 @@ test('partial recovery workflow preflights and launches the built candidate inst
   assert.equal(result.status, 'completed');
   const serverConfig = invocations[0]!.find((arg) => arg.startsWith('mcp_servers.sheg='));
   assert.ok(serverConfig);
-  assert.match(serverConfig.replaceAll('\\\\', '/'), /dist\/mcp\.js/);
+  assert.match(serverConfig.replaceAll('\\\\', '/'), /scripts\/skill-testing\/recovery-mcp\.ts/);
+  assert.ok(serverConfig.includes('--import'));
   assert.ok(serverConfig.includes(JSON.stringify(process.execPath)));
   assert.doesNotMatch(serverConfig, /installed-dev\.7\.js|C:\\\\installed/);
 });
 
-test('controlled candidate resolution rejects missing bundles and mismatched metadata before actor launch', () => {
+test('controlled candidate resolution rejects missing harness and mismatched metadata before actor launch', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-candidate-mcp-'));
   try {
     assert.throws(() => resolveControlledCandidateMcp(root), /package\.json is missing/i);
-    mkdirSync(path.join(root, 'dist'));
+    mkdirSync(path.join(root, 'scripts', 'skill-testing'), { recursive: true });
+    mkdirSync(path.join(root, 'src'));
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.3.0-dev.9' }));
     writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ version: '0.3.0-dev.8' }));
-    writeFileSync(path.join(root, 'dist', 'mcp.js'), 'candidate mcp');
-    writeFileSync(path.join(root, 'dist', 'worker.js'), 'candidate worker');
+    writeFileSync(path.join(root, 'scripts', 'skill-testing', 'recovery-mcp.ts'), 'candidate harness');
+    writeFileSync(path.join(root, 'scripts', 'skill-testing', 'controlled-recovery.ts'), 'candidate provider');
+    writeFileSync(path.join(root, 'src', 'candidate.ts'), 'candidate source');
     assert.throws(() => resolveControlledCandidateMcp(root), /versions do not match/i);
+    writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ version: '0.3.0-dev.9' }));
+    const candidate = resolveControlledCandidateMcp(root);
+    assert.equal(candidate.harnessPath, path.join(root, 'scripts', 'skill-testing', 'recovery-mcp.ts'));
+    assert.match(candidate.sourceSha256, /^[0-9a-f]{64}$/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

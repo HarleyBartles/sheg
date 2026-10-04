@@ -6,7 +6,8 @@ import test from 'node:test';
 import { assertComparableManifests, prepareCampaign, readFrozenCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
 import { runCampaign } from '../../scripts/skill-testing/runner.js';
 import { openRunStore } from '../../src/infrastructure/run-store.js';
-import { createControlledWorkflowProvider, isControlledWorkflowTestEnabled } from '../../src/testing/controlled-workflow-provider.js';
+import { createControlledRecoveryProvider } from '../../scripts/skill-testing/controlled-recovery.js';
+import { JevProvider } from '../../src/providers/jev.js';
 import { createProvider } from '../../src/providers/factory.js';
 
 function fixture(): { root: string; config: CampaignConfig; cleanup: () => void } {
@@ -158,23 +159,22 @@ test('partial-journey workflow fixture seeds the real isolated Sheg store for ea
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('controlled recovery provider is enabled only by the explicit isolated test environment', async () => {
-  assert.equal(isControlledWorkflowTestEnabled({ NODE_ENV: 'test', SHEG_TEST_PROVIDER: 'partial-journey-recovery' }), true);
-  assert.equal(isControlledWorkflowTestEnabled({ NODE_ENV: 'production', SHEG_TEST_PROVIDER: 'partial-journey-recovery' }), false);
-  assert.equal(isControlledWorkflowTestEnabled({ NODE_ENV: 'test' }), false);
-  const provider = createControlledWorkflowProvider();
+test('controlled recovery provider exists only in its harness and accepts its frozen route', async () => {
+  const provider = createControlledRecoveryProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
   const result = await provider.decide({ state: {}, question: { type: 'score', id: 'clarity', instructions: 'How clear?', rubric: ['Unclear', 'Mixed', 'Clear'] } }, 1);
   assert.deepEqual({ type: result.type, score: result.type === 'score' ? result.score : undefined, model: result.model }, { type: 'score', score: 2, model: 'controlled/partial-journey-recovery' });
   await assert.rejects(() => provider.decide({ state: {}, question: { type: 'choice', id: 'interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } }, optionIds: ['yes', 'no'] }, 1), /unexpected turn/i);
+  assert.throws(() => createControlledRecoveryProvider({ kind: 'jev', route: 'typesafe', model: 'other' }), /frozen TypeSafe fixture/i);
+  assert.throws(() => createControlledRecoveryProvider({ kind: 'laya', baseUrl: 'https://example.invalid', checkpoint: 'fixture', contextLimit: 32000, headLimit: 4000, tokenizerJsonPath: 'tokenizer.json', tokenizerSha256: 'a'.repeat(64), timeoutMs: 1000 }), /frozen TypeSafe fixture/i);
+});
+
+test('ordinary provider construction cannot be switched to a fixture by ambient test environment', () => {
   const previousNodeEnv = process.env.NODE_ENV;
   const previousProvider = process.env.SHEG_TEST_PROVIDER;
   try {
     process.env.NODE_ENV = 'test';
     process.env.SHEG_TEST_PROVIDER = 'partial-journey-recovery';
-    const configured = createProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
-    assert.equal((await configured.measure?.({ state: {}, question: { type: 'score', id: 'clarity', instructions: 'How clear?', rubric: ['Unclear', 'Mixed', 'Clear'] } }) as { modelIdentity: string }).modelIdentity, 'controlled/partial-journey-recovery');
-    assert.throws(() => createProvider({ kind: 'jev', route: 'typesafe', model: 'different-model' }), /frozen TypeSafe fixture/i);
-    assert.throws(() => createProvider({ kind: 'laya', baseUrl: 'https://example.invalid', checkpoint: 'fixture', contextLimit: 32000, headLimit: 4000, tokenizerJsonPath: 'tokenizer.json', tokenizerSha256: 'a'.repeat(64), timeoutMs: 1000 }), /controlled recovery provider only accepts/i);
+    assert.ok(createProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' }) instanceof JevProvider);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
     if (previousProvider === undefined) delete process.env.SHEG_TEST_PROVIDER; else process.env.SHEG_TEST_PROVIDER = previousProvider;

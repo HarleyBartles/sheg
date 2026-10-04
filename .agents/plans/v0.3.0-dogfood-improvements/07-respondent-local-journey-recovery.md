@@ -227,25 +227,26 @@ Run the controlled workflow contract, MCP, lifecycle, worker and campaign-suite 
 ### Task 5: Bind the controlled recovery campaign to the candidate runtime
 
 **Files:**
-- Modify: `src/providers/factory.ts`
+- Modify: `src/providers/factory.ts`, `src/entrypoints/mcp.ts`
+- Add: `scripts/skill-testing/controlled-recovery.ts`, `scripts/skill-testing/recovery-mcp.ts`
 - Modify: `scripts/skill-testing/codex-adapter.ts` and `scripts/skill-testing/runner.ts`
-- Test: `test/skill-testing/codex-adapter.test.ts`, `test/skill-testing/campaign-contracts.test.ts`
+- Test: `test/skill-testing/codex-adapter.test.ts`, `test/skill-testing/campaign-contracts.test.ts`, `test/mcp.test.ts`
 
 - [ ] **Step 1: Prove controlled mode rejects every non-fixture provider**
 
-Under the exact controlled test environment, assert that the TypeSafe fixture provider returns the named deterministic identity while an otherwise valid Laya provider configuration is rejected before inference. The test must fail because controlled mode currently constructs a real Laya provider.
+Assert that the production provider factory remains a real provider even when fixture marker environment values are set. Assert that the deterministic provider factory lives only in the skill-testing harness and accepts only the frozen TypeSafe fixture route.
 
 - [ ] **Step 2: Prove the recovery adapter chooses the built candidate instead of the installed plugin**
 
-Add an adapter test with an intentionally stale configured MCP command and the recovery workflow setup. Assert preflight reports the candidate package/plugin identity and Codex receives a nested Sheg MCP command pointing to the candidate's built `dist/mcp.js` and its sibling worker, not the installed command/args/cwd. Missing or version-mismatched candidate artifacts must fail before actor launch.
+Add an adapter test with an intentionally stale configured MCP command and the recovery workflow setup. Assert preflight reports the candidate package/plugin/source identity and Codex receives a nested Sheg MCP command pointing to the candidate source recovery harness, not the installed command/args/cwd. Missing or version-mismatched candidate metadata must fail before actor launch. The harness runs the current source through the repository's pinned `tsx` development dependency, so a stale checked-in distribution bundle cannot be mistaken for the source candidate.
 
 - [ ] **Step 3: Restrict controlled inference and readiness bypass to the fixture provider**
 
-Reject Laya and every Jev configuration except the frozen TypeSafe fixture before service admission or worker dispatch. Keep provider readiness bypass and the inline worker behind the explicit `NODE_ENV=test` plus fixture marker. Preserve normal production provider routing.
+Keep deterministic fixture-provider selection, inline worker launch, and readiness bypass inside a dedicated skill-testing MCP entrypoint. Remove ambient environment activation from the production provider factory and MCP entrypoint; normal MCP startup always uses detached workers and provider readiness checks. The harness rejects Laya and every Jev configuration except the frozen TypeSafe fixture before worker dispatch.
 
 - [ ] **Step 4: Pass workflow setup through adapter preflight and execute with the candidate configuration**
 
-Have the runner pass its frozen workflow setup into adapter preflight. In the recovery fixture only, resolve and validate the current candidate package, plugin metadata, `dist/mcp.js`, and `dist/worker.js`, fingerprint the effective candidate configuration, and use `process.execPath` with the candidate bundle and worktree root. Preserve the configured MCP command for other suites. Never infer candidate identity from the installed plugin.
+Have the runner pass its frozen workflow setup into adapter preflight. In the recovery fixture only, resolve and validate the current candidate package and plugin metadata, fingerprint the candidate source tree and harness, and use `process.execPath --import tsx` with the source harness and worktree root. Preserve the configured MCP command for other suites. Never infer candidate identity from the installed plugin or checked-in generated bundles.
 
 - [ ] **Step 5: Run focused proofs, build, and the full repository gate**
 

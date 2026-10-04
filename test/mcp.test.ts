@@ -13,7 +13,7 @@ import { openRunStore } from '../src/infrastructure/run-store.js';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
 import { seedWorkflowState } from '../scripts/skill-testing/workflow-seeds.js';
-import { createControlledWorkflowProvider } from '../src/testing/controlled-workflow-provider.js';
+import { createControlledRecoveryProvider } from '../scripts/skill-testing/controlled-recovery.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
 
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
@@ -187,7 +187,7 @@ test('MCP controlled recovery resumes the saved journey before the next workflow
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-controlled-resume-'));
   const seeded = await seedWorkflowState({ kind: 'partial-journey-recovery', version: 1 }, root);
   const store = openRunStore(root);
-  const provider = createControlledWorkflowProvider();
+  const provider = createControlledRecoveryProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
   const service = createRunService(store, root, () => provider, {
     async launch(_dataRoot, runId) { await executeQuestionRun(store, runId, () => provider); },
   }, { assertProviderReady: async () => undefined });

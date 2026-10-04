@@ -1,13 +1,9 @@
-import type { DecisionRequest, DecisionResult } from '../domain/decision/decision.js';
-import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
+import type { DecisionRequest, DecisionResult } from '../../src/domain/decision/decision.js';
+import type { DecisionProvider, ProviderContextFit } from '../../src/domain/decision/provider.js';
+import type { ProviderConfigInput } from '../../src/providers/config.js';
 
-export const controlledWorkflowProviderName = 'partial-journey-recovery';
-
-export function isControlledWorkflowTestEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.NODE_ENV === 'test' && env.SHEG_TEST_PROVIDER === controlledWorkflowProviderName;
-}
-
-export function createControlledWorkflowProvider(): DecisionProvider {
+export function createControlledRecoveryProvider(config: ProviderConfigInput): DecisionProvider {
+  if (config.kind !== 'jev' || (config.route ?? 'openrouter') !== 'typesafe' || config.model !== 'jev-latest') throw new Error('Controlled recovery provider only accepts its frozen TypeSafe fixture request.');
   return {
     measure(): ProviderContextFit {
       return { provider: 'jev', status: 'fits', method: 'controlled-workflow-test', modelIdentity: 'controlled/partial-journey-recovery', tokenCount: 'estimated', tokens: 1, contextLimit: 32_000, headroomTokens: 0, effectiveLimit: 32_000, details: {} };

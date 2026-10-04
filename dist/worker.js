@@ -23851,32 +23851,8 @@ var SQLiteRunStore = class {
   }
 };
 
-// src/testing/controlled-workflow-provider.ts
-var controlledWorkflowProviderName = "partial-journey-recovery";
-function isControlledWorkflowTestEnabled(env = process.env) {
-  return env.NODE_ENV === "test" && env.SHEG_TEST_PROVIDER === controlledWorkflowProviderName;
-}
-function createControlledWorkflowProvider() {
-  return {
-    measure() {
-      return { provider: "jev", status: "fits", method: "controlled-workflow-test", modelIdentity: "controlled/partial-journey-recovery", tokenCount: "estimated", tokens: 1, contextLimit: 32e3, headroomTokens: 0, effectiveLimit: 32e3, details: {} };
-    },
-    async decide(request) {
-      if (request.question.type !== "score" || request.question.id !== "clarity") throw new Error("Controlled recovery provider received an unexpected turn.");
-      const lastIndex = request.question.rubric.length - 1;
-      const probabilities2 = Object.fromEntries(request.question.rubric.map((_, index) => [String(index), index === lastIndex ? 1 : 0]));
-      const legend = Object.fromEntries(request.question.rubric.map((value, index) => [String(index), value]));
-      return { type: "score", score: lastIndex, legend, probabilities: probabilities2, attempts: 1, provider: "jev", model: "controlled/partial-journey-recovery", latencyMs: 0, usage: {} };
-    }
-  };
-}
-
 // src/providers/factory.ts
 function createProvider(config2) {
-  if (isControlledWorkflowTestEnabled()) {
-    if (config2.kind !== "jev" || (config2.route ?? "openrouter") !== "typesafe" || config2.model !== "jev-latest") throw new Error("Controlled recovery provider only accepts its frozen TypeSafe fixture request.");
-    return createControlledWorkflowProvider();
-  }
   if (config2.kind === "jev") {
     return new JevProvider(config2);
   }

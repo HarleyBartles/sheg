@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,30 +26,32 @@ interface ShegMcpServerConfig {
 interface ControlledCandidateMcp {
   version: string;
   root: string;
-  mcpPath: string;
-  workerPath: string;
-  mcpSha256: string;
-  workerSha256: string;
+  harnessPath: string;
+  sourceSha256: string;
 }
 
 export function resolveControlledCandidateMcp(root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')): ControlledCandidateMcp {
   const packagePath = path.join(root, 'package.json');
   const pluginPath = path.join(root, 'plugin.json');
-  const mcpPath = path.join(root, 'dist', 'mcp.js');
-  const workerPath = path.join(root, 'dist', 'worker.js');
-  for (const candidatePath of [packagePath, pluginPath, mcpPath, workerPath]) {
-    if (!existsSync(candidatePath)) throw new Error(`Controlled recovery requires the built candidate artifact: ${path.relative(root, candidatePath)} is missing.`);
+  const harnessPath = path.join(root, 'scripts', 'skill-testing', 'recovery-mcp.ts');
+  const providerPath = path.join(root, 'scripts', 'skill-testing', 'controlled-recovery.ts');
+  for (const candidatePath of [packagePath, pluginPath, harnessPath, providerPath]) {
+    if (!existsSync(candidatePath)) throw new Error(`Controlled recovery requires the candidate source harness: ${path.relative(root, candidatePath)} is missing.`);
   }
   const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as { version?: unknown };
   const pluginJson = JSON.parse(readFileSync(pluginPath, 'utf8')) as { version?: unknown };
   if (typeof packageJson.version !== 'string' || packageJson.version !== pluginJson.version) throw new Error('Controlled recovery candidate package and plugin versions do not match.');
+  const sourceFiles = readdirSync(path.join(root, 'src'), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.ts'))
+    .map((entry) => path.join(entry.parentPath, entry.name))
+    .concat(harnessPath, providerPath)
+    .sort();
+  const sourceIdentity = sourceFiles.map((file) => [path.relative(root, file).replaceAll('\\', '/'), sha256(readFileSync(file, 'utf8'))]);
   return {
     version: packageJson.version,
     root,
-    mcpPath,
-    workerPath,
-    mcpSha256: sha256(readFileSync(mcpPath, 'utf8')),
-    workerSha256: sha256(readFileSync(workerPath, 'utf8')),
+    harnessPath,
+    sourceSha256: sha256(stableJson(sourceIdentity)),
   };
 }
 
@@ -85,14 +87,16 @@ export function createCodexAdapter(options: { executable?: string; args?: string
     return value;
   };
   let cachedShegConfig: ReturnType<typeof getShegConfig> | undefined;
+  let cachedCandidate: ControlledCandidateMcp | undefined;
+  const candidateForRecovery = () => cachedCandidate ??= resolveControlledCandidateMcp();
   const preflightPromises = new Map<string, Promise<Record<string, unknown>>>();
   const shegConfigFor = (workflowSetup?: WorkflowSetup) => {
     const configured = cachedShegConfig ??= getShegConfig();
     if (!isRecoverySetup(workflowSetup)) return configured;
-    const candidate = resolveControlledCandidateMcp();
+    const candidate = candidateForRecovery();
     return {
       ...configured,
-      transport: { type: 'stdio', command: process.execPath, args: [candidate.mcpPath], cwd: candidate.root, env: {} },
+      transport: { type: 'stdio', command: process.execPath, args: ['--import', 'tsx', candidate.harnessPath], cwd: candidate.root, env: {} },
     } satisfies ShegMcpServerConfig;
   };
   const preflight = async (workflowSetup?: WorkflowSetup): Promise<Record<string, unknown>> => {
@@ -109,7 +113,7 @@ export function createCodexAdapter(options: { executable?: string; args?: string
       for (const flag of ['--json', '--ephemeral', '--skip-git-repo-check', '-C', '-o']) requireFlag(execHelp, flag, 'exec');
       for (const flag of ['--json', '--skip-git-repo-check', '-o']) requireFlag(resumeHelp, flag, 'resume');
       const activeShegConfig = shegConfigFor(workflowSetup);
-      const candidate = isRecoverySetup(workflowSetup) ? resolveControlledCandidateMcp() : undefined;
+      const candidate = isRecoverySetup(workflowSetup) ? candidateForRecovery() : undefined;
       const env = activeShegConfig.transport?.env ?? {};
       const configFingerprint = sha256(stableJson({
         enabled: activeShegConfig.enabled,
@@ -131,7 +135,7 @@ export function createCodexAdapter(options: { executable?: string; args?: string
         codexConfigSha256: existsSync(codexConfig) ? sha256(readFileSync(codexConfig, 'utf8')) : null,
         customArgumentsSha256: sha256(stableJson(options.args ?? [])),
         shegMcpConfigSha256: configFingerprint,
-        ...(candidate ? { shegMcpVersion: candidate.version, shegMcpBundleSha256: candidate.mcpSha256, shegWorkerBundleSha256: candidate.workerSha256 } : {}),
+        ...(candidate ? { shegMcpVersion: candidate.version, shegRecoveryHarnessSha256: sha256(readFileSync(candidate.harnessPath, 'utf8')), shegSourceSha256: candidate.sourceSha256 } : {}),
       };
       });
       preflightPromises.set(setupKey, preflightPromise);
@@ -149,10 +153,6 @@ export function createCodexAdapter(options: { executable?: string; args?: string
       const activeShegConfig = shegConfigFor(input.workflowSetup);
       const isolatedData = path.join(input.cwd, 'sheg-data');
       const env: Record<string, string> = { ...(activeShegConfig.transport?.env ?? {}), PLUGIN_DATA: isolatedData, SHEG_DATA_DIR: isolatedData };
-      if (input.workflowSetup?.kind === 'partial-journey-recovery' && input.workflowSetup.version === 1) {
-        env.NODE_ENV = 'test';
-        env.SHEG_TEST_PROVIDER = 'partial-journey-recovery';
-      }
       const toml = (item: unknown): string => {
         if (typeof item === 'string') return JSON.stringify(item);
         if (typeof item === 'boolean' || typeof item === 'number') return String(item);

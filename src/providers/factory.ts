@@ -3,13 +3,8 @@ import type { DecisionProvider } from '../domain/decision/provider.js';
 import type { ProviderConfigInput } from './config.js';
 import { JevProvider } from './jev.js';
 import { LayaProvider } from './laya.js';
-import { createControlledWorkflowProvider, isControlledWorkflowTestEnabled } from '../testing/controlled-workflow-provider.js';
 
 export function createProvider(config: ProviderConfigInput): DecisionProvider {
-  if (isControlledWorkflowTestEnabled()) {
-    if (config.kind !== 'jev' || (config.route ?? 'openrouter') !== 'typesafe' || config.model !== 'jev-latest') throw new Error('Controlled recovery provider only accepts its frozen TypeSafe fixture request.');
-    return createControlledWorkflowProvider();
-  }
   if (config.kind === 'jev') {
     return new JevProvider(config);
   }
