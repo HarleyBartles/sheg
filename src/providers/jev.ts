@@ -1,6 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
-import { decisionBatchRequestSchema, decisionRequestSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
+import { decisionBatchRequestSchema, decisionRequestSchema, decisionValueFromResult, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision, validateDecisionBatch } from '../domain/decision/validate.js';
 import { jevConfigSchema, type JevConfigInput, type JevConfig } from './jev/config.js';
@@ -272,7 +272,7 @@ export class JevProvider implements DecisionProvider {
         : undefined;
       const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
         const answer = answerSchema.safeParse(rawValue);
-        return { questionId, value: answer.success ? toDecisionValue(answer.data) : rawValue };
+        return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
       });
       const execution = {
         attempts, provider: 'jev' as const, model: parsedResponse.data.model,
@@ -293,12 +293,6 @@ export class JevProvider implements DecisionProvider {
   measure(request: DecisionRequest): ProviderContextFit {
     return this.measureContext(request, this.config);
   }
-}
-
-function toDecisionValue(answer: z.infer<typeof answerSchema>) {
-  if (answer.type === 'choice') return { type: 'choice' as const, choice: answer.choice, probabilities: answer.probabilities, ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) };
-  if (answer.type === 'score') return { type: 'score' as const, score: answer.score, legend: answer.legend, probabilities: answer.probabilities, ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) };
-  return { type: 'noul' as const, noul: answer.noul };
 }
 
 function missingMeasureFit(config: JevConfig, reason: string): ProviderContextFit {

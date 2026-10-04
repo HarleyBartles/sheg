@@ -19774,15 +19774,7 @@ var decisionValueSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string().regex(/^\d+$/), prose), probabilities: external_exports.record(external_exports.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
   external_exports.object({ type: external_exports.literal("noul"), noul: probability }).strict()
 ]);
-var providerExecutionEvidenceSchema = external_exports.object({
-  attempts: external_exports.number().int().positive(),
-  provider: external_exports.enum(["jev", "laya"]),
-  model: external_exports.string().min(1),
-  checkpoint: external_exports.string().min(1).optional(),
-  latencyMs: external_exports.number().finite().nonnegative(),
-  usage: external_exports.object({ inputTokens: external_exports.number().int().nonnegative().optional(), outputTokens: external_exports.number().int().nonnegative().optional() }).strict(),
-  cost: costEvidenceSchema.optional()
-}).strict();
+var providerExecutionEvidenceSchema = metadata;
 var decisionFailureDetailSchema = external_exports.object({
   reason: external_exports.enum(["malformed_answer", "answer_type_mismatch", "unknown_option", "probability_keys", "probability_sum", "score_out_of_range", "score_legend_mismatch", "invalid_answer"]),
   field: external_exports.enum(["answer", "type", "choice", "probabilities", "score", "legend"]),
@@ -19812,6 +19804,16 @@ var decisionBatchResultSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["answers"], message: "Batch result question IDs must be unique." });
   }
 });
+function decisionValueFromResult(result) {
+  switch (result.type) {
+    case "choice":
+      return { type: "choice", choice: result.choice, ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+    case "score":
+      return { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+    case "noul":
+      return { type: "noul", noul: result.noul };
+  }
+}
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
@@ -20133,7 +20135,7 @@ function validateChoiceTask(task, context) {
   const choiceOptions = optionsValue;
   if ("answerKeyOptionId" in task) {
     const answerKeyOptionId = task.answerKeyOptionId;
-    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in choiceOptions)) {
+    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !Object.hasOwn(choiceOptions, answerKeyOptionId)) {
       context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
     }
   }
@@ -21242,9 +21244,11 @@ import { setTimeout as wait } from "node:timers/promises";
 
 // src/domain/decision/validate.ts
 var DecisionError = class extends Error {
+  reason;
   constructor(message, options2) {
     super(message, options2);
     this.name = "DecisionError";
+    this.reason = options2?.reason ?? "invalid_answer";
   }
 };
 var probabilitySumTolerance = 0.01;
@@ -21255,34 +21259,34 @@ function validateDecision(request, result, options2 = {}) {
   }
   const parsed = decisionResultSchema.safeParse(result);
   if (!parsed.success) {
-    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error });
+    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error, reason: "malformed_answer" });
   }
   const decision = parsed.data;
   const normalizedRequest = parsedRequest.data;
   if (decision.type !== normalizedRequest.question.type) {
-    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`);
+    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`, { reason: "answer_type_mismatch" });
   }
   if (decision.type === "choice") {
-    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.");
+    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.", { reason: "answer_type_mismatch" });
     const optionIds = Object.keys(normalizedRequest.question.options);
     if (!optionIds.includes(decision.choice)) {
-      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
+      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`, { reason: "unknown_option" });
     }
     validateDistribution(decision.probabilities, optionIds, "Choice");
   } else if (decision.type === "score") {
-    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.");
+    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.", { reason: "answer_type_mismatch" });
     const rubric = normalizedRequest.question.rubric;
     const levelIds = rubric.map((_level, index) => String(index));
     if (decision.score < 0 || decision.score > rubric.length - 1) {
-      throw new DecisionError("Score result is outside the declared rubric range.");
+      throw new DecisionError("Score result is outside the declared rubric range.", { reason: "score_out_of_range" });
     }
     validateDistribution(decision.probabilities, levelIds, "Score");
     for (const [index, meaning] of rubric.entries()) {
       if (decision.legend[String(index)] !== meaning) {
-        throw new DecisionError(`Score legend does not match rubric level ${index}.`);
+        throw new DecisionError(`Score legend does not match rubric level ${index}.`, { reason: "score_legend_mismatch" });
       }
     }
-  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.");
+  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.", { reason: "answer_type_mismatch" });
   const maxAttempts = options2.maxAttempts ?? 1;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
     throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
@@ -21324,7 +21328,7 @@ function validateDecisionBatch(request, result, options2 = {}) {
     try {
       const enriched = { ...value.data, ...execution };
       const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
-      return { questionId: question.id, value: toDecisionValue(checked) };
+      return { questionId: question.id, value: decisionValueFromResult(checked) };
     } catch (error62) {
       if (!(error62 instanceof DecisionError)) throw error62;
       return { questionId: question.id, failure: decisionValidationFailure(error62) };
@@ -21332,13 +21336,8 @@ function validateDecisionBatch(request, result, options2 = {}) {
   });
   return decisionBatchResultSchema.parse({ answers, execution });
 }
-function decisionFailureReason(error62) {
-  const message = error62.message;
-  const reason = message.includes("does not match task type") ? "answer_type_mismatch" : message.includes("was not offered") ? "unknown_option" : message.includes("probabilities must contain exactly") ? "probability_keys" : message.includes("probabilities must sum") ? "probability_sum" : message.includes("outside the declared rubric range") ? "score_out_of_range" : message.includes("Score legend does not match") ? "score_legend_mismatch" : message.startsWith("Decision result is invalid:") ? "malformed_answer" : "invalid_answer";
-  return reason;
-}
 function decisionValidationFailure(error62) {
-  return decisionValidationFailureForReason(decisionFailureReason(error62));
+  return decisionValidationFailureForReason(error62.reason);
 }
 function decisionValidationFailureForReason(reason) {
   const detail = decisionFailureDetailForReason(reason);
@@ -21364,22 +21363,6 @@ function decisionFailureMessage(detail) {
       return "The answer failed a typed-answer validation rule.";
   }
 }
-function toDecisionValue(result) {
-  if (result.type === "choice") return {
-    type: "choice",
-    choice: result.choice,
-    probabilities: result.probabilities,
-    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
-  };
-  if (result.type === "score") return {
-    type: "score",
-    score: result.score,
-    legend: result.legend,
-    probabilities: result.probabilities,
-    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
-  };
-  return { type: "noul", noul: result.noul };
-}
 var batchEnvelopeSchema = external_exports.object({
   answers: external_exports.array(external_exports.object({
     questionId: external_exports.string().min(1),
@@ -21393,11 +21376,11 @@ var batchEnvelopeSchema = external_exports.object({
 function validateDistribution(distribution, expectedIds, label) {
   const ids = Object.keys(distribution);
   if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
-    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`);
+    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`, { reason: "probability_keys" });
   }
   const total = Object.values(distribution).reduce((sum, value) => sum + value, 0);
   if (Math.abs(total - 1) > probabilitySumTolerance) {
-    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`);
+    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`, { reason: "probability_sum" });
   }
 }
 
@@ -21809,7 +21792,7 @@ var JevProvider = class {
       const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
         const answer = answerSchema.safeParse(rawValue);
-        return { questionId, value: answer.success ? toDecisionValue2(answer.data) : rawValue };
+        return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
       });
       const execution = {
         attempts,
@@ -21832,11 +21815,6 @@ var JevProvider = class {
     return this.measureContext(request, this.config);
   }
 };
-function toDecisionValue2(answer) {
-  if (answer.type === "choice") return { type: "choice", choice: answer.choice, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
-  if (answer.type === "score") return { type: "score", score: answer.score, legend: answer.legend, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
-  return { type: "noul", noul: answer.noul };
-}
 function missingMeasureFit(config2, reason) {
   return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
 }
@@ -22751,7 +22729,7 @@ function reconstructPartialEvents(arm, stored) {
     }
     used.add(decisionIndex);
     const result = stored.decisions[decisionIndex].result;
-    const value = result.type === "choice" ? { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : result.type === "score" ? { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : { type: "noul", noul: result.noul };
+    const value = decisionValueFromResult(result);
     events.push({ type: "response", sequence: sequence++, nodeId, taskId, result: value });
     return stored.decisions[decisionIndex];
   };
@@ -22844,7 +22822,7 @@ async function buildReport(checkpoint) {
         const presentationOccurrence = (presentationOccurrenceByTask.get(decisionId) ?? 0) + 1;
         presentationOccurrenceByTask.set(decisionId, presentationOccurrence);
         const choiceTask = task && "options" in task ? task : void 0;
-        const answer = result.type === "choice" ? { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : result.type === "score" ? { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } } : { type: "noul", noul: result.noul };
+        const answer = decisionValueFromResult(result);
         return {
           taskId: decisionId,
           comparisonKey: task?.comparisonKey ?? null,

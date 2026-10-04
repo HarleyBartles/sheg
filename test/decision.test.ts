@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DecisionError, validateDecision, validateDecisionBatch } from '../src/domain/decision/validate.js';
+import { DecisionError, decisionValidationFailure, validateDecision, validateDecisionBatch } from '../src/domain/decision/validate.js';
+import { taskSchema } from '../src/domain/study/task.js';
 import type { DecisionBatchRequest, DecisionBatchResult, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
 import { decisionQuestionSchema } from '../src/domain/decision/decision.js';
 
@@ -14,6 +15,28 @@ const request: DecisionRequest = {
   },
   optionIds: ['continue', 'leave'],
 };
+
+test('answer keys identify an own offered option rather than an inherited object member', () => {
+  const task = { id: 'check', instructions: 'Choose', options: { a: 'A' } };
+  assert.equal(taskSchema.safeParse({ ...task, answerKeyOptionId: 'constructor' }).success, false);
+  assert.equal(taskSchema.safeParse({ ...task, answerKeyOptionId: 'a' }).success, true);
+});
+
+test('typed validation reasons survive changes to the diagnostic message', () => {
+  const cases = [
+    { change: { choice: 'unknown' }, reason: 'unknown_option' },
+    { change: { probabilities: { continue: 1 } }, reason: 'probability_keys' },
+    { change: { probabilities: { continue: 0.1, leave: 0.1 } }, reason: 'probability_sum' },
+  ] as const;
+  for (const { change, reason } of cases) {
+    assert.throws(() => validateDecision(request, result(change)), (error: unknown) => {
+      assert.ok(error instanceof DecisionError);
+      error.message = 'A diagnostic was translated or reworded.';
+      assert.equal(decisionValidationFailure(error).detail.reason, reason);
+      return true;
+    });
+  }
+});
 
 test('choice questions preserve explicit material links and reject links to duplicate or missing options', () => {
   const candidate = { type: 'choice', id: 'candidate', instructions: 'Choose a section.', options: { section: 'Exact section text.', 'no-fit': 'Neither' }, materialOptions: { section: 'section-three' } };

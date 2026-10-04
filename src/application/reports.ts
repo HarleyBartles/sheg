@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { loadStudy } from '../infrastructure/study-loader.js';
 import { CheckpointStore, contextFailureSchema, interruptionEvidenceSchema, runCheckpointSchema, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
 import { executionFingerprint, respondentCohortFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
-import { decisionValueSchema } from '../domain/decision/decision.js';
+import { decisionValueSchema, decisionValueFromResult } from '../domain/decision/decision.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
 import type { StudyArm } from '../domain/study/arm.js';
 
@@ -37,11 +37,7 @@ function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys
     }
     used.add(decisionIndex);
     const result = stored.decisions[decisionIndex]!.result;
-    const value = result.type === 'choice'
-      ? { type: 'choice', choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-      : result.type === 'score'
-        ? { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-        : { type: 'noul', noul: result.noul };
+    const value = decisionValueFromResult(result);
     events.push({ type: 'response', sequence: sequence++, nodeId, taskId, result: value });
     return stored.decisions[decisionIndex]!;
   };
@@ -138,11 +134,7 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
         const presentationOccurrence = (presentationOccurrenceByTask.get(decisionId) ?? 0) + 1;
         presentationOccurrenceByTask.set(decisionId, presentationOccurrence);
         const choiceTask = task && 'options' in task ? task : undefined;
-        const answer = result.type === 'choice'
-          ? { type: 'choice' as const, choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-          : result.type === 'score'
-            ? { type: 'score' as const, score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-            : { type: 'noul' as const, noul: result.noul };
+        const answer = decisionValueFromResult(result);
         return { taskId: decisionId, comparisonKey: task?.comparisonKey ?? null, occurrence, presentationOccurrence, requestFingerprint: checkpointDecision.requestFingerprint, answer, optionIds: choiceTask ? Object.keys(choiceTask.options) : [], ...(result.type === 'choice' ? { choice: result.choice } : {}),
           correct: result.type === 'choice' && choiceTask?.answerKeyOptionId ? result.choice === choiceTask.answerKeyOptionId : null, attempts: result.attempts, latencyMs: result.latencyMs,
           confidence: 'confidence' in result ? result.confidence ?? null : null, cost: result.cost ?? null };

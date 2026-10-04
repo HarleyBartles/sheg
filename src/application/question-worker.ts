@@ -7,7 +7,8 @@ import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import { JevCallError } from '../providers/jev.js';
 import { LayaCallError } from '../providers/laya.js';
 import type { ProviderFactory } from './run-service.js';
-import type { DecisionBatchRequest, DecisionBatchResult, DecisionFailureDetail, DecisionResult, DecisionValue } from '../domain/decision/decision.js';
+import { decisionValueFromResult } from '../domain/decision/decision.js';
+import type { DecisionBatchRequest, DecisionBatchResult, DecisionFailureDetail } from '../domain/decision/decision.js';
 
 const HEARTBEAT_MS = 2_000;
 export async function executeQuestionRun(store: RunStore, runId: string, providerFactory: ProviderFactory): Promise<void> {
@@ -63,7 +64,7 @@ async function executePoll(store: RunStore, runId: string, claim: import('../dom
         if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
         else {
           const single = await provider.decide(reservation.evaluations[0]!.packet, 1);
-          result = { answers: [{ questionId: reservation.evaluations[0]!.questionId, value: valueOnly(single) }], execution: {
+          result = { answers: [{ questionId: reservation.evaluations[0]!.questionId, value: decisionValueFromResult(single) }], execution: {
             attempts: single.attempts, provider: single.provider, model: single.model,
             ...(single.checkpoint ? { checkpoint: single.checkpoint } : {}), latencyMs: single.latencyMs, usage: single.usage,
             ...(single.cost ? { cost: single.cost } : {}),
@@ -80,12 +81,6 @@ async function executePoll(store: RunStore, runId: string, claim: import('../dom
       for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId)!);
     }
   }
-}
-
-function valueOnly(result: DecisionResult): DecisionValue {
-  if (result.type === 'choice') return { type: 'choice', choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
-  if (result.type === 'score') return { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
-  return { type: 'noul', noul: result.noul };
 }
 
 async function executeJourney(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {

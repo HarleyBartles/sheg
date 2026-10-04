@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash } from '../domain/decision/prompt.js';
-import { decisionValueSchema } from '../domain/decision/decision.js';
+import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
@@ -92,11 +92,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
-    const rawResult = turn.result ? decisionValueSchema.parse(turn.result.type === 'choice'
-      ? { type: turn.result.type, choice: turn.result.choice, probabilities: turn.result.probabilities, confidence: turn.result.confidence }
-      : turn.result.type === 'score'
-        ? { type: turn.result.type, score: turn.result.score, probabilities: turn.result.probabilities, legend: turn.result.legend, confidence: turn.result.confidence }
-        : { type: turn.result.type, noul: turn.result.noul }) : undefined;
+    const rawResult = turn.result ? decisionValueFromResult(turn.result) : undefined;
     const packets: DecisionRequest[] = [];
     try {
       for (const question of request.questions) {

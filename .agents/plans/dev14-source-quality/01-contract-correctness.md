@@ -30,10 +30,10 @@ Preserve request compatibility, migration paths, original compiler fingerprints,
 
 **Interfaces:** Export decisionValueFromResult(result: DecisionResult): DecisionValue. DecisionError carries a stable DecisionFailureReason; validation maps reasons without parsing prose. One providerExecutionEvidenceSchema defines result metadata and batch execution.
 
-- [ ] Add a task-schema behavior case rejecting inherited answerKeyOptionId names while accepting offered own keys. Add validation cases showing invalid type, unknown option, distribution and rubric failures retain the expected machine reason independent of message wording.
-- [ ] Run node --import tsx --test test/decision.test.ts test/stimulus-response.test.ts and witness the missing behavior.
-- [ ] Implement own-key validation, shared result metadata/projection and construction-time validation reasons; replace duplicated projections without changing serialized answers.
-- [ ] Run the focused checks and npm run typecheck; inspect the diff and commit the completed task.
+- [x] Add a task-schema behavior case rejecting inherited answerKeyOptionId names while accepting offered own keys. Add validation cases showing invalid type, unknown option, distribution and rubric failures retain the expected machine reason independent of message wording.
+- [x] Run node --import tsx --test test/decision.test.ts test/stimulus-response.test.ts and witness the missing behavior.
+- [x] Implement own-key validation, shared result metadata/projection and construction-time validation reasons; replace duplicated projections without changing serialized answers.
+- [x] Run the focused checks and npm run typecheck; inspect the diff and commit the completed task.
 
 ### Task 2: Preserve safe provider failures
 
