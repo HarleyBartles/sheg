@@ -1,10 +1,10 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plans 1 through 8 are merged to `develop`; Plans 9 and 10 remain. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
+Status: Plans 1 through 9 are merged to `develop`; Plan 10 remains. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
 
 ## Workspace and base
 
-- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-store-migrations`, branch `codex/v0.3.0-store-migrations`, based on Plan 8 merge `027b3b983bbe95870eb8450bfc14ec1b0009f61a`.
+- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-guidance-installed-proof`, branch `codex/v0.3.0-guidance-installed-proof`, based on Plan 9 merge `d77c4ebbbd978624e3934b104e7f68216f24155c`.
 - Implementation follows `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
 
 ## Outcome
@@ -27,20 +27,12 @@ Each next executable plan is written against the delivered code of its predecess
 | 6 | Enable native TypeSafe inference and verify a realistic author journey | merged to `develop` in PR #18 | Retired after merge | `0.3.0-dev.8` |
 | 7 | Resume eligible respondent-local failures in partial journeys | merged to `develop` in PR #19 | Retired after merge | `0.3.0-dev.9` |
 | 8 | Ship one reproducible self-contained plugin package across Git and ZIP | merged to `develop` in PR #20 | Retired after merge | `0.3.0-dev.10` |
-| 9 | Establish datastore upgrade compatibility from the 0.3.0 baseline | active; plan written JIT | [Plan 9](09-datastore-upgrade-compatibility.md) | `0.3.0-dev.11` |
-| 10 | Reconcile guidance and verify the installed author journey | pending; plan written JIT | Not authored yet | `0.3.0-dev.12` |
-
-## Plan 9: datastore upgrade compatibility
-
-Make SQLite schema version 8 the v0.3.0 baseline and the beginning of the supported upgrade range. This plan migrates the current development schema 7 to 8 so the migration machinery is exercised; older prerelease datastores remain disposable and are not a release compatibility promise. After v0.3.0, every schema-changing release must ship a tested forward migration from every supported released schema. Keep migrations sequential, transactional and data-preserving, with a verified pre-migration backup and integrity checks. Version and upcast persisted JSON payloads separately where their contracts evolve; preserve frozen requests, packets, answers, lineage and physical-attempt accounting as historical evidence rather than silently reinterpreting them. Do not automatically reset data when migration fails or when a newer unsupported schema is found.
-
-Ensure MCP startup remains useful when datastore opening or migration fails. Register a bounded maintenance/recovery surface that reports compatibility and migration state and offers an explicitly confirmed reset without exposing credentials or raw SQL. Before reset, retain a verified SQLite backup when readable or quarantine the original database files when SQLite cannot read them. Ordinary study tools must refuse writes while recovery is required. A failed migration leaves the original database recoverable and explains the next action. Supersede ADR-0018 with the post-0.3.0 compatibility promise and its supported-schema policy.
-
-Acceptance: source-owned schema fixtures represent the v8 release baseline and the v7 migration input; automated tests prove data and accounting preservation across 7-to-8, transaction rollback on failure, refusal of unknown future schemas without mutation, and actionable maintenance access when normal startup cannot open the store. Future schema changes cannot merge without the corresponding migration and upgrade tests. These are tests and fixtures, not retained campaign results or development receipts.
+| 9 | Establish datastore upgrade compatibility from the 0.3.0 baseline | merged to `develop` in PR #21 | Retired in this successor slice | `0.3.0-dev.11` |
+| 10 | Reconcile guidance and verify the installed author journey | active; plan written JIT | [Plan 10](10-guidance-and-installed-proof.md) | `0.3.0-dev.12` |
 
 ## Plan 10: combined guidance and installed proof
 
-Own the study-design and comparison/interpretation guidance, the stale cohort-minimization wording, version-policy instructions that currently sound like manual synchronization, and final package integration scenarios. Explain purposeful variation across respondent profile, stimulus, question/response and state; identical fingerprints do not add substantive coverage, and cohorts should cover meaningful profile differences rather than default to the smallest size. State that `package.json` is the sole authored product version and build/package generation owns downstream copies. This final slice checks the conversation as a whole: staged reading, material selection, isolated reuse, changed framing, a local failure, explicit journey resume with preserved progress, durable recall, the 0.3.0 datastore upgrade contract, and both prerelease and stable package paths. Read current skills as an agent receives them; run versioned fresh-context scenarios with fixed criteria and transient campaign outputs. Include cases where an identical input is repeated and where one input dimension changes purposefully. Report strengths preserved and remaining limitations.
+Own the study-design and comparison/interpretation guidance, the stale cohort-minimization wording, version-policy instructions that currently sound like manual synchronization, and final package integration scenarios. Explain purposeful variation across respondent profile, stimulus, question/response and state; identical fingerprints do not add substantive coverage, and cohorts should cover meaningful profile differences rather than default to the smallest size. State that `package.json` is the sole authored product version and build/package generation owns downstream copies. This final slice checks the conversation as a whole: staged reading, material selection, isolated reuse, changed framing, a local failure, explicit journey resume with preserved progress, durable recall, the 0.3.0 datastore upgrade contract, and both prerelease and stable package paths. Read current skills as an agent receives them; run versioned fresh-context scenarios with fixed criteria and transient campaign outputs. Include cases where an identical input is repeated and where one input dimension changes purposefully. Verify workflows that require Sheg use its real MCP tools against deterministic attempt-owned evidence. Report strengths preserved and remaining limitations.
 
 ## Validation and handoff
 
