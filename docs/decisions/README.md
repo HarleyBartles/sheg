@@ -31,6 +31,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0022](0022-source-linked-material-choices.md) | Link offered Choice options to exact source material | Accepted |
 | [0023](0023-identify-development-and-candidate-builds.md) | Identify development and candidate builds | Accepted |
 | [0024](0024-normalize-journeys-and-version-packet-context.md) | Normalize journeys and version packet context | Accepted |
+| [0025](0025-bound-native-typesafe-context-admission.md) | Bound native TypeSafe context admission with published evidence | Accepted |
 
 ## Writing and changing decisions
 
