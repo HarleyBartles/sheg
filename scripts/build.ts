@@ -3,12 +3,14 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { respondentArchetypeGroups } from '../src/domain/respondents/archetype-catalogue.js';
+import { syncPackageLockVersion } from './generate-package-lock.js';
 import { syncPluginManifest } from './generate-plugin-manifest.js';
 import { generatePluginPackage } from './generate-plugin-package.js';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
 export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'dist')): Promise<void> {
+  await syncPackageLockVersion(repositoryRoot);
   await syncPluginManifest(repositoryRoot);
   const resolvedOutputDirectory = path.resolve(outputDirectory);
   await rm(resolvedOutputDirectory, { recursive: true, force: true });
