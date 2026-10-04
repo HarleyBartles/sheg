@@ -1,6 +1,6 @@
 import type { DecisionResult, DecisionValue } from '../decision/decision.js';
 import type { ProviderContextFit } from '../decision/provider.js';
-import type { EvidenceCriteria, FrozenEvaluation, RunEvidenceItem, RunEvidencePage, RunEvidenceQuery, RunListQueryInput } from './request.js';
+import type { EvidenceCriteria, FollowOnSelectionExclusion, FrozenEvaluation, RunEvidenceItem, RunEvidencePage, RunEvidenceQuery, RunListQueryInput, SelectionCoverage } from './request.js';
 import type { PromptHistoryEvent } from '../decision/prompt.js';
 import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
@@ -47,6 +47,8 @@ export type JourneyRunRecord = {
 export type Inspection = {
   valid: boolean;
   respondentCount: number;
+  selectionCoverage?: SelectionCoverage;
+  selectionExclusions?: FollowOnSelectionExclusion[];
   minimumCalls: number;
   maximumCalls?: number;
   problems: RunProblem[];

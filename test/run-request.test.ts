@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evidenceCriteriaSchema, followOnRunRequestSchema, inlineRunRequestSchema, runEvidencePageSchema, runEvidenceQuerySchema, runListQuerySchema, runRequestSchema, type InlineRunRequest } from '../src/domain/run/request.js';
+import { evidenceCriteriaSchema, followOnLineageSchema, followOnRunRequestSchema, inlineRunRequestSchema, runEvidencePageSchema, runEvidenceQuerySchema, runListQuerySchema, runRequestSchema, selectionCoverageSchema, type InlineRunRequest } from '../src/domain/run/request.js';
 
 function profile(id: string, intent: string) {
   return {
@@ -244,6 +244,65 @@ test('follow-on requests select criteria or exact evaluation/context references 
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { references: [] }, context: { mode: 'recorded' } }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'fresh-material' } }).success, false);
   assert.equal(followOnRunRequestSchema.safeParse({ ...base, selection: { criteria: {} }, context: { mode: 'recorded' }, rationale: 'They lost interest.' }).success, false);
+});
+
+test('selected-material follow-ons require an explicit isolation request and source question', () => {
+  const base = {
+    kind: 'follow-on', sourceRunId: '123e4567-e89b-42d3-a456-426614174000',
+    questions: [{ ...question, id: 'is-it-clear' }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  };
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { criteria: { questionId: 'pick-paragraph' } },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true },
+  }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { criteria: { questionId: 'pick-paragraph' } },
+    context: { mode: 'omit-history', includeSelectedMaterial: true },
+  }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { references: [{ evaluationId: '123e4567-e89b-42d3-a456-426614174001', contextId: '123e4567-e89b-42d3-a456-426614174002' }] },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true },
+  }).success, true);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { criteria: { questionId: 'pick-paragraph' } },
+    context: { mode: 'recorded', includeSelectedMaterial: true },
+  }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { criteria: { questionId: 'pick-paragraph' } },
+    context: { mode: 'continue', includeSelectedMaterial: true },
+  }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { criteria: {} },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true },
+  }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { criteria: { questionId: 'pick-paragraph', answer: { type: 'choice', choiceId: 'p3' } } },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true },
+  }).success, false);
+  assert.equal(followOnRunRequestSchema.safeParse({ ...base,
+    selection: { criteria: { questionId: 'pick-paragraph' } },
+    context: { mode: 'recorded' },
+  }).success, true);
+});
+
+test('selection coverage reconciles every matched source evaluation and old lineage parses without invented counts', () => {
+  const coverage = {
+    matched: 6,
+    eligible: 1,
+    excluded: { pending: 1, failed: 1, unreached: 1, nonChoice: 1, unmappedChoice: 1 },
+  };
+  assert.deepEqual(selectionCoverageSchema.parse(coverage), coverage);
+  assert.equal(selectionCoverageSchema.safeParse({ ...coverage, eligible: 2 }).success, false);
+
+  const lineage = followOnLineageSchema.parse({
+    sourceRunId: '123e4567-e89b-42d3-a456-426614174000',
+    sourceStatusAtAcceptance: 'completed', sourceCompleteAtAcceptance: true,
+    sourceVersion: { status: 'completed', usedCalls: 1, reservedCalls: 0, maxOrdinal: 0 },
+    selections: [],
+  });
+  assert.equal(lineage.selectionCoverage, undefined);
+  assert.deepEqual(lineage.excludedSelections, []);
 });
 
 test('evidence page reports query-page exhaustion separately from source completion', () => {

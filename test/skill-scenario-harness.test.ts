@@ -31,6 +31,7 @@ const expectedScenarioIds = [
   'live-storage-inspection',
   'live-storage-inspection-heldout',
   'partial-run-selected-question',
+  'selected-material-isolation-heldout',
   'selected-material-isolation-no-fit',
   'sequence-versus-linear-graph',
   'typed-answer-failure',
@@ -74,6 +75,8 @@ test('actor prompts include only the owner skill, declared references, user requ
   assert.ok(prompt.includes('# Stimulus-response polling'));
   assert.ok(prompt.includes(scenario.userRequest));
   assert.ok(prompt.includes(JSON.stringify(scenario.controlledEvidence, null, 2)));
+  assert.match(prompt, /"finalResponse": string.*"uncertainties": string\[\]/);
+  assert.match(prompt, /Keep finalResponse as a string/);
   for (const referencePath of scenario.referencePaths) {
     assert.ok(prompt.includes(referencePath));
   }
@@ -87,6 +90,8 @@ test('no-guidance control prompts preserve the scenario request and evidence wit
 
   assert.ok(controlPrompt.prompt.includes(scenario.userRequest));
   assert.ok(controlPrompt.prompt.includes(JSON.stringify(scenario.controlledEvidence, null, 2)));
+  assert.match(controlPrompt.prompt, /"finalResponse": string.*"uncertainties": string\[\]/);
+  assert.match(controlPrompt.prompt, /Keep finalResponse as a string/);
   assert.doesNotMatch(controlPrompt.prompt, /Current skill and declared references|# Stimulus-response polling/);
   assert.match(controlPrompt.sha256, /^[a-f0-9]{64}$/);
 });
@@ -210,7 +215,7 @@ test('scenario CLI replays a stored no-guidance control by one-based index', () 
 test('evaluator refuses to replay a control whose actor scenario ID conflicts with its wrapper', () => {
   assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', {
     scenarioId: 'selected-material-isolation-no-fit',
-    scenarioVersion: 5,
+    scenarioVersion: 9,
     controls: [{ actor: { scenarioId: 'control_selected_material', finalResponse: 'Wrong identity.' } }],
   }, { controlIndex: 1 }), /Actor trace does not match scenario/);
 });
@@ -236,7 +241,7 @@ test('evaluator rejects archived versions of a scenario before selecting an acto
   assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', {
     scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 3,
     guided: { actor: { scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 3, finalResponse: 'Synthetic stale trace.' } },
-  }), /version 3.*current version 5/);
+  }), /version 3.*current version 9/);
 });
 
 test('evaluator rejects raw actors that declare a stale scenario version', () => {
@@ -343,11 +348,17 @@ test('typed answer recovery fixture has a precise failure and an exhausted origi
 
 test('selected-material fixture matches the current run query contract and omits material for no-fit', () => {
   const scenario = loadScenarioCatalog().find((item) => item.id === 'selected-material-isolation-no-fit')!;
-  const evidence = scenario.controlledEvidence as { queryResult: unknown };
+  const evidence = scenario.controlledEvidence as { pullQuote: string; sourceQuestion: { id: string; type: string; options: string[] }; followOnQuestion: { id: string; type: string }; followOnState: { mode: string; priorTurnVisibility: string; includeSelectedMaterial: boolean }; respondentProfiles: Array<{ respondentId: string; profile: string }>; queryResult: unknown };
   const queryResult = runEvidencePageSchema.parse(evidence.queryResult);
 
   assert.deepEqual(queryResult.items.map((item) => item.status), ['answered', 'answered', 'answered']);
   assert.deepEqual(queryResult.items.map((item) => item.selectedMaterial?.materialId), ['p2', undefined, 'p5']);
+  assert.equal(new Set(evidence.respondentProfiles.map(({ profile }) => profile)).size, 3);
+  assert.equal(new Set(queryResult.items.flatMap((item) => item.selectedMaterial ? [item.selectedMaterial.materialId] : [])).size, 2);
+  assert.equal(evidence.pullQuote, 'A city is a promise people keep making to each other.');
+  assert.deepEqual(evidence.sourceQuestion, { id: 'q-pull-quote', type: 'choice', prompt: 'Which paragraph best represents the pull quote?', options: ['p2', 'p5', 'no-fit'] });
+  assert.deepEqual(evidence.followOnQuestion, { id: 'quote-fit', type: 'noul', prompt: 'Does this paragraph express the pull quote?' });
+  assert.deepEqual(evidence.followOnState, { mode: 'fresh-material', priorTurnVisibility: 'empty', includeSelectedMaterial: true });
   assert.equal(queryResult.items[0]?.selectedMaterial?.text, 'Exact paragraph two.');
   assert.equal(queryResult.items[2]?.selectedMaterial?.text, 'Exact paragraph five.');
   const choiceResults = queryResult.items.flatMap((item) => item.result?.type === 'choice' ? [item.result] : []);

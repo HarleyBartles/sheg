@@ -21,7 +21,7 @@ function closeTestServer(server: ReturnType<typeof createServer>): Promise<void>
 type JourneyDetailTestShape = { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId: string }> } } } }> };
 type FollowOnRequestTestShape = {
   evaluations: Array<{ questionId: string; contextId: string; packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } } } }>;
-  lineage: { sourceAvailable: boolean; selections: Array<{ sourceContextId: string }>; materialSnapshots: Array<{ materials: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> }> };
+  lineage: { sourceAvailable: boolean; selections: Array<{ sourceContextId: string; selectedMaterial?: { materialId: string } }>; materialSnapshots: Array<{ materials: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> }> };
 };
 
 test('a copied plugin launches its shipped MCP without checkout or node_modules', async (t) => {
@@ -447,7 +447,7 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     assert.deepEqual(evidence.items[0]?.selectedMaterial, { materialId: 'section-three', text: 'Third section.', sourceId: 'article-section-3', sourceSha256: '3'.repeat(64), textSha256: createHash('sha256').update('Third section.', 'utf8').digest('hex') });
     const followOn = {
       kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: evidence.items[0]!.evaluationId, contextId: evidence.items[0]!.contextId }] },
-      context: { mode: 'omit-history', materialIds: [evidence.items[0]!.selectedMaterial!.materialId] },
+      context: { mode: 'omit-history', includeSelectedMaterial: true },
       questions: [
         { type: 'noul', id: 'why-interest', instructions: 'Did the examples in section three reduce your interest?' },
         { type: 'choice', id: 'which-detail', instructions: 'Which aspect mattered most?', options: { example: 'The specific example', style: 'The writing style', 'no-fit': 'Neither' } },
@@ -459,6 +459,9 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     };
     const inspected = await client.callTool({ name: 'run_inspect', arguments: { request: followOn } });
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true, JSON.stringify(inspected.structuredContent));
+    assert.deepEqual((inspected.structuredContent as { selectionCoverage: unknown }).selectionCoverage, {
+      matched: 1, eligible: 1, excluded: { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 0 },
+    });
     const accepted = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: followOn } });
     assert.equal(accepted.isError ?? false, false, JSON.stringify(accepted.structuredContent));
     const followOnRunId = (accepted.structuredContent as { runId: string }).runId;
@@ -472,9 +475,8 @@ test('a copied MCP queries a typed departure reason, reuses its context, and ret
     assert.ok(savedBeforeDelete.evaluations.every(({ packet }) => packet.state.trajectory.responses.length === 0));
     assert.equal(savedBeforeDelete.lineage.sourceAvailable, true);
     assert.deepEqual(savedBeforeDelete.lineage.selections[0]?.sourceContextId, evidence.items[0]?.contextId);
+    assert.equal(savedBeforeDelete.lineage.selections[0]?.selectedMaterial?.materialId, 'section-three');
     assert.deepEqual(savedBeforeDelete.lineage.materialSnapshots[0]?.materials, [
-      { id: 'section-one', text: 'First section.', sourceId: 'article-section-1', sourceSha256: '1'.repeat(64) },
-      { id: 'section-two', text: 'Second section.', sourceId: 'article-section-2', sourceSha256: '2'.repeat(64) },
       { id: 'section-three', text: 'Third section.', sourceId: 'article-section-3', sourceSha256: '3'.repeat(64) },
     ]);
     assert.equal(providerPayloads.length, 6);

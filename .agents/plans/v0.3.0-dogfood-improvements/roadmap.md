@@ -1,17 +1,11 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plans 1, 2, and 3 merged; Plan 3a is in progress; Plan 4 is paused by the user on 2026-10-03. Authority: [agreed scope](../../specs/2026-10-02-v0.3.0-dogfood-improvements.md). Plans 1 through 3 delivered `0.3.0-dev.2` through `0.3.0-dev.4`; Plan 3a targets `0.3.0-dev.5`; Plan 4 resumes afterward targeting `0.3.0-dev.6`. No release tag or publication is authorized.
+Status: Plans 1, 2, 3, and 3a are merged; Plan 4 is active. The next development candidate is `0.3.0-dev.6`. No release tag or publication is authorized.
 
 ## Workspace and base
 
-- Current worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-selected-stimulus`.
-- Current branch: `codex/v0.3.0-selected-stimulus`, based on `origin/develop` at Plan 3 merge `be3ff2a2490af73627ba60c096e90036c3fe85a6`.
-- Plan 4 initial linked-worktree status: clean. Baseline `npm test`: 360 tests passed, zero failed, zero skipped.
-- Plan 1 merged as PR #12 at `7e2943bf1daec403ae5e56e7166eb68f9d868474`; its prior linked worktree and local branch were removed after exact PR/head/develop verification.
-- Plan 2 merged as PR #13 from exact head `ba95909cc13ef82d876f864fcfc49304b3fb5188` at `1d758ceae6db1b7f8245120ddc252354747a5652`. The hosted `sheg-verify` check passed, and the tracked staged gate passed all 352 tests. Its prior linked worktree and local branch were removed after exact PR/head/develop verification.
-- Plan 3 merged as PR #14 from exact head `9ce5da28858bcc20da66b6805a630feb2ef92ab2` at `be3ff2a2490af73627ba60c096e90036c3fe85a6`. Hosted `sheg-verify` passed on the head; the final fresh review found no actionable issues and passed 123 focused tests; the tracked staged gate passed all 360 tests. The helper deregistered the completed worktree but Windows reported its directory locked; the local feature branch and remote ref were retired after exact PR/head/develop verification.
-- Shared root exception: `Z:/sheg` is configured `core.bare=true`, with an existing staged snapshot. Its main ref equals fetched `origin/main` at `9bc6a961313ce38e3614dc238a708599e7637d50`. The bundled worktree script created the canonical worktree without changing that configuration or staged snapshot. Fresh develop was fetched explicitly because the remote fetch configuration only tracks main by default.
-- Planning and implementation guidance: `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
+- Feature worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-selected-stimulus`, branch `codex/v0.3.0-selected-stimulus`.
+- Implementation follows `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
 
 ## Outcome
 
@@ -29,11 +23,11 @@ Write each next executable plan against the delivered code of its predecessor. L
 
 | # | Title | Status | Plan file | Commit | PR | Rating | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Align development identity and candidate packaging | merged | [Plan 1](01-development-version-and-packaging.md) | `7e2943bf1dae` | [#12](https://github.com/HarleyBartles/sheg/pull/12) | - | Merged to `develop` as `0.3.0-dev.2`. Candidate ZIP identity and stable publication protections verified |
-| 2 | Establish skill behavior scenarios and baseline | merged | [Plan 2](02-skill-behavior-scenarios.md) | `1d758ceae6db` | [#13](https://github.com/HarleyBartles/sheg/pull/13) | - | Merged to `develop` as `0.3.0-dev.3`; six skill-owned scenarios, private evaluator boundary, fresh-agent baseline, matched controls, and `sheg-verify` passed |
-| 3 | Unify journey context across sequence and graph | merged | [Plan 3](03-journey-context.md) | `be3ff2a2490a` | [#14](https://github.com/HarleyBartles/sheg/pull/14) | - | Merged to `develop` as `0.3.0-dev.4`; hosted check, fresh review, 360-test staged gate, repeated-exposure parity, and 27-file candidate package verified |
-| 3a | Build the repeatable skill campaign harness | in progress | [Plan 3a](03a-skill-campaign-harness.md) | - | - | - | Merge version `0.3.0-dev.5`. Frozen old/new experiments, resumable dispatch, contract-aware and calibrated semantic graders, owner/tag/guidance-path suite selection, held-out material/history wording, criterion-level comparison deltas, and discovery/workflow suites. Deterministic tests protect harness mechanics; skill campaigns stay outside CI and pre-commit. Keep campaign outputs and development receipts transient |
-| 4 | Follow each selected stimulus in one run | paused | [Plan 4](04-selected-stimulus-reuse.md) | - | - | - | Merge version `0.3.0-dev.6`. Resume after Plan 3a; Tasks 1-3 retained through `f09978f`, unfinished Task 4 campaign will use the new harness. For each respondent who selected a piece of stimulus, allow the request to recall that exact selected piece and use it as that respondent's next stimulus; preserve optional shared framing, no-fit coverage, exact provenance, race protection and deletion-independent recall. The selected piece supplies stimulus variation for the follow-up |
+| 1 | Align development identity and candidate packaging | merged | [Plan 1](01-development-version-and-packaging.md) | - | - | - | `0.3.0-dev.2` |
+| 2 | Establish skill behavior scenarios and baseline | merged | [Plan 2](02-skill-behavior-scenarios.md) | - | - | - | `0.3.0-dev.3` |
+| 3 | Unify journey context across sequence and graph | merged | [Plan 3](03-journey-context.md) | - | - | - | `0.3.0-dev.4` |
+| 3a | Build the repeatable skill campaign harness | merged | [Plan 3a](03a-skill-campaign-harness.md) | - | - | - | `0.3.0-dev.5`; campaign outputs stay transient, behavior campaigns stay outside CI and pre-commit |
+| 4 | Follow each selected stimulus in one run | active | [Plan 4](04-selected-stimulus-reuse.md) | - | - | - | `0.3.0-dev.6`; reuse each selected piece as that respondent's follow-up stimulus, with shared framing, exclusions, provenance, race protection, and deletion-independent recall |
 | 5 | Expose precise failure and lifecycle evidence | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.7`. Safe structured validation reasons, consistent execution/coverage/recovery, selected-question coverage and captured query-state semantics; make represented respondents and selected inputs legible without equating call counts with input diversity |
 | 6 | Reconcile guidance and verify the installed author journey | pending | Not authored yet | - | - | - | Merge version `0.3.0-dev.8`. Comparative interpretation guidance, old/new scenario evidence, purposeful variation across the four input dimensions, duplicate-input recognition, copied candidate integration, final source/generated agreement |
 
@@ -45,7 +39,7 @@ Own `package.json`, `package-lock.json`, `plugin.json`, runtime product identity
 
 ### 2. Skill scenarios
 
-Own `skills/study-design/tests/behavior/`, `skills/stimulus-response-polling/tests/behavior/` and a small shared fixture/evaluator seam if duplication actually requires it. Deterministic harness checks belong to the normal gate; live agent trials are an explicit campaign with retained traces. Establish current-guidance success and failure evidence before later edits. Run no paid Sheg calls. Do not treat one agent's compliance or a canned trace as a completed pressure campaign.
+Own skill guidance and its behavior tests under each skill's `tests/` directory. Deterministic harness checks belong to the normal gate; live agent campaigns are explicit, run outside CI and pre-commit, and their outputs remain transient. Establish current-guidance behavior before later edits. Do not treat one agent's compliance or a canned trace as a completed pressure campaign.
 
 ### 3. Journey context
 
@@ -53,7 +47,7 @@ Own `src/domain/study/presentation.ts`, `src/domain/decision/prompt.ts`, `src/do
 
 ### 3a. Repeatable skill campaigns
 
-Own `scripts/skill-testing/`, shared deterministic harness tests, skill-owned discovery/workflow/calibration fixtures, and skill-testing doctrine. Implement the [approved harness scope](../../specs/2026-10-03-skill-campaign-harness.md) before resuming Plan 4. Preserve raw outputs, distinguish runtime errors from behavior failures, compare frozen old/new guidance with separate attribution controls, and exercise real request contracts against offline evidence. Live campaigns remain explicit; ordinary CI uses deterministic adapters. Tool isolation is an ambient Agent Capability Pack concern and is outside this slice.
+Own `scripts/skill-testing/`, shared deterministic harness tests, skill-owned discovery/workflow/calibration fixtures, and skill-testing doctrine. The harness compares frozen old/new guidance with separate attribution controls, distinguishes runtime errors from behavior failures, and checks executable requests against controlled evidence. Live campaigns run explicitly outside CI and pre-commit; inspect their outputs during development, then discard them. Tool isolation is an ambient Agent Capability Pack concern and is outside this slice.
 
 ### 4. Selected-stimulus reuse
 
@@ -73,8 +67,4 @@ Each executable plan supplies exact files, behavioral proof and commands. Regene
 
 Execution is sequential through `executing-plans`: the context, follow-on and lifecycle contracts share persisted packets, compiler identity, generated contracts and agent guidance. Fresh implementers per small seam would repeatedly reconstruct that shared state. Scenario actors are fresh by design; that is a test requirement, not permission to delegate implementation.
 
-The initial planning turn ended before implementation. This continuing objective authorizes implementation, a PR into develop and a merge after fresh review and required checks pass. It does not authorize a stable release tag, GitHub Release or paid inference. Final roadmap handoff records version alignment, copied-package proof, tests, skill campaign evidence, exact head and outstanding provider/human-reader limitations. No paid call budget transfers from the Portfolio pilot.
-
-## Handoff notes: Plan 3a insertion, 2026-10-03
-
-The user paused Plan 4 and inserted Plan 3a after a web spike. Plan 4 product Tasks 1-3 remain on `codex/v0.3.0-selected-stimulus` through `f09978f`; retain that branch/worktree. Its preliminary actor outputs are incomplete campaign evidence and must not be represented as a completed proof. The uncommitted skill-testing doctrine and AGENTS pointer accompany these planning changes for transfer into Plan 3a. Execute Plan 3a in a fresh worktree from latest develop, independent of the paused product changes. After its merge, rebase the retained Plan 4 branch, reconcile shared docs/harness changes, refresh the JIT plan and focused product verification, then finish guidance with the new campaign runner. Plans 4-6 each shift one development version. Planning alone does not resume the paused goal or authorize immediate implementation.
+The initial planning turn ended before implementation. This continuing objective authorizes implementation, a PR into develop and a merge after fresh review and required checks pass. It does not authorize a stable release tag, GitHub Release or paid inference. Keep the status and next development version current; Git history records completed development work. No paid call budget transfers from the Portfolio pilot.

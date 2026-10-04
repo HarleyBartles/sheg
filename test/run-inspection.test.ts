@@ -4,7 +4,7 @@ import { prepareFollowOnRun, prepareRun } from '../src/application/run-inspectio
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import { compileDecisionRequest, emptyTrajectory } from '../src/domain/decision/prompt.js';
 import type { DecisionBatchRequest, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
-import { followOnRunRequestSchema, type FollowOnSourceSet, type InlineRunRequest } from '../src/domain/run/request.js';
+import { followOnRunRequestSchema, type FollowOnSourceSet, type FollowOnSourceTurn, type InlineRunRequest } from '../src/domain/run/request.js';
 
 const fit = (status: ProviderContextFit['status'] = 'fits'): ProviderContextFit => ({
   provider: 'laya', status, method: 'test-fixture', modelIdentity: 'test-model',
@@ -27,6 +27,48 @@ function makeProvider(statuses: ProviderContextFit['status'][] = ['fits']) {
     },
   };
   return { provider, measured, get decisions() { return decisions; } };
+}
+
+const pullQuote = { id: 'pull-quote', text: 'A city is a promise people keep making to each other.', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) };
+const paragraph3 = { id: 'paragraph-3', text: 'Exact paragraph three.', sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) };
+const paragraph7 = { id: 'paragraph-7', text: 'Exact paragraph seven.', sourceId: 'article-v1', sourceSha256: 'c'.repeat(64) };
+const surrounding = { id: 'article-body', text: 'Surrounding article text.', sourceId: 'article-v1', sourceSha256: 'd'.repeat(64) };
+const selectionProfile = { intent: 'Learn', context: 'New reader', desired_outcome: 'Understand', engagement_cues: 'Examples', friction_cues: 'Hype' };
+const selectionQuestion = {
+  type: 'choice' as const, id: 'pick-paragraph', instructions: 'Which paragraph best represents the pull quote?',
+  options: { p3: paragraph3.text, p7: paragraph7.text, 'no-fit': 'No paragraph fits the pull quote.' },
+  materialOptions: { p3: paragraph3.id, p7: paragraph7.id },
+};
+
+function makeSelectionTurn(evaluationId: string, contextId: string, respondentId: string, choice: 'p3' | 'p7' | 'no-fit') {
+  const packet = compileDecisionRequest({ respondentProfile: selectionProfile, encounteredItems: [surrounding], trajectory: emptyTrajectory(), question: selectionQuestion });
+  const material = choice === 'p3' ? paragraph3 : choice === 'p7' ? paragraph7 : undefined;
+  const probabilities = Object.fromEntries(Object.keys(selectionQuestion.options).map((option) => [option, option === choice ? 1 : 0]));
+  return {
+    evaluationId, contextId, respondentId, status: 'answered' as const, packet,
+    result: { type: 'choice' as const, choice, confidence: 1, probabilities },
+    materials: [pullQuote, paragraph3, paragraph7, surrounding],
+    ...(material ? { selectedMaterial: { materialId: material.id, text: material.text, sourceId: material.sourceId, sourceSha256: material.sourceSha256, textSha256: 'e'.repeat(64) } } : {}),
+  } as unknown as FollowOnSourceTurn;
+}
+
+function makeScoreSelectionTurn(evaluationId: string, contextId: string, respondentId: string) {
+  const packet = compileDecisionRequest({ respondentProfile: selectionProfile, encounteredItems: [surrounding], trajectory: emptyTrajectory(), question: {
+    type: 'score', id: 'rate', instructions: 'Rate the paragraph.', rubric: ['Poor', 'Good'],
+  } });
+  return {
+    evaluationId, contextId, respondentId, status: 'answered' as const, packet,
+    result: { type: 'score' as const, score: 'Good', confidence: 1, probabilities: { Poor: 0, Good: 1 } },
+    materials: [pullQuote, paragraph3, paragraph7, surrounding],
+  } as unknown as FollowOnSourceTurn;
+}
+
+function makeUnansweredSelectionTurn(evaluationId: string, contextId: string, respondentId: string, status: 'pending' | 'failed' | 'unreached'): FollowOnSourceTurn {
+  const turn = makeSelectionTurn(evaluationId, contextId, respondentId, 'p3');
+  delete turn.result;
+  delete turn.selectedMaterial;
+  turn.status = status;
+  return turn;
 }
 
 function request(questions: InlineRunRequest['questions'] = [{
@@ -260,9 +302,9 @@ test('follow-on batching groups distinct source contexts and never includes sele
     sourceRunId: followOn.sourceRunId, sourceStatus: 'running', sourceComplete: false,
     version: { status: 'running', usedCalls: 2, reservedCalls: 0, maxOrdinal: 3 },
     turns: [
-      { evaluationId: '11111111-1111-4111-8111-111111111111', contextId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', respondentId: 'reader-a', packet: sourcePacket('First source context') },
-      { evaluationId: '22222222-2222-4222-8222-222222222222', contextId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', respondentId: 'reader-a', packet: sourcePacket('First source context') },
-      { evaluationId: '33333333-3333-4333-8333-333333333333', contextId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', respondentId: 'reader-a', packet: sourcePacket('Second source context') },
+      { evaluationId: '11111111-1111-4111-8111-111111111111', contextId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', respondentId: 'reader-a', status: 'answered', packet: sourcePacket('First source context') },
+      { evaluationId: '22222222-2222-4222-8222-222222222222', contextId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', respondentId: 'reader-a', status: 'answered', packet: sourcePacket('First source context') },
+      { evaluationId: '33333333-3333-4333-8333-333333333333', contextId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', respondentId: 'reader-a', status: 'answered', packet: sourcePacket('Second source context') },
     ],
   };
   const measured: DecisionBatchRequest[] = [];
@@ -273,6 +315,7 @@ test('follow-on batching groups distinct source contexts and never includes sele
   const admission = await prepareFollowOnRun(followOn, source, provider);
 
   assert.equal(admission.inspection.valid, true);
+  assert.deepEqual(admission.prepared.lineage?.excludedSelections, []);
   assert.equal(admission.inspection.respondentCount, 2);
   assert.equal(admission.inspection.minimumCalls, 2);
   assert.deepEqual(measured.map(({ questions: grouped }) => grouped.map(({ id }) => id)), [
@@ -306,6 +349,123 @@ test('follow-on batching groups distinct source contexts and never includes sele
   assert.equal(continued.prepared.evaluations.length, 6);
   assert.equal(new Set(continued.prepared.evaluations.map(({ contextId }) => contextId)).size, 3);
   assert.deepEqual(continuationProviderCalls.map(({ state }) => (state.trajectory as { responses: Array<{ noul: number }> }).responses.at(-1)?.noul), [0, 0, 0.5, 0.5, 1, 1]);
+});
+
+test('selected-material follow-on gives each mapped answer its own isolated packet and reports no-fit coverage', async () => {
+  const sourceTurns = [
+    makeSelectionTurn('11111111-1111-4111-8111-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001', 'reader-a', 'p3'),
+    makeSelectionTurn('11111111-1111-4111-8111-000000000002', 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002', 'reader-b', 'p3'),
+    makeSelectionTurn('11111111-1111-4111-8111-000000000003', 'aaaaaaaa-aaaa-4aaa-8aaa-000000000003', 'reader-c', 'p7'),
+    makeSelectionTurn('11111111-1111-4111-8111-000000000004', 'aaaaaaaa-aaaa-4aaa-8aaa-000000000004', 'reader-d', 'no-fit'),
+  ];
+  const followOn = followOnRunRequestSchema.parse({
+    kind: 'follow-on', sourceRunId: '123e4567-e89b-42d3-a456-426614174000',
+    selection: { criteria: { questionId: 'pick-paragraph' } },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true, materialIds: ['pull-quote'] },
+    questions: [{ type: 'noul', id: 'expresses-quote', instructions: 'Does this paragraph express the pull quote?' }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 3,
+  });
+  const source: FollowOnSourceSet = {
+    sourceRunId: followOn.sourceRunId, sourceStatus: 'completed', sourceComplete: true,
+    version: { status: 'completed', usedCalls: 4, reservedCalls: 0, maxOrdinal: 3 }, turns: sourceTurns,
+  };
+  const measured: DecisionBatchRequest[] = [];
+  const provider: DecisionProvider = {
+    measureBatch(batch) { measured.push(batch); return fit(); },
+    async decide() { throw new Error('Inspection must not run inference.'); },
+  };
+
+  const admission = await prepareFollowOnRun(followOn, source, provider);
+
+  assert.equal(admission.inspection.valid, true);
+  assert.equal(admission.inspection.respondentCount, 3);
+  assert.deepEqual(admission.inspection.selectionCoverage, {
+    matched: 4, eligible: 3,
+    excluded: { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 1 },
+  });
+  assert.deepEqual(admission.inspection.selectionExclusions, [{
+    sourceEvaluationId: sourceTurns[3]!.evaluationId,
+    sourceContextId: sourceTurns[3]!.contextId,
+    respondentId: 'reader-d', status: 'answered', reason: 'unmappedChoice',
+    choiceId: 'no-fit', choiceMeaning: 'No paragraph fits the pull quote.',
+  }]);
+  assert.equal(admission.prepared.evaluations.length, 3);
+  for (const evaluation of admission.prepared.evaluations) {
+    const paragraph = evaluation.respondentId === 'reader-c' ? paragraph7 : paragraph3;
+    assert.deepEqual(evaluation.packet.state.encounteredItems, [pullQuote, paragraph].map(({ id, text }) => ({ id, text })));
+    assert.deepEqual((evaluation.packet.state.trajectory as { responses: unknown[] }).responses, []);
+    assert.equal(JSON.stringify(evaluation.packet.state).includes('surrounding article'), false);
+    assert.equal(JSON.stringify(evaluation.packet.state).includes(evaluation.respondentId === 'reader-c' ? paragraph3.text : paragraph7.text), false);
+  }
+  assert.deepEqual(measured.map(({ state }) => state.encounteredItems), admission.prepared.evaluations.map(({ packet }) => packet.state.encounteredItems));
+  assert.deepEqual(admission.prepared.lineage?.selectionCoverage, admission.inspection.selectionCoverage);
+  assert.deepEqual(admission.prepared.lineage?.excludedSelections, admission.inspection.selectionExclusions);
+});
+
+test('selected-material coverage identifies non-Choice, failed, pending, and unreached source handles', async () => {
+  const eligible = makeSelectionTurn('21111111-1111-4111-8111-000000000001', 'baaaaaaa-aaaa-4aaa-8aaa-000000000001', 'reader-a', 'p3');
+  const noFit = makeSelectionTurn('21111111-1111-4111-8111-000000000002', 'baaaaaaa-aaaa-4aaa-8aaa-000000000002', 'reader-b', 'no-fit');
+  const pending = makeUnansweredSelectionTurn('21111111-1111-4111-8111-000000000003', 'baaaaaaa-aaaa-4aaa-8aaa-000000000003', 'reader-c', 'pending');
+  const failed = makeUnansweredSelectionTurn('21111111-1111-4111-8111-000000000004', 'baaaaaaa-aaaa-4aaa-8aaa-000000000004', 'reader-d', 'failed');
+  const unreached = makeUnansweredSelectionTurn('21111111-1111-4111-8111-000000000005', 'baaaaaaa-aaaa-4aaa-8aaa-000000000005', 'reader-e', 'unreached');
+  const nonChoice = makeScoreSelectionTurn('21111111-1111-4111-8111-000000000006', 'baaaaaaa-aaaa-4aaa-8aaa-000000000006', 'reader-f');
+  const sourceRunId = '123e4567-e89b-42d3-a456-426614174000';
+  const turns = [eligible, noFit, pending, failed, unreached, nonChoice];
+  const followOn = followOnRunRequestSchema.parse({
+    kind: 'follow-on', sourceRunId,
+    selection: { references: turns.map(({ evaluationId, contextId }) => ({ evaluationId, contextId })) },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true },
+    questions: [{ type: 'noul', id: 'expresses-quote', instructions: 'Does this express the pull quote?' }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1,
+  });
+  const source: FollowOnSourceSet = {
+    sourceRunId, sourceStatus: 'partial', sourceComplete: false,
+    version: { status: 'partial', usedCalls: 4, reservedCalls: 0, maxOrdinal: 5 }, turns,
+  };
+  const admission = await prepareFollowOnRun(followOn, source, makeProvider().provider);
+
+  assert.equal(admission.inspection.valid, true);
+  assert.deepEqual(admission.inspection.selectionCoverage, {
+    matched: 6, eligible: 1,
+    excluded: { pending: 1, failed: 1, unreached: 1, nonChoice: 1, unmappedChoice: 1 },
+  });
+  assert.deepEqual(admission.inspection.selectionExclusions?.map(({ sourceEvaluationId, status, reason }) => [sourceEvaluationId, status, reason]), [
+    [noFit.evaluationId, 'answered', 'unmappedChoice'],
+    [pending.evaluationId, 'pending', 'pending'],
+    [failed.evaluationId, 'failed', 'failed'],
+    [unreached.evaluationId, 'unreached', 'unreached'],
+    [nonChoice.evaluationId, 'answered', 'nonChoice'],
+  ]);
+  assert.deepEqual(admission.prepared.lineage?.excludedSelections, admission.inspection.selectionExclusions);
+});
+
+test('distinct selected answers from one respondent do not share a material-specific follow-on context', async () => {
+  const sourceTurns = [
+    makeSelectionTurn('31111111-1111-4111-8111-000000000001', 'caaaaaaa-aaaa-4aaa-8aaa-000000000001', 'reader-a', 'p3'),
+    makeSelectionTurn('31111111-1111-4111-8111-000000000002', 'caaaaaaa-aaaa-4aaa-8aaa-000000000001', 'reader-a', 'p7'),
+  ];
+  const followOn = followOnRunRequestSchema.parse({
+    kind: 'follow-on', sourceRunId: '123e4567-e89b-42d3-a456-426614174000',
+    selection: { references: sourceTurns.map(({ evaluationId, contextId }) => ({ evaluationId, contextId })) },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true, materialIds: ['pull-quote'] },
+    questions: [
+      { type: 'noul', id: 'clear', instructions: 'Is it clear?' },
+      { type: 'score', id: 'fit', instructions: 'How well does it fit?', rubric: ['Poor', 'Good'] },
+    ],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 2,
+  });
+  const source: FollowOnSourceSet = {
+    sourceRunId: followOn.sourceRunId, sourceStatus: 'completed', sourceComplete: true,
+    version: { status: 'completed', usedCalls: 2, reservedCalls: 0, maxOrdinal: 1 }, turns: sourceTurns,
+  };
+  const admission = await prepareFollowOnRun(followOn, source, makeProvider().provider);
+
+  assert.equal(admission.inspection.respondentCount, 2);
+  assert.equal(admission.prepared.evaluations.length, 4);
+  const [p3Context, p7Context] = [...new Set(admission.prepared.evaluations.map(({ contextId }) => contextId))];
+  assert.ok(p3Context && p7Context && p3Context !== p7Context);
+  assert.deepEqual(admission.prepared.evaluations.filter(({ contextId }) => contextId === p3Context).map(({ packet }) => packet.state.encounteredItems), [2, 2].map(() => [pullQuote, paragraph3].map(({ id, text }) => ({ id, text }))));
+  assert.deepEqual(admission.prepared.evaluations.filter(({ contextId }) => contextId === p7Context).map(({ packet }) => packet.state.encounteredItems), [2, 2].map(() => [pullQuote, paragraph7].map(({ id, text }) => ({ id, text }))));
 });
 
 test('follow-on can select an offered catalog candidate that was not encountered', async () => {

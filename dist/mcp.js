@@ -34998,19 +34998,27 @@ var followOnSelectionSchema = external_exports.union([
     }
   })
 ]);
+var followOnContextSchema = external_exports.object({
+  mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
+  materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional(),
+  includeSelectedMaterial: external_exports.boolean().optional()
+}).strict().superRefine((contextInput, context) => {
+  if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
+    context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
+  }
+  if (contextInput.mode === "recorded" && contextInput.materialIds) {
+    context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
+  }
+  if (contextInput.includeSelectedMaterial && contextInput.mode !== "fresh-material" && contextInput.mode !== "omit-history") {
+    context.addIssue({ code: "custom", path: ["includeSelectedMaterial"], message: "Selected Choice material requires fresh-material or omit-history context." });
+  }
+});
 var followOnRunRequestSchema = external_exports.object({
   kind: external_exports.literal("follow-on"),
   label: external_exports.string().min(1).max(120).optional(),
   sourceRunId: external_exports.string().uuid(),
   selection: followOnSelectionSchema,
-  context: external_exports.object({ mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]), materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional() }).strict().superRefine((contextInput, context) => {
-    if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
-      context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
-    }
-    if (contextInput.mode === "recorded" && contextInput.materialIds) {
-      context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
-    }
-  }),
+  context: followOnContextSchema,
   material: external_exports.array(materialItemSchema).min(1).optional(),
   questions: external_exports.array(decisionQuestionSchema).min(1),
   provider: providerConfigSchema,
@@ -35020,7 +35028,15 @@ var followOnRunRequestSchema = external_exports.object({
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
   }
-  const hasMaterial = Boolean(request.material?.length || request.context.materialIds?.length);
+  if (request.context.includeSelectedMaterial && "criteria" in request.selection) {
+    if (!request.selection.criteria.questionId) {
+      context.addIssue({ code: "custom", path: ["selection", "criteria", "questionId"], message: "Selected-material criteria must identify the source Choice question." });
+    }
+    if (request.selection.criteria.answer) {
+      context.addIssue({ code: "custom", path: ["selection", "criteria", "answer"], message: "Selected-material criteria must include all answers to report mapped and unmapped selections." });
+    }
+  }
+  const hasMaterial = Boolean(request.context.includeSelectedMaterial || request.material?.length || request.context.materialIds?.length);
   if ((request.context.mode === "fresh-material" || request.context.mode === "omit-history") && !hasMaterial) {
     context.addIssue({ code: "custom", path: ["context", "materialIds"], message: `${request.context.mode} context requires explicit material or material references.` });
   }
@@ -35035,6 +35051,39 @@ var followOnRunRequestSchema = external_exports.object({
   }
 });
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
+var sourceEvaluationStatuses = ["pending", "answered", "failed", "unreached"];
+var followOnExclusionSchema = external_exports.object({
+  sourceEvaluationId: external_exports.string().uuid(),
+  sourceContextId: external_exports.string().uuid(),
+  respondentId: external_exports.string().min(1),
+  status: external_exports.enum(sourceEvaluationStatuses),
+  reason: external_exports.enum(["pending", "failed", "unreached", "nonChoice", "unmappedChoice"]),
+  choiceId: external_exports.string().min(1).optional(),
+  choiceMeaning: external_exports.string().min(1).optional()
+}).strict();
+var selectionCoverageSchema = external_exports.object({
+  matched: external_exports.number().int().nonnegative(),
+  eligible: external_exports.number().int().nonnegative(),
+  excluded: external_exports.object({
+    pending: external_exports.number().int().nonnegative(),
+    failed: external_exports.number().int().nonnegative(),
+    unreached: external_exports.number().int().nonnegative(),
+    nonChoice: external_exports.number().int().nonnegative(),
+    unmappedChoice: external_exports.number().int().nonnegative()
+  }).strict()
+}).strict().superRefine((coverage, context) => {
+  const excludedCount = Object.values(coverage.excluded).reduce((sum, count) => sum + count, 0);
+  if (coverage.eligible > coverage.matched || coverage.eligible + excludedCount !== coverage.matched) {
+    context.addIssue({ code: "custom", path: ["excluded"], message: "Eligible and excluded counts must account for every matched source evaluation." });
+  }
+});
+var selectedMaterialEvidenceSchema = external_exports.object({
+  materialId: materialItemSchema.shape.id,
+  text: materialItemSchema.shape.text,
+  sourceId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  textSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
 var followOnLineageSchema = external_exports.object({
   sourceRunId: external_exports.string().uuid(),
   sourceStatusAtAcceptance: external_exports.enum(runStatuses),
@@ -35042,7 +35091,16 @@ var followOnLineageSchema = external_exports.object({
   sourceVersion: external_exports.object({ status: external_exports.enum(runStatuses), usedCalls: external_exports.number().int().nonnegative(), reservedCalls: external_exports.number().int().nonnegative(), maxOrdinal: external_exports.number().int().min(-1) }).strict(),
   sourceAvailable: external_exports.boolean().optional(),
   sourceRecordState: external_exports.enum(["live", "historical"]).optional(),
-  selections: external_exports.array(external_exports.object({ sourceEvaluationId: external_exports.string().uuid(), sourceContextId: external_exports.string().uuid(), respondentId: external_exports.string().min(1), evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict()),
+  selectionCoverage: selectionCoverageSchema.optional(),
+  excludedSelections: external_exports.array(followOnExclusionSchema).default([]),
+  selections: external_exports.array(external_exports.object({
+    sourceEvaluationId: external_exports.string().uuid(),
+    sourceContextId: external_exports.string().uuid(),
+    respondentId: external_exports.string().min(1),
+    evaluationId: external_exports.string().uuid(),
+    contextId: external_exports.string().uuid(),
+    selectedMaterial: selectedMaterialEvidenceSchema.optional()
+  }).strict()),
   materialSnapshots: external_exports.array(external_exports.object({ contextId: external_exports.string().uuid(), respondentId: external_exports.string().min(1), materials: external_exports.array(materialItemSchema) }).strict()).default([])
 }).strict();
 var runListQuerySchema = external_exports.object({
@@ -35072,13 +35130,7 @@ var runEvidenceItemSchema = external_exports.object({
   questionId: external_exports.string().min(1),
   status: external_exports.enum(["pending", "answered", "failed", "unreached"]),
   result: decisionResultSchema.optional(),
-  selectedMaterial: external_exports.object({
-    materialId: materialItemSchema.shape.id,
-    text: materialItemSchema.shape.text,
-    sourceId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-    sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-    textSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-  }).strict().optional(),
+  selectedMaterial: selectedMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
   turnId: external_exports.string().min(1).optional(),
   nodeId: external_exports.string().min(1).optional(),
@@ -35745,8 +35797,28 @@ async function prepareFollowOnRun(request, source, provider) {
   const evaluations = [];
   const preparedGroups = [];
   const groups = /* @__PURE__ */ new Map();
+  const selectionExclusions = [];
+  const excludedCounts = { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 0 };
   for (const turn of source.turns) {
-    const groupKey = request.context.mode === "continue" ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
+    if (request.context.includeSelectedMaterial) {
+      let reason;
+      if (turn.status === "pending" || turn.status === "failed" || turn.status === "unreached") reason = turn.status;
+      else if (turn.result?.type !== "choice") reason = "nonChoice";
+      else if (!turn.selectedMaterial) reason = "unmappedChoice";
+      if (reason) {
+        excludedCounts[reason] += 1;
+        selectionExclusions.push({
+          sourceEvaluationId: turn.evaluationId,
+          sourceContextId: turn.contextId,
+          respondentId: turn.respondentId,
+          status: turn.status,
+          reason,
+          ...turn.result?.type === "choice" ? { choiceId: turn.result.choice, choiceMeaning: turn.packet.question.type === "choice" ? turn.packet.question.options[turn.result.choice] : void 0 } : {}
+        });
+        continue;
+      }
+    }
+    const groupKey = request.context.includeSelectedMaterial ? `evaluation:${turn.evaluationId}:${turn.contextId}` : request.context.mode === "continue" ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
     const group = groups.get(groupKey) ?? { representative: turn, turns: [] };
     group.turns.push(turn);
     groups.set(groupKey, group);
@@ -35764,9 +35836,12 @@ async function prepareFollowOnRun(request, source, provider) {
       for (const id of request.context.materialIds) {
         const item = catalog.find((candidate) => candidate.id === id);
         if (!item) throw new RunProblemError("follow_on_material_not_found", `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
-        referencedMaterial.push({ id: item.id, text: item.text });
+        referencedMaterial.push(item);
       }
       selectedMaterial = [...referencedMaterial, ...selectedMaterial];
+    }
+    if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
+      selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
     const rawResult = turn.result ? decisionValueSchema.parse(turn.result.type === "choice" ? { type: turn.result.type, choice: turn.result.choice, probabilities: turn.result.probabilities, confidence: turn.result.confidence } : turn.result.type === "score" ? { type: turn.result.type, score: turn.result.score, probabilities: turn.result.probabilities, legend: turn.result.legend, confidence: turn.result.confidence } : { type: turn.result.type, noul: turn.result.noul }) : void 0;
     const packets = [];
@@ -35803,7 +35878,17 @@ async function prepareFollowOnRun(request, source, provider) {
       evaluations.push(evaluation);
       return evaluation;
     });
-    materialSnapshots.push({ contextId, respondentId: turn.respondentId, materials: catalog });
+    const linkedMaterialIds = new Set(request.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
+    const linkedMaterials = [...linkedMaterialIds].map((id) => {
+      const item = catalog.find((candidate) => candidate.id === id);
+      if (!item) throw new RunProblemError("follow_on_material_not_found", `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
+      return item;
+    });
+    materialSnapshots.push({
+      contextId,
+      respondentId: turn.respondentId,
+      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, linkedMaterials) : mergeMaterials(catalog, selectedMaterial)
+    });
     preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
       selections.push({
@@ -35811,7 +35896,8 @@ async function prepareFollowOnRun(request, source, provider) {
         sourceContextId: sourceTurn.contextId,
         respondentId: sourceTurn.respondentId,
         evaluationId: evaluation.evaluationId,
-        contextId: evaluation.contextId
+        contextId: evaluation.contextId,
+        ...request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}
       });
     }
   }
@@ -35821,12 +35907,18 @@ async function prepareFollowOnRun(request, source, provider) {
     code: "source_incomplete",
     message: ["prepared", "running"].includes(source.sourceStatus) ? `${groups.size} respondent contexts match so far. Source run is ${source.sourceStatus}; more may match after it completes.` : `Source run is ${source.sourceStatus} and incomplete. This follow-on uses the evidence currently recorded.`
   };
+  const selectionCoverage = request.context.includeSelectedMaterial ? {
+    matched: source.turns.length,
+    eligible: groups.size,
+    excluded: excludedCounts
+  } : void 0;
   const inspection = {
     valid: problems.length === 0,
     respondentCount: groups.size,
     minimumCalls,
     problems,
     fits,
+    ...selectionCoverage ? { selectionCoverage, selectionExclusions } : {},
     ...sourceWarning ? { warnings: [sourceWarning] } : {}
   };
   const lineage = {
@@ -35835,7 +35927,9 @@ async function prepareFollowOnRun(request, source, provider) {
     sourceCompleteAtAcceptance: source.sourceComplete,
     sourceVersion: source.version,
     selections,
-    materialSnapshots
+    materialSnapshots,
+    ...selectionCoverage ? { selectionCoverage } : {},
+    excludedSelections: selectionExclusions
   };
   return {
     sourceVersion: source.version,
@@ -36577,8 +36671,26 @@ function validateRunIds(runIds) {
     throw new RunStoreError("invalid_run_selection", "Select between 1 and 200 unique run IDs.");
   }
 }
+function isTransientSqliteLock(error62) {
+  return typeof error62 === "object" && error62 !== null && "errcode" in error62 && (error62.errcode === 5 || error62.errcode === 6);
+}
+function setWriteAheadLogMode(database) {
+  const deadline = Date.now() + 5e3;
+  const waitCell = new Int32Array(new SharedArrayBuffer(4));
+  while (true) {
+    try {
+      database.exec("PRAGMA journal_mode = WAL");
+      return;
+    } catch (error62) {
+      if (!isTransientSqliteLock(error62) || Date.now() >= deadline) throw error62;
+      Atomics.wait(waitCell, 0, 0, Math.min(25, deadline - Date.now()));
+    }
+  }
+}
 function initialize(database) {
-  database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
+  database.exec("PRAGMA foreign_keys = ON;");
+  setWriteAheadLogMode(database);
+  database.exec("PRAGMA synchronous = FULL;");
   database.exec("BEGIN IMMEDIATE");
   try {
     const versionRow = database.prepare("PRAGMA user_version").get();
@@ -36718,6 +36830,17 @@ function validatePrepared(prepared) {
     const parsedLineage = followOnLineageSchema.safeParse(prepared.lineage);
     if (!parsedLineage.success) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material lineage is invalid.");
     const lineage = parsedLineage.data;
+    const includesSelectedMaterial = parsedRequest.data.context.includeSelectedMaterial === true;
+    if (includesSelectedMaterial) {
+      const coverage = lineage.selectionCoverage;
+      const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const eligibleIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      if (!coverage || coverage.eligible !== eligibleIds.size || coverage.matched !== coverage.eligible + lineage.excludedSelections.length || [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial }) => !selectedMaterial)) {
+        throw new RunStoreError("invalid_prepared_run", "Selected-material coverage and source lineage are inconsistent.");
+      }
+    } else if (lineage.selectionCoverage !== void 0 || lineage.selections.some(({ selectedMaterial }) => selectedMaterial !== void 0)) {
+      throw new RunStoreError("invalid_prepared_run", "Selected-material lineage cannot be attached to a request without the resolver flag.");
+    }
     const requestedQuestionIds2 = parsedRequest.data.questions.map(({ id }) => id);
     if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId || lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === "completed")) {
       throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage does not match its request and frozen evaluations.");
@@ -36728,12 +36851,14 @@ function validatePrepared(prepared) {
     if (!prepared.groups || prepared.groups.length === 0 || new Set(prepared.groups.map(({ groupId }) => groupId)).size !== prepared.groups.length) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on groups are missing or duplicated.");
     for (const group of prepared.groups) groupIds.add(group.groupId);
     const snapshotKeys = /* @__PURE__ */ new Set();
+    const snapshotsByKey = /* @__PURE__ */ new Map();
     for (const snapshot of lineage.materialSnapshots) {
       const key = `${snapshot.contextId}:${snapshot.respondentId}`;
       if (snapshotKeys.has(key) || !prepared.groups.some((group) => group.contextId === snapshot.contextId && group.respondentId === snapshot.respondentId)) {
         throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material snapshots do not match an accepted respondent context.");
       }
       snapshotKeys.add(key);
+      snapshotsByKey.set(key, snapshot);
     }
     for (const evaluation of prepared.evaluations) {
       const packet = decisionRequestSchema.safeParse(evaluation.packet);
@@ -36749,12 +36874,32 @@ function validatePrepared(prepared) {
           }
         }
       }
+      if (includesSelectedMaterial) {
+        const mappings = lineage.selections.filter(({ evaluationId }) => evaluationId === evaluation.evaluationId);
+        const selected = mappings[0]?.selectedMaterial;
+        const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
+        const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
+        const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text }) => id === selected.materialId && text === selected.text);
+        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash4("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+          throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
+        }
+      }
       evaluationIds2.add(evaluation.evaluationId);
       const ids = questionIdsByGroup2.get(evaluation.groupId) ?? [];
       ids.push(evaluation.questionId);
       questionIdsByGroup2.set(evaluation.groupId, ids);
     }
     if (!prepared.groups || prepared.groups.length === 0 || lineage.selections.some((selection) => !evaluationIds2.has(selection.evaluationId)) || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds2) || JSON.stringify(questionIdsByGroup2.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on group lineage is inconsistent.");
+    if (includesSelectedMaterial) {
+      const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
+      for (const group of prepared.groups) {
+        const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
+        const expectedIds = /* @__PURE__ */ new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
+        if (!snapshot || JSON.stringify([...snapshot.materials.map(({ id }) => id)].sort()) !== JSON.stringify([...expectedIds].sort())) {
+          throw new RunStoreError("invalid_prepared_run", "Selected-material catalog contains unrelated material or omits a packet dependency.");
+        }
+      }
+    }
     return { ...prepared, request: parsedRequest.data, lineage };
   }
   if (parsedRequest.data.kind !== "poll") throw new RunStoreError("invalid_prepared_run", "A journey must be accepted through journey preparation.");
@@ -37268,9 +37413,16 @@ var SQLiteRunStore = class {
           evaluationId: asText(row.evaluation_id, "evaluation ID"),
           contextId,
           respondentId,
+          status: asText(row.status, "evaluation status"),
           packet,
           ...result ? { result } : {},
-          materials: materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems)
+          materials: materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems),
+          ...result?.type === "choice" && packet.question.type === "choice" && packet.question.materialOptions?.[result.choice] ? (() => {
+            const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
+            const candidate = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems).find(({ id }) => id === materialId);
+            if (!candidate?.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash4("sha256").update(candidate.text, "utf8").digest("hex") } };
+          })() : {}
         };
       });
       return {
@@ -38938,7 +39090,7 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.5",
+  version: "0.3.0-dev.6",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',

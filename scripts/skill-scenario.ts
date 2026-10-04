@@ -183,7 +183,7 @@ export function renderActorPrompt(scenarioId: string): string {
     'You are acting as a Sheg user-facing agent in a controlled skill behavior scenario.',
     'Use the supplied skill and references to respond to the user request. Treat the evidence below as a mock fixture, not a live tool result.',
     'Do not call tools, connectors, inference providers, or external services. If a tool action would help, record it as a proposed action only.',
-    'Return only JSON with scenarioId, scenarioVersion, actions (objects with tool and input), finalResponse, and uncertainties.',
+    'Return only JSON matching this shape: { "scenarioId": string, "scenarioVersion": number, "actions": [{ "tool": string, "input": object }], "finalResponse": string, "uncertainties": string[] }. Keep finalResponse as a string; put any structured explanation inside its text rather than changing its type.',
     `scenarioId: ${scenario.id}`,
     `scenarioVersion: ${scenario.version}`,
     `\n## User request\n${scenario.userRequest}`,
@@ -197,7 +197,7 @@ export function renderControlPrompt(scenarioId: string): { prompt: string; sha25
   const prompt = [
     'You are acting as a Sheg user-facing agent in a controlled skill behavior scenario without supplied skill guidance. Use only the mock evidence below to respond to the request.',
     'Do not call tools, connectors, inference providers, or external services. If an action would help, describe it in the response rather than executing it.',
-    'Return only JSON with scenarioId, scenarioVersion, actions (objects with tool and input), finalResponse, and uncertainties.',
+    'Return only JSON matching this shape: { "scenarioId": string, "scenarioVersion": number, "actions": [{ "tool": string, "input": object }], "finalResponse": string, "uncertainties": string[] }. Keep finalResponse as a string; put any structured explanation inside its text rather than changing its type.',
     `scenarioId: ${scenario.id}`,
     `scenarioVersion: ${scenario.version}`,
     `\n## User request\n${scenario.userRequest}`,

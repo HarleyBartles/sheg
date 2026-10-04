@@ -31,7 +31,7 @@
 
 ---
 
-**Status:** Paused by the user on 2026-10-03 pending Plan 3a. Tasks 1-3 are retained through `f09978f`; Task 4 has unfinished preliminary actor trials. Resume by rebasing onto the merged Plan 3a, updating this plan against the new harness, and preserving completed product work.
+**Status:** Implementation complete. Tasks 1-5 are complete for `0.3.0-dev.6`; fresh review and merge into `develop` remain.
 
 **Target development version:** `0.3.0-dev.6`. This checkpoint follows Plan 3a, which targets `0.3.0-dev.5`, after Plan 3 merged `0.3.0-dev.4` as PR #14. It is a development candidate, not a stable release, and receives no release tag.
 
@@ -117,19 +117,19 @@ The selected native `executing-plans` lane is inline. Per-answer resolution, no-
 
 ### Task 4: Teach and pressure-test the selected-stimulus workflow
 
-**Files:** Modify `skills/stimulus-response-polling/references/run-and-recovery.md`; version the selected-material scenario in `skills/stimulus-response-polling/tests/behavior/scenarios.json` if its tested interface or criteria changes; retain candidate actor evidence under `skills/stimulus-response-polling/tests/behavior/traces/campaign/`.
+**Files:** Modify `skills/stimulus-response-polling/SKILL.md`, `references/run-and-recovery.md`, and the owning skill behavior scenario/evaluator under `skills/stimulus-response-polling/tests/behavior/`. Keep campaign outputs outside the repository.
 
 **Consumes:** The request field, coverage output, and packet semantics from Tasks 1 through 3.
 
-**Produces:** Current installed-skill instructions for one-run per-answer reuse, plus candidate traces tied to the exact skill digest.
+**Produces:** Current installed-skill instructions for one-run per-answer reuse and solid, versioned behavior tests that teach and check the author workflow.
 
-- [ ] **Step 1: Inspect the retained baseline campaign** and run at least five fresh-context trials against current guidance before editing. Keep the fixed request, mock evidence, and existing evaluator criteria unchanged.
-- [ ] **Step 2: Update the shipped follow-on reference and versioned scenario guidance** to demonstrate the one-run request shape, source question selection, exact per-answer material reuse, shared quote, isolation, no-fit/unmapped exclusions, and reading selection coverage. State that Sheg does not extract text. Do not recommend one run per paragraph.
-- [ ] **Step 3: Run at least five fresh-context candidate trials** with the same requests and controlled evidence, recording model settings and skill digest. Manually inspect all flagged results. Campaign records continue to mark `toolUseAudit: "not-captured"`.
-- [ ] **Step 4: Run deterministic scenario/evaluator tests and current skill-hash validation.** Ensure no `tests/behavior/` asset enters the candidate plugin package.
-- [ ] **Step 5: Commit only skill source and its owned behavior tests/traces.**
+- [x] **Step 1: Freeze a fit-for-purpose scenario contract** for the implemented feature. The user asks Sheg to take each respondent who selected a piece of stimulus, recall that exact selected material, and use it as that respondent's next stimulus. Preserve the authored shared pull quote and assess each selected paragraph in isolation. Include materially different respondent profiles and selected passages, one unmapped/no-fit answer, the source question, and explicit isolation state. Do not vary cosmetic wording while leaving the input fingerprint unchanged.
+- [x] **Step 2: Inspect prior campaign observations as context, then run the harness baseline** against current guidance with the frozen request, controlled evidence, and criteria. Use fresh contexts; identify runtime/contract failures separately from semantic misses. Keep every output in scratch, inspect it, then discard it. Preserve each attempt during inspection; do not overwrite, normalize, or selectively omit flaky actor outputs. If behavior or grading is unstable, investigate the scenario, criteria, and execution route before treating it as evidence.
+- [x] **Step 3: Improve the shipped follow-on reference** to show the one-run request shape, source question selection, exact per-answer material reuse, shared quote, isolation, no-fit/unmapped exclusions, and reading selection coverage. State that Sheg does not extract text. Do not recommend one run per paragraph. Preserve existing strong interpretation guidance.
+- [x] **Step 4: Update and exercise the owning behavior test** against candidate guidance using the same scenario contract and criteria. Add held-out input variation only as a separately identified scenario/rubric change. Run old and candidate arms through the Plan 3a harness, with contract-aware checks and separate semantic grading; keep the outputs transient and inspect all failures, disputes, and runtime errors. Prefer several meaningfully varied inputs over many repetitions of an identical fingerprint; use repetitions only to assess actor or judge reliability, not as additional study-input coverage.
+- [x] **Step 5: Run deterministic scenario/evaluator checks, validate current guidance hashes, and confirm no `tests/behavior/` asset enters the candidate plugin package.** Commit skill source and its owning tests, never campaign output or a result report.
 
-The guidance should show the one-run request shape, source evaluation selection by question, exact per-answer mapped material reuse, explicit shared quote, isolation semantics, no-fit/unmapped exclusions, and how to read selection coverage. It must not recommend one run per paragraph or imply that Sheg extracts text from an answer. Do not add tool-use hooks or Devin tool-disabled profiles.
+The guidance should show the one-run request shape, source evaluation selection by question, exact per-answer mapped material reuse, explicit shared quote, isolation semantics, no-fit/unmapped exclusions, and how to read selection coverage. It must not recommend one run per paragraph or imply that Sheg extracts text from an answer. Explain that rich outputs come from deliberate variation in respondent profile, stimulus, question/response, and state. Same-fingerprint repeats may show model variability but do not add substantive coverage. Do not add tool-use hooks or Devin tool-disabled profiles.
 
 **Verify:** Run the deterministic scenario tests, validate scenario/evaluator pairing and current guidance hashes, inspect every trial, and ensure behavior test assets remain excluded from the plugin archive.
 
@@ -137,19 +137,19 @@ The guidance should show the one-run request shape, source evaluation selection 
 
 **Files:** Modify `package.json`, `package-lock.json`, `plugin.json`, generated MCP/runtime files, and this roadmap. Keep generated output derived from source.
 
-**Consumes:** Tasks 1 through 4; Plan 3's verified merge evidence.
+**Consumes:** Tasks 1 through 4 and the current merged development candidate policy.
 
 **Produces:** Aligned `0.3.0-dev.6` manifests, validated candidate ZIP, and a review-ready feature branch.
 
-- [ ] **Step 1: Update the development identity** in all authoritative version fields to `0.3.0-dev.6` and set the roadmap's Plan 3 evidence to PR #14, head `9ce5da28858bcc20da66b6805a630feb2ef92ab2`, merge `be3ff2a2490af73627ba60c096e90036c3fe85a6`, hosted check success, clean fresh review, and 360-test staged gate.
-- [ ] **Step 2: Run `npm run build` and `npm run plugin:package -- --validate-only`.**
-- [ ] **Step 3: Run the complete `npm run verify` through the tracked staged commit gate.**
-- [ ] **Step 4: Package a local no-tag dev.6 ZIP**, record file count and SHA-256 in the plan, and verify it ships the two skill entrypoints while excluding all behavior test assets. Do not tag or publish.
-- [ ] **Step 5: Commit the version, generated runtime, plan, roadmap, and candidate evidence.**
+- [x] **Step 1: Update the development identity** in all authoritative version fields to `0.3.0-dev.6` and keep the roadmap status current without adding merge hashes, test totals, package hashes, campaign identities, or run results.
+- [x] **Step 2: Run `npm run build` and `npm run plugin:package -- --validate-only`.**
+- [x] **Step 3: Run the complete `npm run verify` through the tracked staged commit gate.**
+- [x] **Step 4: Package a local no-tag dev.6 ZIP in scratch** and verify it ships the skill entrypoints while excluding all behavior test assets. Discard the temporary package after inspection. Do not tag or publish.
+- [x] **Step 5: Commit the version, generated runtime, plan, roadmap, skill source, and owning tests.**
 
-Align `package.json`, both root version fields in `package-lock.json`, `plugin.json`, MCP initialization, and generated runtime output at `0.3.0-dev.6`. Update the roadmap with Plan 3's verified merge: PR #14 merged to `develop` at `be3ff2a2490af73627ba60c096e90036c3fe85a6` from exact head `9ce5da28858bcc20da66b6805a630feb2ef92ab2`; hosted `sheg-verify` passed, fresh whole-branch review found no actionable issues, and the staged gate passed all 360 tests.
+Align `package.json`, both root version fields in `package-lock.json`, `plugin.json`, MCP initialization, and generated runtime output at `0.3.0-dev.6`. Keep the roadmap's status and next-step version current; Git history records completed development work.
 
-**Verify:** Run focused tests for every changed boundary, `npm run build`, `npm run plugin:package -- --validate-only`, and the tracked staged `npm run verify` gate before publication. Build a local no-tag candidate with `npm run plugin:package -- --output <scratch>/sheg-v0.3.0-dev.6.zip`; record its file count and SHA-256 and confirm it includes shipped skills but no behavior tests. Do not tag or publish it.
+**Verify:** Run focused tests for every changed boundary, `npm run build`, `npm run plugin:package -- --validate-only`, and the tracked staged `npm run verify` gate before publication. Build a local no-tag candidate in scratch and confirm it includes shipped skills but no behavior tests, then discard it. Do not tag or publish it.
 
 ## Review focus
 
@@ -159,14 +159,3 @@ Align `package.json`, both root version fields in `package-lock.json`, `plugin.j
 - Do inspection, packet fit, accepted requests, query/recall, source-version race checks, and submission idempotency agree on the exact selected packet and coverage?
 - Are older follow-on requests and frozen runs unchanged when `includeSelectedMaterial` is absent?
 - Does the skill demonstrate the feature without inventing a no-fit classification, asking for separate runs, or claiming tool use was audited?
-
-## Readiness and handoff evidence
-
-- Plan 3 merged through [PR #14](https://github.com/HarleyBartles/sheg/pull/14). PR head: `9ce5da28858bcc20da66b6805a630feb2ef92ab2`. Squash merge: `be3ff2a2490af73627ba60c096e90036c3fe85a6`, the current `develop` base for this plan. Hosted `sheg-verify` passed on the exact head.
-- Fresh Plan 4 worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-selected-stimulus`, branch `codex/v0.3.0-selected-stimulus`, created from `origin/develop` at `be3ff2a2490af73627ba60c096e90036c3fe85a6` with the canonical worktree helper.
-- Initial status: clean. `npm test` passed 360 tests, zero failures or skips.
-- Current develop candidate is `0.3.0-dev.4`; this plan's merge candidate is `0.3.0-dev.6`.
-
-## Pause and resume dependency
-
-Plan 3a must merge before this plan resumes. Replace Task 4 manual campaign assembly with the runner and layered graders delivered by Plan 3a. Preserve preliminary outputs as historical observations, not completed old/new proof. Rebase the retained branch onto latest develop, inspect shared-file conflicts, refresh generated source and focused product tests, and update the resumed campaign contract before further implementation. The selected-material scenario currently describes the pre-feature interface; freeze the old guidance but grade both arms against the new intended product contract when measuring whether new guidance teaches the implemented feature. Record any rubric/input change as a new experiment, never as an unchanged historical comparison.

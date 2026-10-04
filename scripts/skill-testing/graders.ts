@@ -22,7 +22,7 @@ function selectedMaterialIssues(requestValue: unknown, controlledEvidence: unkno
   if (!queryResult || !Array.isArray(queryResult.items)) return [];
   if ((requestValue as { sourceRunId?: unknown }).sourceRunId !== (queryResult as { sourceRunId?: unknown }).sourceRunId) return ['Follow-on request sourceRunId does not match the source run in frozen evidence.'];
   const items = queryResult.items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
-  const request = requestValue as { sourceRunId?: unknown; selection?: { criteria?: Record<string, unknown>; references?: Array<{ evaluationId: string; contextId: string }> }; context?: { mode?: string; materialIds?: string[] }; material?: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> };
+  const request = requestValue as { sourceRunId?: unknown; selection?: { criteria?: Record<string, unknown>; references?: Array<{ evaluationId: string; contextId: string }> }; context?: { mode?: string; includeSelectedMaterial?: boolean; materialIds?: string[] }; material?: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> };
   const selected = request.selection?.references
     ? items.filter((item) => request.selection!.references!.some((reference) => reference.evaluationId === item.evaluationId && reference.contextId === item.contextId))
     : items.filter((item) => Object.entries(request.selection?.criteria ?? {}).every(([key, value]) => {
@@ -46,19 +46,38 @@ function selectedMaterialIssues(requestValue: unknown, controlledEvidence: unkno
     }));
   if (request.selection?.references && request.selection.references.some((reference) => !items.some((item) => item.evaluationId === reference.evaluationId && item.contextId === reference.contextId))) return ['Follow-on selection contains a reference absent from the frozen evidence.'];
   if (!selected.length) return ['Follow-on selection does not resolve to any exact respondent evidence in the frozen evidence.'];
-  if (selected.some((item) => !item.selectedMaterial)) return ['Follow-on selection includes a respondent whose frozen evidence has no selected material (including no-fit results).'];
-  if (selected.length && selected.some((item) => item.sourceRunId !== (queryResult as { sourceRunId?: unknown }).sourceRunId)) return ['Follow-on request does not target the source run in the frozen evidence.'];
-  const materialIds = [...new Set(selected.map((item) => (item.selectedMaterial as { materialId: string }).materialId))];
-  if (materialIds.length > 1) return ['The selected respondents have different material, which one shared follow-on request cannot provide individually.'];
-  if (materialIds.length === 1) {
-    if (request.context?.mode !== 'fresh-material') return ['Selected material must be supplied as fresh material to isolate it from the source context.'];
-    const expectedMaterial = selected[0]!.selectedMaterial as { materialId: string; text: string; sourceId?: string; sourceSha256?: string };
-    const hasExactReference = request.context.materialIds?.length === 1 && request.context.materialIds[0] === expectedMaterial.materialId;
-    const hasExactInline = request.material?.length === 1 && request.material[0]?.id === expectedMaterial.materialId && request.material[0]?.text === expectedMaterial.text && request.material[0]?.sourceId === expectedMaterial.sourceId && request.material[0]?.sourceSha256 === expectedMaterial.sourceSha256;
-    if (request.material && !hasExactInline) return [`Inline follow-on material must contain only the exact frozen selected material ${materialIds[0]}.`];
-    if (request.context.materialIds && !hasExactReference) return [`Follow-on material must contain only selected material ${materialIds[0]}.`];
-    if (!hasExactReference && !hasExactInline) return [`Follow-on material must contain only selected material ${materialIds[0]}.`];
+  if (!request.context?.includeSelectedMaterial) {
+    if (selected.some((item) => !item.selectedMaterial)) return ['Follow-on selection includes a respondent whose frozen evidence has no selected material (including no-fit results).'];
+    const legacyMaterialIds = [...new Set(selected.map((item) => (item.selectedMaterial as { materialId: string }).materialId))];
+    if (legacyMaterialIds.length > 1) return ['The selected respondents have different material, which one shared follow-on request cannot provide individually.'];
+    if (legacyMaterialIds.length === 1) {
+      if (request.context?.mode !== 'fresh-material') return ['Selected material must be supplied as fresh material to isolate it from the source context.'];
+      const expectedMaterial = selected[0]!.selectedMaterial as { materialId: string; text: string; sourceId?: string; sourceSha256?: string };
+      const hasExactReference = request.context.materialIds?.length === 1 && request.context.materialIds[0] === expectedMaterial.materialId;
+      const hasExactInline = request.material?.length === 1 && request.material[0]?.id === expectedMaterial.materialId && request.material[0]?.text === expectedMaterial.text && request.material[0]?.sourceId === expectedMaterial.sourceId && request.material[0]?.sourceSha256 === expectedMaterial.sourceSha256;
+      if (request.material && !hasExactInline) return [`Inline follow-on material must contain only the exact frozen selected material ${legacyMaterialIds[0]}.`];
+      if (request.context.materialIds && !hasExactReference) return [`Follow-on material must contain only selected material ${legacyMaterialIds[0]}.`];
+      if (!hasExactReference && !hasExactInline) return [`Follow-on material must contain only selected material ${legacyMaterialIds[0]}.`];
+    }
+    return [];
   }
+  const criteria = request.selection?.criteria;
+  const sourceQuestionId = items[0]?.questionId;
+  if (!criteria || criteria.questionId !== sourceQuestionId || Object.hasOwn(criteria, 'answer')) return ['Selected-material follow-on must select the source question without an answer filter so no-fit and other exclusions remain visible.'];
+  if (!request.context?.includeSelectedMaterial) return ['Follow-on context must set includeSelectedMaterial to reuse each respondent\'s exact saved Choice material.'];
+  if (request.context.mode !== 'fresh-material' && request.context.mode !== 'omit-history') return ['Selected material must use an isolation context with an empty trajectory.'];
+  const eligible = selected.filter((item) => item.selectedMaterial && typeof item.selectedMaterial === 'object');
+  if (!eligible.length) return ['The source question selection contains no answered Choice responses with mapped selected material.'];
+  const excludedNoMaterial = selected.filter((item) => !item.selectedMaterial);
+  if (!excludedNoMaterial.length) return ['The frozen evidence includes no unmapped/no-fit selection to verify exclusion coverage.'];
+  if (selected.some((item) => item.sourceRunId !== (queryResult as { sourceRunId?: unknown }).sourceRunId)) return ['Follow-on request does not target the source run in the frozen evidence.'];
+  const materialIds = [...new Set(eligible.map((item) => (item.selectedMaterial as { materialId: string }).materialId))];
+  if (materialIds.length < 2) return ['Frozen evidence must exercise at least two distinct selected materials.'];
+  const pullQuote = (controlledEvidence as { pullQuote?: unknown }).pullQuote;
+  const inlineMaterials = request.material ?? [];
+  if (inlineMaterials.length !== 1 || inlineMaterials[0]?.text !== pullQuote || typeof inlineMaterials[0]?.id !== 'string') return ['The shared pull quote must be the only explicit inline material; respondent-specific paragraphs come from the saved Choice mappings.'];
+  if (materialIds.includes(inlineMaterials[0]!.id)) return ['The shared material ID must not collide with a selected paragraph ID.'];
+  if (request.context.materialIds?.length) return ['This frozen scenario cannot resolve shared material references; provide the pull quote inline and let includeSelectedMaterial resolve respondent-specific paragraphs.'];
   return [];
 }
 

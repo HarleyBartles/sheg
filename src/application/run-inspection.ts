@@ -4,7 +4,7 @@ import { decisionValueSchema } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
-import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage, type RunMaterialItem } from '../domain/run/request.js';
+import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage, type RunMaterialItem, type FollowOnSelectionExclusion, type SelectionCoverage } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import type { PreparedJourneyRun } from '../domain/run/request.js';
@@ -51,8 +51,23 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const evaluations: FrozenEvaluation[] = [];
   const preparedGroups: NonNullable<PreparedRun['groups']> = [];
   const groups = new Map<string, { representative: FollowOnSourceSet['turns'][number]; turns: FollowOnSourceSet['turns'] }>();
+  const selectionExclusions: FollowOnSelectionExclusion[] = [];
+  const excludedCounts: SelectionCoverage['excluded'] = { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 0 };
   for (const turn of source.turns) {
-    const groupKey = request.context.mode === 'continue' ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
+    if (request.context.includeSelectedMaterial) {
+      let reason: FollowOnSelectionExclusion['reason'] | undefined;
+      if (turn.status === 'pending' || turn.status === 'failed' || turn.status === 'unreached') reason = turn.status;
+      else if (turn.result?.type !== 'choice') reason = 'nonChoice';
+      else if (!turn.selectedMaterial) reason = 'unmappedChoice';
+      if (reason) {
+        excludedCounts[reason] += 1;
+        selectionExclusions.push({ sourceEvaluationId: turn.evaluationId, sourceContextId: turn.contextId, respondentId: turn.respondentId,
+          status: turn.status, reason, ...(turn.result?.type === 'choice' ? { choiceId: turn.result.choice, choiceMeaning: turn.packet.question.type === 'choice' ? turn.packet.question.options[turn.result.choice] : undefined } : {}) });
+        continue;
+      }
+    }
+    const groupKey = request.context.includeSelectedMaterial ? `evaluation:${turn.evaluationId}:${turn.contextId}`
+      : request.context.mode === 'continue' ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
     const group = groups.get(groupKey) ?? { representative: turn, turns: [] };
     group.turns.push(turn);
     groups.set(groupKey, group);
@@ -70,9 +85,12 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       for (const id of request.context.materialIds) {
         const item = catalog.find((candidate) => candidate.id === id);
         if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
-        referencedMaterial.push({ id: item.id, text: item.text });
+        referencedMaterial.push(item);
       }
       selectedMaterial = [...referencedMaterial, ...selectedMaterial];
+    }
+    if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
+      selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
     const rawResult = turn.result ? decisionValueSchema.parse(turn.result.type === 'choice'
       ? { type: turn.result.type, choice: turn.result.choice, probabilities: turn.result.probabilities, confidence: turn.result.confidence }
@@ -100,11 +118,19 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       evaluations.push(evaluation);
       return evaluation;
     });
-    materialSnapshots.push({ contextId, respondentId: turn.respondentId, materials: catalog });
+    const linkedMaterialIds = new Set(request.questions.flatMap((question) => question.type === 'choice' ? Object.values(question.materialOptions ?? {}) : []));
+    const linkedMaterials = [...linkedMaterialIds].map((id) => {
+      const item = catalog.find((candidate) => candidate.id === id);
+      if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
+      return item;
+    });
+    materialSnapshots.push({ contextId, respondentId: turn.respondentId,
+      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, linkedMaterials) : mergeMaterials(catalog, selectedMaterial) });
     preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
       selections.push({ sourceEvaluationId: sourceTurn.evaluationId, sourceContextId: sourceTurn.contextId,
-        respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId });
+        respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId,
+        ...(request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}) });
     }
   }
   if (groups.size === 0) problems.push({ code: 'no_follow_on_matches', message: 'No source evaluations match this follow-on selection.' });
@@ -115,10 +141,15 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       ? `${groups.size} respondent contexts match so far. Source run is ${source.sourceStatus}; more may match after it completes.`
       : `Source run is ${source.sourceStatus} and incomplete. This follow-on uses the evidence currently recorded.`,
   };
+  const selectionCoverage: SelectionCoverage | undefined = request.context.includeSelectedMaterial ? {
+    matched: source.turns.length, eligible: groups.size, excluded: excludedCounts,
+  } : undefined;
   const inspection: Inspection = { valid: problems.length === 0, respondentCount: groups.size, minimumCalls, problems, fits,
+    ...(selectionCoverage ? { selectionCoverage, selectionExclusions } : {}),
     ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
-    sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections, materialSnapshots };
+    sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections, materialSnapshots,
+    ...(selectionCoverage ? { selectionCoverage } : {}), excludedSelections: selectionExclusions };
   return { sourceVersion: source.version, inspection,
     prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, groups: preparedGroups, lineage } };
 }
