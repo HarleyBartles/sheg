@@ -3,7 +3,7 @@ import { compileDecisionPacket, compileDecisionPacketForCompiler, type PromptHis
 import type { RespondentProfile } from '../respondents/profile.js';
 import type { JourneyDefinition } from '../study/arm.js';
 import type { PromptState } from '../decision/prompt.js';
-import { journeyTopology } from './topology.js';
+import { journeyTopology, journeyTransitionForResponse } from './topology.js';
 
 export type ExposureEvent = Extract<PromptHistoryEvent, { type: 'exposure' }>;
 export type ChoiceEvent = Extract<PromptHistoryEvent, { type: 'choice' }>;
@@ -44,15 +44,7 @@ export function advanceJourney(
     taskId = askNode.taskId;
     const task = arm.tasks.find((candidate) => candidate.id === taskId);
     if (!task) throw new JourneyExecutionError(`Ask node ${nodeId} references unknown task ${taskId}.`);
-    const edge = graph.transitions.find((candidate) => {
-      if (candidate.fromNodeId !== nodeId) return false;
-      if (result.type === 'choice') return candidate.optionId === result.choice;
-      const interval = candidate.when;
-      const value = result.type === 'score' ? result.score : result.noul;
-      return interval?.type === result.type &&
-        (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) &&
-        (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
-    });
+    const edge = journeyTransitionForResponse(graph, nodeId, result);
     if (!edge) throw new JourneyExecutionError(`Task node ${nodeId} has no transition for ${result.type} response.`);
     routeTarget = edge.toNodeId;
   }
@@ -115,14 +107,7 @@ export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise
     }
     if (decisionCount >= graph.maxDecisions) return { events, outcome: null, status: 'decision-limit', decisionCount };
     const response = await answer(node.taskId, node.id);
-    const edge = graph.transitions.find((candidate) => {
-      if (candidate.fromNodeId !== node.id) return false;
-      if (response.type === 'choice') return candidate.optionId === response.choice;
-      if (!candidate.when || candidate.when.type !== response.type) return false;
-      const value = response.type === 'score' ? response.score : response.noul;
-      return (value > candidate.when.minimum || (candidate.when.minimumInclusive && value === candidate.when.minimum)) &&
-        (value < candidate.when.maximum || (candidate.when.maximumInclusive && value === candidate.when.maximum));
-    });
+    const edge = journeyTransitionForResponse(graph, node.id, response);
     if (!edge) throw new JourneyExecutionError(`Task node ${node.id} has no transition for ${response.type} response.`);
     current = edge.toNodeId;
   }

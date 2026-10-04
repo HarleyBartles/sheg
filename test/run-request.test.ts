@@ -198,7 +198,7 @@ test('journey request rejects invalid routes and nonpositive physical call limit
   assert.equal(runRequestSchema.safeParse({ ...validRoutes, journey: { ...validRoutes.journey, extra: true } }).success, false);
 });
 
-test('provider inputs normalize Jev defaults and preserve accepted Laya configuration', () => {
+test('provider inputs normalize Jev defaults and reject invalid Laya precision consistently', () => {
   const input = validRequest();
   const jev = inlineRunRequestSchema.parse({ ...input, provider: { kind: 'jev' } });
   assert.deepEqual(jev.provider, {
@@ -208,8 +208,9 @@ test('provider inputs normalize Jev defaults and preserve accepted Laya configur
     endpoint: 'https://openrouter.ai/api/alpha/decisions',
     timeoutMs: 30_000,
   });
-  const laya = inlineRunRequestSchema.parse({ ...input, provider: { ...input.provider, precision: '' } });
+  const laya = inlineRunRequestSchema.parse({ ...input, provider: { ...input.provider, precision: 'fp16' } });
   assert.equal(laya.provider.kind, 'laya');
+  assert.equal(inlineRunRequestSchema.safeParse({ ...input, provider: { ...input.provider, precision: '' } }).success, false);
 });
 
 test('evidence criteria combine typed response, question, material, respondent, and route facts', () => {

@@ -1,135 +1,41 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
-import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRunService, RunServiceError, type RunService } from '../application/run-service.js';
-import { resolveDataRoot } from '../infrastructure/data-root.js';
-import { ProcessLock } from '../infrastructure/process-lock.js';
-import { inspectRunStoreCompatibility, openRunStore, resetRunStore, runStoreBackupAvailable, RunStoreError, type RunStore } from '../infrastructure/run-store.js';
-import { DetachedWorkerLauncher } from '../infrastructure/worker-launcher.js';
-import { assertProviderReady, createProvider } from '../providers/factory.js';
+import { RunServiceError, type RunService } from '../application/run-service.js';
+import { RunStoreError } from '../infrastructure/run-store.js';
+import { createRunRuntime } from '../infrastructure/run-runtime.js';
+import { resetConfirmation, runStorageSchema, runDeleteSchema, runGetSchema } from '../application/run-operations.js';
 import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import { productVersion } from '../infrastructure/product-identity.js';
 
 const runListSchema = runListQuerySchema;
-const resetConfirmation = 'RESET SHEG DATASTORE';
-const runStorageSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('inspect') }).strict(),
-  z.object({ operation: z.literal('optimize') }).strict(),
-  z.object({ operation: z.literal('reset'), confirmation: z.literal(resetConfirmation) }).strict(),
-]);
-const runDeleteSchema = z.object({ runIds: z.array(z.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, 'Run IDs must be unique.'), dryRun: z.boolean().default(false) }).strict();
-const runGetSchema = z.discriminatedUnion('view', [
-  z.object({ runId: z.string().uuid(), view: z.literal('status') }).strict(),
-  z.object({ runId: z.string().uuid(), view: z.literal('request') }).strict(),
-  z.object({ runId: z.string().uuid(), view: z.literal('journey') }).strict(),
-  z.object({ runId: z.string().uuid(), view: z.literal('context'), evaluationId: z.string().uuid(), contextId: z.string().uuid() }).strict(),
-  z.object({ runId: z.string().uuid(), view: z.literal('answers'), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
-  z.object({ runId: z.string().uuid(), view: z.literal('attempts'), cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
-]);
-
 export function createPollingServer(service?: RunService): McpServer {
-  const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
-  let runtimeService: RunService;
-  let ownedStore: RunStore | undefined;
-  let storeReady = service !== undefined;
-  let startupFailure: unknown;
-  if (service) runtimeService = service;
-  else {
-    try {
-      const runtime = createDefaultRunService(dataRoot);
-      runtimeService = runtime.service;
-      ownedStore = runtime.store;
-      storeReady = true;
-    } catch (error) {
-      runtimeService = unavailableRunService();
-      startupFailure = error;
-    }
-  }
+  const runtime = createRunRuntime(undefined, service);
   const server = new McpServer({ name: 'sheg', version: productVersion }, { instructions: 'Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work.' });
-  server.registerTool('run_inspect', { description: 'Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.', inputSchema: z.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtimeService.inspect(request)));
-  server.registerTool('run_start', { description: 'Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtimeService.start(submissionId, request)));
-  server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => runtimeService.list(query)));
-  server.registerTool('run_query', { description: 'Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.', inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtimeService.queryEvidence(query)));
+  server.registerTool('run_inspect', { description: 'Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.', inputSchema: z.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
+  server.registerTool('run_start', { description: 'Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
+  server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
+  server.registerTool('run_query', { description: 'Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.', inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtime.service.queryEvidence(query)));
   server.registerTool('run_get', { description: 'Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.', inputSchema: runGetSchema }, async (input) => safeResult(() => {
-    if (input.view === 'status') return runtimeService.getStatus(input.runId);
-    if (input.view === 'request') return runtimeService.getRequest(input.runId);
-    if (input.view === 'journey') return runtimeService.getJourneyRun(input.runId);
-    if (input.view === 'context') return runtimeService.getContext(input.runId, input.evaluationId, input.contextId);
-    if (input.view === 'answers') return runtimeService.answers(input.runId, input.cursor, input.limit);
-    return runtimeService.attempts(input.runId, input.cursor, input.limit);
+    if (input.view === 'status') return runtime.service.getStatus(input.runId);
+    if (input.view === 'request') return runtime.service.getRequest(input.runId);
+    if (input.view === 'journey') return runtime.service.getJourneyRun(input.runId);
+    if (input.view === 'context') return runtime.service.getContext(input.runId, input.evaluationId, input.contextId);
+    if (input.view === 'answers') return runtime.service.answers(input.runId, input.cursor, input.limit);
+    return runtime.service.attempts(input.runId, input.cursor, input.limit);
   }));
-  server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.cancel(runId)));
-  server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.resume(runId)));
-  server.registerTool('run_delete', { description: 'Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.', inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtimeService.previewDelete(runIds) : runtimeService.deleteRuns(runIds)));
-  server.registerTool('run_storage', { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input) => safeResult(async () => {
-    if (input.operation === 'inspect') {
-      if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: 'current', schemaVersion: 8 } };
-      const observed = inspectRunStoreCompatibility(dataRoot);
-      if (observed.status === 'current') {
-        const runtime = createDefaultRunService(dataRoot);
-        runtimeService = runtime.service;
-        ownedStore = runtime.store;
-        storeReady = true;
-        startupFailure = undefined;
-        return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: 'current', schemaVersion: 8 } };
-      }
-      const failure = startupFailure instanceof RunStoreError
-        ? { code: startupFailure.code }
-        : { code: observed.status === 'unreadable' ? 'datastore_unreadable' : 'datastore_open_failed' };
-      const compatibility = startupFailure instanceof RunStoreError && startupFailure.code.startsWith('migration_')
-        ? { status: 'migration_failed', schemaVersion: observed.status === 'migration_available' ? observed.schemaVersion : null }
-        : observed.status === 'migration_available'
-            ? { status: 'migration_available', schemaVersion: observed.schemaVersion }
-            : observed.status === 'uninitialized'
-              ? { status: 'uninitialized', schemaVersion: 0 }
-              : { status: observed.status, schemaVersion: observed.status === 'unreadable' ? null : observed.schemaVersion };
-      return { recoveryRequired: true, compatibility, issue: failure, backupAvailable: runStoreBackupAvailable(dataRoot) };
-    }
-    if (input.operation === 'optimize') {
-      if (!storeReady) throw recoveryRequiredError();
-      runtimeService.optimizeStorage();
-      return { optimized: true };
-    }
-    const resetLock = await ProcessLock.acquire(dataRoot, 'run-storage-reset');
-    try {
-      if (storeReady || inspectRunStoreCompatibility(dataRoot).status === 'current') throw new RunServiceError('recovery_not_required', 'The datastore no longer requires recovery; inspect its current status before taking further action.');
-      const reset = resetRunStore(dataRoot);
-      const runtime = createDefaultRunService(dataRoot);
-      runtimeService = runtime.service;
-      ownedStore = runtime.store;
-      storeReady = true;
-      startupFailure = undefined;
-      return { ...reset, recoveryRequired: false, compatibility: { status: 'current', schemaVersion: 8 } };
-    } catch (error) {
-      startupFailure = error;
-      throw error;
-    } finally { await resetLock.release(); }
-  }));
+  server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.cancel(runId)));
+  server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.resume(runId)));
+  server.registerTool('run_delete', { description: 'Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.', inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtime.service.previewDelete(runIds) : runtime.service.deleteRuns(runIds)));
+  server.registerTool('run_storage', { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input) => safeResult(() => runtime.storage(input)));
   const close = server.close.bind(server);
   server.close = async () => {
-    ownedStore?.close();
-    ownedStore = undefined;
+    runtime.close();
     await close();
   };
   return server;
-}
-
-function createDefaultRunService(dataRoot: string): { service: RunService; store: RunStore } {
-  const store = openRunStore(dataRoot);
-  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
-}
-
-function unavailableRunService(): RunService {
-  return new Proxy(Object.create(null) as RunService, {
-    get: (_target, property) => property === 'then' ? undefined : () => { throw recoveryRequiredError(); },
-  });
-}
-
-function recoveryRequiredError(): RunServiceError {
-  return new RunServiceError('datastore_recovery_required', 'The Sheg datastore requires recovery. Call run_storage.inspect before using study tools.');
 }
 
 async function safeResult(operation: () => unknown | Promise<unknown>) {

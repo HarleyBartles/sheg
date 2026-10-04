@@ -1,5 +1,8 @@
 import type { JourneyDefinition } from '../study/arm.js';
 import type { StudyPresentation } from '../study/presentation.js';
+import type { DecisionValue } from '../decision/decision.js';
+
+type GraphPresentation = Extract<StudyPresentation, { kind: 'graph' }>;
 
 /** Compile the author-friendly sequence shorthand to the same deterministic graph used at runtime. */
 export function journeyTopology(arm: JourneyDefinition): Extract<StudyPresentation, { kind: 'graph' }> {
@@ -27,4 +30,20 @@ export function journeyTopology(arm: JourneyDefinition): Extract<StudyPresentati
   });
   nodes.push({ id: terminal, kind: 'terminal', outcome: 'complete' });
   return { kind: 'graph', nodes, transitions, entryNodeId: exposes[0]!, maxDecisions: arm.tasks.length };
+}
+
+export function journeyTransitionForResponse(
+  graph: GraphPresentation,
+  nodeId: string,
+  response: DecisionValue,
+): GraphPresentation['transitions'][number] | undefined {
+  return graph.transitions.find((transition) => {
+    if (transition.fromNodeId !== nodeId) return false;
+    if (response.type === 'choice') return transition.optionId === response.choice;
+    const interval = transition.when;
+    if (interval?.type !== response.type) return false;
+    const value = response.type === 'score' ? response.score : response.noul;
+    return (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) &&
+      (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
+  });
 }

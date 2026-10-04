@@ -26,13 +26,13 @@ CLI and MCP resolve the same default data root, use the same worker launcher and
 
 ### Task 1: Shared runtime composition and CLI services
 
-**Files:** Create src/infrastructure/run-runtime.ts and src/domain/run/operations.ts for shared interface request schemas. Modify src/entrypoints/cli.ts and mcp.ts. Supporting tests: test/cli.test.ts, prelaunch.test.ts, mcp-storage-recovery.test.ts, release-package.test.ts.
+**Files:** Create `src/infrastructure/run-runtime.ts`; keep shared operation schemas with the existing run request contracts in `src/domain/run/request.ts`. Modify `src/entrypoints/cli.ts` and `mcp.ts`. Supporting tests include `test/cli.test.ts`, `test/prelaunch.test.ts`, MCP storage recovery, and release-package coverage.
 
-**Interfaces:** createRunRuntime(dataRoot?, service?) returns service, storage(input) and close(). Runtime owns startup compatibility/recovery and optional store lifetime; an injected service is not closed by the runtime. CLI runCli(args, io, service?) delegates to the runtime's service. Commands inspect/start use --request JSON; start additionally requires --submission-id UUID. get/status, list/query, cancel/resume, delete and storage expose current durable service operations. --data-root optionally selects an explicit store. Preserve keyless trace/preflight. Require known unique flags and current schema validation before dispatch.
+**Interfaces:** `createRunRuntime(dataRoot?, service?)` returns the service, storage operations, and `close()`. Runtime owns startup compatibility/recovery and optional store lifetime; an injected service is not closed by the runtime. CLI `runCli(args, io, service?)` delegates to the runtime service. `inspect` and `start` accept `--request` JSON; `start` also requires a `--submission-id` UUID. `get`, `list`, `query`, `cancel`, `resume`, `delete`, and `storage` expose durable service operations. `--data-root` optionally selects an explicit store. Preserve keyless `trace`/`preflight`. Require known unique flags and current schema validation before dispatch.
 
-- [ ] Replace obsolete CLI check/start contract tests with current direct-request admission tests. Add a real temporary RunService fixture with injected mock provider and worker launcher; start through CLI, recall/query through MCP service, retry same submission and cancel through CLI. Add safe malformed-input and unknown/duplicate flag behavior. Witness failures before implementing.
-- [ ] Extract runtime composition/recovery and shared operation schemas; replace CLI execution commands with service adapters. Confirm start returns promptly and the copied bundled CLI can access the copied worker. Keep invalid arguments/help from opening a datastore.
-- [ ] Run node --import tsx --test test/cli.test.ts test/prelaunch.test.ts test/mcp.test.ts test/mcp-storage-recovery.test.ts and npm run typecheck. Commit canonical source plus regenerated package.
+- [x] Replace obsolete CLI check/start contract tests with current direct-request admission tests. Add a real temporary RunService fixture with injected mock provider and worker launcher; start through CLI, recall/query through MCP service, retry same submission and cancel through CLI. Add safe malformed-input and unknown/duplicate flag behavior. Witness failures before implementing.
+- [x] Extract runtime composition/recovery and shared operation schemas; replace CLI execution commands with service adapters. Confirm start returns promptly and the copied bundled CLI can access the copied worker. Keep invalid arguments/help from opening a datastore.
+- [x] Run focused CLI, report, historical decoding, prelaunch, journey and credential boundary tests. Regenerate affected artifacts and add a shared-runtime ADR.
 
 ### Task 2: Retire the second lifecycle and separate historical reports
 
@@ -40,9 +40,9 @@ CLI and MCP resolve the same default data root, use the same worker launcher and
 
 **Interfaces:** legacy-report --output --run-id reads existing pre-release checkpoint files without writing them or launching work. Report comparison accepts report JSON inputs and uses one shared typed task difference function. New durable evidence is recalled through get/query; no new file checkpoints are created. Historical evidence remains intact. There is no compatibility promise for resuming pre-release file runs.
 
-- [ ] Add report comparison behavior cases for changed Score rubric, Noul criteria and response-history policy; share task differences for same-run and cross-run comparisons. Add a historical report check proving source checkpoint bytes are unchanged after reading.
-- [ ] Remove lifecycle-only classes/methods and their caller-only tests; move the immutable historical schemas/decoder and report building together. Preserve ordinary domain journey execution for trace. Correct documentation advertising unsupported preview/variant CLI commands.
-- [ ] Run focused CLI, report, historical decoding, prelaunch, journey and credential boundary tests. Regenerate and commit after the repository gate passes.
+- [x] Add report comparison behavior cases for changed Score rubric, Noul criteria and response-history policy; share task differences for same-run and cross-run comparisons. Add a historical report check proving source checkpoint bytes are unchanged after reading.
+- [x] Remove lifecycle-only classes/methods and their caller-only tests; move the immutable historical schemas/decoder and report building together. Preserve ordinary domain journey execution for trace. Correct documentation advertising unsupported preview/variant CLI commands.
+- [x] Run focused CLI, report, historical decoding, prelaunch, journey and credential boundary tests. Regenerate affected artifacts and add a shared-runtime ADR.
 
 ### Task 3: Lock publication and architectural decision
 
@@ -50,6 +50,6 @@ CLI and MCP resolve the same default data root, use the same worker launcher and
 
 **Interfaces:** ProcessLock remains needed by datastore reset even after file execution retires. Ownership publication must avoid empty-lock crash traps while preserving exclusivity and live-owner safety. Choose a complete-record publication protocol with atomic link/rename semantics verified on supported Node/Windows rather than deleting ambiguous partial owners.
 
-- [ ] Prove recovery from incomplete publication and concurrent contenders with real file operations; preserve stale-owner and release ownership checks.
-- [ ] Implement complete ownership publication, narrowly document its invariant, and run focused lock and storage-recovery checks.
-- [ ] Record the durable shared-runtime decision, regenerate affected outputs, commit, and write Plan 3 against the new application seams.
+- [x] Prove recovery from incomplete publication and concurrent contenders with real file operations; preserve stale-owner and release ownership checks.
+- [x] Implement complete ownership publication, narrowly document its invariant, and run focused lock and storage-recovery checks.
+- [x] Record the durable shared-runtime decision and write follow-on plans against the new application seams.

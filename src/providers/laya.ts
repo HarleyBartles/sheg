@@ -4,6 +4,7 @@ import { decisionRequestSchema, type DecisionFailureDetail, type DecisionRequest
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision } from '../domain/decision/validate.js';
 import { measureLayaContext } from './laya/context-fit.js';
+import { systemOneAnswerSchema, systemOneQuestion } from './system-one-contract.js';
 export { measureLayaContext } from './laya/context-fit.js';
 
 export type LayaConfig = {
@@ -14,7 +15,7 @@ export type LayaConfig = {
   headLimit: number;
   tokenizerJsonPath: string;
   tokenizerSha256: string;
-  precision?: string;
+  precision?: string | undefined;
   timeoutMs: number;
 };
 
@@ -27,21 +28,6 @@ export class LayaCallError extends ProviderCallError {
     super(message, { attempts, ...(contextFit ? { contextFit } : {}), scope: failureScope, ...(validationFailure ? { validationFailure } : {}), ...evidence });
     this.name = 'LayaCallError';
   }
-}
-
-const choiceAnswerSchema = z.object({
-  type: z.literal('choice'),
-  choice: z.string().min(1),
-  probabilities: z.record(z.string(), z.number().finite().min(0).max(1)),
-  confidence: z.number().finite().min(0).max(1).optional(),
-}).passthrough();
-const scoreAnswerSchema = z.object({ type: z.literal('score'), score: z.number().finite(), legend: z.record(z.string(), z.string()), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), confidence: z.number().finite().min(0).max(1).optional() }).passthrough();
-const noulAnswerSchema = z.object({ type: z.literal('noul'), noul: z.number().finite().min(0).max(1) }).passthrough();
-const answerSchema = z.discriminatedUnion('type', [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
-
-function wireQuestion(question: DecisionRequest['question']): Record<string, unknown> {
-  const criteria = question.type === 'choice' ? question.options : question.type === 'score' ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...(criteria === undefined ? {} : { criteria }) };
 }
 
 const responseSchema = z.object({
@@ -121,7 +107,7 @@ export class LayaProvider implements DecisionProvider {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: wireQuestion(question),
+            [question.id]: systemOneQuestion(question),
           },
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs),
@@ -144,7 +130,7 @@ export class LayaProvider implements DecisionProvider {
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
       throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1, undefined, undefined, 'evaluation', undefined, { category: 'envelope' });
     }
-    const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
+    const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
     if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, undefined, question.id, 'evaluation', decisionValidationFailureForReason('malformed_answer'));
 
     const result: DecisionResult = {

@@ -6,9 +6,9 @@ Sheg runs structured stimulus-task-response polls against simulated respondent c
 
 A study combines a bounded text stimulus, one or more questions with explicit response options, a frozen cohort of distinct respondent profiles, and one or more arms. Arms let you compare versions of a stimulus or study design with the same cohort in one run.
 
-The file-backed CLI runs each respondent through the tasks they reach in each arm, checkpoints progress, and reports response counts, task reach and completion, optional answer-key scoring, and matched comparisons. A sequence exposes all items before asking tasks; a bounded graph can interleave material and questions or route respondents by their answers.
+The CLI and MCP are entrypoints to the same durable run service. Both validate, admit, execute, store, query, cancel, resume, and recover the same requests in the same SQLite datastore. A finite journey can expose all material before questions or interleave material and questions, then route by typed answers.
 
-The MCP run tools accept a direct inline request with one or more independent typed questions, a finite sequence/graph journey, or a follow-on that selects exact recorded respondent contexts. Independent questions share one frozen respondent state, while each answer remains separate; Jev may batch them and local Laya currently sends one question per physical call. Each durable run ID supports later recall of frozen inputs, typed answers, exposures, routes, query evidence, and lineage. The [study-design skill](skills/study-design/SKILL.md) helps an agent shape the simplest request, and the [polling skill](skills/stimulus-response-polling/SKILL.md) covers querying and reusing recorded contexts. The repository also retains [respondent archetypes](dist/data/respondent-archetypes/) for file-backed cohort authoring.
+Both entrypoints accept direct requests with independent typed questions, finite journeys, or follow-ons that select exact recorded respondent contexts. Independent questions share one frozen respondent state, while each answer remains separate; Jev may batch them and local Laya currently sends one question per physical call. Each durable run ID supports later recall of frozen inputs, typed answers, exposures, routes, query evidence, and lineage. The [study-design skill](skills/study-design/SKILL.md) helps an agent shape the request, and the [polling skill](skills/stimulus-response-polling/SKILL.md) covers querying and reusing recorded contexts. The repository also retains [respondent archetypes](dist/data/respondent-archetypes/) for cohort authoring.
 
 These are simulated responses. Substantive variation comes from respondent profile, stimulus, question/response, and state. Repeating matching inputs does not add substantive coverage. Reports do not establish human readership, real-world accuracy, statistical significance, or causal lift.
 
@@ -45,9 +45,9 @@ In Codex, you can start with a request such as: “I have this article and want 
 
 Local Laya requires a separately operated service, checkpoint, and matching tokenizer asset. The adapter checks the tokenizer digest and complete request fit before inference. See the [Laya capability notes](docs/providers/laya.md) for configuration and the supported integration boundary.
 
-## Run the CLI from source
+## Use the CLI
 
-The CLI is useful for scripted checks and local runs without Codex. From a clone, build the packaged runtime first:
+The CLI uses the same secure credentials and datastore as the MCP server. From a clone, build the runtime first:
 
 ```sh
 npm ci
@@ -55,32 +55,29 @@ npm run build
 node dist/cli.js --help
 ```
 
-Create a config such as `study-run.json` using your study and cohort paths:
+Write a direct request to `request.json`:
 
 ```json
 {
-  "manifestPath": "./study.json",
-  "cohortPath": "./cohort.json",
-  "provider": {
-    "kind": "jev",
-    "route": "openrouter"
-  },
-  "outputDirectory": "./.polling-runs",
-  "maxCalls": 10,
-  "concurrency": 1
+  "kind": "poll",
+  "respondents": [{ "id": "reader", "intent": "Learn", "context": "New", "desired_outcome": "Choose", "engagement_cues": "Examples", "friction_cues": "Hype" }],
+  "material": [{ "id": "opening", "text": "The exact stimulus text." }],
+  "questions": [{ "type": "choice", "id": "fit", "instructions": "Does this fit?", "options": { "yes": "Yes", "no": "No" } }],
+  "provider": { "kind": "jev", "route": "openrouter", "model": "typesafe/jev-1.13" },
+  "maxCalls": 10
 }
 ```
 
-Connect the route's key to Windows Credential Manager with the helper in [Jev provider routes](docs/providers/jev.md). Choose `openrouter` or `typesafe` explicitly. Check first, inspect the result, then start:
+Connect the route's key to Windows Credential Manager with the helper in [Jev provider routes](docs/providers/jev.md). The same durable commands and JSON operations are available through MCP:
 
 ```sh
-node dist/cli.js check --config study-run.json
-node dist/cli.js start --config study-run.json
-node dist/cli.js report --output ./.polling-runs --run-id <run-id>
-node dist/cli.js compare --output ./.polling-runs --run-id <run-id> --left-arm original --right-arm revised
+node dist/cli.js inspect --request request.json
+node dist/cli.js start --request request.json --submission-id <fresh-uuid>
+node dist/cli.js get --request answer-query.json
+node dist/cli.js query --query evidence-query.json
 ```
 
-The CLI also supports `trace`, `status`, `cancel`, and `resume`. See `node dist/cli.js --help` for the full syntax.
+The CLI also supports `list`, `cancel`, `resume`, `delete`, and `storage`. Historical manifests remain useful with keyless `trace` and `preflight` diagnostics; pre-release file-backed reports are read-only. See `node dist/cli.js --help` for the full syntax and request schemas.
 
 The build recreates `dist/` from the current source, bundles the MCP server and CLI, and copies the domain-owned archetype groups into the plugin package.
 

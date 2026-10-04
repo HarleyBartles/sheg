@@ -23,7 +23,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0015](0015-store-jev-credentials-in-windows-vault.md) | Store Jev credentials in Windows Credential Manager | Accepted |
 | [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
 | [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
-| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Schema compatibility policy superseded by 0027 |
+| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | CLI persistence boundary superseded by 0029; schema policy by 0027 |
 | [0019](0019-own-execution-in-detached-workers.md) | Own accepted run execution in detached workers | Accepted |
 | [0020](0020-snapshot-follow-on-contexts.md) | Snapshot follow-on contexts with separate lineage | Accepted |
 | [0021](0021-independent-question-groups-and-batched-attempts.md) | Independent question groups share context and separate evidence | Accepted |
@@ -34,6 +34,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0026](0026-resume-failed-journey-turns.md) | Resume respondent-local failures in partial journeys | Accepted |
 | [0027](0027-migrate-supported-datastore-schemas.md) | Migrate supported datastore schemas forward | Accepted |
 | [0028](0028-keep-planning-artifacts-off-main.md) | Keep planning artifacts off the stable release tree | Accepted |
+| [0029](0029-share-the-durable-run-system-across-entrypoints.md) | Share the durable run system across entrypoints | Accepted |
 
 ## Writing and changing decisions
 

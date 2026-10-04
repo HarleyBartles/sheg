@@ -34392,7 +34392,6 @@ function toError(value) {
 }
 
 // src/entrypoints/mcp.ts
-import os from "node:os";
 import path8 from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -34701,7 +34700,7 @@ var layaConfigSchema = external_exports.object({
   headLimit: external_exports.number().int().positive(),
   tokenizerJsonPath: external_exports.string().min(1),
   tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  precision: external_exports.string().optional(),
+  precision: external_exports.string().min(1).optional(),
   timeoutMs: external_exports.number().int().positive()
 }).strict();
 var providerConfigSchema = external_exports.union([
@@ -36507,174 +36506,10 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
   };
 }
 
-// src/infrastructure/data-root.ts
-import path3 from "node:path";
-function pathsFor(platform) {
-  return platform === "win32" ? path3.win32 : path3.posix;
-}
-function requiredAbsolute(value, name, paths, allowMissing = false) {
-  if (value === void 0 && allowMissing) return void 0;
-  if (value === void 0 || value.length === 0) throw new TypeError(`${name} must not be empty.`);
-  if (!paths.isAbsolute(value)) throw new TypeError(`${name} must be an absolute path.`);
-  return paths.normalize(value);
-}
-function resolveDataRoot(env, platform, home) {
-  const paths = pathsFor(platform);
-  const explicit = env.SHEG_DATA_DIR;
-  if (explicit !== void 0) return requiredAbsolute(explicit, "SHEG_DATA_DIR", paths);
-  const pluginData = env.PLUGIN_DATA;
-  if (pluginData !== void 0) return requiredAbsolute(pluginData, "PLUGIN_DATA", paths);
-  const absoluteHome = requiredAbsolute(home, "Home directory", paths);
-  if (platform === "win32") {
-    const local = env.LOCALAPPDATA;
-    const base2 = local === void 0 ? paths.join(absoluteHome, "AppData", "Local") : requiredAbsolute(local, "LOCALAPPDATA", paths);
-    return paths.join(base2, "Sheg");
-  }
-  if (platform === "darwin") return paths.join(absoluteHome, "Library", "Application Support", "Sheg");
-  const xdg = env.XDG_DATA_HOME;
-  const base = xdg === void 0 ? paths.join(absoluteHome, ".local", "share") : requiredAbsolute(xdg, "XDG_DATA_HOME", paths);
-  return paths.join(base, "sheg");
-}
-
-// src/infrastructure/process-lock.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { link, mkdir, open as open2, readFile, readdir, rename, rm } from "node:fs/promises";
-import path4 from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
-var ProcessLockError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ProcessLockError";
-  }
-};
-var ProcessLock = class _ProcessLock {
-  constructor(lockPath, record2) {
-    this.lockPath = lockPath;
-    this.record = record2;
-  }
-  lockPath;
-  record;
-  static async acquire(directory, name, operations = {}) {
-    if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
-    const lockPath = path4.join(directory, `${name}.lock`);
-    const record2 = { pid: process.pid, token: randomUUID2() };
-    const content = `${JSON.stringify(record2)}
-`;
-    await mkdir(directory, { recursive: true });
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      try {
-        const handle = await open2(lockPath, "wx", 384);
-        try {
-          await handle.writeFile(content, "utf8");
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        const claims = await staleClaims(lockPath);
-        const activeClaims = [];
-        for (const file2 of claims) {
-          const claimed = await readLock(file2);
-          if (!claimed) continue;
-          if (processExists(claimed.pid)) activeClaims.push({ file: file2, record: claimed });
-          else await rm(file2, { force: true });
-        }
-        if (activeClaims.length > 0) {
-          await removeIfOwned(lockPath, record2);
-          for (const claim2 of activeClaims) await restoreClaim(lockPath, claim2.file, claim2.record);
-          throw new ProcessLockError(`Run is already owned by process ${activeClaims[0].record.pid}.`);
-        }
-        return new _ProcessLock(lockPath, record2);
-      } catch (error62) {
-        const code = error62.code;
-        if (code !== "EEXIST" && code !== "EPERM") throw error62;
-      }
-      const existing = await readLock(lockPath);
-      if (!existing) {
-        await delay(Math.min(2 + attempt, 20));
-        continue;
-      }
-      if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
-      const stalePath = `${lockPath}.${process.pid}.${randomUUID2()}.stale`;
-      try {
-        await (operations.rename ?? rename)(lockPath, stalePath);
-        await operations.afterStaleRename?.();
-        const claimed = await readLock(stalePath);
-        if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
-          if (claimed && processExists(claimed.pid)) await restoreClaim(lockPath, stalePath, claimed);
-          throw new ProcessLockError("Lock ownership changed during stale recovery.");
-        }
-        await rm(stalePath, { force: true });
-      } catch (error62) {
-        if (error62 instanceof ProcessLockError) throw error62;
-        if (error62.code === "ENOENT") continue;
-        throw error62;
-      }
-    }
-    throw new ProcessLockError("Could not acquire process lock after retrying incomplete or stale ownership.");
-  }
-  async release() {
-    await removeIfOwned(this.lockPath, this.record);
-    for (const file2 of await staleClaims(this.lockPath)) {
-      const current = await readLock(file2);
-      if (current?.token === this.record.token) await rm(file2, { force: true });
-    }
-  }
-};
-async function staleClaims(lockPath) {
-  const directory = path4.dirname(lockPath);
-  const prefix = `${path4.basename(lockPath)}.`;
-  try {
-    const entries = await readdir(directory);
-    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path4.join(directory, entry));
-  } catch (error62) {
-    if (error62.code === "ENOENT") return [];
-    throw error62;
-  }
-}
-async function removeIfOwned(lockPath, record2) {
-  const current = await readLock(lockPath);
-  if (current?.token === record2.token) await rm(lockPath, { force: true });
-}
-async function restoreClaim(lockPath, claimPath, record2) {
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    const claimed = await readLock(claimPath);
-    if (claimed?.token !== record2.token || !processExists(record2.pid)) return;
-    try {
-      await link(claimPath, lockPath);
-      await rm(claimPath, { force: true });
-      return;
-    } catch (error62) {
-      if (error62.code !== "EEXIST") throw error62;
-      const current = await readLock(lockPath);
-      if (current?.token === record2.token) {
-        await rm(claimPath, { force: true });
-        return;
-      }
-      await delay(Math.min(2 + attempt, 20));
-    }
-  }
-}
-async function readLock(filePath) {
-  try {
-    const value = JSON.parse(await readFile(filePath, "utf8"));
-    return Number.isInteger(value.pid) && typeof value.token === "string" ? { pid: value.pid, token: value.token } : null;
-  } catch {
-    return null;
-  }
-}
-function processExists(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error62) {
-    return error62.code === "EPERM";
-  }
-}
-
 // src/infrastructure/run-store.ts
-import { createHash as createHash4, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash4, randomUUID as randomUUID2 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
-import path5 from "node:path";
+import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 // src/domain/decision/validate.ts
@@ -37037,9 +36872,9 @@ function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   }
 }
 function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
-  const backupRoot = path5.join(dataRoot, "backups");
+  const backupRoot = path3.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path5.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
+  const backupPath = path3.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID2()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -37271,8 +37106,8 @@ function initialize(database, dataRoot) {
   }
 }
 function inspectRunStoreCompatibility(dataRoot) {
-  if (!path5.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
-  const databasePath = path5.join(dataRoot, "runs.sqlite");
+  if (!path3.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
+  const databasePath = path3.join(dataRoot, "runs.sqlite");
   if (!existsSync2(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
   let database;
   try {
@@ -37296,7 +37131,7 @@ function inspectRunStoreCompatibility(dataRoot) {
   }
 }
 function runStoreBackupAvailable(dataRoot) {
-  const backupRoot = path5.join(dataRoot, "backups");
+  const backupRoot = path3.join(dataRoot, "backups");
   if (!existsSync2(backupRoot)) return false;
   try {
     return readdirSync(backupRoot).some((name) => name.startsWith("runs-schema-") && name.endsWith(".sqlite"));
@@ -37305,8 +37140,8 @@ function runStoreBackupAvailable(dataRoot) {
   }
 }
 function resetRunStore(dataRoot) {
-  if (!path5.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
-  const databasePath = path5.join(dataRoot, "runs.sqlite");
+  if (!path3.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  const databasePath = path3.join(dataRoot, "runs.sqlite");
   let inspectionDatabase;
   let version2;
   try {
@@ -37328,14 +37163,14 @@ function resetRunStore(dataRoot) {
     throw new RunStoreError("recovery_backup_failed", "Sheg could not verify a recoverable datastore backup; the original files were left untouched.", { cause: error62 });
   }
   database.close();
-  const recoveryRoot = path5.join(dataRoot, "recovery", randomUUID3());
+  const recoveryRoot = path3.join(dataRoot, "recovery", randomUUID2());
   mkdirSync(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
   try {
     for (const original of files) {
       if (!existsSync2(original)) continue;
-      const archived = path5.join(recoveryRoot, path5.basename(original));
+      const archived = path3.join(recoveryRoot, path3.basename(original));
       renameSync(original, archived);
       moved.push({ original, archived });
     }
@@ -37361,7 +37196,7 @@ function resetRunStore(dataRoot) {
 }
 function resetUnreadableRunStore(dataRoot, databasePath) {
   if (!existsSync2(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
-  const recoveryRoot = path5.join(dataRoot, "recovery", randomUUID3());
+  const recoveryRoot = path3.join(dataRoot, "recovery", randomUUID2());
   mkdirSync(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
@@ -37369,7 +37204,7 @@ function resetUnreadableRunStore(dataRoot, databasePath) {
     for (const original of files) {
       if (!existsSync2(original)) continue;
       const size = statSync(original).size;
-      const archived = path5.join(recoveryRoot, path5.basename(original));
+      const archived = path3.join(recoveryRoot, path3.basename(original));
       renameSync(original, archived);
       if (statSync(archived).size !== size) throw new Error("Quarantined datastore file size changed.");
       moved.push({ original, archived, size });
@@ -37551,16 +37386,16 @@ function validatePreparedJourney(prepared) {
   return { ...prepared, request: parsedRequest.data };
 }
 function openRunStore(dataRoot, options2 = {}) {
-  if (!path5.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  if (!path3.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync(dataRoot, { recursive: true });
-  const database = new DatabaseSync(path5.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
+  const database = new DatabaseSync(path3.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
   try {
     initialize(database, dataRoot);
   } catch (error62) {
     database.close();
     throw error62;
   }
-  return new SQLiteRunStore(database, path5.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+  return new SQLiteRunStore(database, path3.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 var SQLiteRunStore = class {
   constructor(database, databasePath, now) {
@@ -37607,7 +37442,7 @@ var SQLiteRunStore = class {
           if (!sourceEvaluation) throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
         }
       }
-      const runId = randomUUID3();
+      const runId = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -37658,7 +37493,7 @@ var SQLiteRunStore = class {
         this.reconcileInside(runId2, this.now());
         return { created: false, run: this.statusInside(runId2) };
       }
-      const runId = randomUUID3();
+      const runId = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -38496,7 +38331,7 @@ var SQLiteRunStore = class {
       if (!row) throw this.notFound();
       const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, "created time") + LEASE_MS : asNumber(row.lease_expires_ms, "launch deadline");
       if (asText(row.status, "run status") !== "prepared" || asNumber(row.cancel_requested, "cancel flag") === 1 || nowMs >= launchDeadline) return null;
-      const ownerToken = randomUUID3();
+      const ownerToken = randomUUID2();
       this.database.prepare("UPDATE runs SET status = 'running', owner_token = ?, owner_pid = ?, lease_expires_ms = ? WHERE run_id = ? AND status = 'prepared'").run(ownerToken, workerPid, nowMs + LEASE_MS, runId);
       return { runId, ownerToken };
     });
@@ -38518,7 +38353,7 @@ var SQLiteRunStore = class {
       if (asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
       const row = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
       if (!row) return null;
-      const attemptId = randomUUID3();
+      const attemptId = randomUUID2();
       const evaluationId = asText(row.evaluation_id, "evaluation ID");
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)").run(attemptId, claim2.runId, asText(row.group_id, "group ID"), evaluationId, asText(row.packet_fingerprint, "packet fingerprint"), claim2.ownerToken, nowMs);
       this.database.prepare("INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)").run(attemptId, evaluationId);
@@ -38541,7 +38376,7 @@ var SQLiteRunStore = class {
         throw new RunStoreError("invalid_batch_reservation", "A batch may reserve only pending evaluations from the requested group.");
       }
       const sorted = [...selected].sort((left, right) => orderedIds.indexOf(asText(left.question_id, "question ID")) - orderedIds.indexOf(asText(right.question_id, "question ID")));
-      const attemptId = randomUUID3();
+      const attemptId = randomUUID2();
       const anchorId = asText(sorted[0].evaluation_id, "evaluation ID");
       const state = parseJson(group.state_json, "group state");
       const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")).question);
@@ -38939,6 +38774,179 @@ var SQLiteRunStore = class {
   }
 };
 
+// src/infrastructure/run-runtime.ts
+import os from "node:os";
+
+// src/infrastructure/data-root.ts
+import path4 from "node:path";
+function pathsFor(platform) {
+  return platform === "win32" ? path4.win32 : path4.posix;
+}
+function requiredAbsolute(value, name, paths, allowMissing = false) {
+  if (value === void 0 && allowMissing) return void 0;
+  if (value === void 0 || value.length === 0) throw new TypeError(`${name} must not be empty.`);
+  if (!paths.isAbsolute(value)) throw new TypeError(`${name} must be an absolute path.`);
+  return paths.normalize(value);
+}
+function resolveDataRoot(env, platform, home) {
+  const paths = pathsFor(platform);
+  const explicit = env.SHEG_DATA_DIR;
+  if (explicit !== void 0) return requiredAbsolute(explicit, "SHEG_DATA_DIR", paths);
+  const pluginData = env.PLUGIN_DATA;
+  if (pluginData !== void 0) return requiredAbsolute(pluginData, "PLUGIN_DATA", paths);
+  const absoluteHome = requiredAbsolute(home, "Home directory", paths);
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA;
+    const base2 = local === void 0 ? paths.join(absoluteHome, "AppData", "Local") : requiredAbsolute(local, "LOCALAPPDATA", paths);
+    return paths.join(base2, "Sheg");
+  }
+  if (platform === "darwin") return paths.join(absoluteHome, "Library", "Application Support", "Sheg");
+  const xdg = env.XDG_DATA_HOME;
+  const base = xdg === void 0 ? paths.join(absoluteHome, ".local", "share") : requiredAbsolute(xdg, "XDG_DATA_HOME", paths);
+  return paths.join(base, "sheg");
+}
+
+// src/infrastructure/process-lock.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { link, mkdir, open as open2, readFile, readdir, rename, rm } from "node:fs/promises";
+import path5 from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+var ProcessLockError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ProcessLockError";
+  }
+};
+var ProcessLock = class _ProcessLock {
+  constructor(lockPath, record2) {
+    this.lockPath = lockPath;
+    this.record = record2;
+  }
+  lockPath;
+  record;
+  static async acquire(directory, name, operations = {}) {
+    if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
+    const lockPath = path5.join(directory, `${name}.lock`);
+    const record2 = { pid: process.pid, token: randomUUID3() };
+    const content = `${JSON.stringify(record2)}
+`;
+    const temporaryPath = `${lockPath}.${process.pid}.${record2.token}.tmp`;
+    await mkdir(directory, { recursive: true });
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      try {
+        const handle = await open2(temporaryPath, "wx", 384);
+        try {
+          await handle.writeFile(content, "utf8");
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        try {
+          await link(temporaryPath, lockPath);
+        } finally {
+          await rm(temporaryPath, { force: true });
+        }
+        const claims = await staleClaims(lockPath);
+        const activeClaims = [];
+        for (const file2 of claims) {
+          const claimed = await readLock(file2);
+          if (!claimed) continue;
+          if (processExists(claimed.pid)) activeClaims.push({ file: file2, record: claimed });
+          else await rm(file2, { force: true });
+        }
+        if (activeClaims.length > 0) {
+          await removeIfOwned(lockPath, record2);
+          for (const claim2 of activeClaims) await restoreClaim(lockPath, claim2.file, claim2.record);
+          throw new ProcessLockError(`Run is already owned by process ${activeClaims[0].record.pid}.`);
+        }
+        return new _ProcessLock(lockPath, record2);
+      } catch (error62) {
+        const code = error62.code;
+        if (code !== "EEXIST" && code !== "EPERM") throw error62;
+      }
+      const existing = await readLock(lockPath);
+      if (!existing) {
+        await delay(Math.min(2 + attempt, 20));
+        continue;
+      }
+      if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
+      const stalePath = `${lockPath}.${process.pid}.${randomUUID3()}.stale`;
+      try {
+        await (operations.rename ?? rename)(lockPath, stalePath);
+        await operations.afterStaleRename?.();
+        const claimed = await readLock(stalePath);
+        if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
+          if (claimed && processExists(claimed.pid)) await restoreClaim(lockPath, stalePath, claimed);
+          throw new ProcessLockError("Lock ownership changed during stale recovery.");
+        }
+        await rm(stalePath, { force: true });
+      } catch (error62) {
+        if (error62 instanceof ProcessLockError) throw error62;
+        if (error62.code === "ENOENT") continue;
+        throw error62;
+      }
+    }
+    throw new ProcessLockError("Could not acquire process lock after retrying incomplete or stale ownership.");
+  }
+  async release() {
+    await removeIfOwned(this.lockPath, this.record);
+    for (const file2 of await staleClaims(this.lockPath)) {
+      const current = await readLock(file2);
+      if (current?.token === this.record.token) await rm(file2, { force: true });
+    }
+  }
+};
+async function staleClaims(lockPath) {
+  const directory = path5.dirname(lockPath);
+  const prefix = `${path5.basename(lockPath)}.`;
+  try {
+    const entries = await readdir(directory);
+    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path5.join(directory, entry));
+  } catch (error62) {
+    if (error62.code === "ENOENT") return [];
+    throw error62;
+  }
+}
+async function removeIfOwned(lockPath, record2) {
+  const current = await readLock(lockPath);
+  if (current?.token === record2.token) await rm(lockPath, { force: true });
+}
+async function restoreClaim(lockPath, claimPath, record2) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const claimed = await readLock(claimPath);
+    if (claimed?.token !== record2.token || !processExists(record2.pid)) return;
+    try {
+      await link(claimPath, lockPath);
+      await rm(claimPath, { force: true });
+      return;
+    } catch (error62) {
+      if (error62.code !== "EEXIST") throw error62;
+      const current = await readLock(lockPath);
+      if (current?.token === record2.token) {
+        await rm(claimPath, { force: true });
+        return;
+      }
+      await delay(Math.min(2 + attempt, 20));
+    }
+  }
+}
+async function readLock(filePath) {
+  try {
+    const value = JSON.parse(await readFile(filePath, "utf8"));
+    return Number.isInteger(value.pid) && typeof value.token === "string" ? { pid: value.pid, token: value.token } : null;
+  } catch {
+    return null;
+  }
+}
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error62) {
+    return error62.code === "EPERM";
+  }
+}
+
 // src/infrastructure/worker-launcher.ts
 import { spawn } from "node:child_process";
 import path6 from "node:path";
@@ -39004,6 +39012,21 @@ function jevMetadata(route, model) {
   return jevModelMetadata[route][model];
 }
 
+// src/providers/system-one-contract.ts
+var choiceAnswerSchema = external_exports.object({
+  type: external_exports.literal("choice"),
+  choice: external_exports.string().min(1),
+  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
+  confidence: external_exports.number().finite().min(0).max(1).optional()
+}).passthrough();
+var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
+var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
+var systemOneAnswerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
+function systemOneQuestion(question) {
+  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
+  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
+}
+
 // src/providers/jev.ts
 var JevCallError = class extends ProviderCallError {
   constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
@@ -39013,15 +39036,6 @@ var JevCallError = class extends ProviderCallError {
   }
   decisionId;
 };
-var choiceAnswerSchema = external_exports.object({
-  type: external_exports.literal("choice"),
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional()
-}).passthrough();
-var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
-var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
 var wireUsageSchema = external_exports.object({
   input_tokens: external_exports.number().int().nonnegative().optional(),
   output_tokens: external_exports.number().int().nonnegative().optional(),
@@ -39043,15 +39057,11 @@ function parseWireResponse(payload, route) {
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
-function wireQuestion(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
 function requestBody(request, model) {
-  return { model, state: request.state, questions: { [request.question.id]: wireQuestion(request.question) } };
+  return { model, state: request.state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
 }
 function batchRequestBody(request, model) {
-  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, wireQuestion(question)])) };
+  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
 }
 function measureRequestBody(serialized, model, route) {
   const bytes = Buffer.byteLength(serialized, "utf8");
@@ -39152,7 +39162,7 @@ var JevProvider = class {
       if (!parsedResponse.success) {
         throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
-      const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
+      const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
         throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
       }
@@ -39245,7 +39255,7 @@ var JevProvider = class {
       const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
       const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
-        const answer = answerSchema.safeParse(rawValue);
+        const answer = systemOneAnswerSchema.safeParse(rawValue);
         return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
       });
       const execution = {
@@ -39615,19 +39625,6 @@ var LayaCallError = class extends ProviderCallError {
   }
   decisionId;
 };
-var choiceAnswerSchema2 = external_exports.object({
-  type: external_exports.literal("choice"),
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional()
-}).passthrough();
-var scoreAnswerSchema2 = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
-var noulAnswerSchema2 = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema2 = external_exports.discriminatedUnion("type", [choiceAnswerSchema2, scoreAnswerSchema2, noulAnswerSchema2]);
-function wireQuestion2(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
 var responseSchema = external_exports.object({
   model: external_exports.string().min(1),
   answers: external_exports.record(external_exports.string(), external_exports.unknown()),
@@ -39689,7 +39686,7 @@ var LayaProvider = class {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: wireQuestion2(question)
+            [question.id]: systemOneQuestion(question)
           }
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs)
@@ -39711,7 +39708,7 @@ var LayaProvider = class {
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
       throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
-    const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
+    const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
     if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
     const result = {
       ...answer.data,
@@ -39765,10 +39762,119 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
   if (state === "unavailable") throw new CredentialStoreError("credential_unavailable", route);
 }
 
+// src/infrastructure/run-runtime.ts
+function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platform, os.homedir()), service) {
+  let runtimeService;
+  let ownedStore;
+  let storeReady = service !== void 0;
+  let startupFailure;
+  if (service) runtimeService = service;
+  else {
+    try {
+      const runtime = createDefaultRunService(dataRoot);
+      runtimeService = runtime.service;
+      ownedStore = runtime.store;
+      storeReady = true;
+    } catch (error62) {
+      runtimeService = unavailableRunService();
+      startupFailure = error62;
+    }
+  }
+  async function storage(input2) {
+    if (input2.operation === "inspect") {
+      if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
+      const observed = inspectRunStoreCompatibility(dataRoot);
+      if (observed.status === "current") {
+        const runtime = createDefaultRunService(dataRoot);
+        runtimeService = runtime.service;
+        ownedStore = runtime.store;
+        storeReady = true;
+        startupFailure = void 0;
+        return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
+      }
+      const issue2 = startupFailure instanceof RunStoreError ? { code: startupFailure.code } : { code: observed.status === "unreadable" ? "datastore_unreadable" : "datastore_open_failed" };
+      const compatibility = compatibilityStatus(observed, startupFailure);
+      return { recoveryRequired: true, compatibility, issue: issue2, backupAvailable: runStoreBackupAvailable(dataRoot) };
+    }
+    if (input2.operation === "optimize") {
+      if (!storeReady) throw recoveryRequiredError();
+      runtimeService.optimizeStorage();
+      return { optimized: true };
+    }
+    const resetLock = await ProcessLock.acquire(dataRoot, "run-storage-reset");
+    try {
+      if (storeReady || inspectRunStoreCompatibility(dataRoot).status === "current") {
+        throw new RunServiceError("recovery_not_required", "The datastore no longer requires recovery; inspect its current status before taking further action.");
+      }
+      const reset = resetRunStore(dataRoot);
+      const runtime = createDefaultRunService(dataRoot);
+      runtimeService = runtime.service;
+      ownedStore = runtime.store;
+      storeReady = true;
+      startupFailure = void 0;
+      return { ...reset, recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
+    } catch (error62) {
+      startupFailure = error62;
+      throw error62;
+    } finally {
+      await resetLock.release();
+    }
+  }
+  return {
+    get service() {
+      return runtimeService;
+    },
+    close() {
+      ownedStore?.close();
+      ownedStore = void 0;
+    },
+    storage
+  };
+}
+function compatibilityStatus(observed, startupFailure) {
+  if (startupFailure instanceof RunStoreError && startupFailure.code.startsWith("migration_")) {
+    return { status: "migration_failed", schemaVersion: observed.status === "migration_available" ? observed.schemaVersion : null };
+  }
+  if (observed.status === "migration_available") return { status: "migration_available", schemaVersion: observed.schemaVersion };
+  if (observed.status === "uninitialized") return { status: "uninitialized", schemaVersion: 0 };
+  return { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
+}
+function createDefaultRunService(dataRoot) {
+  const store = openRunStore(dataRoot);
+  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
+}
+function unavailableRunService() {
+  return new Proxy(/* @__PURE__ */ Object.create(null), {
+    get: (_target, property) => property === "then" ? void 0 : () => {
+      throw recoveryRequiredError();
+    }
+  });
+}
+function recoveryRequiredError() {
+  return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Inspect storage before using study operations.");
+}
+
+// src/application/run-operations.ts
+var resetConfirmation = "RESET SHEG DATASTORE";
+var runStorageSchema = external_exports.discriminatedUnion("operation", [
+  external_exports.object({ operation: external_exports.literal("inspect") }).strict(),
+  external_exports.object({ operation: external_exports.literal("optimize") }).strict(),
+  external_exports.object({ operation: external_exports.literal("reset"), confirmation: external_exports.literal(resetConfirmation) }).strict()
+]);
+var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
+var runGetSchema = external_exports.discriminatedUnion("view", [
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("journey") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("context"), evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
+]);
+
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.13",
+  version: "0.3.0-dev.14",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
@@ -39808,114 +39914,31 @@ var productVersion = package_default.version;
 
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
-var resetConfirmation = "RESET SHEG DATASTORE";
-var runStorageSchema = external_exports.discriminatedUnion("operation", [
-  external_exports.object({ operation: external_exports.literal("inspect") }).strict(),
-  external_exports.object({ operation: external_exports.literal("optimize") }).strict(),
-  external_exports.object({ operation: external_exports.literal("reset"), confirmation: external_exports.literal(resetConfirmation) }).strict()
-]);
-var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
-var runGetSchema = external_exports.discriminatedUnion("view", [
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("journey") }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("context"), evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
-]);
 function createPollingServer(service) {
-  const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
-  let runtimeService;
-  let ownedStore;
-  let storeReady = service !== void 0;
-  let startupFailure;
-  if (service) runtimeService = service;
-  else {
-    try {
-      const runtime = createDefaultRunService(dataRoot);
-      runtimeService = runtime.service;
-      ownedStore = runtime.store;
-      storeReady = true;
-    } catch (error62) {
-      runtimeService = unavailableRunService();
-      startupFailure = error62;
-    }
-  }
+  const runtime = createRunRuntime(void 0, service);
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
-  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtimeService.inspect(request)));
-  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtimeService.start(submissionId, request)));
-  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtimeService.list(query)));
-  server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtimeService.queryEvidence(query)));
+  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
+  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
+  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
+  server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtime.service.queryEvidence(query)));
   server.registerTool("run_get", { description: "Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
-    if (input2.view === "status") return runtimeService.getStatus(input2.runId);
-    if (input2.view === "request") return runtimeService.getRequest(input2.runId);
-    if (input2.view === "journey") return runtimeService.getJourneyRun(input2.runId);
-    if (input2.view === "context") return runtimeService.getContext(input2.runId, input2.evaluationId, input2.contextId);
-    if (input2.view === "answers") return runtimeService.answers(input2.runId, input2.cursor, input2.limit);
-    return runtimeService.attempts(input2.runId, input2.cursor, input2.limit);
+    if (input2.view === "status") return runtime.service.getStatus(input2.runId);
+    if (input2.view === "request") return runtime.service.getRequest(input2.runId);
+    if (input2.view === "journey") return runtime.service.getJourneyRun(input2.runId);
+    if (input2.view === "context") return runtime.service.getContext(input2.runId, input2.evaluationId, input2.contextId);
+    if (input2.view === "answers") return runtime.service.answers(input2.runId, input2.cursor, input2.limit);
+    return runtime.service.attempts(input2.runId, input2.cursor, input2.limit);
   }));
-  server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.cancel(runId)));
-  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.resume(runId)));
-  server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtimeService.previewDelete(runIds) : runtimeService.deleteRuns(runIds)));
-  server.registerTool("run_storage", { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input2) => safeResult(async () => {
-    if (input2.operation === "inspect") {
-      if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
-      const observed = inspectRunStoreCompatibility(dataRoot);
-      if (observed.status === "current") {
-        const runtime = createDefaultRunService(dataRoot);
-        runtimeService = runtime.service;
-        ownedStore = runtime.store;
-        storeReady = true;
-        startupFailure = void 0;
-        return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
-      }
-      const failure2 = startupFailure instanceof RunStoreError ? { code: startupFailure.code } : { code: observed.status === "unreadable" ? "datastore_unreadable" : "datastore_open_failed" };
-      const compatibility = startupFailure instanceof RunStoreError && startupFailure.code.startsWith("migration_") ? { status: "migration_failed", schemaVersion: observed.status === "migration_available" ? observed.schemaVersion : null } : observed.status === "migration_available" ? { status: "migration_available", schemaVersion: observed.schemaVersion } : observed.status === "uninitialized" ? { status: "uninitialized", schemaVersion: 0 } : { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
-      return { recoveryRequired: true, compatibility, issue: failure2, backupAvailable: runStoreBackupAvailable(dataRoot) };
-    }
-    if (input2.operation === "optimize") {
-      if (!storeReady) throw recoveryRequiredError();
-      runtimeService.optimizeStorage();
-      return { optimized: true };
-    }
-    const resetLock = await ProcessLock.acquire(dataRoot, "run-storage-reset");
-    try {
-      if (storeReady || inspectRunStoreCompatibility(dataRoot).status === "current") throw new RunServiceError("recovery_not_required", "The datastore no longer requires recovery; inspect its current status before taking further action.");
-      const reset = resetRunStore(dataRoot);
-      const runtime = createDefaultRunService(dataRoot);
-      runtimeService = runtime.service;
-      ownedStore = runtime.store;
-      storeReady = true;
-      startupFailure = void 0;
-      return { ...reset, recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
-    } catch (error62) {
-      startupFailure = error62;
-      throw error62;
-    } finally {
-      await resetLock.release();
-    }
-  }));
+  server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.cancel(runId)));
+  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.resume(runId)));
+  server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtime.service.previewDelete(runIds) : runtime.service.deleteRuns(runIds)));
+  server.registerTool("run_storage", { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input2) => safeResult(() => runtime.storage(input2)));
   const close = server.close.bind(server);
   server.close = async () => {
-    ownedStore?.close();
-    ownedStore = void 0;
+    runtime.close();
     await close();
   };
   return server;
-}
-function createDefaultRunService(dataRoot) {
-  const store = openRunStore(dataRoot);
-  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
-}
-function unavailableRunService() {
-  return new Proxy(/* @__PURE__ */ Object.create(null), {
-    get: (_target, property) => property === "then" ? void 0 : () => {
-      throw recoveryRequiredError();
-    }
-  });
-}
-function recoveryRequiredError() {
-  return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Call run_storage.inspect before using study tools.");
 }
 async function safeResult(operation) {
   try {

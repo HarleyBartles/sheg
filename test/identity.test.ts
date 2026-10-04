@@ -53,13 +53,15 @@ test('legacy Choice identity ignores only the new discriminator and detects chan
   assert.notEqual(legacyChoiceStimulusFingerprint(changed, study.cohort, legacyPromptContractHash), legacy);
 });
 
-test('execution fingerprint includes route and endpoint but never credential material', async (t) => {
+test('execution fingerprint includes route and endpoint while excluding credential material', async (t) => {
   const study = await studyFixture(t);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, 'prompt-v1');
-  const first = executionFingerprint(stimulus, { kind: 'jev', route: 'openrouter', model: 'jev-latest', endpoint: 'https://api.example' });
+  const provider = { kind: 'jev' as const, route: 'openrouter' as const, model: 'jev-latest', endpoint: 'https://api.example' };
+  const first = executionFingerprint(stimulus, provider);
   const second = executionFingerprint(stimulus, { kind: 'jev', route: 'typesafe', model: 'jev-latest', endpoint: 'https://other.example' });
+  const credentialBearing = { ...provider, credential: 'private-token', keyEnv: 'TYPESAFE_API_KEY' };
   assert.notEqual(first, second);
-  assert.doesNotMatch(first, /API_KEY|secret/);
+  assert.equal(executionFingerprint(stimulus, credentialBearing), first);
 });
 
 test('canonical object key order does not change the stimulus fingerprint', async (t) => {

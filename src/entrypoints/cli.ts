@@ -3,105 +3,185 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { traceStudy } from '../domain/journey/trace.js';
 import { loadStudy } from '../infrastructure/study-loader.js';
-import { RunManager, checkStudy, type RunConfig } from '../application/run-manager.js';
-import { compareReports, compareRunReports, getReport } from '../application/reports.js';
+import { compareReports, compareRunReports, getLegacyReport } from '../application/legacy/reports.js';
 import { preflightStudy, type PreflightProviderConfig } from '../application/preflight.js';
 import { decisionValueSchema, type DecisionValue } from '../domain/decision/decision.js';
+import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
+import { runDeleteSchema, runGetSchema, runStorageSchema, type StorageOperation } from '../application/run-operations.js';
+import { createRunRuntime } from '../infrastructure/run-runtime.js';
+import { RunServiceError } from '../application/run-service.js';
+import { RunStoreError } from '../infrastructure/run-store.js';
+import type { RunService } from '../application/run-service.js';
 
-const manager = new RunManager();
+type CliIo = { out(value: string): unknown; error(value: string): unknown };
+const outputIo: CliIo = { out: (value) => process.stdout.write(`${value}\n`), error: (value) => process.stderr.write(`${value}\n`) };
 
-export async function runCli(args: readonly string[], io = { out: (value: string) => process.stdout.write(`${value}\n`), error: (value: string) => process.stderr.write(`${value}\n`) }, runManager = manager): Promise<number> {
+export async function runCli(args: readonly string[], io: CliIo = outputIo, service?: RunService): Promise<number> {
+  const [command, ...rest] = args;
+  if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
   try {
-    const [command, ...rest] = args;
     const options = parseArgs(rest);
-    let result: unknown;
-    if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
+    validateOptions(command, options);
     if (command === 'preflight') {
-      if (options.mode !== undefined && options.mode !== 'frozen-cohort' && options.mode !== 'maximum-profile') {
-        throw new Error('Preflight --mode must be frozen-cohort or maximum-profile.');
-      }
-      const providers = JSON.parse(await readFile(required(options, 'providers'), 'utf8')) as PreflightProviderConfig[];
-      const mode = options.mode === 'maximum-profile' ? 'maximum-profile' : 'frozen-cohort';
-      result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), ...(options.cohort === undefined ? {} : { cohortPath: path.resolve(options.cohort) }), mode, providers });
+      const mode = options.mode ?? 'frozen-cohort';
+      if (mode !== 'frozen-cohort' && mode !== 'maximum-profile') throw new CliInputError('Preflight mode must be frozen-cohort or maximum-profile.');
+      const providers = await readJson<PreflightProviderConfig[]>(required(options, 'providers'));
+      const result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), ...(options.cohort === undefined ? {} : { cohortPath: path.resolve(options.cohort) }), mode, providers });
+      io.out(JSON.stringify(result));
+      return 0;
     }
-    else if (command === 'check' || command === 'start') {
-      const config = JSON.parse(await readFile(required(options, 'config'), 'utf8')) as RunConfig;
-      result = command === 'check' ? await checkStudy(config).then(({ study, stimulusFingerprint, executionFingerprint, runBounds }) => ({ valid: true, respondentCount: study.respondents.length, armCount: study.manifest.arms.length, sourceHashes: study.sources.map((source) => source.sha256), stimulusFingerprint, executionFingerprint, runBounds })) : await runManager.startRun(config);
-    } else if (command === 'trace') {
-      const manifestPath = path.resolve(required(options, 'manifest'));
-      const cohortPath = path.resolve(required(options, 'cohort'));
-      const study = await loadStudy(manifestPath, cohortPath);
-      const profile = study.respondents.find((respondent) => respondent.id === required(options, 'respondent'));
-      if (!profile) throw new Error('Respondent ID is not in the frozen cohort.');
-      if ((options.choices === undefined) === (options.responses === undefined)) {
-        throw new Error('Trace requires exactly one of --choices or --responses.');
-      }
-      const scripted: readonly string[] | readonly DecisionValue[] = options.responses === undefined
-        ? required(options, 'choices').split(',').filter(Boolean)
-        : parseResponses(options.responses);
-      const arm = study.manifest.arms.find((candidate) => candidate.id === required(options, 'arm'));
-      if (!arm) throw new Error('Arm ID is not in the study.');
-      result = await traceStudy(arm, profile, scripted);
-    } else if (command === 'status') result = await runManager.runStatus(required(options, 'output'), required(options, 'run-id'));
-    else if (command === 'cancel') result = await runManager.cancelRun(required(options, 'output'), required(options, 'run-id'));
-    else if (command === 'resume') result = await runManager.resumeRun(required(options, 'output'), required(options, 'run-id'));
-    else if (command === 'report') result = await getReport(required(options, 'output'), required(options, 'run-id'));
-    else if (command === 'compare') {
-      const report = await getReport(required(options, 'output'), required(options, 'run-id'));
-      result = compareReports(report, required(options, 'left-arm'), required(options, 'right-arm'));
-    } else if (command === 'compare-runs') {
-      const left = await getReport(required(options, 'left-output'), required(options, 'left-run-id'));
-      const right = await getReport(required(options, 'right-output'), required(options, 'right-run-id'));
-      result = compareRunReports(left, required(options, 'left-arm'), right, required(options, 'right-arm'));
-    } else throw new Error(`Unknown command: ${command}`);
-    io.out(JSON.stringify(result));
-    return 0;
+    if (command === 'trace') {
+      const result = await trace(options);
+      io.out(JSON.stringify(result));
+      return 0;
+    }
+    if (command?.startsWith('legacy-')) {
+      const result = await legacyReport(command, options);
+      io.out(JSON.stringify(result));
+      return 0;
+    }
+    const runtime = createRunRuntime(options['data-root'] === undefined ? undefined : path.resolve(options['data-root']), service);
+    try {
+      const result = await durableOperation(command ?? '', options, runtime.service, runtime.storage);
+      io.out(JSON.stringify(result));
+      return 0;
+    } finally { runtime.close(); }
   } catch (error) {
-    io.error(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }));
+    const result = error instanceof CliInputError || error instanceof RunServiceError || error instanceof RunStoreError
+      ? { error: error.message }
+      : { error: 'The Sheg command failed. Check the command arguments and local datastore.' };
+    io.error(JSON.stringify(result));
     return 1;
   }
 }
 
-const helpText = `sheg <command>
-Commands:
-  preflight --manifest <json> [--cohort <json>] [--mode frozen-cohort|maximum-profile] --providers <json-file>
-  check --config <json>                         Validate study and provider configuration
-  trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b,...> | --responses <json-array>)
-  start --config <json>                         Start a durable run
-  status|cancel|resume --output <dir> --run-id <id>
-  report --output <dir> --run-id <id>
-  compare --output <dir> --run-id <id> --left-arm <id> --right-arm <id>
-  compare-runs --left-output <dir> --left-run-id <id> --left-arm <id> --right-output <dir> --right-run-id <id> --right-arm <id>`;
+class CliInputError extends Error {}
+
+async function durableOperation(command: string, options: Record<string, string>, service: RunService, storage: (input: StorageOperation) => Promise<unknown>): Promise<unknown> {
+  if (command === 'inspect') return service.inspect(await readRequest(options));
+  if (command === 'start') return service.start(uuid(required(options, 'submission-id')), await readRequest(options));
+  if (command === 'list') return service.list(runListQuerySchema.parse(await readJson(required(options, 'query'))));
+  if (command === 'query') return service.queryEvidence(runEvidenceQuerySchema.parse(await readJson(required(options, 'query'))));
+  if (command === 'get') {
+    const input = runGetSchema.parse(await readJson(required(options, 'request')));
+    if (input.view === 'status') return service.getStatus(input.runId);
+    if (input.view === 'request') return service.getRequest(input.runId);
+    if (input.view === 'journey') return service.getJourneyRun(input.runId);
+    if (input.view === 'context') return service.getContext(input.runId, input.evaluationId, input.contextId);
+    if (input.view === 'answers') return service.answers(input.runId, input.cursor, input.limit);
+    return service.attempts(input.runId, input.cursor, input.limit);
+  }
+  if (command === 'cancel') return service.cancel(uuid(required(options, 'run-id')));
+  if (command === 'resume') return service.resume(uuid(required(options, 'run-id')));
+  if (command === 'delete') {
+    const input = runDeleteSchema.parse(await readJson(required(options, 'request')));
+    return input.dryRun ? service.previewDelete(input.runIds) : service.deleteRuns(input.runIds);
+  }
+  if (command === 'storage') return storage(runStorageSchema.parse(await readJson(required(options, 'request'))));
+  throw new CliInputError(`Unknown command: ${command}`);
+}
+
+async function readRequest(options: Record<string, string>) {
+  const parsed = runRequestSchema.safeParse(await readJson(required(options, 'request')));
+  if (!parsed.success) throw new CliInputError(`Request is invalid: ${parsed.error.issues.map(({ path: issuePath }) => issuePath.join('.') || 'request').join(', ')}.`);
+  return parsed.data;
+}
+
+async function readJson<T = unknown>(file: string): Promise<T> {
+  try { return JSON.parse(await readFile(path.resolve(file), 'utf8')) as T; }
+  catch { throw new CliInputError('The specified JSON file is missing or invalid.'); }
+}
+
+function uuid(value: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new CliInputError('A valid run or submission UUID is required.');
+  return value;
+}
+
+async function trace(options: Record<string, string>) {
+  const manifestPath = path.resolve(required(options, 'manifest'));
+  const cohortPath = path.resolve(required(options, 'cohort'));
+  const study = await loadStudy(manifestPath, cohortPath);
+  const respondentId = required(options, 'respondent');
+  const profile = study.respondents.find((respondent) => respondent.id === respondentId);
+  if (!profile) throw new CliInputError('Respondent ID is not in the frozen cohort.');
+  if ((options.choices === undefined) === (options.responses === undefined)) throw new CliInputError('Trace requires exactly one of --choices or --responses.');
+  const scripted: readonly string[] | readonly DecisionValue[] = options.responses === undefined ? required(options, 'choices').split(',').filter(Boolean) : parseResponses(options.responses);
+  const arm = study.manifest.arms.find((candidate) => candidate.id === required(options, 'arm'));
+  if (!arm) throw new CliInputError('Arm ID is not in the study.');
+  return traceStudy(arm, profile, scripted);
+}
+
+async function legacyReport(command: string, options: Record<string, string>) {
+  if (command === 'legacy-report') return getLegacyReport(required(options, 'output'), uuid(required(options, 'run-id')));
+  if (command === 'legacy-compare') return compareReports(await getLegacyReport(required(options, 'output'), uuid(required(options, 'run-id'))), required(options, 'left-arm'), required(options, 'right-arm'));
+  if (command === 'legacy-compare-runs') {
+    const left = await getLegacyReport(required(options, 'left-output'), uuid(required(options, 'left-run-id')));
+    const right = await getLegacyReport(required(options, 'right-output'), uuid(required(options, 'right-run-id')));
+    return compareRunReports(left, required(options, 'left-arm'), right, required(options, 'right-arm'));
+  }
+  throw new CliInputError(`Unknown historical read-only command: ${command}`);
+}
 
 function parseArgs(args: readonly string[]): Record<string, string> {
   const options: Record<string, string> = {};
   for (let index = 0; index < args.length; index += 1) {
-    const key = args[index];
-    if (!key?.startsWith('--')) throw new Error(`Expected an option, got ${key ?? 'end of input'}.`);
+    const flag = args[index];
+    if (!flag?.startsWith('--')) throw new CliInputError(`Expected an option, got ${flag ?? 'end of input'}.`);
+    const key = flag.slice(2);
+    if (Object.hasOwn(options, key)) throw new CliInputError(`Option --${key} was supplied more than once.`);
     const value = args[++index];
-    if (!value || value.startsWith('--')) throw new Error(`Option ${key} requires a value.`);
-    options[key.slice(2)] = value;
+    if (!value || value.startsWith('--')) throw new CliInputError(`Option --${key} requires a value.`);
+    options[key] = value;
   }
   return options;
 }
 
+function validateOptions(command: string | undefined, options: Record<string, string>): void {
+  const commands: Record<string, readonly string[]> = {
+    preflight: ['manifest', 'cohort', 'providers', 'mode'],
+    trace: ['manifest', 'cohort', 'arm', 'respondent', 'choices', 'responses'],
+    inspect: ['request', 'data-root'], start: ['request', 'submission-id', 'data-root'],
+    list: ['query', 'data-root'], query: ['query', 'data-root'], get: ['request', 'data-root'],
+    cancel: ['run-id', 'data-root'], resume: ['run-id', 'data-root'], delete: ['request', 'data-root'], storage: ['request', 'data-root'],
+    'legacy-report': ['output', 'run-id'], 'legacy-compare': ['output', 'run-id', 'left-arm', 'right-arm'],
+    'legacy-compare-runs': ['left-output', 'left-run-id', 'left-arm', 'right-output', 'right-run-id', 'right-arm'],
+  };
+  const allowed = commands[command ?? ''];
+  if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ''}`);
+  const unexpected = Object.keys(options).find((key) => !allowed.includes(key));
+  if (unexpected) throw new CliInputError(`Option --${unexpected} is not supported by ${command}.`);
+}
+
 function required(options: Record<string, string>, key: string): string {
   const value = options[key];
-  if (!value) throw new Error(`Missing --${key}.`);
+  if (!value) throw new CliInputError(`Missing --${key}.`);
   return value;
 }
 
 function parseResponses(value: string): DecisionValue[] {
   let parsed: unknown;
-  try { parsed = JSON.parse(value); } catch { throw new Error('--responses must be a JSON array of typed response values.'); }
-  if (!Array.isArray(parsed)) throw new Error('--responses must be a JSON array of typed response values.');
+  try { parsed = JSON.parse(value); } catch { throw new CliInputError('--responses must be a JSON array of typed response values.'); }
+  if (!Array.isArray(parsed)) throw new CliInputError('--responses must be a JSON array of typed response values.');
   return parsed.map((response, index) => {
     const result = decisionValueSchema.safeParse(response);
-    if (!result.success) throw new Error(`--responses[${index}] is not a valid typed response.`);
+    if (!result.success) throw new CliInputError(`--responses[${index}] is not a valid typed response.`);
     return result.data;
   });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  process.exitCode = await runCli(process.argv.slice(2));
-}
+const helpText = `sheg <command>
+Commands:
+  inspect --request <json-file>                 Validate a durable request without inference
+  start --request <json-file> --submission-id <uuid>  Accept a durable run
+  list --query <json-file>                      Find durable runs
+  query --query <json-file>                     Query exact durable evidence
+  get --request <json-file>                     Read status, request, context, answers, attempts or journey
+  cancel|resume --run-id <uuid>                 Cancel or explicitly resume an eligible run
+  delete --request <json-file>                  Preview or delete selected terminal runs
+  storage --request <json-file>                 Inspect, optimize or explicitly reset the datastore
+  trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
+  preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
+  legacy-report --output <dir> --run-id <uuid>  Read a pre-release file-backed report without modifying it
+  Use --data-root <dir> with durable commands to select the datastore.`;
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));

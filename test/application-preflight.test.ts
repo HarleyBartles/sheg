@@ -6,12 +6,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { preflightStudy } from '../src/application/preflight.js';
+import { preflightInputSchema, preflightStudy } from '../src/application/preflight.js';
 
 const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const tokenizerJsonPath = path.join(fixtures, 'laya-tokenizer.json');
 const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerJsonPath)).digest('hex');
 const missingStore = { availability: async () => 'missing' as const, readForAuthentication: async () => { throw new Error('missing'); } };
+
+test('preflight shares provider validation and rejects empty optional precision', () => {
+  const parsed = preflightInputSchema.safeParse({
+    manifestPath: path.join(fixtures, 'article.json'),
+    cohortPath: path.join(fixtures, 'cohort.json'),
+    providers: [{ kind: 'laya', baseUrl: 'http://127.0.0.1:8787', checkpoint: 'fixture', contextLimit: 1024, headLimit: 192, tokenizerJsonPath, tokenizerSha256, precision: '', timeoutMs: 1000 }],
+  });
+  assert.equal(parsed.success, false);
+});
 
 test('preflight measures every frozen respondent packet for each configured provider without inference', async () => {
   const result = await preflightStudy({

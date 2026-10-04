@@ -19999,6 +19999,16 @@ function journeyTopology(arm) {
   nodes.push({ id: terminal, kind: "terminal", outcome: "complete" });
   return { kind: "graph", nodes, transitions, entryNodeId: exposes[0], maxDecisions: arm.tasks.length };
 }
+function journeyTransitionForResponse(graph, nodeId, response) {
+  return graph.transitions.find((transition) => {
+    if (transition.fromNodeId !== nodeId) return false;
+    if (response.type === "choice") return transition.optionId === response.choice;
+    const interval = transition.when;
+    if (interval?.type !== response.type) return false;
+    const value = response.type === "score" ? response.score : response.noul;
+    return (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
+  });
+}
 
 // src/domain/journey/run.ts
 var JourneyExecutionError = class extends Error {
@@ -20021,13 +20031,7 @@ function advanceJourney(arm, profile, state, rawResult, compilerFingerprint) {
     taskId = askNode.taskId;
     const task = arm.tasks.find((candidate) => candidate.id === taskId);
     if (!task) throw new JourneyExecutionError(`Ask node ${nodeId} references unknown task ${taskId}.`);
-    const edge = graph.transitions.find((candidate) => {
-      if (candidate.fromNodeId !== nodeId) return false;
-      if (result.type === "choice") return candidate.optionId === result.choice;
-      const interval = candidate.when;
-      const value = result.type === "score" ? result.score : result.noul;
-      return interval?.type === result.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
-    });
+    const edge = journeyTransitionForResponse(graph, nodeId, result);
     if (!edge) throw new JourneyExecutionError(`Task node ${nodeId} has no transition for ${result.type} response.`);
     routeTarget = edge.toNodeId;
   }
@@ -20542,7 +20546,7 @@ var layaConfigSchema = external_exports.object({
   headLimit: external_exports.number().int().positive(),
   tokenizerJsonPath: external_exports.string().min(1),
   tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  precision: external_exports.string().optional(),
+  precision: external_exports.string().min(1).optional(),
   timeoutMs: external_exports.number().int().positive()
 }).strict();
 var providerConfigSchema = external_exports.union([
@@ -23256,6 +23260,21 @@ function jevMetadata(route, model) {
   return jevModelMetadata[route][model];
 }
 
+// src/providers/system-one-contract.ts
+var choiceAnswerSchema = external_exports.object({
+  type: external_exports.literal("choice"),
+  choice: external_exports.string().min(1),
+  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
+  confidence: external_exports.number().finite().min(0).max(1).optional()
+}).passthrough();
+var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
+var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
+var systemOneAnswerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
+function systemOneQuestion(question) {
+  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
+  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
+}
+
 // src/providers/jev.ts
 var JevCallError = class extends ProviderCallError {
   constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
@@ -23265,15 +23284,6 @@ var JevCallError = class extends ProviderCallError {
   }
   decisionId;
 };
-var choiceAnswerSchema = external_exports.object({
-  type: external_exports.literal("choice"),
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional()
-}).passthrough();
-var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
-var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
 var wireUsageSchema = external_exports.object({
   input_tokens: external_exports.number().int().nonnegative().optional(),
   output_tokens: external_exports.number().int().nonnegative().optional(),
@@ -23295,15 +23305,11 @@ function parseWireResponse(payload, route) {
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
-function wireQuestion(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
 function requestBody(request, model) {
-  return { model, state: request.state, questions: { [request.question.id]: wireQuestion(request.question) } };
+  return { model, state: request.state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
 }
 function batchRequestBody(request, model) {
-  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, wireQuestion(question)])) };
+  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
 }
 function measureRequestBody(serialized, model, route) {
   const bytes = Buffer.byteLength(serialized, "utf8");
@@ -23404,7 +23410,7 @@ var JevProvider = class {
       if (!parsedResponse.success) {
         throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
-      const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
+      const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
         throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
       }
@@ -23497,7 +23503,7 @@ var JevProvider = class {
       const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
       const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
-        const answer = answerSchema.safeParse(rawValue);
+        const answer = systemOneAnswerSchema.safeParse(rawValue);
         return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
       });
       const execution = {
@@ -23867,19 +23873,6 @@ var LayaCallError = class extends ProviderCallError {
   }
   decisionId;
 };
-var choiceAnswerSchema2 = external_exports.object({
-  type: external_exports.literal("choice"),
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional()
-}).passthrough();
-var scoreAnswerSchema2 = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
-var noulAnswerSchema2 = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema2 = external_exports.discriminatedUnion("type", [choiceAnswerSchema2, scoreAnswerSchema2, noulAnswerSchema2]);
-function wireQuestion2(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
 var responseSchema = external_exports.object({
   model: external_exports.string().min(1),
   answers: external_exports.record(external_exports.string(), external_exports.unknown()),
@@ -23941,7 +23934,7 @@ var LayaProvider = class {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: wireQuestion2(question)
+            [question.id]: systemOneQuestion(question)
           }
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs)
@@ -23963,7 +23956,7 @@ var LayaProvider = class {
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
       throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
-    const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
+    const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
     if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
     const result = {
       ...answer.data,

@@ -1,12 +1,13 @@
 import { ProviderCallError, type ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
-import { decisionBatchRequestSchema, decisionRequestSchema, decisionValueFromResult, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
+import { decisionBatchRequestSchema, decisionRequestSchema, decisionValueFromResult, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision, validateDecisionBatch } from '../domain/decision/validate.js';
 import { jevConfigSchema, type JevConfigInput, type JevConfig } from './jev/config.js';
 import { jevMetadata } from './jev/model-metadata.js';
 import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
+import { systemOneAnswerSchema, systemOneQuestion } from './system-one-contract.js';
 
 export { jevConfigInputSchema, jevConfigSchema, type JevConfigInput, type JevConfig, type JevRoute } from './jev/config.js';
 
@@ -25,16 +26,6 @@ export class JevCallError extends ProviderCallError {
     this.name = 'JevCallError';
   }
 }
-
-const choiceAnswerSchema = z.object({
-  type: z.literal('choice'),
-  choice: z.string().min(1),
-  probabilities: z.record(z.string(), z.number().finite().min(0).max(1)),
-  confidence: z.number().finite().min(0).max(1).optional(),
-}).passthrough();
-const scoreAnswerSchema = z.object({ type: z.literal('score'), score: z.number().finite(), legend: z.record(z.string(), z.string()), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), confidence: z.number().finite().min(0).max(1).optional() }).passthrough();
-const noulAnswerSchema = z.object({ type: z.literal('noul'), noul: z.number().finite().min(0).max(1) }).passthrough();
-const answerSchema = z.discriminatedUnion('type', [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
 
 const wireUsageSchema = z.object({
   input_tokens: z.number().int().nonnegative().optional(),
@@ -60,17 +51,12 @@ const retryableStatuses = new Set([429, 500, 502, 503, 524, 529]);
 const TYPESAFE_CONTEXT_UNVERIFIED = 'typesafe-model-context-unverified';
 const JEV_MEASUREMENT_METHOD = 'utf8-bytes-div-3+20%-reserve/v1';
 
-function wireQuestion(question: DecisionQuestion): Record<string, unknown> {
-  const criteria = question.type === 'choice' ? question.options : question.type === 'score' ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...(criteria === undefined ? {} : { criteria }) };
-}
-
 function requestBody(request: DecisionRequest, model: string): Record<string, unknown> {
-  return { model, state: request.state, questions: { [request.question.id]: wireQuestion(request.question) } };
+  return { model, state: request.state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
 }
 
 function batchRequestBody(request: DecisionBatchRequest, model: string): Record<string, unknown> {
-  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, wireQuestion(question)])) };
+  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
 }
 
 function measureRequestBody(serialized: string, model: string, route: JevConfig['route']): ProviderContextFit {
@@ -181,7 +167,7 @@ export class JevProvider implements DecisionProvider {
       if (!parsedResponse.success) {
         throw new JevCallError('Jev response is missing required identity or usage fields.', attempts, undefined, undefined, 'evaluation', 'provider_unavailable', undefined, { category: 'envelope' });
       }
-      const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
+      const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
         throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, undefined, question.id, 'evaluation', 'decision_failed', decisionValidationFailureForReason('malformed_answer'));
       }
@@ -273,7 +259,7 @@ export class JevProvider implements DecisionProvider {
         ? (inputTokens * metadata.inputUsdPerMillion + outputTokens * metadata.outputUsdPerMillion) / 1_000_000
         : undefined;
       const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
-        const answer = answerSchema.safeParse(rawValue);
+        const answer = systemOneAnswerSchema.safeParse(rawValue);
         return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
       });
       const execution = {

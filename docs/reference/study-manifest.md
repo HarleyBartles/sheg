@@ -1,6 +1,6 @@
-# Study manifest (CLI journey format)
+# Historical study manifest and diagnostics
 
-This file-backed journey format is used by the Sheg CLI. MCP tools accept direct inline requests instead; see the [study-design skill](../../skills/study-design/SKILL.md) for their request shapes and tools.
+This manifest format remains supported for keyless CLI `trace` and `preflight` diagnostics, and for reading pre-release file-backed reports. Current CLI and MCP runs both use the same durable direct-request service; see the [study-design skill](../../skills/study-design/SKILL.md) for request shapes and tools.
 
 The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms under a title and purpose. Each arm is a stimulus variant and has its own sources, ordered stimulus items, typed tasks, and presentation mode. See the [article fixture](../../test/fixtures/article.json), [chapter fixture](../../test/fixtures/chapter.json), and [respondent cohort](../../test/fixtures/cohort.json).
 
@@ -15,7 +15,7 @@ The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms 
 
 For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse Choice option IDs only when they retain the same meaning. Each frozen respondent is run once through every arm in the same run. Reports align task occurrence order within each respondent and compare typed values only when their task meanings align.
 
-Independent runs can also be compared with the CLI `compare-runs` command. The reports must identify the exact same ordered frozen respondent profiles. Select one arm from each run; only responses with matching `comparisonKey`, occurrence, type, and authored task meaning are comparable. This makes a rerun with a changed stimulus comparable without requiring A/B arms in one execution. The report is descriptive evidence from simulated respondents, not a causal estimate. It keeps source, stimulus, task, provider, run-status, and completion-denominator differences visible and includes declared archetype/variation subgroup denominators.
+Pre-release file-backed reports can be compared with the read-only `legacy-compare` and `legacy-compare-runs` commands. Independent durable runs are queried through their stored evidence and can be continued with a follow-on request. Reports are descriptive evidence from simulated respondents, not a causal estimate.
 
 ## Example study design
 
@@ -25,8 +25,8 @@ The [study manifest schema](../../skills/stimulus-response-polling/assets/study-
 
 ## Design and validate in human terms
 
-Start with the source material, what the person wants to learn, and whose perspective would help. Translate the agreed CLI design to a manifest and validate it with `node dist/cli.js check --config <file>`. Use `trace` with scripted Choice IDs or typed responses to inspect a particular path without inference. The shipped CLI has no `preview` command. MCP `run_inspect` assesses an inline journey's fit and call bounds, returning identifiers for measured packets rather than a complete topology or material preview.
+Start with the source material, what the person wants to learn, and whose perspective would help. Use `trace` with scripted Choice IDs or typed responses to inspect a particular manifest path without inference. Use `preflight` to assess a manifest and frozen cohort across reachable paths. Current direct requests use `inspect` for packet fit and call bounds; it returns identifiers for measured packets rather than a complete topology or material preview.
 
 ## Check context fit
 
-Run `node dist/cli.js preflight --manifest study.json --cohort cohort.json --providers providers.json` to assess the authored study across its reachable paths. Without a frozen cohort, use `--mode maximum-profile` for an explicitly synthetic profile-size sample. The CLI does not expose paired or cartesian draft-variant batching. See [prepare and trace](../../skills/stimulus-response-polling/references/prepare-and-trace.md) for measurement limits and command shapes, and [packet budgeting](../../skills/study-design/references/packet-budgeting.md) for packet contents and provider rules.
+Run `node dist/cli.js preflight --manifest study.json --cohort cohort.json --providers providers.json` to assess the authored study across its reachable paths. Without a frozen cohort, use `--mode maximum-profile` for an explicitly synthetic profile-size sample. See [prepare and trace](../../skills/stimulus-response-polling/references/prepare-and-trace.md) for measurement limits and command shapes, and [packet budgeting](../../skills/study-design/references/packet-budgeting.md) for packet contents and provider rules.

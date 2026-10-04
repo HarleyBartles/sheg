@@ -14,7 +14,7 @@ import { hashCanonical } from './identity.js';
 import { journeyTopology } from '../domain/journey/topology.js';
 import { hasSequentialMigrationPath } from './schema-migration-path.js';
 
-const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 8;
 const LEASE_MS = 30_000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;

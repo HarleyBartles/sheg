@@ -1,6 +1,6 @@
 # ADR-0018: Store durable runs in local SQLite
 
-- Status: Accepted; schema compatibility policy superseded by [ADR-0027](0027-migrate-supported-datastore-schemas.md).
+- Status: Superseded by [ADR-0029](0029-share-the-durable-run-system-across-entrypoints.md) for the CLI persistence boundary; schema compatibility policy superseded by [ADR-0027](0027-migrate-supported-datastore-schemas.md).
 - Date: 2026-10-01
 - Supersedes: None
 
