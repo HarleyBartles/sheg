@@ -81,6 +81,27 @@ test('schema 8 baseline fixture has an explicit migration identity', async () =>
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('fresh schema initialization records a recognized baseline identity', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-baseline-'));
+  try {
+    const store = openRunStore(root);
+    store.close();
+    assert.deepEqual((await rows(root, 'SELECT version, migration_id FROM schema_migrations')).map(({ version, migration_id }) => ({ version, migration_id })), [{ version: 8, migration_id: 'baseline-v8' }]);
+    const reopened = openRunStore(root);
+    reopened.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('a current schema with an unrecognized migration identity is refused', async () => {
+  const root = await fixtureRoot('schema-v8.sql');
+  try {
+    const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    database.exec("UPDATE schema_migrations SET migration_id = 'unrecognized-v8' WHERE version = 8");
+    database.close();
+    assert.throws(() => openRunStore(root), (error: unknown) => error instanceof RunStoreError && error.code === 'datastore_schema_invalid');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('a failed schema step leaves the source at version 7 and retains a verified recoverable backup', async () => {
   const root = await fixtureRoot('schema-v7.sql');
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));

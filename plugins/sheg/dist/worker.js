@@ -22189,8 +22189,10 @@ function validateSchemaShape(database) {
     const columnNames = new Set(columns.map((column) => asText(column.name, `${table} column name`)));
     if (requiredColumns.some((column) => !columnNames.has(column))) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.");
   }
-  const migration = database.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?").get(SCHEMA_VERSION);
-  if (asNumber(migration?.count, "current schema migration count") !== 1) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore has no applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.");
+  const migration = database.prepare("SELECT migration_id FROM schema_migrations WHERE version = ?").get(SCHEMA_VERSION);
+  const migrationId = migration?.migration_id;
+  const validMigrationIds = [`baseline-v${SCHEMA_VERSION}`, ...SCHEMA_MIGRATIONS.filter(({ toVersion }) => toVersion === SCHEMA_VERSION).map(({ id }) => id)];
+  if (typeof migrationId !== "string" || !validMigrationIds.includes(migrationId)) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore has no recognized applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.");
 }
 function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   const integrity = database.prepare("PRAGMA integrity_check").all();
@@ -22424,7 +22426,7 @@ function initialize(database, dataRoot) {
     CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
     CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
     CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL);
-    INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (${SCHEMA_VERSION}, 'baseline-v8', '${(/* @__PURE__ */ new Date()).toISOString()}');
+    INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (${SCHEMA_VERSION}, 'baseline-v${SCHEMA_VERSION}', '${(/* @__PURE__ */ new Date()).toISOString()}');
     PRAGMA user_version = ${SCHEMA_VERSION};
   `);
     database.exec("COMMIT");
