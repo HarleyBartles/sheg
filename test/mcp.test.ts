@@ -63,6 +63,7 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
   try {
     const tools = await f.client.listTools();
     assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_query', 'run_resume', 'run_start', 'run_storage']);
+    assert.match(tools.tools.find(({ name }) => name === 'run_resume')?.description ?? '', /partial journey/i);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
