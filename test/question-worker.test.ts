@@ -388,6 +388,24 @@ test('an unclassified provider exception is charged as an uncertain failed evalu
   } finally { await f.close(); }
 });
 
+test('a worker failure with untouched pending work remains explicitly resumable', async () => {
+  const f = await fixture();
+  try {
+    const provider: DecisionProvider = {
+      async decide() { throw new Error('not reached'); },
+      async decideBatch() { throw new Error('not reached'); },
+      measureBatch() { throw new Error('context measurement failed'); },
+    };
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    const failed = f.store.getStatus(f.runId);
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.completedEvaluations, 0);
+    assert.equal(failed.usedCalls, 0);
+    assert.deepEqual(failed.lifecycle.resume, { eligible: true });
+    assert.equal(f.store.resume(f.runId, Date.now()).started, true);
+  } finally { await f.close(); }
+});
+
 test('a duplicate worker cannot execute the same run while the owner is active', async () => {
   const f = await fixture({ ...request(1), maxCalls: 1 });
   let release: (() => void) | undefined;

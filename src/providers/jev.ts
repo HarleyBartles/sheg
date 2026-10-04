@@ -2,7 +2,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { decisionBatchRequestSchema, decisionRequestSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
-import { DecisionError, decisionValidationFailure, validateDecision, validateDecisionBatch } from '../domain/decision/validate.js';
+import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision, validateDecisionBatch } from '../domain/decision/validate.js';
 import { jevConfigSchema, type JevConfigInput, type JevConfig } from './jev/config.js';
 import { jevMetadata } from './jev/model-metadata.js';
 import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
@@ -171,7 +171,7 @@ export class JevProvider implements DecisionProvider {
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts);
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, undefined, question.id, 'evaluation', 'decision_failed', decisionValidationFailureForReason('malformed_answer'));
       }
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;

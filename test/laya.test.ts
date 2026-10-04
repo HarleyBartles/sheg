@@ -101,6 +101,23 @@ test('Laya validation errors carry safe typed failure evidence without echoing t
   });
 });
 
+test('Laya malformed single answers expose only the safe typed-shape failure reason', async () => {
+  const provider = new LayaProvider(config, {
+    measureFit: async () => fit(20),
+    fetchRequest: async () => Response.json({
+      model: 'laya-rl-agent', answers: { continue: { type: 'choice', choice: 'private-malformed-value' } }, usage: {}, routing: { model: config.checkpoint },
+    }),
+  });
+  await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+    assert.deepEqual((error as { validationFailure?: unknown }).validationFailure, {
+      code: 'invalid_answer', message: 'The answer does not match a supported typed-answer shape.',
+      detail: { reason: 'malformed_answer', field: 'answer', constraint: 'typed_answer_shape' },
+    });
+    assert.equal(JSON.stringify(error).includes('private-malformed-value'), false);
+    return true;
+  });
+});
+
 test('Laya receives linked candidate text as Choice options without Sheg material identifiers', async () => {
   let body: Record<string, unknown> | undefined;
   const linkedRequest: DecisionRequest = { ...request, question: { ...request.question, materialOptions: { continue: 'section-three' } } };

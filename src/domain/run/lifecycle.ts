@@ -16,6 +16,7 @@ export type RunLifecycle = {
 export type RunLifecycleFacts = {
   status: RunStatus;
   kind: 'poll' | 'journey' | 'follow-on';
+  failureScope?: 'evaluation' | 'run';
   cancelRequested: boolean;
   usedCalls: number;
   reservedCalls: number;
@@ -38,7 +39,8 @@ export function deriveRunLifecycle(facts: RunLifecycleFacts): RunLifecycle {
   if (facts.reservedCalls > 0) return refuse('attempt_unresolved');
   if (facts.usedCalls >= facts.maxCalls) return refuse('call_allowance_exhausted');
   const hasResumableWork = facts.status === 'interrupted' && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) ||
-    facts.status === 'partial' && facts.hasFailedEvaluations || facts.status === 'failed' && facts.canRetrySharedFailure;
+    facts.status === 'partial' && facts.hasFailedEvaluations ||
+    facts.status === 'failed' && facts.failureScope === 'run' && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
   if (!hasResumableWork) return refuse('no_unfinished_work');
   return { state, resume: { eligible: true } };
 }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { decisionRequestSchema, type DecisionFailureDetail, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
-import { DecisionError, decisionValidationFailure, validateDecision } from '../domain/decision/validate.js';
+import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision } from '../domain/decision/validate.js';
 import { measureLayaContext } from './laya/context-fit.js';
 export { measureLayaContext } from './laya/context-fit.js';
 
@@ -144,7 +144,7 @@ export class LayaProvider implements DecisionProvider {
       throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1);
     }
     const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, undefined, question.id, 'evaluation', decisionValidationFailureForReason('malformed_answer'));
 
     const result: DecisionResult = {
       ...answer.data,

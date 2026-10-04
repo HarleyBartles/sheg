@@ -126,7 +126,11 @@ function decisionFailureReason(error: DecisionError): DecisionFailureDetail['rea
 }
 
 export function decisionValidationFailure(error: DecisionError): { code: string; message: string; detail: DecisionFailureDetail } {
-  const detail = decisionFailureDetailForReason(decisionFailureReason(error));
+  return decisionValidationFailureForReason(decisionFailureReason(error));
+}
+
+export function decisionValidationFailureForReason(reason: DecisionFailureDetail['reason']): { code: string; message: string; detail: DecisionFailureDetail } {
+  const detail = decisionFailureDetailForReason(reason);
   return { code: detail.reason === 'answer_type_mismatch' ? 'answer_type_mismatch' : 'invalid_answer', message: decisionFailureMessage(detail), detail };
 }
 

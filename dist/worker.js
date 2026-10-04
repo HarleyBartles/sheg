@@ -20162,7 +20162,10 @@ function decisionFailureReason(error62) {
   return reason;
 }
 function decisionValidationFailure(error62) {
-  const detail = decisionFailureDetailForReason(decisionFailureReason(error62));
+  return decisionValidationFailureForReason(decisionFailureReason(error62));
+}
+function decisionValidationFailureForReason(reason) {
+  const detail = decisionFailureDetailForReason(reason);
   return { code: detail.reason === "answer_type_mismatch" ? "answer_type_mismatch" : "invalid_answer", message: decisionFailureMessage(detail), detail };
 }
 function decisionFailureMessage(detail) {
@@ -20568,7 +20571,7 @@ var JevProvider = class {
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts);
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
       }
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
@@ -21139,7 +21142,7 @@ var LayaProvider = class {
       throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
     }
     const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
     const result = {
       ...answer.data,
       attempts: 1,
@@ -21356,7 +21359,7 @@ function deriveRunLifecycle(facts) {
   if (facts.cancelRequested) return refuse("cancellation_requested");
   if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
   if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
-  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && facts.hasFailedEvaluations || facts.status === "failed" && facts.canRetrySharedFailure;
+  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && facts.hasFailedEvaluations || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
   if (!hasResumableWork) return refuse("no_unfinished_work");
   return { state, resume: { eligible: true } };
 }
@@ -23749,6 +23752,7 @@ var SQLiteRunStore = class {
         status,
         kind: request.data.kind,
         cancelRequested: asNumber(row.cancel_requested, "cancel flag") === 1,
+        ...row.failure_scope === null ? {} : { failureScope: asText(row.failure_scope, "failure scope") },
         usedCalls,
         reservedCalls,
         maxCalls,

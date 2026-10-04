@@ -127,15 +127,26 @@ test('a changed request cannot reuse a submission ID', async () => {
 
 test('worker launch failure returns the retained run identity and failed status', async () => {
   const fixture = await setup();
+  let launches = 0;
+  let launchFails = true;
   try {
-    const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() { throw new Error('host path detail'); } }, { assertProviderReady: async () => undefined });
+    const service = createRunService(fixture.store, fixture.root, () => provider(), { async launch() {
+      launches += 1;
+      if (launchFails) throw new Error('host path detail');
+    } }, { assertProviderReady: async () => undefined });
     const run = await service.start(randomUUID(), request());
     assert.equal(run.status, 'failed');
     assert.equal(run.failure?.code, 'worker_launch_failed');
     assert.equal(run.failure?.message.includes('host path detail'), false);
+    assert.deepEqual(run.lifecycle.resume, { eligible: true });
     const saved = fixture.store.getRequest(run.runId);
     assert.equal(saved.request.kind, 'poll');
     if (saved.request.kind === 'poll') assert.equal(saved.request.material[0]!.text, 'Section three');
+    launchFails = false;
+    const resumed = await service.resume(run.runId);
+    assert.equal(resumed.runId, run.runId);
+    assert.equal(resumed.status, 'prepared');
+    assert.equal(launches, 2);
   } finally { await fixture.close(); }
 });
 

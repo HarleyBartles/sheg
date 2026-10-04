@@ -1855,6 +1855,7 @@ class SQLiteRunStore implements RunStore {
       maxCalls,
       cancelRequested: asNumber(row.cancel_requested, 'cancel flag') === 1,
       lifecycle: deriveRunLifecycle({ status, kind: request.data.kind, cancelRequested: asNumber(row.cancel_requested, 'cancel flag') === 1,
+        ...(row.failure_scope === null ? {} : { failureScope: asText(row.failure_scope, 'failure scope') as 'evaluation' | 'run' }),
         usedCalls, reservedCalls, maxCalls,
         hasPendingEvaluations: asNumber(row.pending_evaluations, 'pending evaluation count') > 0,
         hasFailedEvaluations: asNumber(row.failed_evaluations, 'failed evaluation count') > 0,

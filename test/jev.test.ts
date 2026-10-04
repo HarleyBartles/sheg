@@ -142,6 +142,21 @@ test('single Jev validation errors retain safe typed failure evidence', async ()
   } finally { restore(); }
 });
 
+test('Jev malformed single answers expose only the safe typed-shape failure reason', async () => {
+  const restore = installTestKey();
+  try {
+    const provider = makeJevProvider(async () => response({ answers: { 'entry-response': { type: 'choice', choice: 'private-malformed-value' } } }));
+    await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+      assert.deepEqual((error as { validationFailure?: unknown }).validationFailure, {
+        code: 'invalid_answer', message: 'The answer does not match a supported typed-answer shape.',
+        detail: { reason: 'malformed_answer', field: 'answer', constraint: 'typed_answer_shape' },
+      });
+      assert.equal(JSON.stringify(error).includes('private-malformed-value'), false);
+      return true;
+    });
+  } finally { restore(); }
+});
+
 test('Jev receives linked candidate text as Choice options without Sheg material identifiers', async () => {
   const restoreKey = installTestKey();
   try {
