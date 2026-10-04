@@ -49,18 +49,18 @@
 
 ## Task 5: Run focused fresh-context pressure campaigns and inspect them
 
-- [ ] Select affected owning-skill cases and shared safeguards with `npm run skill:campaign -- select`; compare `develop` baseline guidance against candidate package guidance under identical scenario, evidence, rubric, actor settings, and runtime identities.
-- [ ] Run fresh guided actors for the new study-design variation case, polling variation/selected-material case, and existing partial-journey recovery safeguard; use the selected-material workflow with its seeded attempt-owned store so required Sheg MCP calls are observed.
-- [ ] Use no-guidance only as a separate attribution control; record repetition rationale in the off-repository campaign configuration, prioritize scenario breadth, and use repeats only to assess response stability or investigate disagreement.
-- [ ] Inspect every failure, uncertain judgment, runtime error, missing model/runtime metadata, and judge disagreement; rerun only after a substantive scenario, prompt, runtime, or harness correction.
-- [ ] Keep configs and outputs under `Z:/_agent-scratch/sheg/` or another off-repository temporary directory; review and discard each campaign with `npm run skill:campaign -- discard` before publication.
+- [x] Select affected owning-skill cases and shared safeguards with `npm run skill:campaign -- select`; compare `develop` baseline guidance against candidate package guidance under identical scenario, evidence, rubric, actor settings, and runtime identities.
+- [x] Run fresh guided actors for the new study-design variation case, polling variation/selected-material case, and existing partial-journey recovery safeguard; use the selected-material workflow with its seeded attempt-owned store so required Sheg MCP calls are observed.
+- [x] Use no-guidance only as a separate attribution control; record repetition rationale in the off-repository campaign configuration, prioritize scenario breadth, and use repeats only to assess response stability or investigate disagreement.
+- [x] Inspect every failure, uncertain judgment, runtime error, missing model/runtime metadata, and judge disagreement; rerun only after a substantive scenario, prompt, runtime, or harness correction.
+- [x] Keep configs and outputs under `Z:/_agent-scratch/sheg/` or another off-repository temporary directory; review and discard each campaign with `npm run skill:campaign -- discard` before publication.
 
 ## Task 6: Verify the final package and release paths
 
-- [ ] Build the generated plugin package and local candidate ZIP from `plugins/sheg/`; prove the current prerelease version is consistent and the archive has exactly the generated package contents.
-- [ ] Run copied-package MCP startup, worker lifecycle, and credential-helper checks without repository files, local builds, or dependency installation; retain only deterministic source tests, not runtime receipts.
-- [ ] Exercise stable-version package validation with synthetic test inputs only; do not create a stable tag, GitHub Release, or publication.
-- [ ] Run focused harness/scenario-catalog tests, `npm run build`, `npm run verify`, and `git diff --check`; inspect generated skill/package parity and ensure campaign tests stay outside CI and pre-commit.
+- [x] Build the generated plugin package and local candidate ZIP from `plugins/sheg/`; prove the current prerelease version is consistent and the archive has exactly the generated package contents.
+- [x] Run copied-package MCP startup, worker lifecycle, and credential-helper checks without repository files, local builds, or dependency installation; retain only deterministic source tests, not runtime receipts.
+- [x] Exercise stable-version package validation with synthetic test inputs only; do not create a stable tag, GitHub Release, or publication.
+- [x] Run focused harness/scenario-catalog tests, `npm run build`, `npm run verify`, and `git diff --check`; inspect generated skill/package parity and ensure campaign tests stay outside CI and pre-commit.
 
 ## Task 7: Review, publish, and close out
 
