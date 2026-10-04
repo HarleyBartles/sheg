@@ -15,7 +15,10 @@ const armConfigSchema = z.object({
 });
 
 const workflowTurnSchema = z.object({ user: z.string().min(1), evidence: z.unknown().optional(), expectedTools: z.array(z.string()).default([]), criteria: z.array(z.string().min(1)).default([]) }).strict();
-const workflowSetupSchema = z.object({ kind: z.literal('partial-journey-recovery'), version: z.literal(1) }).strict();
+const workflowSetupSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('partial-journey-recovery'), version: z.literal(1) }).strict(),
+  z.object({ kind: z.literal('selected-material-follow-on'), version: z.literal(1) }).strict(),
+]);
 const workflowFixtureSchema = z.object({
   id: z.string(), version: z.number().int().positive(), setup: workflowSetupSchema.optional(), turns: z.array(workflowTurnSchema).min(1),
 }).strict();

@@ -22,6 +22,10 @@
       {
         "id": "input-variation",
         "condition": "Explains that meaningful result diversity comes from varying respondent profile, stimulus, question or response, and state; it does not recommend repeating matching inputs to seek a different result or minimizing cohort size by default."
+      },
+      {
+        "id": "one-dimension-contrast",
+        "condition": "Offers at least one concrete decision-relevant comparison that changes exactly one of respondent profile, stimulus, question or response, or state while keeping the other three fixed."
       }
     ],
     "prohibitedClaims": [
@@ -29,9 +33,20 @@
       "No-fit respondents selected a paragraph.",
       "Sheg extracts selected passage text from a respondent answer.",
       "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
-        "The smallest possible cohort is always the best choice.",
-        "All four input dimensions must change in every study."
+      "The smallest possible cohort is always the best choice.",
+      "All four input dimensions must change in every study."
     ]
+  },
+  {
+    "scenarioId": "selected-material-follow-on",
+    "version": 1,
+    "criteria": [
+      {"id": "real-source-query", "condition": "Calls run_query on the supplied attempt-owned run and reports the two mapped Choices plus the no-fit Choice from observed tool output."},
+      {"id": "isolated-selected-stimulus", "condition": "Calls run_inspect on one follow-on request that includes each eligible respondent's exact selected material, the shared claim, and no earlier answer history."},
+      {"id": "honest-inspection", "condition": "Reports the actual matched and eligible coverage, the no-fit exclusion, and whether inference ran; does not claim the follow-on answered the claim-fit question."},
+      {"id": "purposeful-variation", "condition": "Explains that respondent profile, stimulus, question or response, and state are the variation levers; repeating matching inputs adds no substantive coverage."}
+    ],
+    "prohibitedClaims": ["The no-fit respondent has selected material.", "The follow-on started or produced answers.", "The inspection proves whether the passages support the claim."]
   },
   {
     "scenarioId": "partial-run-selected-question",
@@ -168,6 +183,10 @@
       {
         "id": "input-variation",
         "condition": "Explains that meaningful result diversity comes from varying respondent profile, stimulus, question or response, and state; it does not recommend repeating matching inputs to seek a different result or minimizing cohort size by default."
+      },
+      {
+        "id": "one-dimension-contrast",
+        "condition": "Offers at least one concrete decision-relevant comparison that changes exactly one of respondent profile, stimulus, question or response, or state while keeping the other three fixed."
       }
     ],
     "prohibitedClaims": [
@@ -175,7 +194,8 @@
       "No-fit respondents selected a passage.",
       "Sheg extracts selected passage text from a respondent answer.",
       "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
-      "The smallest possible cohort is always the best choice."
+      "The smallest possible cohort is always the best choice.",
+      "All four input dimensions must change in every study."
     ]
   },
   {

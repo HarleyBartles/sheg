@@ -33,6 +33,7 @@ const expectedScenarioIds = [
   'partial-journey-recovery',
   'partial-run-selected-question',
   'purposeful-input-variation',
+  'selected-material-follow-on',
   'selected-material-isolation-heldout',
   'selected-material-isolation-no-fit',
   'sequence-versus-linear-graph',
@@ -62,7 +63,7 @@ test('scenario selection intersects owner, tags, and guidance paths and can incl
   });
   const ids = selected.map(({ id }) => id);
   assert.deepEqual(ids, [
-    'partial-run-selected-question', 'typed-answer-failure', 'purposeful-input-variation', 'selected-material-isolation-no-fit',
+    'partial-run-selected-question', 'typed-answer-failure', 'purposeful-input-variation', 'selected-material-isolation-no-fit', 'selected-material-follow-on',
     'cumulative-journey-material', 'cumulative-journey-material-heldout',
     'live-storage-inspection-heldout', 'live-storage-inspection',
   ]);

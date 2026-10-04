@@ -148,6 +148,22 @@
     }
   },
   {
+    "id": "selected-material-follow-on",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["selected-material", "workflow", "shared-safeguard"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Use my saved paragraph-selection run to inspect one follow-on: each respondent who selected a paragraph should get that exact paragraph with the shared transit claim and be asked whether it supports the claim. Keep the no-fit person in coverage and leave the follow-on unstarted. Then explain what the inspection did and did not establish.",
+    "controlledEvidence": {
+      "sourceQuestion": {"id": "q-transit-claim", "type": "choice", "prompt": "Which paragraph best represents the pull quote?"},
+      "respondents": ["reader-renter", "reader-parent", "reader-resident"],
+      "selectedMaterials": ["p2", "p5"],
+      "noFitChoice": "no-fit",
+      "followOnState": {"mode": "fresh-material", "priorTurnVisibility": "empty", "includeSelectedMaterial": true},
+      "mockOnly": true
+    }
+  },
+  {
     "id": "partial-run-selected-question",
     "version": 3,
     "ownerSkill": "stimulus-response-polling",
