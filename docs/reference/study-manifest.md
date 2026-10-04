@@ -25,7 +25,7 @@ The [study manifest schema](../../skills/stimulus-response-polling/assets/study-
 
 ## Design and validate in human terms
 
-Start with the source material, what the person wants to learn, and whose perspective would help. Translate the agreed CLI design to a manifest and validate it with `node dist/cli.js check --config <file>`. Use `trace` with scripted Choice IDs or typed responses to inspect a particular path without inference. The shipped CLI has no `preview` command; MCP `run_inspect` previews journeys supplied in its inline request shape.
+Start with the source material, what the person wants to learn, and whose perspective would help. Translate the agreed CLI design to a manifest and validate it with `node dist/cli.js check --config <file>`. Use `trace` with scripted Choice IDs or typed responses to inspect a particular path without inference. The shipped CLI has no `preview` command. MCP `run_inspect` assesses an inline journey's fit and call bounds, returning identifiers for measured packets rather than a complete topology or material preview.
 
 ## Check context fit
 

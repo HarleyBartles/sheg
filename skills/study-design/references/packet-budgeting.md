@@ -22,7 +22,7 @@ New journeys use cumulative material: each question sees the exact text of every
 
 Jev estimates are not exact tokenizer counts or guarantees of provider acceptance. Unknown models remain unavailable until supported context evidence is added. Preserve the measurement method and reason when reporting `fits`, `overflow`, or `unavailable`; unavailable does not mean fit.
 
-Journey inspection walks reachable paths. When variable prior answers prevent exhaustive context measurement, it reports that limitation. Every actual packet is checked before inference, so a design preview is not a guarantee that all later packets will fit.
+Journey inspection walks reachable paths and reports fit with packet identifiers, not a complete topology or material preview. When variable prior answers prevent exhaustive measurement, it reports that limitation. Every actual packet is checked before inference, so an inspection report does not guarantee that all later packets will fit.
 
 ## Authoring within the budget
 

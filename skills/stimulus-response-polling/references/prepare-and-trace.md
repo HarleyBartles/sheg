@@ -1,6 +1,6 @@
 # Prepare and trace a file-backed journey
 
-This reference describes the file-backed journey CLI. MCP tools use inline requests; `run_inspect` can validate fit and preview those journeys without inference.
+This reference describes the file-backed journey CLI. MCP tools use inline requests; `run_inspect` validates their fit and call bounds without inference but does not return a complete journey preview.
 
 Use this workflow to validate inputs, inspect stimulus and task boundaries, or debug a graph route without model inference.
 

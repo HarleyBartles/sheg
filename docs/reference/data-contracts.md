@@ -15,7 +15,7 @@ For example, a profile may satisfy each field's 500-character limit while exceed
 
 ## Durable MCP runs
 
-MCP runs use SQLite with separate versioned persisted JSON payloads. Recall and query expose frozen requests, packets, typed answers, lineage, and physical attempts. Supported upgrade behavior is defined by [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md), rather than the CLI checkpoint format.
+MCP runs use SQLite and store requests, packets, and results as JSON validated on recall. These payloads do not currently carry separate format-version markers; saved compiler fingerprints identify packet semantics. Recall and query expose frozen inputs, typed answers, lineage, and physical attempts. [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md) requires explicit payload versions and upcasters when their contracts change. The CLI checkpoint format does not govern this store.
 
 Jev configuration selects `provider.route` and contains no key material or credential-source override. Authentication uses the selected Windows Credential Manager entry. Results may contain optional cost evidence with a `provider-reported` or `published-rate-estimate` basis. Cost is not aggregated into a run bill; published-rate estimates require metadata for the served model, not merely the requested alias.
 
