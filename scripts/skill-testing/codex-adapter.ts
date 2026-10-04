@@ -2,7 +2,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { CampaignAdapter, ExecutionResult } from './runner.js';
+import { fileURLToPath } from 'node:url';
+import type { CampaignAdapter, ExecutionResult, WorkflowSetup } from './runner.js';
 import { sha256, stableJson } from './snapshots.js';
 
 interface CodexEvent {
@@ -20,6 +21,40 @@ interface ShegMcpServerConfig {
   disabled_tools?: string[] | null;
   startup_timeout_sec?: number | null;
   tool_timeout_sec?: number | null;
+}
+
+interface ControlledCandidateMcp {
+  version: string;
+  root: string;
+  mcpPath: string;
+  workerPath: string;
+  mcpSha256: string;
+  workerSha256: string;
+}
+
+export function resolveControlledCandidateMcp(root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')): ControlledCandidateMcp {
+  const packagePath = path.join(root, 'package.json');
+  const pluginPath = path.join(root, 'plugin.json');
+  const mcpPath = path.join(root, 'dist', 'mcp.js');
+  const workerPath = path.join(root, 'dist', 'worker.js');
+  for (const candidatePath of [packagePath, pluginPath, mcpPath, workerPath]) {
+    if (!existsSync(candidatePath)) throw new Error(`Controlled recovery requires the built candidate artifact: ${path.relative(root, candidatePath)} is missing.`);
+  }
+  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as { version?: unknown };
+  const pluginJson = JSON.parse(readFileSync(pluginPath, 'utf8')) as { version?: unknown };
+  if (typeof packageJson.version !== 'string' || packageJson.version !== pluginJson.version) throw new Error('Controlled recovery candidate package and plugin versions do not match.');
+  return {
+    version: packageJson.version,
+    root,
+    mcpPath,
+    workerPath,
+    mcpSha256: sha256(readFileSync(mcpPath, 'utf8')),
+    workerSha256: sha256(readFileSync(workerPath, 'utf8')),
+  };
+}
+
+function isRecoverySetup(setup: WorkflowSetup | undefined): boolean {
+  return setup?.kind === 'partial-journey-recovery' && setup.version === 1;
 }
 
 function observe(events: string): { sessionId: string | null; settings: Record<string, unknown> } {
@@ -45,15 +80,26 @@ export function createCodexAdapter(options: { executable?: string; args?: string
     return String(result.stdout ?? '');
   };
   const getShegConfig = () => {
-    if (options.shegMcpConfig) return options.shegMcpConfig;
-    const value = JSON.parse(probe(['mcp', 'get', 'sheg', '--json'], 'read the Sheg MCP server configuration')) as ShegMcpServerConfig;
+    const value = options.shegMcpConfig ?? JSON.parse(probe(['mcp', 'get', 'sheg', '--json'], 'read the Sheg MCP server configuration')) as ShegMcpServerConfig;
     if (!value.enabled || value.transport?.type !== 'stdio' || !value.transport.command || !value.transport.cwd) throw new Error('Cannot isolate Sheg MCP storage because the configured Sheg server is not an enabled stdio server.');
     return value;
   };
   let cachedShegConfig: ReturnType<typeof getShegConfig> | undefined;
-  let preflightPromise: Promise<Record<string, unknown>> | undefined;
-  const preflight = async (): Promise<Record<string, unknown>> => {
-    preflightPromise ??= Promise.resolve().then(() => {
+  const preflightPromises = new Map<string, Promise<Record<string, unknown>>>();
+  const shegConfigFor = (workflowSetup?: WorkflowSetup) => {
+    const configured = cachedShegConfig ??= getShegConfig();
+    if (!isRecoverySetup(workflowSetup)) return configured;
+    const candidate = resolveControlledCandidateMcp();
+    return {
+      ...configured,
+      transport: { type: 'stdio', command: process.execPath, args: [candidate.mcpPath], cwd: candidate.root, env: {} },
+    } satisfies ShegMcpServerConfig;
+  };
+  const preflight = async (workflowSetup?: WorkflowSetup): Promise<Record<string, unknown>> => {
+    const setupKey = stableJson(workflowSetup ?? null);
+    let preflightPromise = preflightPromises.get(setupKey);
+    if (!preflightPromise) {
+      preflightPromise = Promise.resolve().then(() => {
       const version = probe(['--version'], 'read its version').trim();
       const execHelp = probe(['exec', '--help'], 'inspect exec capabilities');
       const resumeHelp = probe(['exec', 'resume', '--help'], 'inspect resume capabilities');
@@ -62,17 +108,19 @@ export function createCodexAdapter(options: { executable?: string; args?: string
       };
       for (const flag of ['--json', '--ephemeral', '--skip-git-repo-check', '-C', '-o']) requireFlag(execHelp, flag, 'exec');
       for (const flag of ['--json', '--skip-git-repo-check', '-o']) requireFlag(resumeHelp, flag, 'resume');
-      cachedShegConfig ??= getShegConfig();
-      const env = cachedShegConfig.transport?.env ?? {};
+      const activeShegConfig = shegConfigFor(workflowSetup);
+      const candidate = isRecoverySetup(workflowSetup) ? resolveControlledCandidateMcp() : undefined;
+      const env = activeShegConfig.transport?.env ?? {};
       const configFingerprint = sha256(stableJson({
-        enabled: cachedShegConfig.enabled,
-        transport: { type: cachedShegConfig.transport?.type, command: cachedShegConfig.transport?.command, args: cachedShegConfig.transport?.args ?? [], cwd: cachedShegConfig.transport?.cwd, envSha256: sha256(stableJson(env)) },
-        enabledTools: cachedShegConfig.enabled_tools ?? null,
-        disabledTools: cachedShegConfig.disabled_tools ?? null,
-        startupTimeoutSec: cachedShegConfig.startup_timeout_sec ?? null,
-        toolTimeoutSec: cachedShegConfig.tool_timeout_sec ?? null,
+        enabled: activeShegConfig.enabled,
+        transport: { type: activeShegConfig.transport?.type, command: activeShegConfig.transport?.command, args: activeShegConfig.transport?.args ?? [], cwd: activeShegConfig.transport?.cwd, envSha256: sha256(stableJson(env)) },
+        enabledTools: activeShegConfig.enabled_tools ?? null,
+        disabledTools: activeShegConfig.disabled_tools ?? null,
+        startupTimeoutSec: activeShegConfig.startup_timeout_sec ?? null,
+        toolTimeoutSec: activeShegConfig.tool_timeout_sec ?? null,
       }));
-      const packageJson = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8')) as { version?: unknown };
+      const packagePath = candidate ? path.join(candidate.root, 'package.json') : path.resolve('package.json');
+      const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as { version?: unknown };
       const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
       const codexConfig = path.join(codexHome, 'config.toml');
       return {
@@ -83,21 +131,24 @@ export function createCodexAdapter(options: { executable?: string; args?: string
         codexConfigSha256: existsSync(codexConfig) ? sha256(readFileSync(codexConfig, 'utf8')) : null,
         customArgumentsSha256: sha256(stableJson(options.args ?? [])),
         shegMcpConfigSha256: configFingerprint,
+        ...(candidate ? { shegMcpVersion: candidate.version, shegMcpBundleSha256: candidate.mcpSha256, shegWorkerBundleSha256: candidate.workerSha256 } : {}),
       };
-    });
+      });
+      preflightPromises.set(setupKey, preflightPromise);
+    }
     return preflightPromise;
   };
   const execute: CampaignAdapter['execute'] = async (input): Promise<ExecutionResult> => {
-      await preflight();
+      await preflight(input.workflowSetup);
       const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'sheg-codex-trial-'));
       const finalMessagePath = path.join(temporaryRoot, 'final-message.txt');
       const requested = input.requestedSettings;
       const args = input.resumeSessionId
         ? ['exec', 'resume', input.resumeSessionId, '--json', '--skip-git-repo-check', '-o', finalMessagePath]
         : ['exec', '--json', ...(input.persistent ? [] : ['--ephemeral']), '--skip-git-repo-check', '-C', input.cwd, '-o', finalMessagePath];
-      cachedShegConfig ??= getShegConfig();
+      const activeShegConfig = shegConfigFor(input.workflowSetup);
       const isolatedData = path.join(input.cwd, 'sheg-data');
-      const env: Record<string, string> = { ...(cachedShegConfig.transport?.env ?? {}), PLUGIN_DATA: isolatedData, SHEG_DATA_DIR: isolatedData };
+      const env: Record<string, string> = { ...(activeShegConfig.transport?.env ?? {}), PLUGIN_DATA: isolatedData, SHEG_DATA_DIR: isolatedData };
       if (input.workflowSetup?.kind === 'partial-journey-recovery' && input.workflowSetup.version === 1) {
         env.NODE_ENV = 'test';
         env.SHEG_TEST_PROVIDER = 'partial-journey-recovery';
@@ -110,16 +161,16 @@ export function createCodexAdapter(options: { executable?: string; args?: string
         throw new Error('Unsupported Sheg MCP configuration value.');
       };
       const mcpConfig: Record<string, unknown> = {
-        enabled: cachedShegConfig.enabled,
-        command: cachedShegConfig.transport!.command,
-        args: cachedShegConfig.transport!.args ?? [],
-        cwd: cachedShegConfig.transport!.cwd,
+        enabled: activeShegConfig.enabled,
+        command: activeShegConfig.transport!.command,
+        args: activeShegConfig.transport!.args ?? [],
+        cwd: activeShegConfig.transport!.cwd,
         env,
       };
-      if (cachedShegConfig.enabled_tools) mcpConfig.enabled_tools = cachedShegConfig.enabled_tools;
-      if (cachedShegConfig.disabled_tools) mcpConfig.disabled_tools = cachedShegConfig.disabled_tools;
-      if (cachedShegConfig.startup_timeout_sec) mcpConfig.startup_timeout_sec = cachedShegConfig.startup_timeout_sec;
-      if (cachedShegConfig.tool_timeout_sec) mcpConfig.tool_timeout_sec = cachedShegConfig.tool_timeout_sec;
+      if (activeShegConfig.enabled_tools) mcpConfig.enabled_tools = activeShegConfig.enabled_tools;
+      if (activeShegConfig.disabled_tools) mcpConfig.disabled_tools = activeShegConfig.disabled_tools;
+      if (activeShegConfig.startup_timeout_sec) mcpConfig.startup_timeout_sec = activeShegConfig.startup_timeout_sec;
+      if (activeShegConfig.tool_timeout_sec) mcpConfig.tool_timeout_sec = activeShegConfig.tool_timeout_sec;
       args.push('-c', `mcp_servers.sheg=${toml(mcpConfig)}`);
       const model = requested.model;
       if (typeof model === 'string' && model.length > 0) args.push('--model', model);

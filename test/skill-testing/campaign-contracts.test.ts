@@ -108,6 +108,7 @@ test('partial-journey workflow fixture seeds the real isolated Sheg store for ea
 
     const observedRunIds: string[] = [];
     const result = await runCampaign(campaign, {
+      async preflight(workflowSetup) { assert.deepEqual(workflowSetup, { kind: 'partial-journey-recovery', version: 1 }); return { adapter: 'controlled-test' }; },
       async execute() { throw new Error('Workflow fixture must use persistent execution.'); },
       async executeWorkflow(input) {
         assert.deepEqual(input.workflowSetup, { kind: 'partial-journey-recovery', version: 1 });
@@ -173,6 +174,7 @@ test('controlled recovery provider is enabled only by the explicit isolated test
     const configured = createProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
     assert.equal((await configured.measure?.({ state: {}, question: { type: 'score', id: 'clarity', instructions: 'How clear?', rubric: ['Unclear', 'Mixed', 'Clear'] } }) as { modelIdentity: string }).modelIdentity, 'controlled/partial-journey-recovery');
     assert.throws(() => createProvider({ kind: 'jev', route: 'typesafe', model: 'different-model' }), /frozen TypeSafe fixture/i);
+    assert.throws(() => createProvider({ kind: 'laya', baseUrl: 'https://example.invalid', checkpoint: 'fixture', contextLimit: 32000, headLimit: 4000, tokenizerJsonPath: 'tokenizer.json', tokenizerSha256: 'a'.repeat(64), timeoutMs: 1000 }), /controlled recovery provider only accepts/i);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
     if (previousProvider === undefined) delete process.env.SHEG_TEST_PROVIDER; else process.env.SHEG_TEST_PROVIDER = previousProvider;

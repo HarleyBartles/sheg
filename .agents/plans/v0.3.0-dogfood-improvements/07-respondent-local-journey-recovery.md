@@ -224,6 +224,33 @@ Remove generated evaluation/context IDs from frozen evidence, correct the route 
 
 Run the controlled workflow contract, MCP, lifecycle, worker and campaign-suite tests, then `npm run build` and commit so the tracked pre-commit hook runs `npm run verify` on the staged snapshot. No live actor/judge campaign or hosted inference is part of CI or pre-commit.
 
-- [ ] **Step 5: Obtain a fresh whole-branch review and integrate through the authorized GitHub surface**
+### Task 5: Bind the controlled recovery campaign to the candidate runtime
 
-Review the whole branch against the verified develop base after these corrections. Create/merge the PR only through an authorized GitHub surface; a prior create-PR request was rejected by the GitHub integration with HTTP 403, so continue to treat that connector block as unresolved and do not route around it.
+**Files:**
+- Modify: `src/providers/factory.ts`
+- Modify: `scripts/skill-testing/codex-adapter.ts` and `scripts/skill-testing/runner.ts`
+- Test: `test/skill-testing/codex-adapter.test.ts`, `test/skill-testing/campaign-contracts.test.ts`
+
+- [ ] **Step 1: Prove controlled mode rejects every non-fixture provider**
+
+Under the exact controlled test environment, assert that the TypeSafe fixture provider returns the named deterministic identity while an otherwise valid Laya provider configuration is rejected before inference. The test must fail because controlled mode currently constructs a real Laya provider.
+
+- [ ] **Step 2: Prove the recovery adapter chooses the built candidate instead of the installed plugin**
+
+Add an adapter test with an intentionally stale configured MCP command and the recovery workflow setup. Assert preflight reports the candidate package/plugin identity and Codex receives a nested Sheg MCP command pointing to the candidate's built `dist/mcp.js` and its sibling worker, not the installed command/args/cwd. Missing or version-mismatched candidate artifacts must fail before actor launch.
+
+- [ ] **Step 3: Restrict controlled inference and readiness bypass to the fixture provider**
+
+Reject Laya and every Jev configuration except the frozen TypeSafe fixture before service admission or worker dispatch. Keep provider readiness bypass and the inline worker behind the explicit `NODE_ENV=test` plus fixture marker. Preserve normal production provider routing.
+
+- [ ] **Step 4: Pass workflow setup through adapter preflight and execute with the candidate configuration**
+
+Have the runner pass its frozen workflow setup into adapter preflight. In the recovery fixture only, resolve and validate the current candidate package, plugin metadata, `dist/mcp.js`, and `dist/worker.js`, fingerprint the effective candidate configuration, and use `process.execPath` with the candidate bundle and worktree root. Preserve the configured MCP command for other suites. Never infer candidate identity from the installed plugin.
+
+- [ ] **Step 5: Run focused proofs, build, and the full repository gate**
+
+Run Codex adapter, campaign contract, MCP, provider, lifecycle and worker tests, `npm run build`, then commit so the tracked hook validates the staged snapshot with `npm run verify`. Do not run the skill actor/judge campaign or hosted inference in CI or pre-commit.
+
+- [ ] **Step 6: Re-run the fresh whole-branch review and integrate through the authorized GitHub surface**
+
+Build a new review package and obtain fresh whole-branch and matching specialist reviews after the fixes. Re-grade every review finding and declined-to-judge line. Create/merge the PR only through the GitHub integration. The prior create-PR request received HTTP 403, and its no-bypass boundary remains in force unless the connector state or permission materially changes.

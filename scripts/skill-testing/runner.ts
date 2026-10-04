@@ -20,7 +20,7 @@ export interface ExecutionResult {
 export type WorkflowSetup = { kind: 'partial-journey-recovery'; version: 1 };
 
 export interface CampaignAdapter {
-  preflight?(): Promise<Record<string, unknown>>;
+  preflight?(workflowSetup?: WorkflowSetup): Promise<Record<string, unknown>>;
   execute(input: { prompt: string; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; persistent?: boolean; resumeSessionId?: string; workflowSetup?: WorkflowSetup }): Promise<ExecutionResult>;
   executeWorkflow?(input: { initialPrompt: string; turns: string[]; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; workflowSetup?: WorkflowSetup }): Promise<ExecutionResult>;
 }
@@ -113,7 +113,7 @@ export async function runCampaign(
     throw new Error(`Campaign concurrency must be between 1 and ${manifest.concurrency}.`);
   }
   const adapterRuntimeIdentity = adapter.preflight
-    ? await adapter.preflight()
+    ? await adapter.preflight(manifest.workflowSetup)
     : { adapter: typeof manifest.execution.adapter === 'string' ? manifest.execution.adapter : 'custom', executionSha256: manifest.basis.executionSha256 };
   const runtimeIdentity = { ...adapterRuntimeIdentity, effectiveConcurrency: concurrency };
   const runtimeIdentitySha256 = sha256(stableJson(runtimeIdentity));

@@ -39344,11 +39344,11 @@ function createControlledWorkflowProvider() {
 
 // src/providers/factory.ts
 function createProvider(config2) {
+  if (isControlledWorkflowTestEnabled()) {
+    if (config2.kind !== "jev" || (config2.route ?? "openrouter") !== "typesafe" || config2.model !== "jev-latest") throw new Error("Controlled recovery provider only accepts its frozen TypeSafe fixture request.");
+    return createControlledWorkflowProvider();
+  }
   if (config2.kind === "jev") {
-    if (isControlledWorkflowTestEnabled()) {
-      if ((config2.route ?? "openrouter") !== "typesafe" || config2.model !== "jev-latest") throw new Error("Controlled recovery provider only accepts its frozen TypeSafe fixture request.");
-      return createControlledWorkflowProvider();
-    }
     return new JevProvider(config2);
   }
   return new LayaProvider({
