@@ -198,3 +198,32 @@ Expected: PASS; the deterministic adapter observes a genuine durable partial run
 - [x] **Step 6: Commit and mark the review corrections complete**
 
 Commit with message `fix: validate and seed partial journey recovery`; run `task-done` against this task's exact start base and the focused command. The commit hook runs `npm run verify` over the staged snapshot. Do not run live actors or judges in CI or pre-commit.
+
+### Task 4: Keep the recovery workflow controlled and evidence-aligned
+
+**Files:**
+- Modify: `src/testing/controlled-workflow-provider.ts`, `src/providers/factory.ts`, and `src/entrypoints/mcp.ts`
+- Modify: `scripts/skill-testing/runner.ts` and `scripts/skill-testing/codex-adapter.ts`
+- Modify: `scripts/skill-testing/workflow-seeds.ts`
+- Modify: `skills/stimulus-response-polling/tests/behavior/scenarios.json`
+- Test: `test/skill-testing/campaign-contracts.test.ts` and `test/mcp.test.ts`
+
+- [x] **Step 1: Add failing fixture-contract and recovery-through-MCP tests**
+
+Assert the workflow setup reaches the actor adapter, stable evaluator facts match the actual seeded run, controlled inference is enabled only by its explicit isolated test environment, and the MCP `run_resume` action completes the saved retry before a later status read.
+
+- [x] **Step 2: Add an isolated deterministic worker boundary**
+
+For this versioned workflow fixture only, pass an explicit test-provider marker into the isolated Sheg MCP process. Require both `NODE_ENV=test` and the fixture marker before bypassing credential readiness or substituting inference. Use an inline worker in this mode so the subsequent workflow turn reads the durable retry result. Keep normal MCP and detached-worker execution unchanged, reject unexpected fixture requests, and label recorded execution as controlled rather than native TypeSafe.
+
+- [x] **Step 3: Align semantic evidence with durable seeded facts**
+
+Remove generated evaluation/context IDs from frozen evidence, correct the route destination and failure code to match the seed, and assert parity for stable status, allowance, route, failed node, question and failure code. Do not freeze per-trial generated IDs or campaign results into source.
+
+- [x] **Step 4: Run focused proofs and the canonical repository gate**
+
+Run the controlled workflow contract, MCP, lifecycle, worker and campaign-suite tests, then `npm run build` and commit so the tracked pre-commit hook runs `npm run verify` on the staged snapshot. No live actor/judge campaign or hosted inference is part of CI or pre-commit.
+
+- [ ] **Step 5: Obtain a fresh whole-branch review and integrate through the authorized GitHub surface**
+
+Review the whole branch against the verified develop base after these corrections. Create/merge the PR only through an authorized GitHub surface; a prior create-PR request was rejected by the GitHub integration with HTTP 403, so continue to treat that connector block as unresolved and do not route around it.

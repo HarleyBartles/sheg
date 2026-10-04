@@ -17,10 +17,12 @@ export interface ExecutionResult {
   workflowTurnEvents?: string[];
 }
 
+export type WorkflowSetup = { kind: 'partial-journey-recovery'; version: 1 };
+
 export interface CampaignAdapter {
   preflight?(): Promise<Record<string, unknown>>;
-  execute(input: { prompt: string; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; persistent?: boolean; resumeSessionId?: string }): Promise<ExecutionResult>;
-  executeWorkflow?(input: { initialPrompt: string; turns: string[]; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal }): Promise<ExecutionResult>;
+  execute(input: { prompt: string; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; persistent?: boolean; resumeSessionId?: string; workflowSetup?: WorkflowSetup }): Promise<ExecutionResult>;
+  executeWorkflow?(input: { initialPrompt: string; turns: string[]; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; workflowSetup?: WorkflowSetup }): Promise<ExecutionResult>;
 }
 
 interface JournalEntry {
@@ -169,6 +171,7 @@ export async function runCampaign(
           result = await adapter.executeWorkflow!({
             initialPrompt: workflowPrompts[0]!,
             turns: turns.slice(1), cwd, timeoutMs: manifest.timeoutMs, requestedSettings: manifest.execution,
+            ...(manifest.workflowSetup ? { workflowSetup: manifest.workflowSetup } : {}),
             ...(options.signal ? { signal: options.signal } : {}),
           });
         } else {

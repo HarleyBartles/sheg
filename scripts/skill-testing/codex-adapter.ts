@@ -97,7 +97,11 @@ export function createCodexAdapter(options: { executable?: string; args?: string
         : ['exec', '--json', ...(input.persistent ? [] : ['--ephemeral']), '--skip-git-repo-check', '-C', input.cwd, '-o', finalMessagePath];
       cachedShegConfig ??= getShegConfig();
       const isolatedData = path.join(input.cwd, 'sheg-data');
-      const env = { ...(cachedShegConfig.transport?.env ?? {}), PLUGIN_DATA: isolatedData, SHEG_DATA_DIR: isolatedData };
+      const env: Record<string, string> = { ...(cachedShegConfig.transport?.env ?? {}), PLUGIN_DATA: isolatedData, SHEG_DATA_DIR: isolatedData };
+      if (input.workflowSetup?.kind === 'partial-journey-recovery' && input.workflowSetup.version === 1) {
+        env.NODE_ENV = 'test';
+        env.SHEG_TEST_PROVIDER = 'partial-journey-recovery';
+      }
       const toml = (item: unknown): string => {
         if (typeof item === 'string') return JSON.stringify(item);
         if (typeof item === 'boolean' || typeof item === 'number') return String(item);

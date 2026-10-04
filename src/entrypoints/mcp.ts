@@ -11,6 +11,8 @@ import { DetachedWorkerLauncher } from '../infrastructure/worker-launcher.js';
 import { assertProviderReady, createProvider } from '../providers/factory.js';
 import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import { productVersion } from '../infrastructure/product-identity.js';
+import { isControlledWorkflowTestEnabled } from '../testing/controlled-workflow-provider.js';
+import { executeQuestionRun } from '../application/question-worker.js';
 
 const runListSchema = runListQuerySchema;
 const runDeleteSchema = z.object({ runIds: z.array(z.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, 'Run IDs must be unique.'), dryRun: z.boolean().default(false) }).strict();
@@ -51,7 +53,11 @@ export function createPollingServer(service: RunService = createDefaultRunServic
 function createDefaultRunService(): RunService {
   const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
   const store = openRunStore(dataRoot);
-  return createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady });
+  const controlledWorkflowTest = isControlledWorkflowTestEnabled();
+  const launcher = controlledWorkflowTest
+    ? { async launch(_root: string, runId: string) { await executeQuestionRun(store, runId, createProvider); } }
+    : new DetachedWorkerLauncher();
+  return createRunService(store, dataRoot, createProvider, launcher, { assertProviderReady: controlledWorkflowTest ? async () => {} : assertProviderReady });
 }
 
 async function safeResult(operation: () => unknown | Promise<unknown>) {

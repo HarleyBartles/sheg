@@ -43,13 +43,13 @@ const partialJourneyRequest = runRequestSchema.parse({
 });
 
 function fit(): ProviderContextFit {
-  return { provider: 'jev', status: 'fits', method: 'deterministic-workflow-fixture', modelIdentity: 'jev-latest', tokenCount: 'estimated',
+  return { provider: 'jev', status: 'fits', method: 'deterministic-workflow-fixture', modelIdentity: 'controlled/partial-journey-recovery', tokenCount: 'estimated',
     tokens: 1, contextLimit: 32_000, headroomTokens: 0, effectiveLimit: 32_000, details: {} };
 }
 
 function choice(choiceId: 'continue' | 'leave'): DecisionResult {
   return { type: 'choice', choice: choiceId, probabilities: { continue: choiceId === 'continue' ? 0.9 : 0.1, leave: choiceId === 'leave' ? 0.9 : 0.1 },
-    attempts: 1, provider: 'jev', model: 'jev-latest', latencyMs: 1, usage: {} };
+    attempts: 1, provider: 'jev', model: 'controlled/partial-journey-recovery', latencyMs: 1, usage: {} };
 }
 
 const seedProvider: DecisionProvider = {

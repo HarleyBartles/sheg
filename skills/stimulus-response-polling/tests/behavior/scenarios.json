@@ -620,14 +620,14 @@
             { "type": "response", "questionId": "interest", "choice": "continue" },
             { "type": "exposure", "itemId": "evidence" }
           ],
-          "route": [{ "nodeId": "ask-interest", "response": "continue", "toNodeId": "show-evidence" }],
-          "failedTurn": { "evaluationId": "evaluation-b-clarity", "contextId": "context-b-clarity", "nodeId": "ask-clarity", "questionId": "clarity", "status": "failed", "failure": { "code": "invalid_answer", "reason": "unknown_option" } }
+          "route": [{ "nodeId": "ask-interest", "response": "continue", "toNodeId": "evidence-node" }],
+          "failedTurn": { "nodeId": "ask-clarity", "questionId": "clarity", "status": "failed", "failure": { "code": "decision_failed" } }
         }
       ],
       "attempts": [
         { "respondentId": "reader-a", "status": "answered" },
         { "respondentId": "reader-b", "status": "answered" },
-        { "respondentId": "reader-b", "evaluationId": "evaluation-b-clarity", "status": "failed", "failureScope": "evaluation" }
+        { "respondentId": "reader-b", "status": "failed", "failureScope": "evaluation" }
       ]
     }
   }

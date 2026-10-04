@@ -12,6 +12,9 @@ import { createRunService } from '../src/application/run-service.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
+import { seedWorkflowState } from '../scripts/skill-testing/workflow-seeds.js';
+import { createControlledWorkflowProvider } from '../src/testing/controlled-workflow-provider.js';
+import { executeQuestionRun } from '../src/application/question-worker.js';
 
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
@@ -177,6 +180,41 @@ test('MCP reports eligible respondent-local journey recovery and resumes only on
     assert.deepEqual(f.store.attempts(runId).items.map(({ status }) => status), ['failed']);
   } finally {
     await f.close();
+  }
+});
+
+test('MCP controlled recovery resumes the saved journey before the next workflow turn reads it', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-controlled-resume-'));
+  const seeded = await seedWorkflowState({ kind: 'partial-journey-recovery', version: 1 }, root);
+  const store = openRunStore(root);
+  const provider = createControlledWorkflowProvider();
+  const service = createRunService(store, root, () => provider, {
+    async launch(_dataRoot, runId) { await executeQuestionRun(store, runId, () => provider); },
+  }, { assertProviderReady: async () => undefined });
+  const server = createPollingServer(service);
+  const client = new Client({ name: 'sheg-controlled-recovery-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const before = await client.callTool({ name: 'run_get', arguments: { runId: seeded.runId, view: 'status' } });
+    assert.equal((before.structuredContent as { status: string }).status, 'partial');
+    const resumed = await client.callTool({ name: 'run_resume', arguments: { runId: seeded.runId } });
+    const status = resumed.structuredContent as { runId: string; status: string; usedCalls: number; maxCalls: number };
+    assert.equal(status.runId, seeded.runId);
+    assert.equal(status.status, 'completed');
+    assert.equal(status.usedCalls, 4);
+    assert.equal(status.maxCalls, 8);
+    const journey = await client.callTool({ name: 'run_get', arguments: { runId: seeded.runId, view: 'journey' } });
+    const data = journey.structuredContent as { respondents: Array<{ respondentId: string; status: string; route: Array<{ nodeId: string; toNodeId: string }> }> ; evaluations: Array<{ respondentId: string; questionId: string; status: string }> };
+    assert.deepEqual(data.respondents.map(({ respondentId, status }) => [respondentId, status]), [['reader-a', 'completed'], ['reader-b', 'completed']]);
+    assert.deepEqual(data.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.route.map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-interest', 'evidence-node'], ['ask-clarity', 'clear']]);
+    assert.deepEqual(store.attempts(seeded.runId).items.map(({ status }) => status), ['answered', 'answered', 'failed', 'answered']);
+    assert.equal(data.evaluations.filter(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'interest').length, 1);
+  } finally {
+    await client.close();
+    await server.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
   }
 });
 

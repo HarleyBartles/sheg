@@ -6,6 +6,8 @@ import test from 'node:test';
 import { assertComparableManifests, prepareCampaign, readFrozenCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
 import { runCampaign } from '../../scripts/skill-testing/runner.js';
 import { openRunStore } from '../../src/infrastructure/run-store.js';
+import { createControlledWorkflowProvider, isControlledWorkflowTestEnabled } from '../../src/testing/controlled-workflow-provider.js';
+import { createProvider } from '../../src/providers/factory.js';
 
 function fixture(): { root: string; config: CampaignConfig; cleanup: () => void } {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-skill-campaign-contracts-'));
@@ -108,6 +110,7 @@ test('partial-journey workflow fixture seeds the real isolated Sheg store for ea
     const result = await runCampaign(campaign, {
       async execute() { throw new Error('Workflow fixture must use persistent execution.'); },
       async executeWorkflow(input) {
+        assert.deepEqual(input.workflowSetup, { kind: 'partial-journey-recovery', version: 1 });
         const prompts = [input.initialPrompt, ...input.turns];
         const turnPrompts = prompts.map((prompt, index) => index === 0 ? prompt.split('## Workflow turn 1\n').at(-1)! : prompt);
         const runIds = turnPrompts.map((prompt) => /\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b/i.exec(prompt)?.[0]);
@@ -126,8 +129,20 @@ test('partial-journey workflow fixture seeds the real isolated Sheg store for ea
           assert.equal(status.maxCalls, 8);
           assert.deepEqual(journey.respondents.map(({ respondentId, status }) => [respondentId, status]), [['reader-a', 'completed'], ['reader-b', 'failed']]);
           assert.equal(journey.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.events.filter(({ type }) => type === 'response').length, 1, JSON.stringify(journey.respondents));
-          assert.equal(journey.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.route.length, 1, JSON.stringify(journey.respondents));
-          assert.ok(journey.evaluations.some(({ respondentId, questionId, status }) => respondentId === 'reader-b' && questionId === 'clarity' && status === 'failed'));
+          const readerB = journey.respondents.find(({ respondentId }) => respondentId === 'reader-b')!;
+          assert.equal(readerB.route.length, 1, JSON.stringify(journey.respondents));
+          const failedTurn = journey.evaluations.find(({ respondentId, questionId, status }) => respondentId === 'reader-b' && questionId === 'clarity' && status === 'failed')!;
+          const scenario = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/scenarios.json', 'utf8')) as { id: string; controlledEvidence: unknown }[];
+          const controlled = scenario.find(({ id }) => id === 'partial-journey-recovery')!.controlledEvidence as { status: string; usedCalls: number; maxCalls: number; respondents: { respondentId: string; route?: { toNodeId: string }[]; failedTurn?: { nodeId: string; questionId: string; status: string; failure: { code: string } } }[] };
+          const controlledReaderB = controlled.respondents.find(({ respondentId }) => respondentId === 'reader-b')!;
+          assert.equal(controlled.status, status.status);
+          assert.equal(controlled.usedCalls, status.usedCalls);
+          assert.equal(controlled.maxCalls, status.maxCalls);
+          assert.equal(controlledReaderB.route?.[0]?.toNodeId, readerB.route[0]?.toNodeId);
+          assert.equal(controlledReaderB.failedTurn?.nodeId, failedTurn.nodeId);
+          assert.equal(controlledReaderB.failedTurn?.questionId, failedTurn.questionId);
+          assert.equal(controlledReaderB.failedTurn?.status, failedTurn.status);
+          assert.equal(controlledReaderB.failedTurn?.failure.code, failedTurn.failure?.code);
           assert.equal(attempts.length, 3, JSON.stringify(attempts));
           assert.deepEqual(attempts.map(({ status }) => status), ['answered', 'answered', 'failed']);
           assert.ok(attempts.every(({ status }) => status !== 'reserved' && status !== 'uncertain'));
@@ -140,6 +155,28 @@ test('partial-journey workflow fixture seeds the real isolated Sheg store for ea
     assert.equal(new Set(observedRunIds).size, 2);
     assert.ok(observedRunIds.every((runId) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(runId)));
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('controlled recovery provider is enabled only by the explicit isolated test environment', async () => {
+  assert.equal(isControlledWorkflowTestEnabled({ NODE_ENV: 'test', SHEG_TEST_PROVIDER: 'partial-journey-recovery' }), true);
+  assert.equal(isControlledWorkflowTestEnabled({ NODE_ENV: 'production', SHEG_TEST_PROVIDER: 'partial-journey-recovery' }), false);
+  assert.equal(isControlledWorkflowTestEnabled({ NODE_ENV: 'test' }), false);
+  const provider = createControlledWorkflowProvider();
+  const result = await provider.decide({ state: {}, question: { type: 'score', id: 'clarity', instructions: 'How clear?', rubric: ['Unclear', 'Mixed', 'Clear'] } }, 1);
+  assert.deepEqual({ type: result.type, score: result.type === 'score' ? result.score : undefined, model: result.model }, { type: 'score', score: 2, model: 'controlled/partial-journey-recovery' });
+  await assert.rejects(() => provider.decide({ state: {}, question: { type: 'choice', id: 'interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } }, optionIds: ['yes', 'no'] }, 1), /unexpected turn/i);
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousProvider = process.env.SHEG_TEST_PROVIDER;
+  try {
+    process.env.NODE_ENV = 'test';
+    process.env.SHEG_TEST_PROVIDER = 'partial-journey-recovery';
+    const configured = createProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
+    assert.equal((await configured.measure?.({ state: {}, question: { type: 'score', id: 'clarity', instructions: 'How clear?', rubric: ['Unclear', 'Mixed', 'Clear'] } }) as { modelIdentity: string }).modelIdentity, 'controlled/partial-journey-recovery');
+    assert.throws(() => createProvider({ kind: 'jev', route: 'typesafe', model: 'different-model' }), /frozen TypeSafe fixture/i);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    if (previousProvider === undefined) delete process.env.SHEG_TEST_PROVIDER; else process.env.SHEG_TEST_PROVIDER = previousProvider;
+  }
 });
 
 test('preparation rejects missing guidance references and output collisions', () => {
