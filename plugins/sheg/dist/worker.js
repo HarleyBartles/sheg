@@ -22195,13 +22195,7 @@ var SQLiteRunStore = class {
       let cursor;
       if (query.cursor) {
         cursor = decodeCursor(query.cursor, "evidence");
-        const coverage2 = cursor.coverage;
-        const respondents = coverage2?.respondents;
-        const matched = cursor.matchedCoverage;
-        const matchedEvaluations = matched?.evaluations;
-        const selectedMaterials = matched?.selectedMaterials;
-        const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
-        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.totalMatches) || cursor.totalMatches < 0 || !Number.isSafeInteger(cursor.usedCalls) || !Number.isSafeInteger(cursor.reservedCalls) || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || typeof cursor.sourceComplete !== "boolean" || !runLifecycleSchema.safeParse(cursor.lifecycle).success || !validCount(coverage2?.totalEvaluations) || !validCount(coverage2?.completedEvaluations) || !validCount(coverage2?.failedEvaluations) || !validCount(respondents?.total) || !validCount(respondents?.active) || !validCount(respondents?.completed) || !validCount(respondents?.failed) || !validCount(respondents?.unreached) || !validCount(matched?.representedRespondents) || !validCount(matchedEvaluations?.total) || !validCount(matchedEvaluations?.pending) || !validCount(matchedEvaluations?.answered) || !validCount(matchedEvaluations?.failed) || !validCount(matchedEvaluations?.unreached) || !validCount(selectedMaterials?.evaluations) || !validCount(selectedMaterials?.respondents) || !validCount(selectedMaterials?.distinctMaterials)) {
+        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
           throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
         }
       }
@@ -22248,14 +22242,14 @@ var SQLiteRunStore = class {
       }
       const whereSql = where.join(" AND ");
       const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
-      const snapshotCount = cursor?.totalMatches ?? asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
-      const evaluationCoverage = cursor?.coverage ?? {
+      const snapshotCount = asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
+      const evaluationCoverage = {
         totalEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
         completedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
         failedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal).count, "failed evaluation denominator")
       };
-      let respondentCoverage = cursor?.coverage.respondents;
-      if (!respondentCoverage) {
+      let respondentCoverage;
+      {
         const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
         const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
@@ -22272,8 +22266,8 @@ var SQLiteRunStore = class {
         respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-      const lifecycle = cursor?.lifecycle ?? currentLifecycle;
-      const matchedCoverage = cursor?.matchedCoverage ?? (() => {
+      const lifecycle = currentLifecycle;
+      const matchedCoverage = (() => {
         const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
           (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
             WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
@@ -22362,12 +22356,12 @@ var SQLiteRunStore = class {
         };
       });
       const last = pageRows.at(-1);
-      const sourceComplete = cursor?.sourceComplete ?? sourceStatus === "completed";
+      const sourceComplete = sourceStatus === "completed";
       return {
         items,
         totalMatches: snapshotCount,
         sourceRunId: query.sourceRunId,
-        sourceStatus: cursor?.sourceStatus ?? sourceStatus,
+        sourceStatus,
         sourceComplete,
         lifecycle,
         coverage,
@@ -22378,12 +22372,8 @@ var SQLiteRunStore = class {
           criteriaFingerprint,
           maxOrdinal,
           lastOrdinal: asNumber(last.ordinal, "evaluation ordinal"),
-          sourceStatus: cursor?.sourceStatus ?? sourceStatus,
-          sourceComplete,
-          totalMatches: snapshotCount,
+          sourceStatus,
           lifecycle,
-          coverage,
-          matchedCoverage,
           usedCalls,
           reservedCalls
         }) } : {}

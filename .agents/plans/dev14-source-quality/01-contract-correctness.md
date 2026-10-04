@@ -52,11 +52,11 @@ Preserve request compatibility, migration paths, original compiler fingerprints,
 
 **Interfaces:** Public RunEvidencePage fields remain unchanged. A cursor supplies position and verified source revision, not trusted summaries. Historical unsigned cursors may be rejected with the existing invalid-cursor contract rather than believed.
 
-- [ ] Add a settled mapped Choice pagination case that alters totals/material coverage in a returned cursor, and verifies refusal or database-derived accurate counts. Include valid pagination and an unlinked no-fit answer to prove counts use real selected materials.
-- [ ] Run node --import tsx --test test/run-store.test.ts and witness the false totals before correction.
-- [ ] Derive summaries from stored evidence or protect a server-authored snapshot using an explicit integrity mechanism; keep query/source binding and revision checks intact.
-- [ ] Run node --import tsx --test test/run-store.test.ts test/run-service.test.ts test/mcp.test.ts and npm run typecheck; inspect and commit.
+- [x] Add a settled mapped Choice pagination case that alters totals/material coverage in a returned cursor, and verifies refusal or database-derived accurate counts. Include valid pagination and an unlinked no-fit answer to prove counts use real selected materials.
+- [x] Run node --import tsx --test test/run-store.test.ts and witness the false totals before correction.
+- [x] Derive summaries from stored evidence or protect a server-authored snapshot using an explicit integrity mechanism; keep query/source binding and revision checks intact.
+- [x] Run node --import tsx --test test/run-store.test.ts test/run-service.test.ts test/mcp.test.ts and npm run typecheck; inspect and commit.
 
 ### Completion
 
-- [ ] Run npm run verify after regenerating canonical contract/package outputs affected by schema changes. Update the live roadmap and write Plan 2 against the delivered seams. Keep results off-repository; Git and the PR carry publication history.
+- [x] Run npm run verify after regenerating canonical contract/package outputs affected by schema changes. Update the live roadmap and write Plan 2 against the delivered seams. Keep results off-repository; Git and the PR carry publication history.
