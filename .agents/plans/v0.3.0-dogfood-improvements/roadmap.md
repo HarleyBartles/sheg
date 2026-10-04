@@ -1,10 +1,10 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plans 1 through 7 are merged to `develop`; Plans 8, 9, and 10 remain. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
+Status: Plans 1 through 8 are merged to `develop`; Plans 9 and 10 remain. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
 
 ## Workspace and base
 
-- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-marketplace-package`, branch `codex/v0.3.0-marketplace-package`, based on Plan 7 merge `8f2ad5fd133367a872c99cf46ec92b7c7eea5327`.
+- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-store-migrations`, branch `codex/v0.3.0-store-migrations`, based on Plan 8 merge `027b3b983bbe95870eb8450bfc14ec1b0009f61a`.
 - Implementation follows `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
 
 ## Outcome
@@ -26,11 +26,11 @@ Each next executable plan is written against the delivered code of its predecess
 | 5 | Expose precise failure and lifecycle evidence | merged to `develop` in PR #17 | Retired after merge | `0.3.0-dev.7` |
 | 6 | Enable native TypeSafe inference and verify a realistic author journey | merged to `develop` in PR #18 | Retired after merge | `0.3.0-dev.8` |
 | 7 | Resume eligible respondent-local failures in partial journeys | merged to `develop` in PR #19 | Retired after merge | `0.3.0-dev.9` |
-| 8 | Ship one reproducible self-contained plugin package across Git and ZIP | active; plan written JIT | [Plan 8](08-self-contained-marketplace-package.md) | `0.3.0-dev.10` |
-| 9 | Establish datastore upgrade compatibility from the 0.3.0 baseline | pending; plan written JIT | Not authored yet | `0.3.0-dev.11` |
+| 8 | Ship one reproducible self-contained plugin package across Git and ZIP | merged to `develop` in PR #20 | Retired after merge | `0.3.0-dev.10` |
+| 9 | Establish datastore upgrade compatibility from the 0.3.0 baseline | active; plan written JIT | [Plan 9](09-datastore-upgrade-compatibility.md) | `0.3.0-dev.11` |
 | 10 | Reconcile guidance and verify the installed author journey | pending; plan written JIT | Not authored yet | `0.3.0-dev.12` |
 
-## Plan 8: self-contained marketplace package
+## Plan 8: self-contained marketplace package (merged in PR #20)
 
 Generate a tracked `plugins/sheg/` package from canonical repository source and point the existing `.agents/plugins/marketplace.json` entry at `./plugins/sheg`. Keep plugin name, marketplace name, display name, installation policy and authentication policy unchanged. The generated package contains only the portable manifests, a minimal runtime `package.json` carrying the generated version and module type, built `dist/` runtime and required helper/data assets, shipped skills and references without skill behavior tests, and the license. It excludes implementation source, dependencies, tests, plans, development guidance, build scripts, and unrelated repository files. Root `package.json` remains the single authored product version; the generated manifests and package are reproducible build outputs.
 
@@ -40,15 +40,11 @@ Acceptance: a clean generated package diff is reproducible; source and ZIP have 
 
 ## Plan 9: datastore upgrade compatibility
 
-The merged lifecycle contract deliberately refuses every partial journey, and respondent-local failure settlement clears the failed turn identifiers. Change that runtime contract so `run_resume` can retry eligible failed journey work under the same run ID and original remaining call allowance while preserving completed answers, respondent-specific exposure/response history, route choices, reached-turn order and physical-attempt history. A failed retry remains visible and resumable only when safe. Never replay successful respondents or earlier reached turns, widen the allowance, or retry unresolved/uncertain provider attempts. Prove the reported eligibility and actual transition agree, with refusal for cancellation, exhausted allowance and unresolved attempts. Update the polling guidance and add a behavior scenario for explaining and explicitly resuming a partial journey.
-
-## Plan 8: datastore upgrade compatibility
-
-Make the final 0.3.0 candidate the first supported SQLite schema baseline. Development prerelease datastores remain disposable and need not migrate; after 0.3.0, every schema-changing release must ship a tested forward migration from each supported prior schema. Keep migrations sequential, transactional and data-preserving, with a verified pre-migration backup and integrity checks. Version and upcast persisted JSON payloads separately where their contracts evolve; preserve frozen requests, packets, answers, lineage and physical-attempt accounting as historical evidence rather than silently reinterpreting them. Do not automatically reset data when migration fails or when a newer unsupported schema is found.
+Make SQLite schema version 8 the v0.3.0 baseline and the beginning of the supported upgrade range. This plan migrates the current development schema 7 to 8 so the migration machinery is exercised; older prerelease datastores remain disposable and are not a release compatibility promise. After v0.3.0, every schema-changing release must ship a tested forward migration from every supported released schema. Keep migrations sequential, transactional and data-preserving, with a verified pre-migration backup and integrity checks. Version and upcast persisted JSON payloads separately where their contracts evolve; preserve frozen requests, packets, answers, lineage and physical-attempt accounting as historical evidence rather than silently reinterpreting them. Do not automatically reset data when migration fails or when a newer unsupported schema is found.
 
 Ensure MCP startup remains useful when datastore opening or migration fails. Register a bounded maintenance/recovery surface that can report compatibility and migration state and provide safe export or explicitly confirmed reset options without exposing credentials or raw SQL. Ordinary study tools must refuse writes while recovery is required. A failed migration leaves the original database recoverable and explains the next action. Supersede ADR-0018 with the post-0.3.0 compatibility promise and its supported-schema policy.
 
-Acceptance: source-owned schema fixtures represent the 0.3.0 baseline and each supported migration input; automated tests prove data and accounting preservation across every migration step, transaction rollback on failure, refusal of unknown future schemas without mutation, and actionable maintenance access when normal startup cannot open the store. Future schema changes cannot merge without the corresponding migration and upgrade tests. These are tests and fixtures, not retained campaign results or development receipts.
+Acceptance: source-owned schema fixtures represent the v8 release baseline and the v7 migration input; automated tests prove data and accounting preservation across 7-to-8, transaction rollback on failure, refusal of unknown future schemas without mutation, and actionable maintenance access when normal startup cannot open the store. Future schema changes cannot merge without the corresponding migration and upgrade tests. These are tests and fixtures, not retained campaign results or development receipts.
 
 ## Plan 10: combined guidance and installed proof
 
