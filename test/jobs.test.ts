@@ -117,6 +117,20 @@ test('migrates version-3 checkpoints without resetting their call usage', async 
   assert.deepEqual(migrated.budget, { maxCalls: 10, usedCalls: 3, reservedCalls: 0, remainingCalls: 7 });
 });
 
+test('unknown checkpoint formats are rejected without rewriting the stored evidence', async (t) => {
+  const directory = await tempDirectory(t);
+  const store = new CheckpointStore(directory);
+  const created = await store.create(checkpoint(directory));
+  const filename = path.join(directory, `run-${created.runId}.json`);
+  const payload = JSON.parse(await readFile(filename, 'utf8')) as Record<string, unknown>;
+  payload.formatVersion = 99;
+  const unknownFormat = `${JSON.stringify(payload)}\n`;
+  await writeFile(filename, unknownFormat);
+
+  await assert.rejects(store.read(created.runId), /failed validation/);
+  assert.equal(await readFile(filename, 'utf8'), unknownFormat);
+});
+
 test('checkpoint rejects unrecognized fields and malformed provider provenance', async (t) => {
   const directory = await tempDirectory(t);
   const store = new CheckpointStore(directory);

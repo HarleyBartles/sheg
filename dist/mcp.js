@@ -36490,7 +36490,7 @@ function resolveDataRoot(env, platform, home) {
 
 // src/infrastructure/run-store.ts
 import { createHash as createHash4, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync as existsSync2, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import path4 from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -36818,20 +36818,20 @@ var SCHEMA_MIGRATIONS = [{
     database.prepare("INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (?, ?, ?)").run(8, "schema-v7-to-v8-ledger", (/* @__PURE__ */ new Date()).toISOString());
   }
 }];
-function checkDatabaseIntegrity(database) {
+function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   const integrity = database.prepare("PRAGMA integrity_check").all();
   if (integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
     throw new RunStoreError("migration_integrity_failed", "The datastore failed its SQLite integrity check during migration. The original database was left recoverable.");
   }
-  const foreignKeys = database.prepare("PRAGMA foreign_key_check").all();
+  const foreignKeys = checkForeignKeys ? database.prepare("PRAGMA foreign_key_check").all() : [];
   if (foreignKeys.length > 0) {
     throw new RunStoreError("migration_integrity_failed", "The datastore has foreign-key violations during migration. The original database was left recoverable.");
   }
 }
-function verifiedBackup(database, dataRoot, fromVersion, toVersion) {
+function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
   const backupRoot = path4.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path4.join(backupRoot, `runs-schema-${fromVersion}-before-${toVersion}-${randomUUID2()}.sqlite`);
+  const backupPath = path4.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID2()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -36841,7 +36841,7 @@ function verifiedBackup(database, dataRoot, fromVersion, toVersion) {
       if (asNumber(versionRow?.user_version, "backup schema version") !== fromVersion) {
         throw new RunStoreError("migration_backup_failed", "The datastore backup does not match the source schema version.");
       }
-      checkDatabaseIntegrity(backup);
+      checkDatabaseIntegrity(backup, checkForeignKeys);
     } finally {
       backup.close();
     }
@@ -36862,9 +36862,31 @@ function migrate(database, dataRoot, startingVersion) {
     if (!step || step.toVersion <= step.fromVersion || step.toVersion > SCHEMA_VERSION) {
       throw new RunStoreError("unsupported_schema_version", `The Sheg datastore schema ${version2} has no supported migration path to ${SCHEMA_VERSION}. Preserve the database and use run_storage to inspect recovery options.`);
     }
-    verifiedBackup(database, dataRoot, step.fromVersion, step.toVersion);
+    const liveVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+    if (liveVersion === step.toVersion) {
+      version2 = liveVersion;
+      continue;
+    }
+    if (liveVersion !== step.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${liveVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
+    try {
+      verifiedBackup(database, dataRoot, step.fromVersion, step.toVersion);
+    } catch (error62) {
+      const updatedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+      if (updatedVersion === step.toVersion) {
+        version2 = updatedVersion;
+        continue;
+      }
+      throw error62;
+    }
     database.exec("BEGIN IMMEDIATE");
     try {
+      const lockedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+      if (lockedVersion === step.toVersion) {
+        database.exec("COMMIT");
+        version2 = lockedVersion;
+        continue;
+      }
+      if (lockedVersion !== step.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
       step.apply(database);
       database.exec(`PRAGMA user_version = ${step.toVersion}`);
       checkDatabaseIntegrity(database);
@@ -36909,6 +36931,14 @@ function initialize(database, dataRoot) {
   setWriteAheadLogMode(database);
   database.exec("BEGIN IMMEDIATE");
   try {
+    const lockedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+    const lockedTables = asNumber(database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get().count, "table count");
+    if (lockedVersion === SCHEMA_VERSION && lockedTables > 0) {
+      database.exec("COMMIT");
+      checkDatabaseIntegrity(database);
+      return;
+    }
+    if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError("unsupported_schema_version", "The Sheg datastore changed while being initialized; preserve it and use run_storage to inspect compatibility.");
     database.exec(`
     CREATE TABLE runs (
       run_id TEXT PRIMARY KEY,
@@ -37028,6 +37058,87 @@ function initialize(database, dataRoot) {
     } catch {
     }
     throw error62;
+  }
+}
+function inspectRunStoreCompatibility(dataRoot) {
+  if (!path4.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
+  const databasePath = path4.join(dataRoot, "runs.sqlite");
+  if (!existsSync2(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true, timeout: 5e3 });
+    const versionRow = database.prepare("PRAGMA user_version").get();
+    const version2 = asNumber(versionRow?.user_version, "schema version");
+    const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
+    const tableCount = asNumber(existing?.count, "table count");
+    if (version2 === SCHEMA_VERSION) return { status: "current", schemaVersion: SCHEMA_VERSION };
+    if (version2 === 0 && tableCount === 0) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
+    if (version2 === 7) return { status: "migration_available", schemaVersion: version2, targetSchemaVersion: SCHEMA_VERSION };
+    return { status: "unsupported", schemaVersion: version2, targetSchemaVersion: SCHEMA_VERSION };
+  } catch {
+    return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
+  } finally {
+    database?.close();
+  }
+}
+function runStoreBackupAvailable(dataRoot) {
+  const backupRoot = path4.join(dataRoot, "backups");
+  if (!existsSync2(backupRoot)) return false;
+  try {
+    return readdirSync(backupRoot).some((name) => name.startsWith("runs-schema-") && name.endsWith(".sqlite"));
+  } catch {
+    return false;
+  }
+}
+function resetRunStore(dataRoot) {
+  if (!path4.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  const databasePath = path4.join(dataRoot, "runs.sqlite");
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { timeout: 5e3 });
+  } catch (error62) {
+    throw new RunStoreError("recovery_backup_failed", "Sheg could not open and verify the datastore for recovery; the original files were left untouched.", { cause: error62 });
+  }
+  let version2;
+  try {
+    const versionRow = database.prepare("PRAGMA user_version").get();
+    version2 = asNumber(versionRow?.user_version, "schema version");
+    verifiedBackup(database, dataRoot, version2, version2, "before-reset", false);
+  } catch (error62) {
+    database.close();
+    if (error62 instanceof RunStoreError) throw error62;
+    throw new RunStoreError("recovery_backup_failed", "Sheg could not verify a recoverable datastore backup; the original files were left untouched.", { cause: error62 });
+  }
+  database.close();
+  const recoveryRoot = path4.join(dataRoot, "recovery", randomUUID2());
+  mkdirSync(recoveryRoot, { recursive: true });
+  const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
+  const moved = [];
+  try {
+    for (const original of files) {
+      if (!existsSync2(original)) continue;
+      const archived = path4.join(recoveryRoot, path4.basename(original));
+      renameSync(original, archived);
+      moved.push({ original, archived });
+    }
+    const freshStore = openRunStore(dataRoot);
+    freshStore.close();
+    return { reset: true, backupRetained: true, schemaVersion: SCHEMA_VERSION };
+  } catch (error62) {
+    for (const original of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
+      try {
+        unlinkSync(original);
+      } catch {
+      }
+    }
+    for (const item of moved.toReversed()) {
+      try {
+        renameSync(item.archived, item.original);
+      } catch {
+      }
+    }
+    if (error62 instanceof RunStoreError) throw error62;
+    throw new RunStoreError("recovery_reset_failed", "Sheg could not complete the explicit datastore reset; the original database and verified backup were preserved.", { cause: error62 });
   }
 }
 function validatePrepared(prepared) {
@@ -39436,7 +39547,7 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.10",
+  version: "0.3.0-dev.11",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
@@ -39476,6 +39587,12 @@ var productVersion = package_default.version;
 
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
+var resetConfirmation = "RESET SHEG DATASTORE";
+var runStorageSchema = external_exports.discriminatedUnion("operation", [
+  external_exports.object({ operation: external_exports.literal("inspect") }).strict(),
+  external_exports.object({ operation: external_exports.literal("optimize") }).strict(),
+  external_exports.object({ operation: external_exports.literal("reset"), confirmation: external_exports.literal(resetConfirmation) }).strict()
+]);
 var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
 var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
@@ -39485,34 +39602,88 @@ var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
 ]);
-function createPollingServer(service = createDefaultRunService()) {
+function createPollingServer(service) {
+  const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
+  let runtimeService;
+  let ownedStore;
+  let storeReady = service !== void 0;
+  let startupFailure;
+  if (service) runtimeService = service;
+  else {
+    try {
+      const runtime = createDefaultRunService(dataRoot);
+      runtimeService = runtime.service;
+      ownedStore = runtime.store;
+      storeReady = true;
+    } catch (error62) {
+      runtimeService = unavailableRunService();
+      startupFailure = error62;
+    }
+  }
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
-  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => service.inspect(request)));
-  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => service.start(submissionId, request)));
-  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => service.list(query)));
-  server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => service.queryEvidence(query)));
+  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtimeService.inspect(request)));
+  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtimeService.start(submissionId, request)));
+  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtimeService.list(query)));
+  server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtimeService.queryEvidence(query)));
   server.registerTool("run_get", { description: "Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
-    if (input2.view === "status") return service.getStatus(input2.runId);
-    if (input2.view === "request") return service.getRequest(input2.runId);
-    if (input2.view === "journey") return service.getJourneyRun(input2.runId);
-    if (input2.view === "context") return service.getContext(input2.runId, input2.evaluationId, input2.contextId);
-    if (input2.view === "answers") return service.answers(input2.runId, input2.cursor, input2.limit);
-    return service.attempts(input2.runId, input2.cursor, input2.limit);
+    if (input2.view === "status") return runtimeService.getStatus(input2.runId);
+    if (input2.view === "request") return runtimeService.getRequest(input2.runId);
+    if (input2.view === "journey") return runtimeService.getJourneyRun(input2.runId);
+    if (input2.view === "context") return runtimeService.getContext(input2.runId, input2.evaluationId, input2.contextId);
+    if (input2.view === "answers") return runtimeService.answers(input2.runId, input2.cursor, input2.limit);
+    return runtimeService.attempts(input2.runId, input2.cursor, input2.limit);
   }));
-  server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
-  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
-  server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? service.previewDelete(runIds) : service.deleteRuns(runIds)));
-  server.registerTool("run_storage", { description: "Inspect Sheg-managed local datastore health or ask Sheg to optimize it. No file paths or SQL are exposed.", inputSchema: external_exports.object({ operation: external_exports.enum(["inspect", "optimize"]) }).strict() }, async ({ operation }) => safeResult(() => {
-    if (operation === "inspect") return service.storageInfo();
-    service.optimizeStorage();
-    return { optimized: true };
+  server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.cancel(runId)));
+  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.resume(runId)));
+  server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtimeService.previewDelete(runIds) : runtimeService.deleteRuns(runIds)));
+  server.registerTool("run_storage", { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg verifies and preserves a backup first. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input2) => safeResult(() => {
+    if (input2.operation === "inspect") {
+      if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
+      const observed = inspectRunStoreCompatibility(dataRoot);
+      const failure2 = startupFailure instanceof RunStoreError ? { code: startupFailure.code } : { code: observed.status === "unreadable" ? "datastore_unreadable" : "datastore_open_failed" };
+      const compatibility = startupFailure instanceof RunStoreError && startupFailure.code.startsWith("migration_") ? { status: "migration_failed", schemaVersion: observed.status === "migration_available" ? observed.schemaVersion : null } : observed.status === "current" ? { status: "current", schemaVersion: observed.schemaVersion } : observed.status === "migration_available" ? { status: "migration_available", schemaVersion: observed.schemaVersion } : observed.status === "uninitialized" ? { status: "uninitialized", schemaVersion: 0 } : { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
+      return { recoveryRequired: true, compatibility, issue: failure2, backupAvailable: runStoreBackupAvailable(dataRoot) };
+    }
+    if (input2.operation === "optimize") {
+      if (!storeReady) throw recoveryRequiredError();
+      runtimeService.optimizeStorage();
+      return { optimized: true };
+    }
+    if (storeReady) throw new RunServiceError("recovery_not_required", "Datastore reset is available only when run_storage.inspect reports recovery required.");
+    const reset = resetRunStore(dataRoot);
+    try {
+      const runtime = createDefaultRunService(dataRoot);
+      runtimeService = runtime.service;
+      ownedStore = runtime.store;
+      storeReady = true;
+      startupFailure = void 0;
+      return { ...reset, recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
+    } catch (error62) {
+      startupFailure = error62;
+      throw error62;
+    }
   }));
+  const close = server.close.bind(server);
+  server.close = async () => {
+    ownedStore?.close();
+    ownedStore = void 0;
+    await close();
+  };
   return server;
 }
-function createDefaultRunService() {
-  const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
+function createDefaultRunService(dataRoot) {
   const store = openRunStore(dataRoot);
-  return createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady });
+  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
+}
+function unavailableRunService() {
+  return new Proxy(/* @__PURE__ */ Object.create(null), {
+    get: (_target, property) => property === "then" ? void 0 : () => {
+      throw recoveryRequiredError();
+    }
+  });
+}
+function recoveryRequiredError() {
+  return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Call run_storage.inspect before using study tools.");
 }
 async function safeResult(operation) {
   try {

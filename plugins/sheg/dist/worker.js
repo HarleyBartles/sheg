@@ -21356,7 +21356,7 @@ function failureDetails(error62, scope) {
 
 // src/infrastructure/run-store.ts
 import { createHash as createHash4, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync as existsSync2, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -22170,20 +22170,20 @@ var SCHEMA_MIGRATIONS = [{
     database.prepare("INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (?, ?, ?)").run(8, "schema-v7-to-v8-ledger", (/* @__PURE__ */ new Date()).toISOString());
   }
 }];
-function checkDatabaseIntegrity(database) {
+function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   const integrity = database.prepare("PRAGMA integrity_check").all();
   if (integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
     throw new RunStoreError("migration_integrity_failed", "The datastore failed its SQLite integrity check during migration. The original database was left recoverable.");
   }
-  const foreignKeys = database.prepare("PRAGMA foreign_key_check").all();
+  const foreignKeys = checkForeignKeys ? database.prepare("PRAGMA foreign_key_check").all() : [];
   if (foreignKeys.length > 0) {
     throw new RunStoreError("migration_integrity_failed", "The datastore has foreign-key violations during migration. The original database was left recoverable.");
   }
 }
-function verifiedBackup(database, dataRoot, fromVersion, toVersion) {
+function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
   const backupRoot = path3.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path3.join(backupRoot, `runs-schema-${fromVersion}-before-${toVersion}-${randomUUID2()}.sqlite`);
+  const backupPath = path3.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID2()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -22193,7 +22193,7 @@ function verifiedBackup(database, dataRoot, fromVersion, toVersion) {
       if (asNumber(versionRow?.user_version, "backup schema version") !== fromVersion) {
         throw new RunStoreError("migration_backup_failed", "The datastore backup does not match the source schema version.");
       }
-      checkDatabaseIntegrity(backup);
+      checkDatabaseIntegrity(backup, checkForeignKeys);
     } finally {
       backup.close();
     }
@@ -22214,9 +22214,31 @@ function migrate(database, dataRoot, startingVersion) {
     if (!step || step.toVersion <= step.fromVersion || step.toVersion > SCHEMA_VERSION) {
       throw new RunStoreError("unsupported_schema_version", `The Sheg datastore schema ${version2} has no supported migration path to ${SCHEMA_VERSION}. Preserve the database and use run_storage to inspect recovery options.`);
     }
-    verifiedBackup(database, dataRoot, step.fromVersion, step.toVersion);
+    const liveVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+    if (liveVersion === step.toVersion) {
+      version2 = liveVersion;
+      continue;
+    }
+    if (liveVersion !== step.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${liveVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
+    try {
+      verifiedBackup(database, dataRoot, step.fromVersion, step.toVersion);
+    } catch (error62) {
+      const updatedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+      if (updatedVersion === step.toVersion) {
+        version2 = updatedVersion;
+        continue;
+      }
+      throw error62;
+    }
     database.exec("BEGIN IMMEDIATE");
     try {
+      const lockedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+      if (lockedVersion === step.toVersion) {
+        database.exec("COMMIT");
+        version2 = lockedVersion;
+        continue;
+      }
+      if (lockedVersion !== step.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
       step.apply(database);
       database.exec(`PRAGMA user_version = ${step.toVersion}`);
       checkDatabaseIntegrity(database);
@@ -22261,6 +22283,14 @@ function initialize(database, dataRoot) {
   setWriteAheadLogMode(database);
   database.exec("BEGIN IMMEDIATE");
   try {
+    const lockedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
+    const lockedTables = asNumber(database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get().count, "table count");
+    if (lockedVersion === SCHEMA_VERSION && lockedTables > 0) {
+      database.exec("COMMIT");
+      checkDatabaseIntegrity(database);
+      return;
+    }
+    if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError("unsupported_schema_version", "The Sheg datastore changed while being initialized; preserve it and use run_storage to inspect compatibility.");
     database.exec(`
     CREATE TABLE runs (
       run_id TEXT PRIMARY KEY,

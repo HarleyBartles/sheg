@@ -20,6 +20,23 @@ Before `1.0.0`:
 - Document breaking changes clearly. Pre-1.0 does not make breakage invisible
   to users.
 
+## Datastore compatibility
+
+Schema 8 is the first supported datastore baseline in v0.3.0; older development
+databases are disposable. Every later release that changes the SQLite schema
+must include sequential, tested forward migrations from every supported
+released schema. Preserve frozen request and packet payloads, answers, lineage,
+and physical-attempt accounting. Before each migration, verify a recoverable
+SQLite backup, apply the step transactionally, and check database integrity and
+foreign keys before committing the new version.
+
+Keep persisted JSON format versions separate from the SQLite schema version.
+Add an explicit payload upcaster when a payload contract changes, and reject
+unknown formats without rewriting stored evidence. If startup cannot open or
+migrate the database, keep the MCP recovery inspection available and block
+study operations until recovery succeeds. Never reset data automatically or
+rewrite a newer unsupported schema. See [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md).
+
 Use `1.0.0` when Sheg is a stable, usable product and the public compatibility
 contract is explicitly declared. That contract must identify the supported
 harness (currently Codex), runtime requirements, supported plugin entrypoints,
