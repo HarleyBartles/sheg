@@ -35,10 +35,10 @@
 
 ## Task 3: Align canonical study-design and polling guidance
 
-- [ ] Replace wording that implies the study, question set, or cohort should be minimized by default with guidance to keep the design focused while covering every meaningful input difference the author wants to understand.
-- [ ] State in `skills/study-design/SKILL.md` and `skills/stimulus-response-polling/SKILL.md` that respondents, stimulus, question/response, and state are the four substantive variation levers; the cohort is the source of profile variation; matching across the four dimensions is duplicate input.
-- [ ] Explain that rerunning an identical fingerprint may sample ordinary model variability but adds no substantive coverage; reserve exact repeats for explicit stability or recovery checks and keep those purposes distinct from study design.
-- [ ] Preserve useful boundaries such as exact authored material units, focused question selection, provider call limits, and the agent's role in designing rather than inferring editorial boundaries.
+- [x] Replace wording that implies the study, question set, or cohort should be minimized by default with guidance to keep the design focused while covering every meaningful input difference the author wants to understand.
+- [x] State in `skills/study-design/SKILL.md` and `skills/stimulus-response-polling/SKILL.md` that respondents, stimulus, question/response, and state are the four substantive variation levers; the cohort is the source of profile variation; matching across the four dimensions is duplicate input.
+- [x] Explain that rerunning an identical fingerprint may sample ordinary model variability but adds no substantive coverage; reserve exact repeats for explicit stability or recovery checks and keep those purposes distinct from study design.
+- [x] Preserve useful boundaries such as exact authored material units, focused question selection, provider call limits, and the agent's role in designing rather than inferring editorial boundaries.
 
 ## Task 4: Add source-owned pressure scenarios and usable tool-backed fixture state
 
