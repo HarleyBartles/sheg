@@ -31,7 +31,7 @@
 
 ---
 
-**Status:** Active. Tasks 1-4 are complete. Complete candidate packaging and repository verification for `0.3.0-dev.6`.
+**Status:** Implementation complete. Tasks 1-5 are complete for `0.3.0-dev.6`; fresh review and merge into `develop` remain.
 
 **Target development version:** `0.3.0-dev.6`. This checkpoint follows Plan 3a, which targets `0.3.0-dev.5`, after Plan 3 merged `0.3.0-dev.4` as PR #14. It is a development candidate, not a stable release, and receives no release tag.
 
@@ -143,9 +143,9 @@ The guidance should show the one-run request shape, source evaluation selection 
 
 - [x] **Step 1: Update the development identity** in all authoritative version fields to `0.3.0-dev.6` and keep the roadmap status current without adding merge hashes, test totals, package hashes, campaign identities, or run results.
 - [x] **Step 2: Run `npm run build` and `npm run plugin:package -- --validate-only`.**
-- [ ] **Step 3: Run the complete `npm run verify` through the tracked staged commit gate.**
+- [x] **Step 3: Run the complete `npm run verify` through the tracked staged commit gate.**
 - [x] **Step 4: Package a local no-tag dev.6 ZIP in scratch** and verify it ships the skill entrypoints while excluding all behavior test assets. Discard the temporary package after inspection. Do not tag or publish.
-- [ ] **Step 5: Commit the version, generated runtime, plan, roadmap, skill source, and owning tests.**
+- [x] **Step 5: Commit the version, generated runtime, plan, roadmap, skill source, and owning tests.**
 
 Align `package.json`, both root version fields in `package-lock.json`, `plugin.json`, MCP initialization, and generated runtime output at `0.3.0-dev.6`. Keep the roadmap's status and next-step version current; Git history records completed development work.
 
