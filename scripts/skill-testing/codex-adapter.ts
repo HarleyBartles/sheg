@@ -96,7 +96,7 @@ export function createCodexAdapter(options: { executable?: string; args?: string
     const candidate = candidateForRecovery();
     return {
       ...configured,
-      transport: { type: 'stdio', command: process.execPath, args: ['--import', 'tsx', candidate.harnessPath], cwd: candidate.root, env: {} },
+      transport: { type: 'stdio', command: process.execPath, args: ['--import', 'tsx', candidate.harnessPath], cwd: candidate.root, env: { NODE_ENV: 'test', SHEG_TEST_PROVIDER: 'partial-journey-recovery' } },
     } satisfies ShegMcpServerConfig;
   };
   const preflight = async (workflowSetup?: WorkflowSetup): Promise<Record<string, unknown>> => {

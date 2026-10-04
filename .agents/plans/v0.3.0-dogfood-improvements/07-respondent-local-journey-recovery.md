@@ -242,7 +242,7 @@ Add an adapter test with an intentionally stale configured MCP command and the r
 
 - [x] **Step 3: Restrict controlled inference and readiness bypass to the fixture harness**
 
-Keep deterministic fixture-provider selection, inline worker launch, and readiness bypass inside a dedicated skill-testing MCP entrypoint. Remove ambient environment activation from the production provider factory and MCP entrypoint; normal MCP startup always uses detached workers and provider readiness checks. The harness rejects Laya and every Jev configuration except the frozen TypeSafe fixture before worker dispatch.
+Keep deterministic fixture-provider selection, inline worker launch, and readiness bypass inside a dedicated skill-testing MCP entrypoint, gated by both NODE_ENV=test and the fixture marker. Remove ambient environment activation from the production provider factory and MCP entrypoint; normal MCP startup always uses detached workers and provider readiness checks. The harness rejects Laya and every Jev configuration except the frozen TypeSafe fixture before worker dispatch.
 
 - [x] **Step 4: Pass workflow setup through adapter preflight and execute with the candidate source harness**
 

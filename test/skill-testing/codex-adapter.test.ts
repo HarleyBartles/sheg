@@ -94,12 +94,14 @@ test('partial recovery workflow preflights and launches the source-bound harness
   const identity = await preflight(setup);
   const packageJson = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8')) as { version: string };
   assert.equal(identity.shegMcpVersion, packageJson.version);
+  assert.ok(identity.shegRecoveryHarnessSha256);
   const result = await adapter.executeWorkflow!({ initialPrompt: 'resume fixture', turns: [], cwd: process.cwd(), timeoutMs: 5000, requestedSettings: {}, workflowSetup: setup });
   assert.equal(result.status, 'completed');
   const serverConfig = invocations[0]!.find((arg) => arg.startsWith('mcp_servers.sheg='));
   assert.ok(serverConfig);
   assert.match(serverConfig.replaceAll('\\\\', '/'), /scripts\/skill-testing\/recovery-mcp\.ts/);
   assert.ok(serverConfig.includes('--import'));
+  assert.ok(serverConfig.includes('SHEG_TEST_PROVIDER'));
   assert.ok(serverConfig.includes(JSON.stringify(process.execPath)));
   assert.doesNotMatch(serverConfig, /installed-dev\.7\.js|C:\\\\installed/);
 });

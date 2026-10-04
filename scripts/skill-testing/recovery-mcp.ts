@@ -5,7 +5,9 @@ import { executeQuestionRun } from '../../src/application/question-worker.js';
 import { resolveDataRoot } from '../../src/infrastructure/data-root.js';
 import { openRunStore } from '../../src/infrastructure/run-store.js';
 import { createPollingServer } from '../../src/entrypoints/mcp.js';
-import { createControlledRecoveryProvider } from './controlled-recovery.js';
+import { assertControlledRecoveryEnvironment, createControlledRecoveryProvider } from './controlled-recovery.js';
+
+assertControlledRecoveryEnvironment(process.env);
 
 function createControlledRecoveryServer(): ReturnType<typeof createPollingServer> {
   const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());

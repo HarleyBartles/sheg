@@ -2,6 +2,12 @@ import type { DecisionRequest, DecisionResult } from '../../src/domain/decision/
 import type { DecisionProvider, ProviderContextFit } from '../../src/domain/decision/provider.js';
 import type { ProviderConfigInput } from '../../src/providers/config.js';
 
+export const controlledRecoveryProviderName = 'partial-journey-recovery';
+
+export function assertControlledRecoveryEnvironment(env: NodeJS.ProcessEnv): void {
+  if (env.NODE_ENV !== 'test' || env.SHEG_TEST_PROVIDER !== controlledRecoveryProviderName) throw new Error('Controlled recovery MCP requires its explicit isolated test environment.');
+}
+
 export function createControlledRecoveryProvider(config: ProviderConfigInput): DecisionProvider {
   if (config.kind !== 'jev' || (config.route ?? 'openrouter') !== 'typesafe' || config.model !== 'jev-latest') throw new Error('Controlled recovery provider only accepts its frozen TypeSafe fixture request.');
   return {

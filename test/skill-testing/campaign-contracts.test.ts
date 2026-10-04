@@ -6,7 +6,7 @@ import test from 'node:test';
 import { assertComparableManifests, prepareCampaign, readFrozenCampaign, type CampaignConfig } from '../../scripts/skill-testing/contracts.js';
 import { runCampaign } from '../../scripts/skill-testing/runner.js';
 import { openRunStore } from '../../src/infrastructure/run-store.js';
-import { createControlledRecoveryProvider } from '../../scripts/skill-testing/controlled-recovery.js';
+import { assertControlledRecoveryEnvironment, createControlledRecoveryProvider } from '../../scripts/skill-testing/controlled-recovery.js';
 import { JevProvider } from '../../src/providers/jev.js';
 import { createProvider } from '../../src/providers/factory.js';
 
@@ -160,6 +160,8 @@ test('partial-journey workflow fixture seeds the real isolated Sheg store for ea
 });
 
 test('controlled recovery provider exists only in its harness and accepts its frozen route', async () => {
+  assert.throws(() => assertControlledRecoveryEnvironment({}), /explicit isolated test environment/i);
+  assertControlledRecoveryEnvironment({ NODE_ENV: 'test', SHEG_TEST_PROVIDER: 'partial-journey-recovery' });
   const provider = createControlledRecoveryProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
   const result = await provider.decide({ state: {}, question: { type: 'score', id: 'clarity', instructions: 'How clear?', rubric: ['Unclear', 'Mixed', 'Clear'] } }, 1);
   assert.deepEqual({ type: result.type, score: result.type === 'score' ? result.score : undefined, model: result.model }, { type: 'score', score: 2, model: 'controlled/partial-journey-recovery' });

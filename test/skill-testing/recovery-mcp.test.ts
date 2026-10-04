@@ -15,7 +15,7 @@ test('dedicated recovery MCP resumes an isolated saved journey through real Sheg
     command: process.execPath,
     args: ['--import', 'tsx', path.resolve('scripts/skill-testing/recovery-mcp.ts')],
     cwd: process.cwd(),
-    env: { ...process.env, SHEG_DATA_DIR: root, PLUGIN_DATA: root },
+    env: { ...process.env, NODE_ENV: 'test', SHEG_TEST_PROVIDER: 'partial-journey-recovery', SHEG_DATA_DIR: root, PLUGIN_DATA: root },
   });
   const client = new Client({ name: 'sheg-recovery-harness-test', version: '1.0.0' });
   try {
