@@ -39,7 +39,7 @@
 ## Task 5: Review, publish, and close out
 
 - [ ] Request a fresh review of the complete branch and resolve all actionable findings.
-- [ ] Open and merge a PR into `develop` after review and hosted `sheg-verify` pass.
-- [ ] Verify PR head and merge identity, then remove this worktree and its local/remote branch using repository cleanup guidance.
+- [ ] Push the reviewed branch and open a PR into `develop`; verify its exact head and hosted `sheg-verify` result.
+- [ ] Keep the worktree while the PR is open; retire it only after an authorized merge and verified merge identity.
 
 **Non-goals:** Live reproduction, paid inference, data rewrites, schema changes, release tagging, or GitHub Release publication.
