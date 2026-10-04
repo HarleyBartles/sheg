@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,11 +39,14 @@ function createManifestFixture(): { directory: string; setVersion(version: strin
   const directory = mkdtempSync(path.join(os.tmpdir(), 'sheg-release-manifest-'));
   const scriptDirectory = path.join(directory, 'scripts');
   mkdirSync(scriptDirectory);
+  mkdirSync(path.join(directory, 'plugins', 'sheg'), { recursive: true });
   copyFileSync(path.join(repositoryRoot, 'scripts/package-plugin.py'), path.join(scriptDirectory, 'package-plugin.py'));
   const writeJson = (name: string, value: unknown) => writeFileSync(path.join(directory, name), JSON.stringify(value));
   const setVersion = (version: string, pluginVersion = version, lockVersion = version, lockPackageVersion = version) => {
     writeJson('package.json', { name: 'sheg', version, private: true });
     writeJson('plugin.json', { version: pluginVersion });
+    writeJson(path.join('plugins', 'sheg', 'package.json'), { name: 'sheg', version, type: 'module' });
+    writeJson(path.join('plugins', 'sheg', 'plugin.json'), { version });
     writeJson('package-lock.json', {
       name: 'sheg', version: lockVersion, lockfileVersion: 3, requires: true,
       packages: { '': { name: 'sheg', version: lockPackageVersion } },
@@ -61,12 +64,10 @@ function createManifestFixture(): { directory: string; setVersion(version: strin
 
 function createStablePackageFixture(): { directory: string; run(args: string[]): { status: number | null; stderr: string; stdout: string } } {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'sheg-stable-package-'));
-  for (const file of ['LICENSE', 'mcp.json', 'plugin.json', 'package.json', 'package-lock.json']) {
+  for (const file of ['plugin.json', 'package.json', 'package-lock.json']) {
     copyFileSync(path.join(repositoryRoot, file), path.join(directory, file));
   }
-  for (const folder of ['.agents/plugins', 'dist', 'skills']) {
-    cpSync(path.join(repositoryRoot, folder), path.join(directory, folder), { recursive: true });
-  }
+  cpSync(path.join(repositoryRoot, 'plugins/sheg'), path.join(directory, 'plugins/sheg'), { recursive: true });
   const stable = '0.3.0';
   const packagePath = path.join(directory, 'package.json');
   const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as Record<string, unknown>;
@@ -76,6 +77,13 @@ function createStablePackageFixture(): { directory: string; run(args: string[]):
   const pluginJson = JSON.parse(readFileSync(pluginPath, 'utf8')) as Record<string, unknown>;
   pluginJson.version = stable;
   writeFileSync(pluginPath, JSON.stringify(pluginJson));
+  const packagedRoot = path.join(directory, 'plugins/sheg');
+  for (const file of ['package.json', 'plugin.json']) {
+    const manifestPath = path.join(packagedRoot, file);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    manifest.version = stable;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+  }
   const lockPath = path.join(directory, 'package-lock.json');
   const lockJson = JSON.parse(readFileSync(lockPath, 'utf8')) as {
     version: string;
@@ -174,9 +182,12 @@ test('release validation rejects a stale npm lockfile root version', () => {
     });
 
     mkdirSync(scriptDirectory);
+    mkdirSync(path.join(temporaryDirectory, 'plugins', 'sheg'), { recursive: true });
     copyFileSync(path.join(repositoryRoot, 'scripts/package-plugin.py'), scriptPath);
     writeFileSync(path.join(temporaryDirectory, 'package.json'), JSON.stringify(packageManifest));
     writeFileSync(path.join(temporaryDirectory, 'plugin.json'), JSON.stringify(pluginManifest));
+    writeFileSync(path.join(temporaryDirectory, 'plugins/sheg/package.json'), JSON.stringify({ name: 'sheg', version: packageVersion, type: 'module' }));
+    writeFileSync(path.join(temporaryDirectory, 'plugins/sheg/plugin.json'), JSON.stringify(pluginManifest));
     writeFileSync(path.join(temporaryDirectory, 'package-lock.json'), JSON.stringify(lockfile));
     assert.equal(runFixture().status, 0);
 
@@ -211,11 +222,14 @@ test('release validation rejects a tag retargeted away from its triggering commi
       packages: { '': { name: 'sheg', version: packageVersion } },
     };
     mkdirSync(scriptDirectory);
+    mkdirSync(path.join(temporaryDirectory, 'plugins', 'sheg'), { recursive: true });
     copyFileSync(path.join(repositoryRoot, 'scripts/package-plugin.py'), scriptPath);
     writeFileSync(path.join(temporaryDirectory, 'package.json'), JSON.stringify({
       name: 'sheg', version: packageVersion, private: true,
     }));
     writeFileSync(path.join(temporaryDirectory, 'plugin.json'), JSON.stringify({ version: packageVersion }));
+    writeFileSync(path.join(temporaryDirectory, 'plugins/sheg/package.json'), JSON.stringify({ name: 'sheg', version: packageVersion, type: 'module' }));
+    writeFileSync(path.join(temporaryDirectory, 'plugins/sheg/plugin.json'), JSON.stringify({ version: packageVersion }));
     writeFileSync(path.join(temporaryDirectory, 'package-lock.json'), JSON.stringify(lockfile));
     writeFileSync(path.join(temporaryDirectory, 'source.txt'), 'first release source');
     execFileSync('git', ['init', '--initial-branch=main'], {
@@ -286,12 +300,17 @@ test('release package contains plugin runtime inputs and is byte-for-byte reprod
     assert.equal(firstHash, secondHash);
 
     const files = listArchive(first);
+    const packageRoot = path.join(repositoryRoot, 'plugins/sheg');
+    const packageFiles = readdirSync(packageRoot, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => path.relative(packageRoot, path.join(entry.parentPath, entry.name)).replaceAll('\\', '/'))
+      .sort();
+    assert.deepEqual(files, packageFiles);
     for (const required of [
       'LICENSE',
       'package.json',
       'plugin.json',
       'mcp.json',
-      '.agents/plugins/marketplace.json',
       'skills/stimulus-response-polling/SKILL.md',
       'skills/study-design/SKILL.md',
       'dist/mcp.js',
@@ -303,6 +322,8 @@ test('release package contains plugin runtime inputs and is byte-for-byte reprod
     assert.ok(files.every((file) => !file.startsWith('src/')));
     assert.ok(files.every((file) => !file.startsWith('test/')));
     assert.ok(files.every((file) => !file.endsWith('.ts')));
+    assert.ok(!files.some((file) => file.includes('/tests/')));
+    assert.ok(!files.some((file) => file.startsWith('.agents/')));
 
     const extractedDirectory = path.join(temporaryDirectory, 'extracted');
     const [pythonCommand, pythonPrefix] = python;
@@ -317,6 +338,9 @@ test('release package contains plugin runtime inputs and is byte-for-byte reprod
       ],
       { cwd: repositoryRoot },
     );
+    for (const relative of packageFiles) {
+      assert.deepEqual(readFileSync(path.join(extractedDirectory, relative)), readFileSync(path.join(packageRoot, relative)), `${relative} should match the generated plugin package`);
+    }
     const cliHelp = execFileSync(process.execPath, [path.join(extractedDirectory, 'dist/cli.js'), '--help'], {
       cwd: extractedDirectory,
       encoding: 'utf8',
@@ -340,23 +364,6 @@ test('stable tagged release package remains byte-for-byte reproducible', () => {
     assert.equal(firstHash, secondHash);
     assert.ok(listArchive(first).includes('dist/mcp.js'));
     assert.ok(listArchive(first).includes('package.json'));
-  } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
-  }
-});
-
-test('stable package excludes skill-local behavior tests while retaining skill guidance', () => {
-  const fixture = createStablePackageFixture();
-  try {
-    const behaviorTests = path.join(fixture.directory, 'skills/study-design/tests/behavior');
-    mkdirSync(behaviorTests, { recursive: true });
-    writeFileSync(path.join(behaviorTests, 'private-evaluator.json'), '{"private":true}');
-    const archive = path.join(fixture.directory, 'with-tests.zip');
-    assert.equal(fixture.run(['--tag', 'v0.3.0', '--output', archive]).status, 0);
-
-    const files = listArchive(archive);
-    assert.ok(files.includes('skills/study-design/SKILL.md'));
-    assert.ok(!files.includes('skills/study-design/tests/behavior/private-evaluator.json'));
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

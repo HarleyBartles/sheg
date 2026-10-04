@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { respondentArchetypeGroups } from '../src/domain/respondents/archetype-catalogue.js';
 import { syncPluginManifest } from './generate-plugin-manifest.js';
+import { generatePluginPackage } from './generate-plugin-package.js';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -43,4 +44,7 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildPlugin();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await buildPlugin();
+  await generatePluginPackage(repositoryRoot);
+}
