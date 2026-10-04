@@ -47,7 +47,7 @@ test('campaign CLI selects affected scenarios by owner and guidance with shared 
   assert.deepEqual(selected.map(({ id }) => id), [
     'selected-material-isolation-no-fit', 'partial-run-selected-question', 'typed-answer-failure',
     'isolated-storage-inspection', 'live-storage-inspection-heldout', 'live-storage-inspection',
-    'selected-material-isolation-heldout',
+    'selected-material-isolation-heldout', 'partial-journey-recovery',
     'cumulative-journey-material', 'cumulative-journey-material-heldout',
   ]);
   assert.deepEqual(selected.filter(({ tags }) => tags.includes('shared-safeguard')).map(({ id }) => id), [

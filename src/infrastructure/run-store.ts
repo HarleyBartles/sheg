@@ -1309,11 +1309,20 @@ class SQLiteRunStore implements RunStore {
       if (!statusView.lifecycle.resume.eligible) {
         throw new RunStoreError('run_not_resumable', resumeRefusalMessage(statusView.lifecycle.resume.reason));
       }
-      const run = this.database.prepare('SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
+      const run = this.database.prepare('SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls, request_json FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
       if (!run) throw this.notFound();
       const status = asText(run.status, 'run status');
+      const storedRequest = parseJson<{ request?: unknown }>(run.request_json, 'run request');
+      const parsedRequest = runRequestSchema.safeParse(storedRequest.request);
+      if (!parsedRequest.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
+      const isJourney = parsedRequest.data.kind === 'journey';
 
       const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId) as DatabaseRow;
+      const journeyFailures = status === 'partial' && isJourney && statusView.lifecycle.resume.eligible
+        ? this.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.turn_id, e.node_id, e.context_id
+          FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = ? AND e.status = 'failed' AND jr.status = 'failed' ORDER BY e.ordinal`).all(runId) as DatabaseRow[]
+        : [];
       const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId) as DatabaseRow | undefined;
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, 'failed evaluation ID') : undefined;
       const failedEvaluation = failedRunEvaluationId
@@ -1321,13 +1330,29 @@ class SQLiteRunStore implements RunStore {
         : undefined;
       const canRetrySharedFailure = status === 'failed' && asText(run.failure_scope, 'failure scope') === 'run' &&
         failedEvaluation !== undefined && asText(failedEvaluation.status, 'evaluation status') === 'failed';
-      const canRetryQuestionFailures = status === 'partial' && asNumber(failed.count, 'failed evaluation count') > 0;
+      const canRetryQuestionFailures = status === 'partial' && asNumber(failed.count, 'failed evaluation count') > 0 &&
+        !isJourney;
       if (canRetrySharedFailure && runFailure) {
         this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
           WHERE run_id = ? AND status = 'failed' AND evaluation_id IN (SELECT evaluation_id FROM attempt_evaluations WHERE attempt_id = ?)`)
           .run(runId, asText(runFailure.attempt_id, 'failed attempt ID'));
       }
       if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE run_id = ? AND status = 'failed'").run(runId);
+      for (const checkpoint of journeyFailures) {
+        const evaluationId = asText(checkpoint.evaluation_id, 'failed evaluation ID');
+        const respondentId = asText(checkpoint.respondent_id, 'failed respondent ID');
+        const reopened = this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL,
+          failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
+          WHERE run_id = ? AND evaluation_id = ? AND respondent_id = ? AND status = 'failed'`).run(runId, evaluationId, respondentId);
+        const restored = this.database.prepare(`UPDATE journey_respondents SET status = 'active',
+          current_node_id = ?, current_turn_id = ?, current_context_id = ?, revision = revision + 1
+          WHERE run_id = ? AND respondent_id = ? AND status = 'failed'`).run(
+          asText(checkpoint.node_id, 'failed turn node ID'), asText(checkpoint.turn_id, 'failed turn ID'),
+          asText(checkpoint.context_id, 'failed turn context ID'), runId, respondentId);
+        if (reopened.changes !== 1 || restored.changes !== 1) {
+          throw new RunStoreError('data_integrity_error', 'The saved failed journey checkpoint changed during resume.');
+        }
+      }
       this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
         failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
         WHERE run_id = ? AND status IN ('interrupted', 'failed', 'partial')`)
@@ -1833,7 +1858,18 @@ class SQLiteRunStore implements RunStore {
       EXISTS (SELECT 1 FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
         JOIN evaluations e ON e.run_id = a.run_id AND e.evaluation_id = ae.evaluation_id
         WHERE a.run_id = r.run_id AND a.status = 'failed' AND a.failure_scope = 'run' AND e.status = 'failed'
-          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure
+          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure,
+      (EXISTS (SELECT 1 FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = r.run_id AND e.status = 'failed' AND jr.status = 'failed') AND
+       NOT EXISTS (SELECT 1 FROM evaluations e LEFT JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = r.run_id AND e.status = 'failed' AND (jr.respondent_id IS NULL OR jr.status <> 'failed' OR
+            e.turn_id IS NULL OR length(trim(e.turn_id)) = 0 OR e.node_id IS NULL OR length(trim(e.node_id)) = 0 OR
+            e.path_id IS NULL OR length(trim(e.path_id)) = 0 OR e.occurrence IS NULL OR e.occurrence < 1 OR
+            length(trim(e.packet_json)) = 0 OR length(trim(e.packet_fingerprint)) = 0)) AND
+       NOT EXISTS (SELECT e.respondent_id FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed'
+          GROUP BY e.respondent_id HAVING COUNT(*) <> 1) AND
+       NOT EXISTS (SELECT 1 FROM journey_respondents jr WHERE jr.run_id = r.run_id AND jr.status = 'failed' AND
+          (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = jr.run_id AND e.respondent_id = jr.respondent_id AND e.status = 'failed') <> 1)) AS retryable_journey_failure
       FROM runs r WHERE r.run_id = ?`).get(runId) as DatabaseRow | undefined;
     if (!row) throw this.notFound();
     const stored = parseJson<{ request?: unknown }>(row.request_json, 'run request');
@@ -1859,7 +1895,8 @@ class SQLiteRunStore implements RunStore {
         usedCalls, reservedCalls, maxCalls,
         hasPendingEvaluations: asNumber(row.pending_evaluations, 'pending evaluation count') > 0,
         hasFailedEvaluations: asNumber(row.failed_evaluations, 'failed evaluation count') > 0,
-        canRetrySharedFailure: asNumber(row.retryable_shared_failure, 'retryable shared failure') === 1 }),
+        canRetrySharedFailure: asNumber(row.retryable_shared_failure, 'retryable shared failure') === 1,
+        hasRetryableJourneyFailure: asNumber(row.retryable_journey_failure, 'retryable journey failure') === 1 }),
       ...(row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, 'failure code'), message: asText(row.failure_message, 'failure message') } }),
     };
   }

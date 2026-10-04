@@ -1,10 +1,10 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plans 1, 2, 3, 3a, 4, and 5 are merged to `develop`; Plans 6, 7, 8, and 9 remain. Native TypeSafe inference, realistic native author validation, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
+Status: Plans 1 through 6 are merged to `develop`; Plans 7, 8, and 9 remain. Native TypeSafe inference, realistic native author validation, respondent-local journey recovery, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
 
 ## Workspace and base
 
-- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-study-guidance`, branch `codex/v0.3.0-partial-journey-resume`, based on `develop` after Plan 5 merged.
+- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-partial-journey-resume`, branch `codex/v0.3.0-partial-journey-resume`, based on Plan 6 merge `591a53107369c337b8961ef7bfa41fe422b44b1e`.
 - Implementation follows `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
 
 ## Outcome
@@ -24,18 +24,10 @@ Each next executable plan is written against the delivered code of its predecess
 | # | Title | Status | Plan file | Target version |
 | --- | --- | --- | --- | --- |
 | 5 | Expose precise failure and lifecycle evidence | merged to `develop` in PR #17 | Retired after merge | `0.3.0-dev.7` |
-| 6 | Enable native TypeSafe inference and verify a realistic author journey | active | [Plan 6](06-native-typesafe-inference.md) | `0.3.0-dev.8` |
-| 7 | Resume eligible respondent-local failures in partial journeys | pending; plan written JIT | Not authored yet | `0.3.0-dev.9` |
+| 6 | Enable native TypeSafe inference and verify a realistic author journey | merged to `develop` in PR #18 | Retired after merge | `0.3.0-dev.8` |
+| 7 | Resume eligible respondent-local failures in partial journeys | active; plan written JIT | [Plan 7](07-respondent-local-journey-recovery.md) | `0.3.0-dev.9` |
 | 8 | Establish datastore upgrade compatibility from the 0.3.0 baseline | pending; plan written JIT | Not authored yet | `0.3.0-dev.10` |
 | 9 | Reconcile guidance and verify the installed author journey | pending; plan written JIT | Not authored yet | `0.3.0-dev.11` |
-
-## Plan 6: native TypeSafe inference and author validation
-
-Establish and implement an evidence-backed native TypeSafe context-fit policy using TypeSafe's own model documentation and supported API behavior. Do not infer native limits from OpenRouter metadata, assume that a model alias has a permanent target, or bypass admission checks. Current official TypeSafe documentation describes Jev 1.13 as supporting 64k total request context and a 32k limit for state plus the longest question; translate that evidence into a conservative Sheg admission rule that accounts for the actual serialized native request and Sheg's estimator/headroom. Confirm whether the documented limits and alias target remain applicable before the v0.3.0 stable release. Sources: [TypeSafe models](https://docs.typesafe.ai/models) and [TypeSafe API schema](https://api.typesafe.ai/openapi.json).
-
-Add meaningful automated tests for native-route admission and transport, including fit, overflow/refusal before dispatch, authentication path, typed-answer validation, provider/model identity, physical-call accounting and safe error reporting. Update provider documentation and record the accepted native context-fit contract in a new ADR with an index update. Preserve the existing secure credential path and never expose credentials in output or retained artifacts.
-
-Acceptance includes an actual native TypeSafe study using the stored credential, followed by a realistic author follow-up against a Portfolio article. Verify successful authentication, typed answers, provider/model identity, physical-call accounting, durable run recall after reconnect/reopen, and safe failure reporting. Keep live campaign outputs outside the repository. Paid validation is authorized for an initial budget of 500 API calls; ask the user before exceeding that budget. This is a v0.3.0 release requirement, not an optional spike.
 
 ## Plan 7: respondent-local journey recovery
 

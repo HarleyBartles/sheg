@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { prepareCampaign } from '../../scripts/skill-testing/contracts.js';
 import { runCampaign, type CampaignAdapter, type ExecutionResult } from '../../scripts/skill-testing/runner.js';
+import { loadEvaluatorCatalog, loadScenarioCatalog } from '../../scripts/skill-scenario.js';
 
 const turns = [
   { user: 'Help design a paragraph-selection study. Ask for missing setup before starting.', evidence: { article: 'Seven paragraphs.' }, expectedTools: [], criteria: ['Ask for the intended reader cohort and confirm the article stimulus before proposing execution.'] },
@@ -112,4 +113,20 @@ test('selected-material workflow fixture uses real Sheg checkpoints without star
   assert.match(fixture.turns[0]!.user, /\{\{sourceRunId\}\}/);
   assert.match(fixture.turns[1]!.user, /Inspect fit and coverage only; do not start/);
   assert.match(fixture.turns[2]!.user, /Do not call another tool/);
+});
+
+test('partial journey workflow fixture gates run_resume on a separate explicit user turn', () => {
+  const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/partial-journey-recovery.json', 'utf8')) as { id: string; version: number; setup: { kind: string; version: number }; turns: Array<{ user: string; expectedTools: string[]; evidence?: unknown }> };
+  const scenario = loadScenarioCatalog().find(({ id }) => id === 'partial-journey-recovery');
+  const evaluator = loadEvaluatorCatalog().find(({ scenarioId }) => scenarioId === 'partial-journey-recovery');
+  assert.equal(fixture.id, 'partial-journey-recovery');
+  assert.equal(scenario?.version, fixture.version);
+  assert.equal(evaluator?.version, fixture.version);
+  assert.deepEqual(fixture.setup, { kind: 'partial-journey-recovery', version: 1 });
+  assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [['run_get', 'run_get', 'run_get'], ['run_resume'], ['run_get', 'run_get', 'run_get']]);
+  assert.ok(fixture.turns.every(({ user, evidence }) => user.includes('{{runId}}') && JSON.stringify(evidence).includes('{{runId}}')));
+  assert.match(fixture.turns[0]!.user, /do not resume/i);
+  assert.match(fixture.turns[1]!.user, /resume this run now/i);
+  assert.ok((scenario?.controlledEvidence as { lifecycle?: unknown } | undefined)?.lifecycle);
+  assert.ok(evaluator?.criteria.some(({ id, condition }) => id === 'resume-after-explicit-consent' && /first turn|explicit/i.test(condition)));
 });

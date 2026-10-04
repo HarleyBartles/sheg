@@ -5,7 +5,9 @@ import { JevProvider } from './jev.js';
 import { LayaProvider } from './laya.js';
 
 export function createProvider(config: ProviderConfigInput): DecisionProvider {
-  if (config.kind === 'jev') return new JevProvider(config);
+  if (config.kind === 'jev') {
+    return new JevProvider(config);
+  }
   return new LayaProvider({
     kind: 'laya', baseUrl: config.baseUrl, checkpoint: config.checkpoint,
     contextLimit: config.contextLimit, headLimit: config.headLimit,

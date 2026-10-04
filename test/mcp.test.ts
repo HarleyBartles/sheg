@@ -12,6 +12,9 @@ import { createRunService } from '../src/application/run-service.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
+import { seedWorkflowState } from '../scripts/skill-testing/workflow-seeds.js';
+import { createControlledRecoveryProvider } from '../scripts/skill-testing/controlled-recovery.js';
+import { executeQuestionRun } from '../src/application/question-worker.js';
 
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
@@ -60,6 +63,7 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
   try {
     const tools = await f.client.listTools();
     assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_query', 'run_resume', 'run_start', 'run_storage']);
+    assert.match(tools.tools.find(({ name }) => name === 'run_resume')?.description ?? '', /partial journey/i);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);
     assert.equal((inspected.structuredContent as { valid: boolean }).valid, true);
@@ -139,6 +143,80 @@ test('MCP inspects and accepts an inline journey, then exposes its initial durab
     assert.equal(retry.isError ?? false, false);
     assert.equal(f.store.list({}).items.length, 1);
   } finally { await f.close(); }
+});
+
+test('MCP reports eligible respondent-local journey recovery and resumes only on run_resume', async () => {
+  const f = await connectedFixture();
+  try {
+    const started = await f.client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: journeyRequest() } });
+    const runId = (started.structuredContent as { runId: string }).runId;
+    const claim = f.store.claim(runId, Date.now(), 1234);
+    assert.ok(claim);
+    const reservation = f.store.reserveNext(claim, Date.now());
+    assert.ok(reservation);
+    const journey = f.store.getJourneyRun(runId);
+    const failedTurn = journey.evaluations[0]!.turnId;
+    const respondent = journey.respondents[0]!;
+    f.store.settleJourney(claim, reservation.attemptId, { kind: 'failed', code: 'decision_failed', message: 'The answer did not validate.', scope: 'evaluation' }, {
+      respondentId: respondent.respondentId,
+      expectedRevision: respondent.revision,
+      state: { ...respondent, status: 'failed', currentNodeId: null, currentTurnId: null, currentContextId: null, revision: respondent.revision + 1 },
+    });
+    assert.equal(f.store.finish(claim).status, 'partial');
+
+    const before = await f.client.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+    const beforeData = before.structuredContent as { status: string; lifecycle: { resume: { eligible: boolean } } };
+    assert.equal(beforeData.status, 'partial');
+    assert.deepEqual(beforeData.lifecycle.resume, { eligible: true });
+    assert.equal(f.store.getJourneyRun(runId).respondents[0]?.status, 'failed');
+
+    const resumed = await f.client.callTool({ name: 'run_resume', arguments: { runId } });
+    const resumedData = resumed.structuredContent as { runId: string; status: string };
+    assert.equal(resumedData.runId, runId);
+    assert.equal(resumedData.status, 'prepared');
+    const after = f.store.getJourneyRun(runId);
+    assert.equal(after.respondents[0]?.status, 'active');
+    assert.equal(after.respondents[0]?.currentTurnId, failedTurn);
+    assert.equal(after.evaluations[0]?.status, 'pending');
+    assert.deepEqual(f.store.attempts(runId).items.map(({ status }) => status), ['failed']);
+  } finally {
+    await f.close();
+  }
+});
+
+test('MCP controlled recovery resumes the saved journey before the next workflow turn reads it', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-controlled-resume-'));
+  const seeded = await seedWorkflowState({ kind: 'partial-journey-recovery', version: 1 }, root);
+  const store = openRunStore(root);
+  const provider = createControlledRecoveryProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
+  const service = createRunService(store, root, () => provider, {
+    async launch(_dataRoot, runId) { await executeQuestionRun(store, runId, () => provider); },
+  }, { assertProviderReady: async () => undefined });
+  const server = createPollingServer(service);
+  const client = new Client({ name: 'sheg-controlled-recovery-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const before = await client.callTool({ name: 'run_get', arguments: { runId: seeded.runId, view: 'status' } });
+    assert.equal((before.structuredContent as { status: string }).status, 'partial');
+    const resumed = await client.callTool({ name: 'run_resume', arguments: { runId: seeded.runId } });
+    const status = resumed.structuredContent as { runId: string; status: string; usedCalls: number; maxCalls: number };
+    assert.equal(status.runId, seeded.runId);
+    assert.equal(status.status, 'completed');
+    assert.equal(status.usedCalls, 4);
+    assert.equal(status.maxCalls, 8);
+    const journey = await client.callTool({ name: 'run_get', arguments: { runId: seeded.runId, view: 'journey' } });
+    const data = journey.structuredContent as { respondents: Array<{ respondentId: string; status: string; route: Array<{ nodeId: string; toNodeId: string }> }> ; evaluations: Array<{ respondentId: string; questionId: string; status: string }> };
+    assert.deepEqual(data.respondents.map(({ respondentId, status }) => [respondentId, status]), [['reader-a', 'completed'], ['reader-b', 'completed']]);
+    assert.deepEqual(data.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.route.map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-interest', 'evidence-node'], ['ask-clarity', 'clear']]);
+    assert.deepEqual(store.attempts(seeded.runId).items.map(({ status }) => status), ['answered', 'answered', 'failed', 'answered']);
+    assert.equal(data.evaluations.filter(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'interest').length, 1);
+  } finally {
+    await client.close();
+    await server.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('MCP queries typed evidence and starts a context-preserving follow-on', async () => {

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFrozenCampaign, type CampaignManifest } from './contracts.js';
 import { sha256, stableJson } from './snapshots.js';
+import { seedWorkflowState } from './workflow-seeds.js';
 
 export interface ExecutionResult {
   status: 'completed' | 'timed-out' | 'failed';
@@ -16,10 +17,12 @@ export interface ExecutionResult {
   workflowTurnEvents?: string[];
 }
 
+export type WorkflowSetup = { kind: 'partial-journey-recovery'; version: 1 };
+
 export interface CampaignAdapter {
-  preflight?(): Promise<Record<string, unknown>>;
-  execute(input: { prompt: string; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; persistent?: boolean; resumeSessionId?: string }): Promise<ExecutionResult>;
-  executeWorkflow?(input: { initialPrompt: string; turns: string[]; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal }): Promise<ExecutionResult>;
+  preflight?(workflowSetup?: WorkflowSetup): Promise<Record<string, unknown>>;
+  execute(input: { prompt: string; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; persistent?: boolean; resumeSessionId?: string; workflowSetup?: WorkflowSetup }): Promise<ExecutionResult>;
+  executeWorkflow?(input: { initialPrompt: string; turns: string[]; cwd: string; timeoutMs: number; requestedSettings: Record<string, unknown>; signal?: AbortSignal; workflowSetup?: WorkflowSetup }): Promise<ExecutionResult>;
 }
 
 interface JournalEntry {
@@ -65,6 +68,16 @@ function fileSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
+function substituteRunId(value: unknown, runId: string | undefined): unknown {
+  if (typeof value === 'string') {
+    if (value.includes('{{runId}}') && !runId) throw new Error('Workflow fixture requires a seeded run ID.');
+    return runId ? value.replaceAll('{{runId}}', runId) : value;
+  }
+  if (Array.isArray(value)) return value.map((entry) => substituteRunId(entry, runId));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substituteRunId(entry, runId)]));
+  return value;
+}
+
 function resultSummary(result: ExecutionResult): NonNullable<JournalEntry['result']> {
   return { status: result.status, exitCode: result.exitCode, sessionId: result.sessionId, observedSettings: result.observedSettings };
 }
@@ -100,7 +113,7 @@ export async function runCampaign(
     throw new Error(`Campaign concurrency must be between 1 and ${manifest.concurrency}.`);
   }
   const adapterRuntimeIdentity = adapter.preflight
-    ? await adapter.preflight()
+    ? await adapter.preflight(manifest.workflowSetup)
     : { adapter: typeof manifest.execution.adapter === 'string' ? manifest.execution.adapter : 'custom', executionSha256: manifest.basis.executionSha256 };
   const runtimeIdentity = { ...adapterRuntimeIdentity, effectiveConcurrency: concurrency };
   const runtimeIdentitySha256 = sha256(stableJson(runtimeIdentity));
@@ -139,7 +152,14 @@ export async function runCampaign(
           const guidanceMarker = '\n## Current skill and declared references\n';
           const guidanceBoundary = arm.actorPrompt.indexOf(guidanceMarker);
           if (userBoundary < 0 || (guidanceBoundary < 0 && Object.keys(arm.skillReferenceHashes).length > 0) || !manifest.workflowTurns?.length) throw new Error('Workflow prompt, frozen guidance, or turns are missing.');
-          const turns = manifest.workflowTurns.map((turn) => `${turn.user}${turn.evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(turn.evidence)}`}`);
+          const workflowRunId = manifest.workflowSetup
+            ? (await seedWorkflowState(manifest.workflowSetup, path.join(cwd, 'sheg-data'))).runId
+            : undefined;
+          const turns = manifest.workflowTurns.map((turn) => {
+            const user = substituteRunId(turn.user, workflowRunId) as string;
+            const evidence = substituteRunId(turn.evidence, workflowRunId);
+            return `${user}${evidence === undefined ? '' : `\n\nEvidence for this turn only:\n${JSON.stringify(evidence)}`}`;
+          });
           const guidance = guidanceBoundary >= 0 ? arm.actorPrompt.slice(guidanceBoundary) : '';
           const workflowPrelude = `${arm.actorPrompt.slice(0, userBoundary)}${guidance}`
             .replace('Use the supplied skill and references to respond to the user request. Treat the evidence below as a mock fixture, not a live tool result.', 'Use the supplied skill and references to handle the conversation. The scripted evidence is fixture data supplied only at its listed turn.')
@@ -151,6 +171,7 @@ export async function runCampaign(
           result = await adapter.executeWorkflow!({
             initialPrompt: workflowPrompts[0]!,
             turns: turns.slice(1), cwd, timeoutMs: manifest.timeoutMs, requestedSettings: manifest.execution,
+            ...(manifest.workflowSetup ? { workflowSetup: manifest.workflowSetup } : {}),
             ...(options.signal ? { signal: options.signal } : {}),
           });
         } else {

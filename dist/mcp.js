@@ -34406,12 +34406,12 @@ function deriveRunLifecycle(facts) {
   if (facts.status === "prepared" || facts.status === "running") return refuse("already_active");
   if (facts.status === "completed") return refuse("already_completed");
   if (facts.status === "cancelled") return refuse("cancelled");
-  if (facts.status === "partial" && facts.kind === "journey") return refuse("partial_journey");
   if (facts.status !== "interrupted" && facts.status !== "failed" && facts.status !== "partial") return refuse("unsupported_status");
   if (facts.cancelRequested) return refuse("cancellation_requested");
   if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
   if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
-  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && facts.hasFailedEvaluations || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
+  if (facts.status === "partial" && facts.kind === "journey" && !facts.hasRetryableJourneyFailure) return refuse("partial_journey");
+  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && (facts.kind === "journey" ? facts.hasRetryableJourneyFailure : facts.hasFailedEvaluations) || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
   if (!hasResumableWork) return refuse("no_unfinished_work");
   return { state, resume: { eligible: true } };
 }
@@ -37912,20 +37912,46 @@ var SQLiteRunStore = class {
       if (!statusView.lifecycle.resume.eligible) {
         throw new RunStoreError("run_not_resumable", resumeRefusalMessage(statusView.lifecycle.resume.reason));
       }
-      const run = this.database.prepare("SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls FROM runs WHERE run_id = ?").get(runId);
+      const run = this.database.prepare("SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls, request_json FROM runs WHERE run_id = ?").get(runId);
       if (!run) throw this.notFound();
       const status = asText(run.status, "run status");
+      const storedRequest = parseJson(run.request_json, "run request");
+      const parsedRequest = runRequestSchema.safeParse(storedRequest.request);
+      if (!parsedRequest.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+      const isJourney = parsedRequest.data.kind === "journey";
       const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId);
+      const journeyFailures = status === "partial" && isJourney && statusView.lifecycle.resume.eligible ? this.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.turn_id, e.node_id, e.context_id
+          FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = ? AND e.status = 'failed' AND jr.status = 'failed' ORDER BY e.ordinal`).all(runId) : [];
       const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId);
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
       const failedEvaluation = failedRunEvaluationId ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId, failedRunEvaluationId) : void 0;
       const canRetrySharedFailure = status === "failed" && asText(run.failure_scope, "failure scope") === "run" && failedEvaluation !== void 0 && asText(failedEvaluation.status, "evaluation status") === "failed";
-      const canRetryQuestionFailures = status === "partial" && asNumber(failed.count, "failed evaluation count") > 0;
+      const canRetryQuestionFailures = status === "partial" && asNumber(failed.count, "failed evaluation count") > 0 && !isJourney;
       if (canRetrySharedFailure && runFailure) {
         this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
           WHERE run_id = ? AND status = 'failed' AND evaluation_id IN (SELECT evaluation_id FROM attempt_evaluations WHERE attempt_id = ?)`).run(runId, asText(runFailure.attempt_id, "failed attempt ID"));
       }
       if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE run_id = ? AND status = 'failed'").run(runId);
+      for (const checkpoint of journeyFailures) {
+        const evaluationId = asText(checkpoint.evaluation_id, "failed evaluation ID");
+        const respondentId = asText(checkpoint.respondent_id, "failed respondent ID");
+        const reopened = this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL,
+          failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
+          WHERE run_id = ? AND evaluation_id = ? AND respondent_id = ? AND status = 'failed'`).run(runId, evaluationId, respondentId);
+        const restored = this.database.prepare(`UPDATE journey_respondents SET status = 'active',
+          current_node_id = ?, current_turn_id = ?, current_context_id = ?, revision = revision + 1
+          WHERE run_id = ? AND respondent_id = ? AND status = 'failed'`).run(
+          asText(checkpoint.node_id, "failed turn node ID"),
+          asText(checkpoint.turn_id, "failed turn ID"),
+          asText(checkpoint.context_id, "failed turn context ID"),
+          runId,
+          respondentId
+        );
+        if (reopened.changes !== 1 || restored.changes !== 1) {
+          throw new RunStoreError("data_integrity_error", "The saved failed journey checkpoint changed during resume.");
+        }
+      }
       this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
         failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
         WHERE run_id = ? AND status IN ('interrupted', 'failed', 'partial')`).run(nowMs + LEASE_MS, runId);
@@ -38388,7 +38414,18 @@ var SQLiteRunStore = class {
       EXISTS (SELECT 1 FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
         JOIN evaluations e ON e.run_id = a.run_id AND e.evaluation_id = ae.evaluation_id
         WHERE a.run_id = r.run_id AND a.status = 'failed' AND a.failure_scope = 'run' AND e.status = 'failed'
-          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure
+          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure,
+      (EXISTS (SELECT 1 FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = r.run_id AND e.status = 'failed' AND jr.status = 'failed') AND
+       NOT EXISTS (SELECT 1 FROM evaluations e LEFT JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          WHERE e.run_id = r.run_id AND e.status = 'failed' AND (jr.respondent_id IS NULL OR jr.status <> 'failed' OR
+            e.turn_id IS NULL OR length(trim(e.turn_id)) = 0 OR e.node_id IS NULL OR length(trim(e.node_id)) = 0 OR
+            e.path_id IS NULL OR length(trim(e.path_id)) = 0 OR e.occurrence IS NULL OR e.occurrence < 1 OR
+            length(trim(e.packet_json)) = 0 OR length(trim(e.packet_fingerprint)) = 0)) AND
+       NOT EXISTS (SELECT e.respondent_id FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed'
+          GROUP BY e.respondent_id HAVING COUNT(*) <> 1) AND
+       NOT EXISTS (SELECT 1 FROM journey_respondents jr WHERE jr.run_id = r.run_id AND jr.status = 'failed' AND
+          (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = jr.run_id AND e.respondent_id = jr.respondent_id AND e.status = 'failed') <> 1)) AS retryable_journey_failure
       FROM runs r WHERE r.run_id = ?`).get(runId);
     if (!row) throw this.notFound();
     const stored = parseJson(row.request_json, "run request");
@@ -38419,7 +38456,8 @@ var SQLiteRunStore = class {
         maxCalls,
         hasPendingEvaluations: asNumber(row.pending_evaluations, "pending evaluation count") > 0,
         hasFailedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count") > 0,
-        canRetrySharedFailure: asNumber(row.retryable_shared_failure, "retryable shared failure") === 1
+        canRetrySharedFailure: asNumber(row.retryable_shared_failure, "retryable shared failure") === 1,
+        hasRetryableJourneyFailure: asNumber(row.retryable_journey_failure, "retryable journey failure") === 1
       }),
       ...row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, "failure code"), message: asText(row.failure_message, "failure message") } }
     };
@@ -39286,7 +39324,9 @@ function ensureTrailingSlash(value) {
 
 // src/providers/factory.ts
 function createProvider(config2) {
-  if (config2.kind === "jev") return new JevProvider(config2);
+  if (config2.kind === "jev") {
+    return new JevProvider(config2);
+  }
   return new LayaProvider({
     kind: "laya",
     baseUrl: config2.baseUrl,
@@ -39311,7 +39351,7 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.8",
+  version: "0.3.0-dev.9",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
@@ -39375,7 +39415,7 @@ function createPollingServer(service = createDefaultRunService()) {
     return service.attempts(input2.runId, input2.cursor, input2.limit);
   }));
   server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.cancel(runId)));
-  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work or retryable partial question failures under the same run ID, saved request, and remaining provider-call allowance. Completed answers are preserved and only unanswered questions are dispatched. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
+  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => service.resume(runId)));
   server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? service.previewDelete(runIds) : service.deleteRuns(runIds)));
   server.registerTool("run_storage", { description: "Inspect Sheg-managed local datastore health or ask Sheg to optimize it. No file paths or SQL are exposed.", inputSchema: external_exports.object({ operation: external_exports.enum(["inspect", "optimize"]) }).strict() }, async ({ operation }) => safeResult(() => {
     if (operation === "inspect") return service.storageInfo();

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import test from 'node:test';
-import { createCodexAdapter } from '../../scripts/skill-testing/codex-adapter.js';
+import { createCodexAdapter, resolveControlledCandidateMcp } from '../../scripts/skill-testing/codex-adapter.js';
 
 const supportedProbe = ((_: string, args: readonly string[]) => ({
   status: 0, error: undefined,
@@ -62,6 +64,65 @@ test('Codex workflow resumes the exact session and sends turns in order without 
   assert.equal(result.workflowTurnEvents?.length, 3);
   assert.match(result.workflowTurnEvents?.[0] ?? '', /thread.started/);
   assert.ok(result.workflowTurnEvents?.slice(1).every((events) => events.includes('turn.completed')));
+});
+
+test('partial recovery workflow preflights and launches the source-bound harness instead of a stale installed MCP', async () => {
+  const invocations: string[][] = [];
+  const fakeSpawn = ((
+    _file: string,
+    args: readonly string[],
+  ) => {
+    invocations.push([...args]);
+    const child = new EventEmitter();
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    const stdin = new EventEmitter();
+    Object.assign(stdin, { end() {} });
+    Object.assign(child, { stdout, stderr, stdin, kill() { return true; } });
+    setImmediate(() => {
+      stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'thread.started', thread_id: '22222222-2222-4222-8222-222222222222' })}\n`));
+      child.emit('close', 0);
+    });
+    return child as unknown as ChildProcess;
+  }) as unknown as typeof import('node:child_process').spawn;
+  const adapter = createCodexAdapter({
+    executable: 'codex-test', spawnProcess: fakeSpawn, spawnSyncProcess: supportedProbe,
+    shegMcpConfig: { enabled: true, transport: { type: 'stdio', command: 'stale-sheg', args: ['installed-dev.7.js'], cwd: 'C:\\installed\\sheg-dev.7' } },
+  });
+  const setup = { kind: 'partial-journey-recovery' as const, version: 1 as const };
+  const preflight = adapter.preflight as (workflowSetup?: typeof setup) => Promise<Record<string, unknown>>;
+  const identity = await preflight(setup);
+  const packageJson = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8')) as { version: string };
+  assert.equal(identity.shegMcpVersion, packageJson.version);
+  assert.ok(identity.shegRecoveryHarnessSha256);
+  const result = await adapter.executeWorkflow!({ initialPrompt: 'resume fixture', turns: [], cwd: process.cwd(), timeoutMs: 5000, requestedSettings: {}, workflowSetup: setup });
+  assert.equal(result.status, 'completed');
+  const serverConfig = invocations[0]!.find((arg) => arg.startsWith('mcp_servers.sheg='));
+  assert.ok(serverConfig);
+  assert.match(serverConfig.replaceAll('\\\\', '/'), /scripts\/skill-testing\/recovery-mcp\.ts/);
+  assert.ok(serverConfig.includes('--import'));
+  assert.ok(serverConfig.includes('SHEG_TEST_PROVIDER'));
+  assert.ok(serverConfig.includes(JSON.stringify(process.execPath)));
+  assert.doesNotMatch(serverConfig, /installed-dev\.7\.js|C:\\\\installed/);
+});
+
+test('controlled candidate resolution rejects missing harness and mismatched metadata before actor launch', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-candidate-mcp-'));
+  try {
+    assert.throws(() => resolveControlledCandidateMcp(root), /package\.json is missing/i);
+    mkdirSync(path.join(root, 'scripts', 'skill-testing'), { recursive: true });
+    mkdirSync(path.join(root, 'src'));
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.3.0-dev.9' }));
+    writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ version: '0.3.0-dev.8' }));
+    writeFileSync(path.join(root, 'scripts', 'skill-testing', 'recovery-mcp.ts'), 'candidate harness');
+    writeFileSync(path.join(root, 'scripts', 'skill-testing', 'controlled-recovery.ts'), 'candidate provider');
+    writeFileSync(path.join(root, 'src', 'candidate.ts'), 'candidate source');
+    assert.throws(() => resolveControlledCandidateMcp(root), /versions do not match/i);
+    writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ version: '0.3.0-dev.9' }));
+    const candidate = resolveControlledCandidateMcp(root);
+    assert.equal(candidate.harnessPath, path.join(root, 'scripts', 'skill-testing', 'recovery-mcp.ts'));
+    assert.match(candidate.sourceSha256, /^[0-9a-f]{64}$/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('Codex stdout pipe errors become retained attempt failures instead of unhandled process errors', async () => {

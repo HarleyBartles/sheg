@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import type { DecisionBatchRequest, DecisionResult } from '../src/domain/decision/decision.js';
-import { compileDecisionPacket, compileDecisionPacketForCompiler, promptContractHash, v6PromptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
+import { compileDecisionPacket, compileDecisionPacketForCompiler, promptContractHash, v6PromptContractHash, type PromptHistoryEvent, type PromptState } from '../src/domain/decision/prompt.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { runRequestSchema, type InlineRunRequest, type InlineJourneyRequest, type PreparedJourneyRun } from '../src/domain/run/request.js';
 import { prepareRun } from '../src/application/run-inspection.js';
@@ -45,7 +46,7 @@ function factory(provider: DecisionProvider) { return () => provider; }
 function authoredJourney(respondentCount = 1, maxCalls = 3): InlineJourneyRequest {
   return {
     kind: 'journey',
-    respondents: Array.from({ length: respondentCount }, (_, index) => ({ id: `reader-${String.fromCharCode(97 + index)}`, intent: 'Learn', context: 'New buyer', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' })),
+    respondents: Array.from({ length: respondentCount }, (_, index) => ({ id: `reader-${String.fromCharCode(97 + index)}`, intent: 'Learn', context: `Reader ${String.fromCharCode(65 + index)}`, desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' })),
     journey: {
       id: 'article', label: 'Article journey',
       items: [{ id: 'section-one', text: 'Opening section.' }, { id: 'section-three', text: 'Later section.' }],
@@ -63,6 +64,7 @@ function authoredJourney(respondentCount = 1, maxCalls = 3): InlineJourneyReques
         { id: 'exit', kind: 'terminal', outcome: 'left' },
         { id: 'unlikely', kind: 'terminal', outcome: 'unlikely' },
         { id: 'likely-outcome', kind: 'terminal', outcome: 'likely' },
+        { id: 'clear-outcome', kind: 'terminal', outcome: 'clear' },
       ], transitions: [
         { fromNodeId: 'opening', toNodeId: 'ask-interest' },
         { fromNodeId: 'ask-interest', optionId: 'continue', toNodeId: 'expose-section-three' },
@@ -70,7 +72,7 @@ function authoredJourney(respondentCount = 1, maxCalls = 3): InlineJourneyReques
         { fromNodeId: 'expose-section-three', toNodeId: 'ask-clarity' },
         { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: false }, toNodeId: 'ask-likely' },
         { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 0.5, maximum: 1.5, minimumInclusive: true, maximumInclusive: false }, toNodeId: 'ask-likely' },
-        { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 1.5, maximum: 2, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'ask-likely' },
+        { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 1.5, maximum: 2, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'clear-outcome' },
         { fromNodeId: 'ask-likely', when: { type: 'noul', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: false }, toNodeId: 'unlikely' },
         { fromNodeId: 'ask-likely', when: { type: 'noul', minimum: 0.5, maximum: 1, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'likely-outcome' },
       ] },
@@ -486,6 +488,214 @@ test('a respondent-local journey failure does not block another respondent', asy
     assert.equal(run.evaluations[0]?.status, 'failed');
     assert.equal(run.evaluations[1]?.status, 'answered');
   } finally { await f.close(); }
+});
+
+test('a partial journey failure retains the respondent-local checkpoint and prior path', async () => {
+  const f = await journeyFixture(2, 8);
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({
+      async decide(request) {
+        const respondent = (request.state as PromptState).respondent.profile.context;
+        if (respondent === 'Reader A' && request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+        if (respondent === 'Reader A' && request.question.id === 'clarity') throw new Error('local typed evaluation failure');
+        if (respondent === 'Reader B' && request.question.id === 'interest') return { ...answer(), choice: 'leave' };
+        throw new Error(`Unexpected question for ${respondent}: ${request.question.id}`);
+      },
+    }));
+    const run = f.store.getJourneyRun(f.runId);
+    const failedEvaluation = run.evaluations.find(({ respondentId, status }) => respondentId === 'reader-a' && status === 'failed');
+    const failedRespondent = run.respondents.find(({ respondentId }) => respondentId === 'reader-a');
+    assert.ok(failedEvaluation);
+    assert.ok(failedRespondent);
+    assert.equal(failedRespondent.status, 'failed');
+    assert.equal(failedRespondent.currentTurnId, null);
+    assert.equal(failedRespondent.currentContextId, null);
+    assert.equal(failedRespondent.currentNodeId, null);
+    assert.deepEqual(failedRespondent.route.map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-interest', 'expose-section-three']]);
+    assert.equal(failedRespondent.events.filter(({ type }) => type === 'response').length, 1);
+    assert.equal(run.evaluations.some(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'likely'), false);
+    assert.equal(run.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.status, 'completed');
+    const before = f.store.getStatus(f.runId);
+    assert.deepEqual(before.lifecycle.resume, { eligible: true });
+    const failedPacket = structuredClone(failedEvaluation.packet);
+    const failedPacketFingerprint = failedEvaluation.packetFingerprint;
+    const previousRoute = structuredClone(failedRespondent.route);
+    const previousEvents = structuredClone(failedRespondent.events);
+    const successfulSibling = structuredClone(run.evaluations.find(({ respondentId }) => respondentId === 'reader-b'));
+    const failedAttemptsBefore = f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(failedEvaluation.evaluationId));
+    assert.equal(failedAttemptsBefore.length, 1);
+    assert.equal(failedAttemptsBefore[0]?.status, 'failed');
+
+    const resumed = f.store.resume(f.runId, Date.now());
+    assert.equal(resumed.started, true);
+    assert.equal(resumed.run.runId, f.runId);
+    assert.equal(resumed.run.maxCalls, before.maxCalls);
+    assert.equal(resumed.run.usedCalls, before.usedCalls);
+    const reopened = f.store.getJourneyRun(f.runId);
+    const activeRespondent = reopened.respondents.find(({ respondentId }) => respondentId === 'reader-a');
+    const retryEvaluation = reopened.evaluations.find(({ evaluationId }) => evaluationId === failedEvaluation.evaluationId);
+    assert.equal(activeRespondent?.status, 'active');
+    assert.equal(activeRespondent?.currentTurnId, failedEvaluation.turnId);
+    assert.equal(activeRespondent?.currentContextId, failedEvaluation.contextId);
+    assert.equal(activeRespondent?.currentNodeId, failedEvaluation.nodeId);
+    assert.ok(activeRespondent!.revision > failedRespondent.revision);
+    assert.deepEqual(activeRespondent?.route, previousRoute);
+    assert.deepEqual(activeRespondent?.events, previousEvents);
+    assert.equal(retryEvaluation?.status, 'pending');
+    assert.deepEqual(retryEvaluation?.packet, failedPacket);
+    assert.equal(retryEvaluation?.packetFingerprint, failedPacketFingerprint);
+    assert.deepEqual(reopened.evaluations.find(({ respondentId }) => respondentId === 'reader-b'), successfulSibling);
+
+    const resumedCalls: Array<{ questionId: string; profile: string }> = [];
+    await executeQuestionRun(f.store, f.runId, factory({
+      async decide(request) {
+        resumedCalls.push({ questionId: request.question.id, profile: (request.state as PromptState).respondent.profile.context });
+        if (request.question.type === 'score') return {
+          type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 },
+          attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+        };
+        return { type: 'noul', noul: 0.8, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
+      },
+    }));
+    assert.deepEqual(resumedCalls, [{ questionId: 'clarity', profile: 'Reader A' }]);
+    const completed = f.store.getJourneyRun(f.runId);
+    assert.equal(f.store.getStatus(f.runId).status, 'completed');
+    assert.equal(completed.evaluations.find(({ evaluationId }) => evaluationId === failedEvaluation.evaluationId)?.turnId, failedEvaluation.turnId);
+    assert.deepEqual(completed.respondents.find(({ respondentId }) => respondentId === 'reader-a')?.route.slice(0, 1), previousRoute);
+    assert.deepEqual(completed.respondents.find(({ respondentId }) => respondentId === 'reader-a')?.route.slice(1).map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-clarity', 'clear-outcome']]);
+    assert.equal(completed.respondents.find(({ respondentId }) => respondentId === 'reader-a')?.events.filter(({ type }) => type === 'response').length, 2);
+    const failedAttemptsAfter = f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(failedEvaluation.evaluationId));
+    assert.deepEqual(failedAttemptsAfter.map(({ status }) => status), ['failed', 'answered']);
+  } finally { await f.close(); }
+});
+
+test('a failed retry stays partial and preserves every attempt for the same reached turn', async () => {
+  const f = await journeyFixture(1, 6);
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      throw new Error('respondent-local evaluation failure');
+    } }));
+    const failedId = f.store.getJourneyRun(f.runId).evaluations.find(({ status }) => status === 'failed')!.evaluationId;
+    assert.equal(f.store.getStatus(f.runId).status, 'partial');
+    assert.equal(f.store.resume(f.runId, Date.now()).started, true);
+    await executeQuestionRun(f.store, f.runId, factory({ async decide() { throw new Error('respondent-local retry failure'); } }));
+    const attempts = f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(failedId));
+    assert.deepEqual(attempts.map(({ status }) => status), ['failed', 'failed']);
+    assert.equal(f.store.getJourneyRun(f.runId).evaluations.find(({ evaluationId }) => evaluationId === failedId)?.status, 'failed');
+    assert.equal(f.store.getStatus(f.runId).status, 'partial');
+    assert.deepEqual(f.store.getStatus(f.runId).lifecycle.resume, { eligible: true });
+  } finally { await f.close(); }
+});
+
+test('a partial journey whose original allowance is exhausted refuses resume', async () => {
+  const f = await journeyFixture(1, 2);
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      throw new Error('respondent-local evaluation failure');
+    } }));
+    const status = f.store.getStatus(f.runId);
+    assert.equal(status.status, 'partial');
+    assert.equal(status.usedCalls, status.maxCalls);
+    assert.deepEqual(status.lifecycle.resume, { eligible: false, reason: 'call_allowance_exhausted' });
+    assert.throws(() => f.store.resume(f.runId, Date.now()), /no remaining provider-call allowance/i);
+  } finally { await f.close(); }
+});
+
+test('resuming multiple failed respondents never exceeds the one call left in the original allowance', async () => {
+  const f = await journeyFixture(2, 5);
+  let retryPhase = false;
+  let retryCalls = 0;
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      if (!retryPhase) throw new Error('respondent-local evaluation failure');
+      retryCalls += 1;
+      if (retryCalls > 1) throw new Error('worker exceeded the remaining physical-call allowance');
+      return {
+        type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 },
+        attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+      };
+    } }));
+    const before = f.store.getStatus(f.runId);
+    assert.equal(before.status, 'partial');
+    assert.equal(before.usedCalls, 4);
+    assert.equal(before.maxCalls, 5);
+    assert.deepEqual(before.lifecycle.resume, { eligible: true });
+    assert.equal(f.store.getJourneyRun(f.runId).evaluations.filter(({ questionId, status }) => questionId === 'clarity' && status === 'failed').length, 2);
+
+    retryPhase = true;
+    assert.equal(f.store.resume(f.runId, Date.now()).started, true);
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      retryCalls += 1;
+      if (retryCalls > 1) throw new Error('worker exceeded the remaining physical-call allowance');
+      return {
+        type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 },
+        attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {},
+      };
+    } }));
+    const after = f.store.getJourneyRun(f.runId);
+    const status = f.store.getStatus(f.runId);
+    assert.equal(retryCalls, 1);
+    assert.equal(status.usedCalls, status.maxCalls);
+    assert.equal(status.status, 'partial');
+    assert.deepEqual(status.lifecycle.resume, { eligible: false, reason: 'call_allowance_exhausted' });
+    assert.equal(after.evaluations.filter(({ questionId, status: evaluationStatus }) => questionId === 'clarity' && evaluationStatus === 'answered').length, 1);
+    const unresolved = after.evaluations.find(({ respondentId, questionId, status: evaluationStatus }) => respondentId === 'reader-b' && questionId === 'clarity' && evaluationStatus === 'unreached');
+    assert.ok(unresolved);
+    assert.deepEqual(f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(unresolved.evaluationId)).map(({ status: attemptStatus }) => attemptStatus), ['failed']);
+    assert.equal(f.store.attempts(f.runId).items.length, 5);
+  } finally { await f.close(); }
+});
+
+test('journey resume lifecycle refuses a failed evaluation without a failed respondent checkpoint', async () => {
+  const f = await journeyFixture(1, 5);
+  const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      throw new Error('respondent-local evaluation failure');
+    } }));
+    assert.deepEqual(f.store.getStatus(f.runId).lifecycle.resume, { eligible: true });
+    database.prepare("UPDATE journey_respondents SET status = 'unreached' WHERE run_id = ? AND respondent_id = 'reader-a'").run(f.runId);
+    assert.deepEqual(f.store.getStatus(f.runId).lifecycle.resume, { eligible: false, reason: 'partial_journey' });
+    assert.throws(() => f.store.resume(f.runId, Date.now()), /partial journey run cannot be resumed/i);
+  } finally { database.close(); await f.close(); }
+});
+
+test('journey resume lifecycle refuses a failed respondent with no failed evaluation', async () => {
+  const f = await journeyFixture(2, 8);
+  const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      throw new Error('respondent-local evaluation failure');
+    } }));
+    const failures = f.store.getJourneyRun(f.runId).evaluations.filter(({ status }) => status === 'failed');
+    assert.equal(failures.length, 2);
+    database.prepare("UPDATE evaluations SET status = 'pending', failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(failures[1]!.evaluationId);
+
+    assert.deepEqual(f.store.getStatus(f.runId).lifecycle.resume, { eligible: false, reason: 'partial_journey' });
+    assert.throws(() => f.store.resume(f.runId, Date.now()), /partial journey run cannot be resumed/i);
+  } finally { database.close(); await f.close(); }
+});
+
+test('journey resume lifecycle refuses a failed evaluation with no saved turn checkpoint', async () => {
+  const f = await journeyFixture(1, 5);
+  const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide(request) {
+      if (request.question.id === 'interest') return { ...answer(), choice: 'continue' };
+      throw new Error('respondent-local evaluation failure');
+    } }));
+    const failed = f.store.getJourneyRun(f.runId).evaluations.find(({ status }) => status === 'failed')!;
+    database.prepare('UPDATE evaluations SET turn_id = NULL, node_id = NULL, path_id = NULL, occurrence = NULL WHERE evaluation_id = ?').run(failed.evaluationId);
+
+    assert.deepEqual(f.store.getStatus(f.runId).lifecycle.resume, { eligible: false, reason: 'partial_journey' });
+    assert.throws(() => f.store.resume(f.runId, Date.now()), /partial journey run cannot be resumed/i);
+  } finally { database.close(); await f.close(); }
 });
 
 test('an explicit resume restarts the failed reached turn without replaying earlier answers', async () => {

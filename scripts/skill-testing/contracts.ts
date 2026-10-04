@@ -15,6 +15,10 @@ const armConfigSchema = z.object({
 });
 
 const workflowTurnSchema = z.object({ user: z.string().min(1), evidence: z.unknown().optional(), expectedTools: z.array(z.string()).default([]), criteria: z.array(z.string().min(1)).default([]) }).strict();
+const workflowSetupSchema = z.object({ kind: z.literal('partial-journey-recovery'), version: z.literal(1) }).strict();
+const workflowFixtureSchema = z.object({
+  id: z.string(), version: z.number().int().positive(), setup: workflowSetupSchema.optional(), turns: z.array(workflowTurnSchema).min(1),
+}).strict();
 
 export const campaignConfigSchema = z.object({
   id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
@@ -28,7 +32,6 @@ export const campaignConfigSchema = z.object({
   workflowTurns: z.array(workflowTurnSchema).min(1).optional(),
   arms: z.array(armConfigSchema).min(1),
 }).strict().superRefine((config, context) => {
-  if (config.suite === 'workflow' && !config.workflowTurns) context.addIssue({ code: 'custom', path: ['workflowTurns'], message: 'Workflow campaigns require ordered scripted turns.' });
   if (config.suite !== 'workflow' && config.workflowTurns) context.addIssue({ code: 'custom', path: ['workflowTurns'], message: 'Scripted turns are only valid for workflow campaigns.' });
   const ids = config.arms.map((arm) => arm.id);
   if (new Set(ids).size !== ids.length) context.addIssue({ code: 'custom', path: ['arms'], message: 'Campaign arm IDs must be unique.' });
@@ -64,6 +67,7 @@ export const campaignManifestSchema = z.object({
   timeoutMs: z.number().int().positive(),
   execution: z.record(z.string(), z.unknown()),
   workflowTurns: z.array(workflowTurnSchema).optional(),
+  workflowSetup: workflowSetupSchema.optional(),
   evaluationBasis: evaluationBasisSchema,
   basis: z.object({
     requestSha256: z.string(),
@@ -81,6 +85,21 @@ export const campaignManifestSchema = z.object({
 }).strict();
 
 export type CampaignManifest = z.infer<typeof campaignManifestSchema>;
+export type WorkflowSetup = z.infer<typeof workflowSetupSchema>;
+
+function scenarioWorkflow(scenarioId: string, ownerSkill: string, version: number): z.infer<typeof workflowFixtureSchema> {
+  const workflowsRoot = path.resolve('skills', ownerSkill, 'tests', 'behavior', 'workflows');
+  const fixturePath = path.resolve(workflowsRoot, `${scenarioId}.json`);
+  const relative = path.relative(workflowsRoot, fixturePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Workflow fixture escapes its owning skill: ${scenarioId}`);
+  const fixture = workflowFixtureSchema.parse(JSON.parse(readFileSync(fixturePath, 'utf8')) as unknown);
+  if (fixture.id !== scenarioId || fixture.version !== version) throw new Error(`Workflow fixture identity or version does not match scenario ${scenarioId}.`);
+  return fixture;
+}
+
+function workflowEvidenceBasis(controlledEvidence: unknown, workflowTurns: CampaignManifest['workflowTurns'], workflowSetup?: CampaignManifest['workflowSetup']): unknown {
+  return { controlledEvidence, workflowTurns: workflowTurns ?? null, ...(workflowSetup ? { workflowSetup } : {}) };
+}
 
 const campaignPreparedSchema = z.object({ type: z.literal('campaign-prepared'), manifestSha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 
@@ -127,6 +146,12 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
   const outputRoot = path.resolve(outputRootInput);
   const scenario = loadScenarioCatalog().find((item) => item.id === config.scenarioId);
   if (!scenario) throw new Error(`Unknown skill scenario: ${config.scenarioId}`);
+  const workflowFixture = config.suite === 'workflow' && !config.workflowTurns
+    ? scenarioWorkflow(scenario.id, scenario.ownerSkill, scenario.version)
+    : undefined;
+  const workflowTurns = config.workflowTurns ?? workflowFixture?.turns;
+  const workflowSetup = workflowFixture?.setup;
+  if (config.suite === 'workflow' && !workflowTurns) throw new Error(`Workflow campaign ${scenario.id} requires ordered scripted turns or an owning-skill workflow fixture.`);
   const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === config.scenarioId);
   if (!evaluator || evaluator.version !== scenario.version) throw new Error(`Scenario evaluator is missing or stale: ${config.scenarioId}`);
   const rendered = renderActorPrompt(config.scenarioId);
@@ -150,7 +175,7 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
   const evaluationBasis: CampaignManifest['evaluationBasis'] = {
     userRequest: scenario.userRequest,
     controlledEvidence: scenario.controlledEvidence,
-    criteria: [...evaluator.criteria, ...(config.workflowTurns ? [{ id: 'workflow-tool-checkpoints', condition: config.workflowTurns.map((turn, index) => `Turn ${index + 1}: use ${turn.expectedTools.join(', ') || 'no Sheg tool'}${turn.criteria.length ? `; ${turn.criteria.join('; ')}` : ''}`).join('\n') }] : [])],
+    criteria: [...evaluator.criteria, ...(workflowTurns ? [{ id: 'workflow-tool-checkpoints', condition: workflowTurns.map((turn, index) => `Turn ${index + 1}: use ${turn.expectedTools.join(', ') || 'no Sheg tool'}${turn.criteria.length ? `; ${turn.criteria.join('; ')}` : ''}`).join('\n') }] : [])],
     prohibitedClaims: evaluator.prohibitedClaims,
   };
   const manifest: CampaignManifest = campaignManifestSchema.parse({
@@ -164,11 +189,12 @@ export function prepareCampaign(configInput: CampaignConfig, outputRootInput: st
     concurrency: config.concurrency,
     timeoutMs: config.timeoutMs,
     execution: config.execution,
-    ...(config.workflowTurns ? { workflowTurns: config.workflowTurns } : {}),
+    ...(workflowTurns ? { workflowTurns } : {}),
+    ...(workflowSetup ? { workflowSetup } : {}),
     evaluationBasis,
     basis: {
       requestSha256: sha256(scenario.userRequest),
-      evidenceSha256: sha256(stableJson({ controlledEvidence: scenario.controlledEvidence, workflowTurns: config.workflowTurns ?? null })),
+      evidenceSha256: sha256(stableJson(workflowEvidenceBasis(scenario.controlledEvidence, workflowTurns, workflowSetup))),
       criteriaSha256: sha256(stableJson(evaluationBasis.criteria)),
       suite: config.suite,
       classification: config.classification,
@@ -211,7 +237,7 @@ export function readFrozenCampaign(campaignDirectory: string): CampaignManifest 
   const prepared = journal[0] ? campaignPreparedSchema.safeParse(JSON.parse(journal[0]) as unknown) : undefined;
   if (!prepared?.success || prepared.data.manifestSha256 !== sha256(manifestText)) throw new Error('Frozen campaign manifest changed after preparation.');
   if (manifest.basis.requestSha256 !== sha256(manifest.evaluationBasis.userRequest) ||
-      manifest.basis.evidenceSha256 !== sha256(stableJson({ controlledEvidence: manifest.evaluationBasis.controlledEvidence, workflowTurns: manifest.workflowTurns ?? null })) ||
+      manifest.basis.evidenceSha256 !== sha256(stableJson(workflowEvidenceBasis(manifest.evaluationBasis.controlledEvidence, manifest.workflowTurns, manifest.workflowSetup))) ||
       manifest.basis.criteriaSha256 !== sha256(stableJson(manifest.evaluationBasis.criteria)) ||
       manifest.basis.executionSha256 !== sha256(stableJson(manifest.execution)) ||
       manifest.basis.suite !== manifest.suite || manifest.basis.classification !== manifest.classification || manifest.basis.repetitions !== manifest.repetitions ||
