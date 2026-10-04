@@ -19783,10 +19783,28 @@ var providerExecutionEvidenceSchema = external_exports.object({
   usage: external_exports.object({ inputTokens: external_exports.number().int().nonnegative().optional(), outputTokens: external_exports.number().int().nonnegative().optional() }).strict(),
   cost: costEvidenceSchema.optional()
 }).strict();
+var decisionFailureDetailSchema = external_exports.object({
+  reason: external_exports.enum(["malformed_answer", "answer_type_mismatch", "unknown_option", "probability_keys", "probability_sum", "score_out_of_range", "score_legend_mismatch", "invalid_answer"]),
+  field: external_exports.enum(["answer", "type", "choice", "probabilities", "score", "legend"]),
+  constraint: external_exports.enum(["typed_answer_shape", "match_question_type", "offered_option", "declared_outcomes", "sum_to_one", "declared_rubric_range", "match_declared_rubric", "typed_answer_contract"])
+}).strict();
+function decisionFailureDetailForReason(reason) {
+  const rule = {
+    malformed_answer: { field: "answer", constraint: "typed_answer_shape" },
+    answer_type_mismatch: { field: "type", constraint: "match_question_type" },
+    unknown_option: { field: "choice", constraint: "offered_option" },
+    probability_keys: { field: "probabilities", constraint: "declared_outcomes" },
+    probability_sum: { field: "probabilities", constraint: "sum_to_one" },
+    score_out_of_range: { field: "score", constraint: "declared_rubric_range" },
+    score_legend_mismatch: { field: "legend", constraint: "match_declared_rubric" },
+    invalid_answer: { field: "answer", constraint: "typed_answer_contract" }
+  }[reason];
+  return { reason, ...rule };
+}
 var decisionBatchResultSchema = external_exports.object({
   answers: external_exports.array(external_exports.union([
     external_exports.object({ questionId: identifier, value: decisionValueSchema }).strict(),
-    external_exports.object({ questionId: identifier, failure: external_exports.object({ code: identifier, message: prose }).strict() }).strict()
+    external_exports.object({ questionId: identifier, failure: external_exports.object({ code: identifier, message: prose, detail: decisionFailureDetailSchema.optional() }).strict() }).strict()
   ])),
   execution: providerExecutionEvidenceSchema
 }).strict().superRefine((result, context) => {
@@ -21298,10 +21316,10 @@ function validateDecisionBatch(request, result, options2 = {}) {
     if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
     if (answer.failure) return { questionId: question.id, failure: answer.failure };
     const value = decisionValueSchema.safeParse(answer.value);
-    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider returned an invalid typed answer." } };
-    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The provider answer type does not match the question." } };
+    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The answer does not match a supported typed-answer shape.", detail: decisionFailureDetailForReason("malformed_answer") } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The answer type does not match the question type.", detail: decisionFailureDetailForReason("answer_type_mismatch") } };
     if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
-      return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider selected an option that was not offered." } };
+      return { questionId: question.id, failure: { code: "invalid_answer", message: "The selected option was not offered by this question.", detail: decisionFailureDetailForReason("unknown_option") } };
     }
     try {
       const enriched = { ...value.data, ...execution };
@@ -21309,11 +21327,42 @@ function validateDecisionBatch(request, result, options2 = {}) {
       return { questionId: question.id, value: toDecisionValue(checked) };
     } catch (error62) {
       if (!(error62 instanceof DecisionError)) throw error62;
-      const typeMismatch = error62.message.includes("does not match task type");
-      return { questionId: question.id, failure: { code: typeMismatch ? "answer_type_mismatch" : "invalid_answer", message: typeMismatch ? "The provider answer type does not match the question." : "The provider returned an invalid answer for this question." } };
+      return { questionId: question.id, failure: decisionValidationFailure(error62) };
     }
   });
   return decisionBatchResultSchema.parse({ answers, execution });
+}
+function decisionFailureReason(error62) {
+  const message = error62.message;
+  const reason = message.includes("does not match task type") ? "answer_type_mismatch" : message.includes("was not offered") ? "unknown_option" : message.includes("probabilities must contain exactly") ? "probability_keys" : message.includes("probabilities must sum") ? "probability_sum" : message.includes("outside the declared rubric range") ? "score_out_of_range" : message.includes("Score legend does not match") ? "score_legend_mismatch" : message.startsWith("Decision result is invalid:") ? "malformed_answer" : "invalid_answer";
+  return reason;
+}
+function decisionValidationFailure(error62) {
+  return decisionValidationFailureForReason(decisionFailureReason(error62));
+}
+function decisionValidationFailureForReason(reason) {
+  const detail = decisionFailureDetailForReason(reason);
+  return { code: detail.reason === "answer_type_mismatch" ? "answer_type_mismatch" : "invalid_answer", message: decisionFailureMessage(detail), detail };
+}
+function decisionFailureMessage(detail) {
+  switch (detail.reason) {
+    case "malformed_answer":
+      return "The answer does not match a supported typed-answer shape.";
+    case "answer_type_mismatch":
+      return "The answer type does not match the question type.";
+    case "unknown_option":
+      return "The selected option was not offered by this question.";
+    case "probability_keys":
+      return "The probability distribution must contain exactly the declared outcomes.";
+    case "probability_sum":
+      return "The probability distribution must sum to 1 within the accepted tolerance.";
+    case "score_out_of_range":
+      return "The score falls outside the declared rubric range.";
+    case "score_legend_mismatch":
+      return "The score legend does not match the declared rubric.";
+    case "invalid_answer":
+      return "The answer failed a typed-answer validation rule.";
+  }
 }
 function toDecisionValue(result) {
   if (result.type === "choice") return {
@@ -21506,13 +21555,14 @@ async function runPowerShell(helperPath, args, interactive = false) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable") {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure) {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.failureScope = failureScope;
     this.failureCode = failureCode;
+    this.validationFailure = validationFailure;
     this.name = "JevCallError";
   }
   attempts;
@@ -21520,6 +21570,7 @@ var JevCallError = class extends Error {
   decisionId;
   failureScope;
   failureCode;
+  validationFailure;
 };
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -21653,7 +21704,7 @@ var JevProvider = class {
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts);
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
       }
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
@@ -21676,7 +21727,7 @@ var JevProvider = class {
         return validateDecision(request, result, { maxAttempts, provider: "jev" });
       } catch (error62) {
         if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation.", attempts);
+          throw new JevCallError("Jev response failed decision validation.", attempts, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
         }
         throw error62;
       }
@@ -22112,18 +22163,20 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation") {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", validationFailure) {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.failureScope = failureScope;
+    this.validationFailure = validationFailure;
     this.name = "LayaCallError";
   }
   attempts;
   contextFit;
   decisionId;
   failureScope;
+  validationFailure;
 };
 var choiceAnswerSchema2 = external_exports.object({
   type: external_exports.literal("choice"),
@@ -22222,7 +22275,7 @@ var LayaProvider = class {
       throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
     }
     const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
     const result = {
       ...answer.data,
       attempts: 1,
@@ -22239,7 +22292,7 @@ var LayaProvider = class {
       return validateDecision(request, result, { maxAttempts, provider: "laya", checkpoint: this.config.checkpoint });
     } catch (error62) {
       if (error62 instanceof DecisionError) {
-        throw new LayaCallError("Laya response failed decision validation.", 1);
+        throw new LayaCallError("Laya response failed decision validation.", 1, void 0, void 0, "evaluation", decisionValidationFailure(error62));
       }
       throw error62;
     }

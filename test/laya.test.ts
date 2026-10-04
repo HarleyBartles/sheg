@@ -81,6 +81,43 @@ test('provider accepts the routed checkpoint while preserving Laya confidence se
   assert.equal(result.cost, undefined);
 });
 
+test('Laya validation errors carry safe typed failure evidence without echoing the answer', async () => {
+  const provider = new LayaProvider(config, {
+    measureFit: async () => fit(20),
+    fetchRequest: async () => Response.json({
+      model: 'laya-rl-agent',
+      answers: { continue: { type: 'choice', choice: 'private-unoffered-value', probabilities: { continue: 0.8, stop: 0.2 } } },
+      usage: {}, routing: { model: config.checkpoint },
+    }),
+  });
+  await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+    assert.equal(error instanceof Error ? error.message : '', 'Laya response failed decision validation.');
+    assert.deepEqual((error as { validationFailure?: unknown }).validationFailure, {
+      code: 'invalid_answer', message: 'The selected option was not offered by this question.',
+      detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+    });
+    assert.equal(JSON.stringify(error).includes('private-unoffered-value'), false);
+    return true;
+  });
+});
+
+test('Laya malformed single answers expose only the safe typed-shape failure reason', async () => {
+  const provider = new LayaProvider(config, {
+    measureFit: async () => fit(20),
+    fetchRequest: async () => Response.json({
+      model: 'laya-rl-agent', answers: { continue: { type: 'choice', choice: 'private-malformed-value' } }, usage: {}, routing: { model: config.checkpoint },
+    }),
+  });
+  await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+    assert.deepEqual((error as { validationFailure?: unknown }).validationFailure, {
+      code: 'invalid_answer', message: 'The answer does not match a supported typed-answer shape.',
+      detail: { reason: 'malformed_answer', field: 'answer', constraint: 'typed_answer_shape' },
+    });
+    assert.equal(JSON.stringify(error).includes('private-malformed-value'), false);
+    return true;
+  });
+});
+
 test('Laya receives linked candidate text as Choice options without Sheg material identifiers', async () => {
   let body: Record<string, unknown> | undefined;
   const linkedRequest: DecisionRequest = { ...request, question: { ...request.question, materialOptions: { continue: 'section-three' } } };

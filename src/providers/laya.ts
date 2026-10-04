@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { decisionRequestSchema, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
+import { decisionRequestSchema, type DecisionFailureDetail, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
-import { DecisionError, validateDecision } from '../domain/decision/validate.js';
+import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision } from '../domain/decision/validate.js';
 import { measureLayaContext } from './laya/context-fit.js';
 export { measureLayaContext } from './laya/context-fit.js';
 
@@ -22,7 +22,7 @@ export type FitResult = ProviderContextFit;
 const MAX_LAYA_SCORE_LEVELS = 32;
 
 export class LayaCallError extends Error {
-  constructor(message: string, readonly attempts: number, readonly contextFit?: ProviderContextFit, readonly decisionId?: string, readonly failureScope: 'evaluation' | 'run' = 'evaluation') {
+  constructor(message: string, readonly attempts: number, readonly contextFit?: ProviderContextFit, readonly decisionId?: string, readonly failureScope: 'evaluation' | 'run' = 'evaluation', readonly validationFailure?: { code: string; message: string; detail: DecisionFailureDetail }) {
     super(message);
     this.name = 'LayaCallError';
   }
@@ -144,7 +144,7 @@ export class LayaProvider implements DecisionProvider {
       throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1);
     }
     const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, undefined, question.id, 'evaluation', decisionValidationFailureForReason('malformed_answer'));
 
     const result: DecisionResult = {
       ...answer.data,
@@ -162,7 +162,7 @@ export class LayaProvider implements DecisionProvider {
       return validateDecision(request, result, { maxAttempts, provider: 'laya', checkpoint: this.config.checkpoint });
     } catch (error) {
       if (error instanceof DecisionError) {
-        throw new LayaCallError('Laya response failed decision validation.', 1);
+        throw new LayaCallError('Laya response failed decision validation.', 1, undefined, undefined, 'evaluation', decisionValidationFailure(error));
       }
       throw error;
     }

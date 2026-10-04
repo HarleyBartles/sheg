@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { decisionBatchRequestSchema, decisionBatchResultSchema, decisionRequestSchema, decisionResultSchema, decisionValueSchema, providerExecutionEvidenceSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionRequest, type DecisionResult, type DecisionValue } from './decision.js';
+import { decisionBatchRequestSchema, decisionBatchResultSchema, decisionFailureDetailForReason, decisionRequestSchema, decisionResultSchema, decisionValueSchema, providerExecutionEvidenceSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionRequest, type DecisionResult, type DecisionValue } from './decision.js';
 import type { ProviderKind } from './provider.js';
 
 type ValidationOptions = {
@@ -96,10 +96,10 @@ export function validateDecisionBatch(
     if (!answer) return { questionId: question.id, failure: { code: 'missing_answer', message: 'The provider did not return an answer for this question.' } };
     if (answer.failure) return { questionId: question.id, failure: answer.failure };
     const value = decisionValueSchema.safeParse(answer.value);
-    if (!value.success) return { questionId: question.id, failure: { code: 'invalid_answer', message: 'The provider returned an invalid typed answer.' } };
-    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: 'answer_type_mismatch', message: 'The provider answer type does not match the question.' } };
+    if (!value.success) return { questionId: question.id, failure: { code: 'invalid_answer', message: 'The answer does not match a supported typed-answer shape.', detail: decisionFailureDetailForReason('malformed_answer') } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: 'answer_type_mismatch', message: 'The answer type does not match the question type.', detail: decisionFailureDetailForReason('answer_type_mismatch') } };
     if (question.type === 'choice' && (value.data.type !== 'choice' || !Object.hasOwn(question.options, value.data.choice))) {
-      return { questionId: question.id, failure: { code: 'invalid_answer', message: 'The provider selected an option that was not offered.' } };
+      return { questionId: question.id, failure: { code: 'invalid_answer', message: 'The selected option was not offered by this question.', detail: decisionFailureDetailForReason('unknown_option') } };
     }
     try {
       const enriched = { ...value.data, ...execution };
@@ -107,11 +107,44 @@ export function validateDecisionBatch(
       return { questionId: question.id, value: toDecisionValue(checked) };
     } catch (error) {
       if (!(error instanceof DecisionError)) throw error;
-      const typeMismatch = error.message.includes('does not match task type');
-      return { questionId: question.id, failure: { code: typeMismatch ? 'answer_type_mismatch' : 'invalid_answer', message: typeMismatch ? 'The provider answer type does not match the question.' : 'The provider returned an invalid answer for this question.' } };
+      return { questionId: question.id, failure: decisionValidationFailure(error) };
     }
   });
   return decisionBatchResultSchema.parse({ answers, execution });
+}
+
+function decisionFailureReason(error: DecisionError): DecisionFailureDetail['reason'] {
+  const message = error.message;
+  const reason: DecisionFailureDetail['reason'] = message.includes('does not match task type') ? 'answer_type_mismatch'
+    : message.includes('was not offered') ? 'unknown_option'
+      : message.includes('probabilities must contain exactly') ? 'probability_keys'
+        : message.includes('probabilities must sum') ? 'probability_sum'
+          : message.includes('outside the declared rubric range') ? 'score_out_of_range'
+            : message.includes('Score legend does not match') ? 'score_legend_mismatch'
+              : message.startsWith('Decision result is invalid:') ? 'malformed_answer' : 'invalid_answer';
+  return reason;
+}
+
+export function decisionValidationFailure(error: DecisionError): { code: string; message: string; detail: DecisionFailureDetail } {
+  return decisionValidationFailureForReason(decisionFailureReason(error));
+}
+
+export function decisionValidationFailureForReason(reason: DecisionFailureDetail['reason']): { code: string; message: string; detail: DecisionFailureDetail } {
+  const detail = decisionFailureDetailForReason(reason);
+  return { code: detail.reason === 'answer_type_mismatch' ? 'answer_type_mismatch' : 'invalid_answer', message: decisionFailureMessage(detail), detail };
+}
+
+function decisionFailureMessage(detail: DecisionFailureDetail): string {
+  switch (detail.reason) {
+    case 'malformed_answer': return 'The answer does not match a supported typed-answer shape.';
+    case 'answer_type_mismatch': return 'The answer type does not match the question type.';
+    case 'unknown_option': return 'The selected option was not offered by this question.';
+    case 'probability_keys': return 'The probability distribution must contain exactly the declared outcomes.';
+    case 'probability_sum': return 'The probability distribution must sum to 1 within the accepted tolerance.';
+    case 'score_out_of_range': return 'The score falls outside the declared rubric range.';
+    case 'score_legend_mismatch': return 'The score legend does not match the declared rubric.';
+    case 'invalid_answer': return 'The answer failed a typed-answer validation rule.';
+  }
 }
 
 function toDecisionValue(result: DecisionResult): DecisionValue {

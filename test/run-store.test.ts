@@ -213,6 +213,55 @@ test('a batch-wide provider failure records one physical call and fails every re
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('safe typed-answer diagnostics persist in answers, filtered queries, and attempt history after resume', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const request: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], questions: [input.questions[0]!,
+      { type: 'noul', id: 'trust', instructions: 'Does this feel credible?' }], maxCalls: 2 };
+    const prepared = await preparedRun(request);
+    const runId = store.accept(randomUUID(), prepared).run.runId;
+    const claim = store.claim(runId, Date.now(), 1234);
+    assert.ok(claim);
+    const group = prepared.groups![0]!;
+    const reservation = store.reserveBatch(claim, group.groupId, prepared.evaluations.map(({ evaluationId }) => evaluationId), Date.now());
+    assert.ok(reservation);
+    store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result: {
+      execution: { attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} },
+      answers: [
+        { questionId: 'interest', failure: { code: 'invalid_answer', message: 'The selected option was not offered by this question.', detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' } } },
+        { questionId: 'trust', value: { type: 'noul', noul: 0.8 } },
+      ],
+    } });
+    assert.equal(store.finish(claim).status, 'partial');
+
+    const answers = store.answers(runId).items;
+    const failed = answers.find(({ questionId }) => questionId === 'interest')!;
+    assert.deepEqual(failed.failure, { code: 'invalid_answer', message: 'The selected option was not offered by this question.', detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' } });
+    assert.equal(answers.find(({ questionId }) => questionId === 'trust')?.status, 'answered');
+    const failedQuery = store.queryEvidence({ sourceRunId: runId, criteria: { questionId: 'interest' } });
+    assert.equal(failedQuery.matchedCoverage.evaluations.total, 1);
+    assert.equal(failedQuery.matchedCoverage.evaluations.failed, 1);
+    assert.deepEqual(failedQuery.items[0]?.failure, failed.failure);
+    const selectedQuestion = store.queryEvidence({ sourceRunId: runId, criteria: { questionId: 'trust' } });
+    assert.deepEqual(selectedQuestion.coverage, { totalEvaluations: 2, completedEvaluations: 1, failedEvaluations: 1,
+      respondents: { total: 1, active: 0, completed: 0, failed: 1, unreached: 0 } });
+    assert.deepEqual(selectedQuestion.matchedCoverage.evaluations, { total: 1, pending: 0, answered: 1, failed: 0, unreached: 0 });
+    assert.equal(selectedQuestion.matchedCoverage.representedRespondents, 1);
+    const status = store.getStatus(runId);
+    assert.deepEqual(status.lifecycle, { state: 'stopped', resume: { eligible: true } });
+
+    const resumed = store.resume(runId, Date.now());
+    assert.equal(resumed.started, true);
+    assert.equal(store.answers(runId).items.find(({ questionId }) => questionId === 'interest')?.status, 'pending');
+    assert.deepEqual(store.attempts(runId).items[0]?.evaluationFailures, [{
+      evaluationId: failed.evaluationId,
+      questionId: 'interest',
+      failure: failed.failure,
+    }]);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('journey acceptance freezes exact reached packets and respondent state across reopen', async () => {
   const root = await temporaryRoot();
   const first = openRunStore(root);
@@ -857,6 +906,9 @@ test('evidence query matches typed answers and material while preserving distrib
     const query = store.queryEvidence({ sourceRunId: runId, criteria: { materialId: 'section-three', answer: { type: 'choice', choiceId: 'leave' } }, limit: 10 });
     assert.equal(query.totalMatches, 1);
     assert.equal(query.sourceComplete, true);
+    assert.deepEqual(query.lifecycle, { state: 'complete', resume: { eligible: false, reason: 'already_completed' } });
+    assert.deepEqual(query.matchedCoverage, { evaluations: { total: 1, pending: 0, answered: 1, failed: 0, unreached: 0 },
+      representedRespondents: 1, selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
     assert.deepEqual(query.coverage, { totalEvaluations: 2, completedEvaluations: 2, failedEvaluations: 0,
       respondents: { total: 2, active: 0, completed: 2, failed: 0, unreached: 0 } });
     assert.equal(query.items[0]!.respondentId, 'reader-b');
@@ -1205,6 +1257,10 @@ test('stopped but incomplete run states never claim complete evidence', async ()
       const page = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: {} });
       assert.equal(page.sourceStatus, status);
       assert.equal(page.sourceComplete, false);
+      assert.equal(page.lifecycle.state, 'stopped');
+      assert.deepEqual(page.lifecycle.resume, status === 'interrupted'
+        ? { eligible: true }
+        : { eligible: false, reason: status === 'cancelled' ? 'cancelled' : 'no_unfinished_work' });
     }
   } finally { fixture.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });

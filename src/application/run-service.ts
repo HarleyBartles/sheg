@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { DecisionProvider } from '../domain/decision/provider.js';
 import type { AnswerRow, Page, RunAttempt, RunStatusView } from '../domain/run/lifecycle.js';
+import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
 import type { PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
@@ -124,12 +125,9 @@ export function createRunService(
   async function resume(runId: string): Promise<RunStatusView> {
     const current = store.getStatus(runId);
     if (current.status === 'prepared') return current;
-    const retryablePartial = current.status === 'partial' && current.failedEvaluations > 0 && store.getRequestKind(runId) !== 'journey';
-    if (current.status !== 'interrupted' && current.status !== 'failed' && !retryablePartial) {
-      throw new RunServiceError('run_not_resumable', `A run in ${current.status} state cannot be resumed.`);
+    if (!current.lifecycle.resume.eligible) {
+      throw new RunServiceError('run_not_resumable', resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    if (current.cancelRequested) throw new RunServiceError('run_not_resumable', 'A run with a cancellation request cannot be resumed.');
-    if (current.usedCalls + current.reservedCalls >= current.maxCalls) throw new RunServiceError('run_not_resumable', 'This run has no remaining provider-call allowance.');
     const frozenProvider = store.getRequestKind(runId) === 'journey'
       ? store.getJourneyRun(runId).request.provider
       : store.getRequest(runId).request.provider;

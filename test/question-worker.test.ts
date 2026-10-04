@@ -313,14 +313,17 @@ test('a credential failure before dispatch preserves the call allowance for expl
   } finally { await f.close(); }
 });
 
-test('a malformed answer fails only its respondent and the worker continues', async () => {
+test('a typed provider validation failure gives safe reasons and the worker continues', async () => {
   const f = await fixture();
   let calls = 0;
   try {
     const provider: DecisionProvider = {
       async decide() {
         calls += 1;
-        if (calls === 1) return { ...answer(), choice: 'not-an-option' };
+        if (calls === 1) throw new LayaCallError('Laya response failed decision validation.', 1, undefined, undefined, 'evaluation', {
+          code: 'invalid_answer', message: 'The selected option was not offered by this question.',
+          detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+        });
         return answer();
       },
     };
@@ -329,6 +332,11 @@ test('a malformed answer fails only its respondent and the worker continues', as
     assert.equal(status.status, 'partial');
     assert.equal(calls, 2);
     assert.deepEqual(f.store.answers(f.runId).items.map((item) => item.status), ['failed', 'answered']);
+    assert.deepEqual(f.store.answers(f.runId).items[0]?.failure, {
+      code: 'invalid_answer', message: 'The selected option was not offered by this question.',
+      detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+    });
+    assert.deepEqual(f.store.attempts(f.runId).items[0]?.evaluationFailures?.[0]?.failure, f.store.answers(f.runId).items[0]?.failure);
     assert.equal(status.usedCalls, 2);
   } finally { await f.close(); }
 });
@@ -377,6 +385,24 @@ test('an unclassified provider exception is charged as an uncertain failed evalu
     assert.equal(status.reservedCalls, 0);
     assert.equal(attemptLimit, 1);
     assert.equal(f.store.answers(f.runId).items[0]?.status, 'failed');
+  } finally { await f.close(); }
+});
+
+test('a worker failure with untouched pending work remains explicitly resumable', async () => {
+  const f = await fixture();
+  try {
+    const provider: DecisionProvider = {
+      async decide() { throw new Error('not reached'); },
+      async decideBatch() { throw new Error('not reached'); },
+      measureBatch() { throw new Error('context measurement failed'); },
+    };
+    await executeQuestionRun(f.store, f.runId, factory(provider));
+    const failed = f.store.getStatus(f.runId);
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.completedEvaluations, 0);
+    assert.equal(failed.usedCalls, 0);
+    assert.deepEqual(failed.lifecycle.resume, { eligible: true });
+    assert.equal(f.store.resume(f.runId, Date.now()).started, true);
   } finally { await f.close(); }
 });
 

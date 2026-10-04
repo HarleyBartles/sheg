@@ -308,7 +308,10 @@ test('selection coverage reconciles every matched source evaluation and old line
 test('evidence page reports query-page exhaustion separately from source completion', () => {
   const page = {
     items: [], totalMatches: 12, sourceRunId: '123e4567-e89b-42d3-a456-426614174000', sourceStatus: 'running', sourceComplete: false,
+    lifecycle: { state: 'active', resume: { eligible: false, reason: 'already_active' } },
     coverage: { totalEvaluations: 80, completedEvaluations: 12, failedEvaluations: 0, respondents: { total: 80, active: 68, completed: 12, failed: 0, unreached: 0 } },
+    matchedCoverage: { evaluations: { total: 12, pending: 0, answered: 12, failed: 0, unreached: 0 }, representedRespondents: 12,
+      selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } },
     nextCursor: 'cursor-token',
   };
   assert.equal(runEvidencePageSchema.parse(page).sourceComplete, false);

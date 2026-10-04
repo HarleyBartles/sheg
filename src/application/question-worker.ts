@@ -7,7 +7,7 @@ import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import { JevCallError } from '../providers/jev.js';
 import { LayaCallError } from '../providers/laya.js';
 import type { ProviderFactory } from './run-service.js';
-import type { DecisionBatchRequest, DecisionBatchResult, DecisionResult, DecisionValue } from '../domain/decision/decision.js';
+import type { DecisionBatchRequest, DecisionBatchResult, DecisionFailureDetail, DecisionResult, DecisionValue } from '../domain/decision/decision.js';
 
 const HEARTBEAT_MS = 2_000;
 export async function executeQuestionRun(store: RunStore, runId: string, providerFactory: ProviderFactory): Promise<void> {
@@ -152,7 +152,9 @@ function failureScope(error: unknown): 'evaluation' | 'run' {
   return error instanceof JevCallError || error instanceof LayaCallError ? error.failureScope : 'evaluation';
 }
 
-function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: string; message: string; providerAttempts?: number } {
+function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: string; message: string; detail?: DecisionFailureDetail; providerAttempts?: number } {
+  const validationFailure = error instanceof JevCallError || error instanceof LayaCallError ? error.validationFailure : undefined;
+  if (validationFailure) return { ...validationFailure, ...(error instanceof JevCallError || error instanceof LayaCallError ? { providerAttempts: error.attempts } : {}) };
   const code = scope === 'run' && error instanceof JevCallError ? error.failureCode : scope === 'run' ? 'provider_unavailable' : 'decision_failed';
   const message = scope === 'run' && error instanceof JevCallError && error.failureCode.startsWith('credential_')
     ? error.message

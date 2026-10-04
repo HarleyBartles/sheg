@@ -56,7 +56,7 @@
   },
   {
     "scenarioId": "typed-answer-failure",
-    "version": 5,
+    "version": 6,
     "criteria": [
       {
         "id": "failure-not-negative",
@@ -64,15 +64,15 @@
       },
       {
         "id": "reports-available-diagnostic",
-        "condition": "Reports invalid_answer and accurately communicates that the provider returned an invalid answer, without inventing a more specific cause; exact wording is optional."
+        "condition": "Reports invalid_answer with the safe structured reason unknown_option and explains that the selected option was not offered by the question."
       },
       {
         "id": "cause-bounded",
-        "condition": "Says the supplied evidence does not identify why the provider returned an invalid answer; does not guess at a provider, prompt, or respondent cause."
+        "condition": "Separates the observed contract violation from any guessed provider, prompt, or respondent cause."
       },
       {
         "id": "recovery-respects-call-limit",
-        "condition": "Uses usedCalls=2 and maxCalls=2 to say this run has no allowance to resume or retry; does not claim automatic retry or recommend run_resume. If another attempt is suggested, identifies it as a separate new run with an explicit call allowance."
+        "condition": "Uses lifecycle.resume.reason=call_allowance_exhausted and the original call limit to say this run cannot resume; does not claim automatic retry or recommend run_resume. If another attempt is suggested, identifies it as a separate new run with an explicit call allowance."
       },
       {
         "id": "states-run-coverage",

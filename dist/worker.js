@@ -19804,10 +19804,28 @@ var providerExecutionEvidenceSchema = external_exports.object({
   usage: external_exports.object({ inputTokens: external_exports.number().int().nonnegative().optional(), outputTokens: external_exports.number().int().nonnegative().optional() }).strict(),
   cost: costEvidenceSchema.optional()
 }).strict();
+var decisionFailureDetailSchema = external_exports.object({
+  reason: external_exports.enum(["malformed_answer", "answer_type_mismatch", "unknown_option", "probability_keys", "probability_sum", "score_out_of_range", "score_legend_mismatch", "invalid_answer"]),
+  field: external_exports.enum(["answer", "type", "choice", "probabilities", "score", "legend"]),
+  constraint: external_exports.enum(["typed_answer_shape", "match_question_type", "offered_option", "declared_outcomes", "sum_to_one", "declared_rubric_range", "match_declared_rubric", "typed_answer_contract"])
+}).strict();
+function decisionFailureDetailForReason(reason) {
+  const rule = {
+    malformed_answer: { field: "answer", constraint: "typed_answer_shape" },
+    answer_type_mismatch: { field: "type", constraint: "match_question_type" },
+    unknown_option: { field: "choice", constraint: "offered_option" },
+    probability_keys: { field: "probabilities", constraint: "declared_outcomes" },
+    probability_sum: { field: "probabilities", constraint: "sum_to_one" },
+    score_out_of_range: { field: "score", constraint: "declared_rubric_range" },
+    score_legend_mismatch: { field: "legend", constraint: "match_declared_rubric" },
+    invalid_answer: { field: "answer", constraint: "typed_answer_contract" }
+  }[reason];
+  return { reason, ...rule };
+}
 var decisionBatchResultSchema = external_exports.object({
   answers: external_exports.array(external_exports.union([
     external_exports.object({ questionId: identifier, value: decisionValueSchema }).strict(),
-    external_exports.object({ questionId: identifier, failure: external_exports.object({ code: identifier, message: prose }).strict() }).strict()
+    external_exports.object({ questionId: identifier, failure: external_exports.object({ code: identifier, message: prose, detail: decisionFailureDetailSchema.optional() }).strict() }).strict()
   ])),
   execution: providerExecutionEvidenceSchema
 }).strict().superRefine((result, context) => {
@@ -20122,10 +20140,10 @@ function validateDecisionBatch(request, result, options2 = {}) {
     if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
     if (answer.failure) return { questionId: question.id, failure: answer.failure };
     const value = decisionValueSchema.safeParse(answer.value);
-    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider returned an invalid typed answer." } };
-    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The provider answer type does not match the question." } };
+    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The answer does not match a supported typed-answer shape.", detail: decisionFailureDetailForReason("malformed_answer") } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The answer type does not match the question type.", detail: decisionFailureDetailForReason("answer_type_mismatch") } };
     if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
-      return { questionId: question.id, failure: { code: "invalid_answer", message: "The provider selected an option that was not offered." } };
+      return { questionId: question.id, failure: { code: "invalid_answer", message: "The selected option was not offered by this question.", detail: decisionFailureDetailForReason("unknown_option") } };
     }
     try {
       const enriched = { ...value.data, ...execution };
@@ -20133,11 +20151,42 @@ function validateDecisionBatch(request, result, options2 = {}) {
       return { questionId: question.id, value: toDecisionValue(checked) };
     } catch (error62) {
       if (!(error62 instanceof DecisionError)) throw error62;
-      const typeMismatch = error62.message.includes("does not match task type");
-      return { questionId: question.id, failure: { code: typeMismatch ? "answer_type_mismatch" : "invalid_answer", message: typeMismatch ? "The provider answer type does not match the question." : "The provider returned an invalid answer for this question." } };
+      return { questionId: question.id, failure: decisionValidationFailure(error62) };
     }
   });
   return decisionBatchResultSchema.parse({ answers, execution });
+}
+function decisionFailureReason(error62) {
+  const message = error62.message;
+  const reason = message.includes("does not match task type") ? "answer_type_mismatch" : message.includes("was not offered") ? "unknown_option" : message.includes("probabilities must contain exactly") ? "probability_keys" : message.includes("probabilities must sum") ? "probability_sum" : message.includes("outside the declared rubric range") ? "score_out_of_range" : message.includes("Score legend does not match") ? "score_legend_mismatch" : message.startsWith("Decision result is invalid:") ? "malformed_answer" : "invalid_answer";
+  return reason;
+}
+function decisionValidationFailure(error62) {
+  return decisionValidationFailureForReason(decisionFailureReason(error62));
+}
+function decisionValidationFailureForReason(reason) {
+  const detail = decisionFailureDetailForReason(reason);
+  return { code: detail.reason === "answer_type_mismatch" ? "answer_type_mismatch" : "invalid_answer", message: decisionFailureMessage(detail), detail };
+}
+function decisionFailureMessage(detail) {
+  switch (detail.reason) {
+    case "malformed_answer":
+      return "The answer does not match a supported typed-answer shape.";
+    case "answer_type_mismatch":
+      return "The answer type does not match the question type.";
+    case "unknown_option":
+      return "The selected option was not offered by this question.";
+    case "probability_keys":
+      return "The probability distribution must contain exactly the declared outcomes.";
+    case "probability_sum":
+      return "The probability distribution must sum to 1 within the accepted tolerance.";
+    case "score_out_of_range":
+      return "The score falls outside the declared rubric range.";
+    case "score_legend_mismatch":
+      return "The score legend does not match the declared rubric.";
+    case "invalid_answer":
+      return "The answer failed a typed-answer validation rule.";
+  }
 }
 function toDecisionValue(result) {
   if (result.type === "choice") return {
@@ -20373,13 +20422,14 @@ async function runPowerShell(helperPath, args, interactive = false) {
 
 // src/providers/jev.ts
 var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable") {
+  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable", validationFailure) {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.failureScope = failureScope2;
     this.failureCode = failureCode;
+    this.validationFailure = validationFailure;
     this.name = "JevCallError";
   }
   attempts;
@@ -20387,6 +20437,7 @@ var JevCallError = class extends Error {
   decisionId;
   failureScope;
   failureCode;
+  validationFailure;
 };
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
@@ -20520,7 +20571,7 @@ var JevProvider = class {
       }
       const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts);
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
       }
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
@@ -20543,7 +20594,7 @@ var JevProvider = class {
         return validateDecision(request, result, { maxAttempts, provider: "jev" });
       } catch (error62) {
         if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation.", attempts);
+          throw new JevCallError("Jev response failed decision validation.", attempts, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
         }
         throw error62;
       }
@@ -20979,18 +21030,20 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation") {
+  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", validationFailure) {
     super(message);
     this.attempts = attempts;
     this.contextFit = contextFit;
     this.decisionId = decisionId;
     this.failureScope = failureScope2;
+    this.validationFailure = validationFailure;
     this.name = "LayaCallError";
   }
   attempts;
   contextFit;
   decisionId;
   failureScope;
+  validationFailure;
 };
 var choiceAnswerSchema2 = external_exports.object({
   type: external_exports.literal("choice"),
@@ -21089,7 +21142,7 @@ var LayaProvider = class {
       throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
     }
     const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1);
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
     const result = {
       ...answer.data,
       attempts: 1,
@@ -21106,7 +21159,7 @@ var LayaProvider = class {
       return validateDecision(request, result, { maxAttempts, provider: "laya", checkpoint: this.config.checkpoint });
     } catch (error62) {
       if (error62 instanceof DecisionError) {
-        throw new LayaCallError("Laya response failed decision validation.", 1);
+        throw new LayaCallError("Laya response failed decision validation.", 1, void 0, void 0, "evaluation", decisionValidationFailure(error62));
       }
       throw error62;
     }
@@ -21280,6 +21333,8 @@ function failureScope(error62) {
   return error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.failureScope : "evaluation";
 }
 function failureDetails(error62, scope) {
+  const validationFailure = error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.validationFailure : void 0;
+  if (validationFailure) return { ...validationFailure, ...error62 instanceof JevCallError || error62 instanceof LayaCallError ? { providerAttempts: error62.attempts } : {} };
   const code = scope === "run" && error62 instanceof JevCallError ? error62.failureCode : scope === "run" ? "provider_unavailable" : "decision_failed";
   const message = scope === "run" && error62 instanceof JevCallError && error62.failureCode.startsWith("credential_") ? error62.message : scope === "run" ? "Provider authentication or service access failed." : "The respondent evaluation did not produce a valid answer.";
   const providerAttempts = error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.attempts : void 0;
@@ -21291,6 +21346,45 @@ import { createHash as createHash4, randomUUID as randomUUID2 } from "node:crypt
 import { mkdirSync, statSync } from "node:fs";
 import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
+// src/domain/run/lifecycle.ts
+function deriveRunLifecycle(facts) {
+  const state = facts.status === "completed" ? "complete" : facts.status === "prepared" || facts.status === "running" ? "active" : "stopped";
+  const refuse = (reason) => ({ state, resume: { eligible: false, reason } });
+  if (facts.status === "prepared" || facts.status === "running") return refuse("already_active");
+  if (facts.status === "completed") return refuse("already_completed");
+  if (facts.status === "cancelled") return refuse("cancelled");
+  if (facts.status === "partial" && facts.kind === "journey") return refuse("partial_journey");
+  if (facts.status !== "interrupted" && facts.status !== "failed" && facts.status !== "partial") return refuse("unsupported_status");
+  if (facts.cancelRequested) return refuse("cancellation_requested");
+  if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
+  if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
+  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && facts.hasFailedEvaluations || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
+  if (!hasResumableWork) return refuse("no_unfinished_work");
+  return { state, resume: { eligible: true } };
+}
+function resumeRefusalMessage(reason) {
+  switch (reason) {
+    case "already_active":
+      return "A run that is already active does not need to be resumed.";
+    case "already_completed":
+      return "A completed run cannot be resumed.";
+    case "cancelled":
+      return "A cancelled run cannot be resumed.";
+    case "unsupported_status":
+      return "This run state cannot be resumed.";
+    case "partial_journey":
+      return "A partial journey run cannot be resumed from this state.";
+    case "cancellation_requested":
+      return "A run with a cancellation request cannot be resumed.";
+    case "attempt_unresolved":
+      return "A run with an unresolved provider attempt cannot be resumed.";
+    case "call_allowance_exhausted":
+      return "This run has no remaining provider-call allowance.";
+    case "no_unfinished_work":
+      return "This run has no resumable unfinished work.";
+  }
+}
 
 // src/domain/respondents/profile.ts
 var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
@@ -21862,6 +21956,7 @@ var runEvidenceItemSchema = external_exports.object({
   questionId: external_exports.string().min(1),
   status: external_exports.enum(["pending", "answered", "failed", "unreached"]),
   result: decisionResultSchema.optional(),
+  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional() }).strict().optional(),
   selectedMaterial: selectedMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
   turnId: external_exports.string().min(1).optional(),
@@ -21870,24 +21965,37 @@ var runEvidenceItemSchema = external_exports.object({
   outcome: external_exports.string().optional(),
   provenance: external_exports.object({ provider: external_exports.enum(["jev", "laya"]), model: external_exports.string().min(1), endpoint: external_exports.string().optional(), compilerFingerprint: external_exports.string().min(1), contextFingerprint: external_exports.string().min(1) }).strict()
 }).strict();
+var runLifecycleSchema = external_exports.object({
+  state: external_exports.enum(["active", "stopped", "complete"]),
+  resume: external_exports.discriminatedUnion("eligible", [
+    external_exports.object({ eligible: external_exports.literal(true) }).strict(),
+    external_exports.object({ eligible: external_exports.literal(false), reason: external_exports.enum(["already_active", "already_completed", "cancelled", "unsupported_status", "partial_journey", "cancellation_requested", "attempt_unresolved", "call_allowance_exhausted", "no_unfinished_work"]) }).strict()
+  ])
+}).strict();
 var runEvidencePageSchema = external_exports.object({
   items: external_exports.array(runEvidenceItemSchema),
   totalMatches: external_exports.number().int().nonnegative(),
   sourceRunId: external_exports.string().uuid(),
   sourceStatus: external_exports.enum(runStatuses),
   sourceComplete: external_exports.boolean(),
+  lifecycle: runLifecycleSchema,
   coverage: external_exports.object({
     totalEvaluations: external_exports.number().int().nonnegative(),
     completedEvaluations: external_exports.number().int().nonnegative(),
     failedEvaluations: external_exports.number().int().nonnegative(),
     respondents: external_exports.object({ total: external_exports.number().int().nonnegative(), active: external_exports.number().int().nonnegative(), completed: external_exports.number().int().nonnegative(), failed: external_exports.number().int().nonnegative(), unreached: external_exports.number().int().nonnegative() }).strict()
   }).strict(),
+  matchedCoverage: external_exports.object({
+    evaluations: external_exports.object({ total: external_exports.number().int().nonnegative(), pending: external_exports.number().int().nonnegative(), answered: external_exports.number().int().nonnegative(), failed: external_exports.number().int().nonnegative(), unreached: external_exports.number().int().nonnegative() }).strict(),
+    representedRespondents: external_exports.number().int().nonnegative(),
+    selectedMaterials: external_exports.object({ evaluations: external_exports.number().int().nonnegative(), respondents: external_exports.number().int().nonnegative(), distinctMaterials: external_exports.number().int().nonnegative() }).strict()
+  }).strict(),
   nextCursor: external_exports.string().min(1).optional()
 }).strict();
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
 // src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 6;
+var SCHEMA_VERSION = 7;
 var LEASE_MS = 3e4;
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
@@ -21976,6 +22084,29 @@ function parseJson(value, label) {
     if (error62 instanceof RunStoreError) throw error62;
     throw new RunStoreError("data_integrity_error", `Stored ${label} is not valid JSON.`, { cause: error62 });
   }
+}
+function failureDetailFromStorage(value) {
+  if (value === null || value === void 0) return void 0;
+  return decisionFailureDetailSchema.parse(parseJson(value, "typed-answer failure detail"));
+}
+function storedEvaluationFailure(row) {
+  if (row.failure_code === null) return void 0;
+  const detail = failureDetailFromStorage(row.failure_detail_json);
+  return {
+    code: asText(row.failure_code, "failure code"),
+    message: asText(row.failure_message, "failure message"),
+    ...detail ? { detail } : {}
+  };
+}
+function evaluationFailureJson(failure2) {
+  return JSON.stringify(failure2);
+}
+function evaluationFailureFromJson(value) {
+  if (value === null || value === void 0) return void 0;
+  const parsed = parseJson(value, "attempt evaluation failure");
+  if (typeof parsed.code !== "string" || typeof parsed.message !== "string") throw new RunStoreError("data_integrity_error", "Stored attempt evaluation failure is invalid.");
+  const detail = parsed.detail === void 0 ? void 0 : decisionFailureDetailSchema.parse(parsed.detail);
+  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {} };
 }
 function encodeCursor(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -22075,6 +22206,7 @@ function initialize(database) {
       result_json TEXT,
       failure_code TEXT,
       failure_message TEXT,
+      failure_detail_json TEXT,
       UNIQUE (run_id, ordinal),
       UNIQUE (run_id, evaluation_id),
       FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE,
@@ -22131,6 +22263,7 @@ function initialize(database) {
     CREATE TABLE attempt_evaluations (
       attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
       evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
+      failure_json TEXT,
       PRIMARY KEY (attempt_id, evaluation_id)
     );
     CREATE TABLE evaluation_answer_attempts (
@@ -22574,7 +22707,8 @@ var SQLiteRunStore = class {
         throw new RunStoreError("data_integrity_error", "Stored journey packet does not match its context identity.");
       }
       if (evaluation.result_json !== null) base.result = validateDecision(packet, parseJson(evaluation.result_json, "decision result"), { maxAttempts: 1 });
-      if (evaluation.failure_code !== null) base.failure = { code: asText(evaluation.failure_code, "failure code"), message: asText(evaluation.failure_message, "failure message") };
+      const evaluationFailure = storedEvaluationFailure(evaluation);
+      if (evaluationFailure) base.failure = evaluationFailure;
       return base;
     });
     const stateRows = this.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id").all(runId2);
@@ -22796,14 +22930,21 @@ var SQLiteRunStore = class {
         cursor = decodeCursor(query.cursor, "evidence");
         const coverage2 = cursor.coverage;
         const respondents = coverage2?.respondents;
+        const matched = cursor.matchedCoverage;
+        const matchedEvaluations = matched?.evaluations;
+        const selectedMaterials = matched?.selectedMaterials;
         const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
-        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.totalMatches) || cursor.totalMatches < 0 || !Number.isSafeInteger(cursor.usedCalls) || !Number.isSafeInteger(cursor.reservedCalls) || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || typeof cursor.sourceComplete !== "boolean" || !validCount(coverage2?.totalEvaluations) || !validCount(coverage2?.completedEvaluations) || !validCount(coverage2?.failedEvaluations) || !validCount(respondents?.total) || !validCount(respondents?.active) || !validCount(respondents?.completed) || !validCount(respondents?.failed) || !validCount(respondents?.unreached)) {
+        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.totalMatches) || cursor.totalMatches < 0 || !Number.isSafeInteger(cursor.usedCalls) || !Number.isSafeInteger(cursor.reservedCalls) || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || typeof cursor.sourceComplete !== "boolean" || !runLifecycleSchema.safeParse(cursor.lifecycle).success || !validCount(coverage2?.totalEvaluations) || !validCount(coverage2?.completedEvaluations) || !validCount(coverage2?.failedEvaluations) || !validCount(respondents?.total) || !validCount(respondents?.active) || !validCount(respondents?.completed) || !validCount(respondents?.failed) || !validCount(respondents?.unreached) || !validCount(matched?.representedRespondents) || !validCount(matchedEvaluations?.total) || !validCount(matchedEvaluations?.pending) || !validCount(matchedEvaluations?.answered) || !validCount(matchedEvaluations?.failed) || !validCount(matchedEvaluations?.unreached) || !validCount(selectedMaterials?.evaluations) || !validCount(selectedMaterials?.respondents) || !validCount(selectedMaterials?.distinctMaterials)) {
           throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
         }
       }
       const maximumOrdinal = asNumber(this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(query.sourceRunId).maximum, "maximum evaluation ordinal");
       if (cursor && (cursor.maxOrdinal !== maximumOrdinal || cursor.sourceStatus !== sourceStatus || cursor.usedCalls !== usedCalls || cursor.reservedCalls !== reservedCalls)) {
         throw new RunStoreError("stale_cursor", "The source run changed while paging this query. Start a fresh query to see its current evidence.");
+      }
+      const currentLifecycle = this.statusInside(query.sourceRunId).lifecycle;
+      if (cursor && hashCanonical(cursor.lifecycle) !== hashCanonical(currentLifecycle)) {
+        throw new RunStoreError("stale_cursor", "The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.");
       }
       const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
       const where = ["e.run_id = ?", "e.ordinal <= ?"];
@@ -22864,6 +23005,39 @@ var SQLiteRunStore = class {
         respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
+      const lifecycle = cursor?.lifecycle ?? currentLifecycle;
+      const matchedCoverage = cursor?.matchedCoverage ?? (() => {
+        const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json
+          FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters);
+        const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
+        const respondents = /* @__PURE__ */ new Set();
+        const selectedMaterialIds = /* @__PURE__ */ new Set();
+        const selectedMaterialRespondents = /* @__PURE__ */ new Set();
+        let selectedMaterialEvaluations = 0;
+        for (const row of matchedRows) {
+          const status = asText(row.status, "matched evaluation status");
+          counts.total += 1;
+          counts[status] += 1;
+          const respondentId = asText(row.respondent_id, "matched respondent ID");
+          respondents.add(respondentId);
+          if (status !== "answered" || row.result_json === null) continue;
+          const result = decisionValueSchema.safeParse(parseJson(row.result_json, "matched result"));
+          if (!result.success || result.data.type !== "choice") continue;
+          const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "matched packet"));
+          if (packet.question.type !== "choice") continue;
+          const materialId = packet.question.materialOptions?.[result.data.choice];
+          if (materialId) {
+            selectedMaterialEvaluations += 1;
+            selectedMaterialIds.add(materialId);
+            selectedMaterialRespondents.add(respondentId);
+          }
+        }
+        return {
+          evaluations: counts,
+          representedRespondents: respondents.size,
+          selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size }
+        };
+      })();
       const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
         (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
           WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
@@ -22878,6 +23052,7 @@ var SQLiteRunStore = class {
         const respondentId = asText(row.respondent_id, "respondent ID");
         const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "evidence packet"));
         const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
+        const failure2 = storedEvaluationFailure(row);
         let selectedMaterial;
         if (result?.type === "choice") {
           const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
@@ -22901,6 +23076,7 @@ var SQLiteRunStore = class {
           questionId: asText(row.question_id, "question ID"),
           status: asText(row.status, "evaluation status"),
           ...result === void 0 ? {} : { result },
+          ...failure2 === void 0 ? {} : { failure: failure2 },
           ...selectedMaterial === void 0 ? {} : { selectedMaterial },
           ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
           ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
@@ -22924,7 +23100,9 @@ var SQLiteRunStore = class {
         sourceRunId: query.sourceRunId,
         sourceStatus: cursor?.sourceStatus ?? sourceStatus,
         sourceComplete,
+        lifecycle,
         coverage,
+        matchedCoverage,
         ...hasMore && last ? { nextCursor: encodeCursor({
           kind: "evidence",
           sourceRunId: query.sourceRunId,
@@ -22934,7 +23112,9 @@ var SQLiteRunStore = class {
           sourceStatus: cursor?.sourceStatus ?? sourceStatus,
           sourceComplete,
           totalMatches: snapshotCount,
+          lifecycle,
           coverage,
+          matchedCoverage,
           usedCalls,
           reservedCalls
         }) } : {}
@@ -22984,16 +23164,19 @@ var SQLiteRunStore = class {
       FROM evaluations e WHERE run_id = ? ${cursor ? "AND ordinal > ?" : ""} ORDER BY ordinal LIMIT ?`).all(...cursor ? [runId2, cursor.ordinal, limit + 1] : [runId2, limit + 1]);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const items = pageRows.map((row) => ({
-      evaluationId: asText(row.evaluation_id, "evaluation ID"),
-      contextId: asText(row.context_id, "context ID"),
-      respondentId: asText(row.respondent_id, "respondent ID"),
-      questionId: asText(row.question_id, "question ID"),
-      status: asText(row.status, "evaluation status"),
-      ...row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution")) },
-      ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
-      ...row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, "failure code"), message: asText(row.failure_message, "failure message") } }
-    }));
+    const items = pageRows.map((row) => {
+      const failure2 = storedEvaluationFailure(row);
+      return {
+        evaluationId: asText(row.evaluation_id, "evaluation ID"),
+        contextId: asText(row.context_id, "context ID"),
+        respondentId: asText(row.respondent_id, "respondent ID"),
+        questionId: asText(row.question_id, "question ID"),
+        status: asText(row.status, "evaluation status"),
+        ...row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution")) },
+        ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
+        ...failure2 === void 0 ? {} : { failure: failure2 }
+      };
+    });
     const last = pageRows.at(-1);
     return { items, ...hasMore && last ? { nextCursor: encodeCursor({ kind: "answers", runId: runId2, ordinal: asNumber(last.ordinal, "evaluation ordinal") }) } : {} };
   }
@@ -23013,20 +23196,30 @@ var SQLiteRunStore = class {
       GROUP BY a.attempt_id ORDER BY a.attempt_sequence LIMIT ?`).all(...cursor ? [runId2, cursor.sequence, limit + 1] : [runId2, limit + 1]);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const items = pageRows.map((row) => ({
-      attemptId: asText(row.attempt_id, "attempt ID"),
-      groupId: asText(row.group_id, "question group ID"),
-      evaluationIds: asText(row.evaluation_ids, "attempt evaluation IDs").split(","),
-      status: asText(row.status, "attempt status"),
-      startedAt: new Date(asNumber(row.started_ms, "attempt start time")).toISOString(),
-      ...row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, "attempt settlement time")).toISOString() },
-      ...row.failure_code === null ? {} : { failure: {
-        code: asText(row.failure_code, "attempt failure code"),
-        message: asText(row.failure_message, "attempt failure message"),
-        ...row.failure_scope === null ? {} : { scope: asText(row.failure_scope, "attempt failure scope") }
-      } },
-      ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "attempt execution")) }
-    }));
+    const items = pageRows.map((row) => {
+      const attemptId = asText(row.attempt_id, "attempt ID");
+      const evaluationFailures = this.database.prepare(`SELECT ae.evaluation_id, e.question_id, ae.failure_json
+        FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id)
+        WHERE ae.attempt_id = ? AND ae.failure_json IS NOT NULL ORDER BY e.ordinal`).all(attemptId).flatMap((failureRow) => {
+        const failure2 = evaluationFailureFromJson(failureRow.failure_json);
+        return failure2 ? [{ evaluationId: asText(failureRow.evaluation_id, "attempt evaluation ID"), questionId: asText(failureRow.question_id, "attempt question ID"), failure: failure2 }] : [];
+      });
+      return {
+        attemptId,
+        groupId: asText(row.group_id, "question group ID"),
+        evaluationIds: asText(row.evaluation_ids, "attempt evaluation IDs").split(","),
+        status: asText(row.status, "attempt status"),
+        startedAt: new Date(asNumber(row.started_ms, "attempt start time")).toISOString(),
+        ...row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, "attempt settlement time")).toISOString() },
+        ...row.failure_code === null ? {} : { failure: {
+          code: asText(row.failure_code, "attempt failure code"),
+          message: asText(row.failure_message, "attempt failure message"),
+          ...row.failure_scope === null ? {} : { scope: asText(row.failure_scope, "attempt failure scope") }
+        } },
+        ...evaluationFailures.length === 0 ? {} : { evaluationFailures },
+        ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "attempt execution")) }
+      };
+    });
     const last = pageRows.at(-1);
     return { items, ...hasMore && last ? { nextCursor: encodeCursor({
       kind: "attempts",
@@ -23053,42 +23246,25 @@ var SQLiteRunStore = class {
     if (!Number.isSafeInteger(nowMs) || nowMs < 0) throw new RunStoreError("invalid_time", "Resume time must be a nonnegative safe integer.");
     return this.transaction(() => {
       this.reconcileInside(runId2, nowMs);
+      const statusView = this.statusInside(runId2);
+      if (statusView.status === "prepared") return { started: false, run: statusView };
+      if (!statusView.lifecycle.resume.eligible) {
+        throw new RunStoreError("run_not_resumable", resumeRefusalMessage(statusView.lifecycle.resume.reason));
+      }
       const run = this.database.prepare("SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls FROM runs WHERE run_id = ?").get(runId2);
       if (!run) throw this.notFound();
       const status = asText(run.status, "run status");
-      if (status === "prepared") return { started: false, run: this.statusInside(runId2) };
-      if (status !== "interrupted" && status !== "failed" && status !== "partial") {
-        throw new RunStoreError("run_not_resumable", `A run in ${status} state cannot be resumed.`);
-      }
-      if (status === "partial" && this.database.prepare("SELECT 1 FROM journey_respondents WHERE run_id = ? LIMIT 1").get(runId2)) {
-        throw new RunStoreError("run_not_resumable", "A partial journey run cannot be resumed from this state.");
-      }
-      if (asNumber(run.cancel_requested, "cancel flag") === 1) {
-        throw new RunStoreError("run_not_resumable", "A run with a cancellation request cannot be resumed.");
-      }
-      if (asNumber(run.reserved_calls, "reserved calls") !== 0) {
-        throw new RunStoreError("data_integrity_error", "A run with an unresolved provider reservation cannot be resumed.");
-      }
-      if (asNumber(run.used_calls, "used calls") >= asNumber(run.max_calls, "maximum calls")) {
-        throw new RunStoreError("run_not_resumable", "This run has no remaining provider-call allowance.");
-      }
-      const pending = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'pending'").get(runId2);
       const failed = this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId2);
       const runFailure = this.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId2);
       const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
       const failedEvaluation = failedRunEvaluationId ? this.database.prepare("SELECT status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(runId2, failedRunEvaluationId) : void 0;
       const canRetrySharedFailure = status === "failed" && asText(run.failure_scope, "failure scope") === "run" && failedEvaluation !== void 0 && asText(failedEvaluation.status, "evaluation status") === "failed";
-      const hasPending = asNumber(pending.count, "pending count") > 0;
       const canRetryQuestionFailures = status === "partial" && asNumber(failed.count, "failed evaluation count") > 0;
-      const hasUnfinished = hasPending || canRetrySharedFailure || canRetryQuestionFailures;
-      if (!hasUnfinished || status === "failed" && asText(run.failure_scope, "failure scope") !== "run") {
-        throw new RunStoreError("run_not_resumable", "This run has no resumable unfinished work.");
-      }
       if (canRetrySharedFailure && runFailure) {
-        this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL
+        this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
           WHERE run_id = ? AND status = 'failed' AND evaluation_id IN (SELECT evaluation_id FROM attempt_evaluations WHERE attempt_id = ?)`).run(runId2, asText(runFailure.attempt_id, "failed attempt ID"));
       }
-      if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL WHERE run_id = ? AND status = 'failed'").run(runId2);
+      if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE run_id = ? AND status = 'failed'").run(runId2);
       this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
         failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
         WHERE run_id = ? AND status IN ('interrupted', 'failed', 'partial')`).run(nowMs + LEASE_MS, runId2);
@@ -23261,7 +23437,11 @@ var SQLiteRunStore = class {
       if (!rows.length) throw new RunStoreError("data_integrity_error", "The provider attempt has no linked evaluations.");
       if (outcome.kind === "failed") {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        for (const row of rows) this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, asText(row.evaluation_id, "evaluation ID"));
+        for (const row of rows) {
+          const evaluationId = asText(row.evaluation_id, "evaluation ID");
+          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
+          if (outcome.detail) this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: outcome.code, message: outcome.message, detail: outcome.detail }), attemptId, evaluationId);
+        }
         if (outcome.scope === "run") this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
       } else {
         const result = decisionBatchResultSchema.safeParse(outcome.result);
@@ -23274,8 +23454,11 @@ var SQLiteRunStore = class {
           const evaluationId = asText(row.evaluation_id, "evaluation ID");
           if (!answer) {
             this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'missing_batch_answer', failure_message = 'Provider returned no answer for this question.' WHERE evaluation_id = ?").run(evaluationId);
+            this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: "missing_batch_answer", message: "Provider returned no answer for this question." }), attemptId, evaluationId);
           } else if ("failure" in answer) {
-            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(answer.failure.code, answer.failure.message, evaluationId);
+            const failure2 = { code: answer.failure.code, message: answer.failure.message, ...answer.failure.detail ? { detail: answer.failure.detail } : {} };
+            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(failure2.code, failure2.message, failure2.detail ? JSON.stringify(failure2.detail) : null, evaluationId);
+            this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
           } else {
             const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet"));
             let validated;
@@ -23283,10 +23466,12 @@ var SQLiteRunStore = class {
               const typed = decisionResultSchema.parse({ ...answer.value, ...result.data.execution });
               validated = validateDecision(packet, typed, { maxAttempts: 1 });
             } catch {
-              this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'invalid_decision', failure_message = 'Provider returned an answer that does not match this question.' WHERE evaluation_id = ?").run(evaluationId);
+              const failure2 = { code: "invalid_decision", message: "The stored answer did not satisfy this question contract.", detail: decisionFailureDetailForReason("invalid_answer") };
+              this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(failure2.code, failure2.message, JSON.stringify(failure2.detail), evaluationId);
+              this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
             }
             if (validated) {
-              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
+              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
               this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
             }
           }
@@ -23309,11 +23494,13 @@ var SQLiteRunStore = class {
       if (outcome.kind === "answered") {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
         this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
+        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
         this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, evaluationId);
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
         }
@@ -23374,7 +23561,7 @@ var SQLiteRunStore = class {
           throw new RunStoreError("journey_transition_conflict", "A terminal respondent state cannot have a next reached turn.");
         }
         this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
+        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
         this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         const sharedFailure = outcome.scope === "run";
@@ -23382,7 +23569,9 @@ var SQLiteRunStore = class {
           throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
         }
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, evaluationId);
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
         }
@@ -23533,20 +23722,44 @@ var SQLiteRunStore = class {
   statusInside(runId2) {
     const row = this.database.prepare(`SELECT r.*,
       (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'answered') AS completed_evaluations,
-      (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed') AS failed_evaluations
+      (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed') AS failed_evaluations,
+      (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'pending') AS pending_evaluations,
+      EXISTS (SELECT 1 FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
+        JOIN evaluations e ON e.run_id = a.run_id AND e.evaluation_id = ae.evaluation_id
+        WHERE a.run_id = r.run_id AND a.status = 'failed' AND a.failure_scope = 'run' AND e.status = 'failed'
+          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure
       FROM runs r WHERE r.run_id = ?`).get(runId2);
     if (!row) throw this.notFound();
+    const stored = parseJson(row.request_json, "run request");
+    const request = runRequestSchema.safeParse(stored.request);
+    if (!request.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+    const status = asText(row.status, "run status");
+    const usedCalls = asNumber(row.used_calls, "used calls");
+    const reservedCalls = asNumber(row.reserved_calls, "reserved calls");
+    const maxCalls = asNumber(row.max_calls, "maximum calls");
     return {
       runId: asText(row.run_id, "run ID"),
-      status: asText(row.status, "run status"),
+      status,
       createdAt: asText(row.created_at, "created time"),
       completedEvaluations: asNumber(row.completed_evaluations, "completed evaluation count"),
       failedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count"),
       totalEvaluations: asNumber(row.evaluation_count, "evaluation count"),
-      usedCalls: asNumber(row.used_calls, "used calls"),
-      reservedCalls: asNumber(row.reserved_calls, "reserved calls"),
-      maxCalls: asNumber(row.max_calls, "maximum calls"),
+      usedCalls,
+      reservedCalls,
+      maxCalls,
       cancelRequested: asNumber(row.cancel_requested, "cancel flag") === 1,
+      lifecycle: deriveRunLifecycle({
+        status,
+        kind: request.data.kind,
+        cancelRequested: asNumber(row.cancel_requested, "cancel flag") === 1,
+        ...row.failure_scope === null ? {} : { failureScope: asText(row.failure_scope, "failure scope") },
+        usedCalls,
+        reservedCalls,
+        maxCalls,
+        hasPendingEvaluations: asNumber(row.pending_evaluations, "pending evaluation count") > 0,
+        hasFailedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count") > 0,
+        canRetrySharedFailure: asNumber(row.retryable_shared_failure, "retryable shared failure") === 1
+      }),
       ...row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, "failure code"), message: asText(row.failure_message, "failure message") } }
     };
   }
