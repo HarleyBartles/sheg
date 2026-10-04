@@ -30,6 +30,7 @@ const expectedScenarioIds = [
   'isolated-storage-inspection',
   'live-storage-inspection',
   'live-storage-inspection-heldout',
+  'partial-journey-recovery',
   'partial-run-selected-question',
   'selected-material-isolation-heldout',
   'selected-material-isolation-no-fit',

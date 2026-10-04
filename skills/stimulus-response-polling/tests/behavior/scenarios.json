@@ -594,5 +594,41 @@
       },
       "mockOnly": true
     }
+  },
+  {
+    "id": "partial-journey-recovery",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["journey", "partial-run", "recovery", "user-authorization"],
+    "referencePaths": ["references/run-and-recovery.md", "references/interpret-results.md"],
+    "userRequest": "A reading journey stopped partway through. Inspect what happened, explain whether it can safely continue, and wait for my decision before resuming.",
+    "controlledEvidence": {
+      "runId": "00000000-0000-4000-8000-000000000019",
+      "status": "partial",
+      "lifecycle": { "state": "stopped", "resume": { "eligible": true } },
+      "usedCalls": 3,
+      "maxCalls": 8,
+      "reservedCalls": 0,
+      "coverage": { "totalEvaluations": 3, "answered": 2, "failed": 1, "pending": 0, "unreached": 0 },
+      "respondents": [
+        { "respondentId": "reader-a", "status": "completed", "route": [{ "nodeId": "ask-interest", "response": "leave", "toNodeId": "left" }] },
+        {
+          "respondentId": "reader-b",
+          "status": "failed",
+          "events": [
+            { "type": "exposure", "itemId": "opening" },
+            { "type": "response", "questionId": "interest", "choice": "continue" },
+            { "type": "exposure", "itemId": "evidence" }
+          ],
+          "route": [{ "nodeId": "ask-interest", "response": "continue", "toNodeId": "show-evidence" }],
+          "failedTurn": { "evaluationId": "evaluation-b-clarity", "contextId": "context-b-clarity", "nodeId": "ask-clarity", "questionId": "clarity", "status": "failed", "failure": { "code": "invalid_answer", "reason": "unknown_option" } }
+        }
+      ],
+      "attempts": [
+        { "respondentId": "reader-a", "status": "answered" },
+        { "respondentId": "reader-b", "status": "answered" },
+        { "respondentId": "reader-b", "evaluationId": "evaluation-b-clarity", "status": "failed", "failureScope": "evaluation" }
+      ]
+    }
   }
 ]

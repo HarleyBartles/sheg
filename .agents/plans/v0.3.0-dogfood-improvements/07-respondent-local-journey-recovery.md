@@ -112,7 +112,10 @@ Expected: ledger records Task 1 complete after the exact focused command passes.
 - Modify: `skills/stimulus-response-polling/references/interpret-results.md`
 - Modify: `skills/stimulus-response-polling/tests/behavior/scenarios.json`
 - Modify: `skills/stimulus-response-polling/tests/behavior/evaluators.json`
+- Create: `skills/stimulus-response-polling/tests/behavior/workflows/partial-journey-recovery.json`
 - Test: `test/skill-testing/campaign-suites.test.ts`
+- Modify: `test/skill-scenario-harness.test.ts` and `test/skill-testing/campaign-cli.test.ts` to include the new selectable scenario in their catalog contracts
+- Modify: `test/question-worker.test.ts` to prove a newly selected branch is reached only after a valid retry answer
 - Modify: `package.json`, `package-lock.json`, generated `plugin.json`/`dist/` only through the canonical build
 
 **Interfaces:**
@@ -122,15 +125,17 @@ Expected: ledger records Task 1 complete after the exact focused command passes.
 
 - [ ] **Step 1: Add the source-owned behavior scenario and evaluator**
 
-Add one focused scenario under `tests/behavior/scenarios.json` using frozen evidence for a partial journey: one respondent completed, one has a prior answer and route plus a failed reached turn, original allowance remains, and no attempt is unresolved. Script a first user turn asking what happened and whether progress is safe; the expected tool trace is read-only inspection. A second user turn explicitly asks to continue; only then is `run_resume` expected. Add evaluator criteria for exact preserved progress, the failed turn to retry, original call allowance, safe retry boundaries, no replay of completed work, and no retry before the second turn. Keep the scenario generic rather than tied to Portfolio.
+Add a scenario identity and frozen evidence to `tests/behavior/scenarios.json`, evaluator criteria to `tests/behavior/evaluators.json`, and ordered turns/tool checkpoints to `tests/behavior/workflows/partial-journey-recovery.json`. Evidence describes a partial journey: one respondent completed, one has a prior answer and route plus a failed reached turn, original allowance remains, and no attempt is unresolved. The first turn reads status, journey, and attempts and explains safe recovery without mutation. A second user turn explicitly asks to continue; only then is `run_resume` expected. A final read reports the actual new state. Keep the scenario generic rather than tied to Portfolio.
 
 - [ ] **Step 2: Add a deterministic contract test for the scenario checkpoint**
 
-Extend `test/skill-testing/campaign-suites.test.ts` to load the new scenario and assert the ordered turns and tool checkpoint expectations match: read/query tools on the explanatory turn and exactly one `run_resume` on the explicit continuation turn. The test validates fixture structure only; it must not dispatch an actor or judge.
+Extend `test/skill-testing/campaign-suites.test.ts` to load the new scenario/evaluator through the owning catalog loader and assert that the workflow fixture's ordered tool checkpoints match: three read-only calls on the explanatory turn, exactly one `run_resume` on the explicit continuation turn, and read-only status/progress/attempt inspection afterward. The test validates source contracts only; it must not dispatch an actor or judge.
+
+Strengthen the Task 1 worker continuation test so the failed turn's eventual answer selects a route that differs from the path it would have taken under another answer. Assert the alternate branch is absent before retry, only the failed turn is dispatched on resume, and the chosen route is recorded only after the retry succeeds.
 
 - [ ] **Step 3: Run the focused harness test and witness RED**
 
-Run: `npm test -- test/skill-testing/campaign-suites.test.ts`
+Run: `node --import tsx --test test/skill-testing/campaign-suites.test.ts`
 Expected: FAIL because the suite does not yet contain the new scenario/checkpoint contract.
 
 - [ ] **Step 4: Update current user-facing recovery guidance**
@@ -139,7 +144,7 @@ In `run-and-recovery.md`, remove the claim that every partial journey is refused
 
 - [ ] **Step 5: Run the focused harness test and verify GREEN**
 
-Run: `npm test -- test/skill-testing/campaign-suites.test.ts`
+Run: `node --import tsx --test test/skill-testing/campaign-suites.test.ts`
 Expected: PASS with the new deterministic source-fixture contract.
 
 - [ ] **Step 6: Set the deliberate development version and regenerate**

@@ -64,6 +64,7 @@ function authoredJourney(respondentCount = 1, maxCalls = 3): InlineJourneyReques
         { id: 'exit', kind: 'terminal', outcome: 'left' },
         { id: 'unlikely', kind: 'terminal', outcome: 'unlikely' },
         { id: 'likely-outcome', kind: 'terminal', outcome: 'likely' },
+        { id: 'clear-outcome', kind: 'terminal', outcome: 'clear' },
       ], transitions: [
         { fromNodeId: 'opening', toNodeId: 'ask-interest' },
         { fromNodeId: 'ask-interest', optionId: 'continue', toNodeId: 'expose-section-three' },
@@ -71,7 +72,7 @@ function authoredJourney(respondentCount = 1, maxCalls = 3): InlineJourneyReques
         { fromNodeId: 'expose-section-three', toNodeId: 'ask-clarity' },
         { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: false }, toNodeId: 'ask-likely' },
         { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 0.5, maximum: 1.5, minimumInclusive: true, maximumInclusive: false }, toNodeId: 'ask-likely' },
-        { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 1.5, maximum: 2, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'ask-likely' },
+        { fromNodeId: 'ask-clarity', when: { type: 'score', minimum: 1.5, maximum: 2, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'clear-outcome' },
         { fromNodeId: 'ask-likely', when: { type: 'noul', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: false }, toNodeId: 'unlikely' },
         { fromNodeId: 'ask-likely', when: { type: 'noul', minimum: 0.5, maximum: 1, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'likely-outcome' },
       ] },
@@ -512,6 +513,7 @@ test('a partial journey failure retains the respondent-local checkpoint and prio
     assert.equal(failedRespondent.currentNodeId, null);
     assert.deepEqual(failedRespondent.route.map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-interest', 'expose-section-three']]);
     assert.equal(failedRespondent.events.filter(({ type }) => type === 'response').length, 1);
+    assert.equal(run.evaluations.some(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'likely'), false);
     assert.equal(run.respondents.find(({ respondentId }) => respondentId === 'reader-b')?.status, 'completed');
     const before = f.store.getStatus(f.runId);
     assert.deepEqual(before.lifecycle.resume, { eligible: true });
@@ -555,12 +557,13 @@ test('a partial journey failure retains the respondent-local checkpoint and prio
         return { type: 'noul', noul: 0.8, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
       },
     }));
-    assert.deepEqual(resumedCalls, [{ questionId: 'clarity', profile: 'Reader A' }, { questionId: 'likely', profile: 'Reader A' }]);
+    assert.deepEqual(resumedCalls, [{ questionId: 'clarity', profile: 'Reader A' }]);
     const completed = f.store.getJourneyRun(f.runId);
     assert.equal(f.store.getStatus(f.runId).status, 'completed');
     assert.equal(completed.evaluations.find(({ evaluationId }) => evaluationId === failedEvaluation.evaluationId)?.turnId, failedEvaluation.turnId);
     assert.deepEqual(completed.respondents.find(({ respondentId }) => respondentId === 'reader-a')?.route.slice(0, 1), previousRoute);
-    assert.equal(completed.respondents.find(({ respondentId }) => respondentId === 'reader-a')?.events.filter(({ type }) => type === 'response').length, 3);
+    assert.deepEqual(completed.respondents.find(({ respondentId }) => respondentId === 'reader-a')?.route.slice(1).map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-clarity', 'clear-outcome']]);
+    assert.equal(completed.respondents.find(({ respondentId }) => respondentId === 'reader-a')?.events.filter(({ type }) => type === 'response').length, 2);
     const failedAttemptsAfter = f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(failedEvaluation.evaluationId));
     assert.deepEqual(failedAttemptsAfter.map(({ status }) => status), ['failed', 'answered']);
   } finally { await f.close(); }

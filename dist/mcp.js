@@ -39340,7 +39340,7 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.8",
+  version: "0.3.0-dev.9",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',

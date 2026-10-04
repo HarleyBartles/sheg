@@ -176,5 +176,23 @@
       "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
       "The smallest possible cohort is always the best choice."
     ]
+  },
+  {
+    "scenarioId": "partial-journey-recovery",
+    "version": 1,
+    "criteria": [
+      { "id": "reports-partial-coverage", "condition": "Reports the partial status, two answered evaluations, one failed evaluation, and the original 3-of-8 physical-call allowance accurately." },
+      { "id": "explains-preserved-path", "condition": "Identifies reader-b's earlier continue answer, exposure of the evidence section, and the failed reached clarity turn; distinguishes reader-a's completed path from the failure." },
+      { "id": "safe-resume-eligibility", "condition": "Explains that the lifecycle makes only the saved failed turn eligible under the remaining original allowance, with no unresolved attempt; does not say successful work will replay." },
+      { "id": "resume-after-explicit-consent", "condition": "Makes no run_resume call during the first turn; calls it exactly once for the same run only after the second user turn explicitly authorizes resume." },
+      { "id": "preserves-run-identity", "condition": "After resume, reads the same run and reports only observed status and attempt evidence; does not start a replacement run or claim a new branch before a valid retry answer." }
+    ],
+    "prohibitedClaims": [
+      "The completed respondent will be called again.",
+      "The failed answer is a negative response.",
+      "The original call allowance increases when the run resumes.",
+      "Resume happens automatically during a read.",
+      "A new route branch is chosen before the failed turn succeeds."
+    ]
   }
 ]
