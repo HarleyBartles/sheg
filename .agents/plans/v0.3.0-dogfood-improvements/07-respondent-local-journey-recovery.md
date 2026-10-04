@@ -224,7 +224,7 @@ Remove generated evaluation/context IDs from frozen evidence, correct the route 
 
 Run the controlled workflow contract, MCP, lifecycle, worker and campaign-suite tests, then `npm run build` and commit so the tracked pre-commit hook runs `npm run verify` on the staged snapshot. No live actor/judge campaign or hosted inference is part of CI or pre-commit.
 
-### Task 5: Bind the controlled recovery campaign to the candidate runtime
+### Task 5: Bind the controlled recovery campaign to the candidate source runtime
 
 **Files:**
 - Modify: `src/providers/factory.ts`, `src/entrypoints/mcp.ts`
@@ -232,26 +232,30 @@ Run the controlled workflow contract, MCP, lifecycle, worker and campaign-suite 
 - Modify: `scripts/skill-testing/codex-adapter.ts` and `scripts/skill-testing/runner.ts`
 - Test: `test/skill-testing/codex-adapter.test.ts`, `test/skill-testing/campaign-contracts.test.ts`, `test/mcp.test.ts`
 
-- [ ] **Step 1: Prove controlled mode rejects every non-fixture provider**
+- [x] **Step 1: Prove controlled mode rejects every non-fixture provider**
 
 Assert that the production provider factory remains a real provider even when fixture marker environment values are set. Assert that the deterministic provider factory lives only in the skill-testing harness and accepts only the frozen TypeSafe fixture route.
 
-- [ ] **Step 2: Prove the recovery adapter chooses the built candidate instead of the installed plugin**
+- [x] **Step 2: Prove the recovery adapter chooses the source candidate instead of the installed plugin**
 
 Add an adapter test with an intentionally stale configured MCP command and the recovery workflow setup. Assert preflight reports the candidate package/plugin/source identity and Codex receives a nested Sheg MCP command pointing to the candidate source recovery harness, not the installed command/args/cwd. Missing or version-mismatched candidate metadata must fail before actor launch. The harness runs the current source through the repository's pinned `tsx` development dependency, so a stale checked-in distribution bundle cannot be mistaken for the source candidate.
 
-- [ ] **Step 3: Restrict controlled inference and readiness bypass to the fixture provider**
+- [x] **Step 3: Restrict controlled inference and readiness bypass to the fixture harness**
 
 Keep deterministic fixture-provider selection, inline worker launch, and readiness bypass inside a dedicated skill-testing MCP entrypoint. Remove ambient environment activation from the production provider factory and MCP entrypoint; normal MCP startup always uses detached workers and provider readiness checks. The harness rejects Laya and every Jev configuration except the frozen TypeSafe fixture before worker dispatch.
 
-- [ ] **Step 4: Pass workflow setup through adapter preflight and execute with the candidate configuration**
+- [x] **Step 4: Pass workflow setup through adapter preflight and execute with the candidate source harness**
 
 Have the runner pass its frozen workflow setup into adapter preflight. In the recovery fixture only, resolve and validate the current candidate package and plugin metadata, fingerprint the candidate source tree and harness, and use `process.execPath --import tsx` with the source harness and worktree root. Preserve the configured MCP command for other suites. Never infer candidate identity from the installed plugin or checked-in generated bundles.
 
-- [ ] **Step 5: Run focused proofs, build, and the full repository gate**
+- [x] **Step 5: Run focused proofs, build, and the full repository gate**
 
 Run Codex adapter, campaign contract, MCP, provider, lifecycle and worker tests, `npm run build`, then commit so the tracked hook validates the staged snapshot with `npm run verify`. Do not run the skill actor/judge campaign or hosted inference in CI or pre-commit.
 
-- [ ] **Step 6: Re-run the fresh whole-branch review and integrate through the authorized GitHub surface**
+- [x] **Step 6: Re-run fresh reviews and open PR #19**
 
-Build a new review package and obtain fresh whole-branch and matching specialist reviews after the fixes. Re-grade every review finding and declined-to-judge line. Create/merge the PR only through the GitHub integration. The prior create-PR request received HTTP 403, and its no-bypass boundary remains in force unless the connector state or permission materially changes.
+Build a new review package and obtain fresh whole-branch and matching specialist reviews after the fixes. Re-grade every review finding and declined-to-judge line. Open the PR into develop with gh after the GitHub integration's create-PR request returned HTTP 403.
+
+- [ ] **Step 7: Merge after checks pass, then close out the plan and worktree**
+
+Confirm PR #19 still points at the freshly reviewed head and all required checks pass, then squash-merge it into develop. Confirm the merge commit advertises 0.3.0-dev.9, update the roadmap to mark Plan 7 merged and Plan 8's target as 0.3.0-dev.10, and apply the completed-planning-artifact policy. Archive or remove only the verified merged worktree and stale branch.
