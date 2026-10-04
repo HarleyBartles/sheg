@@ -15,7 +15,7 @@ function config(id: string, model = 'test-model'): CampaignConfig {
   };
 }
 function actor(finalResponse: string): string {
-  return JSON.stringify({ scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 9, actions: [], finalResponse, uncertainties: [] });
+  return JSON.stringify({ scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 10, actions: [], finalResponse, uncertainties: [] });
 }
 
 test('report separates runtime errors from behavioral denominators and escapes actor HTML', async () => {

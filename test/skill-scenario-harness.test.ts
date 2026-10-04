@@ -32,6 +32,7 @@ const expectedScenarioIds = [
   'live-storage-inspection-heldout',
   'partial-journey-recovery',
   'partial-run-selected-question',
+  'purposeful-input-variation',
   'selected-material-isolation-heldout',
   'selected-material-isolation-no-fit',
   'sequence-versus-linear-graph',
@@ -61,7 +62,7 @@ test('scenario selection intersects owner, tags, and guidance paths and can incl
   });
   const ids = selected.map(({ id }) => id);
   assert.deepEqual(ids, [
-    'partial-run-selected-question', 'typed-answer-failure', 'selected-material-isolation-no-fit',
+    'partial-run-selected-question', 'typed-answer-failure', 'purposeful-input-variation', 'selected-material-isolation-no-fit',
     'cumulative-journey-material', 'cumulative-journey-material-heldout',
     'live-storage-inspection-heldout', 'live-storage-inspection',
   ]);
@@ -216,7 +217,7 @@ test('scenario CLI replays a stored no-guidance control by one-based index', () 
 test('evaluator refuses to replay a control whose actor scenario ID conflicts with its wrapper', () => {
   assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', {
     scenarioId: 'selected-material-isolation-no-fit',
-    scenarioVersion: 9,
+    scenarioVersion: 10,
     controls: [{ actor: { scenarioId: 'control_selected_material', finalResponse: 'Wrong identity.' } }],
   }, { controlIndex: 1 }), /Actor trace does not match scenario/);
 });
@@ -242,7 +243,7 @@ test('evaluator rejects archived versions of a scenario before selecting an acto
   assert.throws(() => renderEvaluatorPrompt('selected-material-isolation-no-fit', {
     scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 3,
     guided: { actor: { scenarioId: 'selected-material-isolation-no-fit', scenarioVersion: 3, finalResponse: 'Synthetic stale trace.' } },
-  }), /version 3.*current version 9/);
+  }), /version 3.*current version 10/);
 });
 
 test('evaluator rejects raw actors that declare a stale scenario version', () => {

@@ -1,13 +1,13 @@
 [
   {
     "id": "selected-material-isolation-no-fit",
-    "version": 9,
+    "version": 10,
     "ownerSkill": "stimulus-response-polling",
     "tags": ["selected-material", "material-history", "shared-safeguard"],
     "referencePaths": [
       "references/run-and-recovery.md"
     ],
-    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent only the paragraph they picked plus the shared pull quote, then ask whether that paragraph expresses the quote. Some may choose no fit. Show me the exact shape of one follow-on request and what happens to those respondents. I want rich results: should I repeat the same inputs or use the smallest cohort? What should I vary?",
+    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent only the paragraph they picked plus the shared pull quote, then ask whether that paragraph expresses the quote. Some may choose no fit. Show me the exact shape of one follow-on request and what happens to those respondents. I want useful differences in the results: should I repeat the same inputs or minimize the cohort? What should I vary?",
     "controlledEvidence": {
       "pullQuote": "A city is a promise people keep making to each other.",
       "sourceQuestion": { "id": "q-pull-quote", "type": "choice", "prompt": "Which paragraph best represents the pull quote?", "options": ["p2", "p5", "no-fit"] },

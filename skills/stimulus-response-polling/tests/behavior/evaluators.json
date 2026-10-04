@@ -1,7 +1,7 @@
 [
   {
     "scenarioId": "selected-material-isolation-no-fit",
-    "version": 9,
+    "version": 10,
     "criteria": [
       {
         "id": "per-respondent-selection",
@@ -29,7 +29,8 @@
       "No-fit respondents selected a paragraph.",
       "Sheg extracts selected passage text from a respondent answer.",
       "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
-      "The smallest possible cohort is always the best choice."
+        "The smallest possible cohort is always the best choice.",
+        "All four input dimensions must change in every study."
     ]
   },
   {
