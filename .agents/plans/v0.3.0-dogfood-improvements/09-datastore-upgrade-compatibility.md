@@ -16,7 +16,7 @@
 
 **Feature target:** `develop`, product version `0.3.0-dev.11` from root `package.json`; use the supported version generator and keep generated package output reproducible.
 
-**Scope:** Establish schema version 8 as the first supported v0.3.0 baseline; add the real schema 7-to-8 migration and a sequential per-version migration contract for later releases; create and verify a recoverable backup before changing a supported datastore; preserve all relational records, JSON payloads, lineage, answers, and physical-attempt accounting; keep startup and bounded maintenance tools available on unsupported, corrupt, or failed-migration stores; support explicit confirmed reset only after preserving a verified recoverable copy; supersede ADR-0018; retire the merged Plan 8 document and correct the roadmap's stale duplicate Plan 8/Plan 9 text.
+**Scope:** Establish schema version 8 as the first supported v0.3.0 baseline; add the real schema 7-to-8 migration and a sequential per-version migration contract for later releases; create and verify a recoverable backup before changing a supported datastore; preserve all relational records, JSON payloads, lineage, answers, and physical-attempt accounting; keep startup and bounded maintenance tools available on unsupported, corrupt, or failed-migration stores; support explicit confirmed reset after securing a verified SQLite backup or quarantining the original database files when SQLite cannot read them; supersede ADR-0018; retire the merged Plan 8 document and correct the roadmap's stale duplicate Plan 8/Plan 9 text.
 
 **Invariants:** Pre-v1 development datastores older than schema 7 are disposable and receive no compatibility promise; the 7-to-8 migration is the final development transition, and the formal post-v0.3.0 support range begins at schema 8. Never auto-reset, silently reinterpret historical payloads, downgrade, mutate an unknown future schema during inspection, expose credentials or raw SQL, lose the original database on migration failure, increase a saved run's allowance, or enable normal study writes while recovery is required. JSON payload upcasters have explicit format versions separate from SQLite schema version and preserve historical evidence.
 
@@ -30,7 +30,7 @@
 
 ## Task 3: Keep bounded MCP recovery available during store failures
 
-- [x] Reshape default MCP startup so server registration completes even if datastore opening fails; make `run_storage.inspect` available in recovery mode; gate all study and destructive run tools with a safe `datastore_recovery_required` response; and add `run_storage.reset` requiring explicit confirmation after a verified backup is secured. Test through an in-memory MCP client for supported, future-schema, corrupt, and migration-failure states. Expected command: `node --import tsx --test test/mcp-storage-recovery.test.ts`.
+- [x] Reshape default MCP startup so server registration completes even if datastore opening fails; make `run_storage.inspect` available in recovery mode; gate all study and destructive run tools with a safe `datastore_recovery_required` response; and add `run_storage.reset` requiring explicit confirmation after a verified SQLite backup is secured or unreadable original files are quarantined. Test supported, future-schema, damaged-schema, corrupt, migration-failure, and stale-session states through an in-memory MCP client. Expected command: `node --import tsx --test test/mcp-storage-recovery.test.ts`.
 
 ## Task 4: Preserve independently versioned JSON payloads
 

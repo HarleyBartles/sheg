@@ -34,8 +34,10 @@ Keep persisted JSON format versions separate from the SQLite schema version.
 Add an explicit payload upcaster when a payload contract changes, and reject
 unknown formats without rewriting stored evidence. If startup cannot open or
 migrate the database, keep the MCP recovery inspection available and block
-study operations until recovery succeeds. Never reset data automatically or
-rewrite a newer unsupported schema. See [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md).
+study operations until recovery succeeds. A confirmed reset keeps a verified
+SQLite backup when readable, or quarantines the original database and sidecars
+when SQLite cannot read them. Never reset data automatically or rewrite a
+newer unsupported schema. See [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md).
 
 Use `1.0.0` when Sheg is a stable, usable product and the public compatibility
 contract is explicitly declared. That contract must identify the supported

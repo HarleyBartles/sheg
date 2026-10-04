@@ -22,7 +22,7 @@ Before each migration, create and verify a SQLite-consistent backup. Apply each 
 
 Keep SQLite schema versions independent from persisted JSON format versions. Evolve payloads with explicit versioned upcasters only when their own contracts change; reject unknown payload formats without rewriting their stored bytes. Historical requests, packets, answers, lineage, and physical-attempt accounting remain evidence and must not be silently reinterpreted.
 
-When the datastore cannot open, complete MCP registration with a bounded maintenance surface that reports compatibility and backup availability. Block ordinary study and destructive run operations until recovery succeeds. A reset requires an explicit confirmation and a verified recoverable copy; inspection never resets data.
+When the datastore cannot open, complete MCP registration with a bounded maintenance surface that reports compatibility and backup availability. Block ordinary study and destructive run operations until recovery succeeds. A reset requires explicit confirmation and a verified SQLite backup when the database is readable; if SQLite cannot read it, quarantine the original database and sidecars before replacing the active store. Inspection never resets data, and reports distinguish a verified SQLite backup from quarantined raw files.
 
 ## Consequences
 

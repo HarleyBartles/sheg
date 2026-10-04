@@ -22170,6 +22170,15 @@ var SCHEMA_MIGRATIONS = [{
     database.prepare("INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (?, ?, ?)").run(8, "schema-v7-to-v8-ledger", (/* @__PURE__ */ new Date()).toISOString());
   }
 }];
+var REQUIRED_SCHEMA_TABLES = ["runs", "question_groups", "evaluations", "journey_respondents", "attempts", "attempt_evaluations", "evaluation_answer_attempts", "schema_migrations"];
+function validateSchemaShape(database) {
+  const rows = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
+  const actual = new Set(rows.map((row) => asText(row.name, "schema table name")));
+  const missing = REQUIRED_SCHEMA_TABLES.filter((name) => !actual.has(name));
+  if (missing.length > 0) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.");
+  const migration = database.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?").get(SCHEMA_VERSION);
+  if (asNumber(migration?.count, "current schema migration count") !== 1) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore has no applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.");
+}
 function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   const integrity = database.prepare("PRAGMA integrity_check").all();
   if (integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
@@ -22242,6 +22251,7 @@ function migrate(database, dataRoot, startingVersion) {
       step.apply(database);
       database.exec(`PRAGMA user_version = ${step.toVersion}`);
       checkDatabaseIntegrity(database);
+      if (step.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
       database.exec("COMMIT");
       version2 = step.toVersion;
     } catch (error62) {
@@ -22271,11 +22281,12 @@ function initialize(database, dataRoot) {
   database.exec("PRAGMA foreign_keys = ON;");
   database.exec("PRAGMA synchronous = FULL;");
   if (version2 === SCHEMA_VERSION) {
-    setWriteAheadLogMode(database);
     checkDatabaseIntegrity(database);
+    validateSchemaShape(database);
+    setWriteAheadLogMode(database);
     return;
   }
-  if (version2 === 7) {
+  if (version2 >= 7 && version2 < SCHEMA_VERSION) {
     migrate(database, dataRoot, version2);
     setWriteAheadLogMode(database);
     return;

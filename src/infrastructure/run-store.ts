@@ -265,6 +265,27 @@ const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [{
   },
 }];
 
+function hasMigrationPath(fromVersion: number, targetVersion = SCHEMA_VERSION): boolean {
+  let version = fromVersion;
+  while (version < targetVersion) {
+    const migration = SCHEMA_MIGRATIONS.find(({ fromVersion: candidate }) => candidate === version);
+    if (!migration || migration.toVersion <= version || migration.toVersion > targetVersion) return false;
+    version = migration.toVersion;
+  }
+  return version === targetVersion;
+}
+
+const REQUIRED_SCHEMA_TABLES = ['runs', 'question_groups', 'evaluations', 'journey_respondents', 'attempts', 'attempt_evaluations', 'evaluation_answer_attempts', 'schema_migrations'] as const;
+
+function validateSchemaShape(database: DatabaseSync): void {
+  const rows = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as DatabaseRow[];
+  const actual = new Set(rows.map((row) => asText(row.name, 'schema table name')));
+  const missing = REQUIRED_SCHEMA_TABLES.filter((name) => !actual.has(name));
+  if (missing.length > 0) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
+  const migration = database.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = ?').get(SCHEMA_VERSION) as DatabaseRow | undefined;
+  if (asNumber(migration?.count, 'current schema migration count') !== 1) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore has no applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.');
+}
+
 function checkDatabaseIntegrity(database: DatabaseSync, checkForeignKeys = true): void {
   const integrity = database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
   if (integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
@@ -327,6 +348,7 @@ function migrate(database: DatabaseSync, dataRoot: string, startingVersion: numb
       step.apply(database);
       database.exec(`PRAGMA user_version = ${step.toVersion}`);
       checkDatabaseIntegrity(database);
+      if (step.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
       database.exec('COMMIT');
       version = step.toVersion;
     } catch (error) {
@@ -357,11 +379,12 @@ function initialize(database: DatabaseSync, dataRoot: string): void {
   database.exec('PRAGMA synchronous = FULL;');
 
   if (version === SCHEMA_VERSION) {
-    setWriteAheadLogMode(database);
     checkDatabaseIntegrity(database);
+    validateSchemaShape(database);
+    setWriteAheadLogMode(database);
     return;
   }
-  if (version === 7) {
+  if (version >= 7 && version < SCHEMA_VERSION) {
     migrate(database, dataRoot, version);
     setWriteAheadLogMode(database);
     return;
@@ -515,9 +538,13 @@ export function inspectRunStoreCompatibility(dataRoot: string): StoreCompatibili
     const version = asNumber(versionRow?.user_version, 'schema version');
     const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() as DatabaseRow | undefined;
     const tableCount = asNumber(existing?.count, 'table count');
-    if (version === SCHEMA_VERSION) return { status: 'current', schemaVersion: SCHEMA_VERSION };
+    if (version === SCHEMA_VERSION) {
+      checkDatabaseIntegrity(database);
+      validateSchemaShape(database);
+      return { status: 'current', schemaVersion: SCHEMA_VERSION };
+    }
     if (version === 0 && tableCount === 0) return { status: 'uninitialized', schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
-    if (version === 7) return { status: 'migration_available', schemaVersion: version, targetSchemaVersion: SCHEMA_VERSION };
+    if (version >= 7 && version < SCHEMA_VERSION && hasMigrationPath(version)) return { status: 'migration_available', schemaVersion: version, targetSchemaVersion: SCHEMA_VERSION };
     return { status: 'unsupported', schemaVersion: version, targetSchemaVersion: SCHEMA_VERSION };
   } catch {
     return { status: 'unreadable', schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
@@ -531,16 +558,23 @@ export function runStoreBackupAvailable(dataRoot: string): boolean {
   catch { return false; }
 }
 
-export function resetRunStore(dataRoot: string): { reset: true; backupRetained: true; schemaVersion: 8 } {
+export function resetRunStore(dataRoot: string): { reset: true; backupRetained: true; preservation: 'verified-sqlite-backup'; schemaVersion: 8 } | { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: 8 } {
   if (!path.isAbsolute(dataRoot)) throw new RunStoreError('invalid_data_root', 'Sheg data directory must be an absolute path.');
   const databasePath = path.join(dataRoot, 'runs.sqlite');
-  let database: DatabaseSync;
-  try { database = new DatabaseSync(databasePath, { timeout: 5_000 }); }
-  catch (error) { throw new RunStoreError('recovery_backup_failed', 'Sheg could not open and verify the datastore for recovery; the original files were left untouched.', { cause: error }); }
+  let inspectionDatabase: DatabaseSync | undefined;
   let version: number;
   try {
-    const versionRow = database.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
+    inspectionDatabase = new DatabaseSync(databasePath, { readOnly: true, timeout: 5_000 });
+    const versionRow = inspectionDatabase.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
     version = asNumber(versionRow?.user_version, 'schema version');
+    checkDatabaseIntegrity(inspectionDatabase, false);
+  } catch {
+    inspectionDatabase?.close();
+    return resetUnreadableRunStore(dataRoot, databasePath);
+  }
+  inspectionDatabase.close();
+  const database = new DatabaseSync(databasePath, { timeout: 5_000 });
+  try {
     verifiedBackup(database, dataRoot, version, version, 'before-reset', false);
   } catch (error) {
     database.close();
@@ -562,7 +596,7 @@ export function resetRunStore(dataRoot: string): { reset: true; backupRetained: 
     }
     const freshStore = openRunStore(dataRoot);
     freshStore.close();
-    return { reset: true, backupRetained: true, schemaVersion: SCHEMA_VERSION };
+    return { reset: true, backupRetained: true, preservation: 'verified-sqlite-backup', schemaVersion: SCHEMA_VERSION };
   } catch (error) {
     for (const original of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
       try { unlinkSync(original); } catch { /* Preserve the reset error. */ }
@@ -572,6 +606,35 @@ export function resetRunStore(dataRoot: string): { reset: true; backupRetained: 
     }
     if (error instanceof RunStoreError) throw error;
     throw new RunStoreError('recovery_reset_failed', 'Sheg could not complete the explicit datastore reset; the original database and verified backup were preserved.', { cause: error });
+  }
+}
+
+function resetUnreadableRunStore(dataRoot: string, databasePath: string): { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: 8 } {
+  if (!existsSync(databasePath)) throw new RunStoreError('recovery_backup_failed', 'Sheg could not find the original datastore files to preserve; no reset was performed.');
+  const recoveryRoot = path.join(dataRoot, 'recovery', randomUUID());
+  mkdirSync(recoveryRoot, { recursive: true });
+  const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
+  const moved: Array<{ original: string; archived: string; size: number }> = [];
+  try {
+    for (const original of files) {
+      if (!existsSync(original)) continue;
+      const size = statSync(original).size;
+      const archived = path.join(recoveryRoot, path.basename(original));
+      renameSync(original, archived);
+      if (statSync(archived).size !== size) throw new Error('Quarantined datastore file size changed.');
+      moved.push({ original, archived, size });
+    }
+    const freshStore = openRunStore(dataRoot);
+    freshStore.close();
+    return { reset: true, backupRetained: false, preservation: 'quarantined-original-files', schemaVersion: SCHEMA_VERSION };
+  } catch (error) {
+    for (const original of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
+      try { unlinkSync(original); } catch { /* Preserve the reset error. */ }
+    }
+    for (const item of moved.toReversed()) {
+      try { renameSync(item.archived, item.original); } catch { /* The original remains in recovery when restoration fails. */ }
+    }
+    throw new RunStoreError('recovery_reset_failed', 'Sheg could not complete the explicit reset; the original database files were preserved.', { cause: error });
   }
 }
 

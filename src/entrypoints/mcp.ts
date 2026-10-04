@@ -6,6 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRunService, RunServiceError, type RunService } from '../application/run-service.js';
 import { resolveDataRoot } from '../infrastructure/data-root.js';
+import { ProcessLock } from '../infrastructure/process-lock.js';
 import { inspectRunStoreCompatibility, openRunStore, resetRunStore, runStoreBackupAvailable, RunStoreError, type RunStore } from '../infrastructure/run-store.js';
 import { DetachedWorkerLauncher } from '../infrastructure/worker-launcher.js';
 import { assertProviderReady, createProvider } from '../providers/factory.js';
@@ -63,18 +64,24 @@ export function createPollingServer(service?: RunService): McpServer {
   server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.cancel(runId)));
   server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.resume(runId)));
   server.registerTool('run_delete', { description: 'Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.', inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtimeService.previewDelete(runIds) : runtimeService.deleteRuns(runIds)));
-  server.registerTool('run_storage', { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg verifies and preserves a backup first. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input) => safeResult(() => {
+  server.registerTool('run_storage', { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input) => safeResult(async () => {
     if (input.operation === 'inspect') {
       if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: 'current', schemaVersion: 8 } };
       const observed = inspectRunStoreCompatibility(dataRoot);
+      if (observed.status === 'current') {
+        const runtime = createDefaultRunService(dataRoot);
+        runtimeService = runtime.service;
+        ownedStore = runtime.store;
+        storeReady = true;
+        startupFailure = undefined;
+        return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: 'current', schemaVersion: 8 } };
+      }
       const failure = startupFailure instanceof RunStoreError
         ? { code: startupFailure.code }
         : { code: observed.status === 'unreadable' ? 'datastore_unreadable' : 'datastore_open_failed' };
       const compatibility = startupFailure instanceof RunStoreError && startupFailure.code.startsWith('migration_')
         ? { status: 'migration_failed', schemaVersion: observed.status === 'migration_available' ? observed.schemaVersion : null }
-        : observed.status === 'current'
-          ? { status: 'current', schemaVersion: observed.schemaVersion }
-          : observed.status === 'migration_available'
+        : observed.status === 'migration_available'
             ? { status: 'migration_available', schemaVersion: observed.schemaVersion }
             : observed.status === 'uninitialized'
               ? { status: 'uninitialized', schemaVersion: 0 }
@@ -86,9 +93,10 @@ export function createPollingServer(service?: RunService): McpServer {
       runtimeService.optimizeStorage();
       return { optimized: true };
     }
-    if (storeReady) throw new RunServiceError('recovery_not_required', 'Datastore reset is available only when run_storage.inspect reports recovery required.');
-    const reset = resetRunStore(dataRoot);
+    const resetLock = await ProcessLock.acquire(dataRoot, 'run-storage-reset');
     try {
+      if (storeReady || inspectRunStoreCompatibility(dataRoot).status === 'current') throw new RunServiceError('recovery_not_required', 'The datastore no longer requires recovery; inspect its current status before taking further action.');
+      const reset = resetRunStore(dataRoot);
       const runtime = createDefaultRunService(dataRoot);
       runtimeService = runtime.service;
       ownedStore = runtime.store;
@@ -98,7 +106,7 @@ export function createPollingServer(service?: RunService): McpServer {
     } catch (error) {
       startupFailure = error;
       throw error;
-    }
+    } finally { await resetLock.release(); }
   }));
   const close = server.close.bind(server);
   server.close = async () => {
