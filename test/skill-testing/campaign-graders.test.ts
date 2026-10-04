@@ -61,6 +61,36 @@ test('deterministic grader accepts only the exact selected material in an isolat
   assert.match(gradeRequest({ ...followOn('p2'), material: [{ id: 'extra', text: 'Unselected extra material.' }] }).deterministic.issues.join(' '), /only the exact frozen selected material p2/i);
 });
 
+test('deterministic grader accepts one isolated follow-on that reuses each selected paragraph and excludes no-fit', () => {
+  const selectedScenario = loadScenarioCatalog().find((item) => item.id === 'selected-material-isolation-no-fit')!;
+  const selectedEvaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === selectedScenario.id)!;
+  const request = {
+    kind: 'follow-on', sourceRunId: '00000000-0000-4000-8000-000000000017',
+    selection: { criteria: { questionId: 'q-pull-quote' } },
+    context: { mode: 'fresh-material', includeSelectedMaterial: true },
+    material: [{ id: 'pull-quote', text: 'A city is a promise people keep making to each other.' }],
+    questions: [{ type: 'noul', id: 'quote-fit', instructions: 'Does this paragraph express the pull quote?' }],
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 2,
+  };
+  const gradeRequest = (requestValue: unknown) => gradeTrial(selectedScenario.id, {
+    scenarioId: selectedScenario.id, scenarioVersion: selectedScenario.version,
+    actions: [{ tool: 'run_inspect', input: { request: requestValue } }],
+    finalResponse: 'One request follows up on each mapped selection in isolation and reports no-fit in selection exclusions.', uncertainties: [],
+  }, undefined, selectedEvaluator.criteria, 'focused', [], undefined, { id: selectedScenario.id, version: selectedScenario.version, controlledEvidence: selectedScenario.controlledEvidence });
+
+  const valid = gradeRequest(request);
+  assert.equal(valid.actorContract.result, 'pass');
+  assert.equal(valid.deterministic.result, 'pass', valid.deterministic.issues.join(' '));
+
+  const answerFiltered = gradeRequest({ ...request, selection: { criteria: { questionId: 'q-pull-quote', answer: { type: 'choice', choiceId: 'p2' } } } });
+  assert.equal(answerFiltered.deterministic.result, 'fail');
+  assert.match(answerFiltered.deterministic.issues.join(' '), /all answers|answer/i);
+
+  const wrongSharedFrame = gradeRequest({ ...request, material: [{ id: 'pull-quote', text: 'A different quote.' }] });
+  assert.equal(wrongSharedFrame.deterministic.result, 'fail');
+  assert.match(wrongSharedFrame.deterministic.issues.join(' '), /shared pull quote/i);
+});
+
 test('deterministic grader resolves frozen Score and Noul follow-on filters', () => {
   const selectedScenario = loadScenarioCatalog().find((item) => item.id === 'selected-material-isolation-no-fit')!;
   const selectedEvaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === selectedScenario.id)!;

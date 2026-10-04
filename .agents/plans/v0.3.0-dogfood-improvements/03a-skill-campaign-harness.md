@@ -12,7 +12,7 @@
 
 **Execution Strategy:** `executing-plans` - frozen identities, retry state, grading records, and report comparability share contracts across tasks. Inline implementation maintains those invariants; fresh scenario actors/evaluators and whole-branch review provide independent checks.
 
-**Status:** Implementation in progress; Tasks 1-5 are implemented, and Task 6 remains in proof, review, and publication. Plan 4 is paused. Its completed product commits are not dependencies of this plan.
+**Status:** Merged. The harness and its deterministic tests are implemented. Plan 4 is active on the merged develop base; its current execution plan owns the follow-on work.
 
 **Target development version:** `0.3.0-dev.5`, based on latest `develop` after Plan 3. Use `/using-git-worktrees` and its bundled script for a fresh canonical `codex/skill-campaign-harness` worktree. Leave `codex/v0.3.0-selected-stimulus` intact. Do not merge Plan 4 product changes into Plan 3a.
 
@@ -103,9 +103,9 @@ For the Codex adapter, use `codex exec --json` to start workflow trials, capture
 - [x] Interrupt and resume one campaign; verify retained captured output is not redispatched, capture evaluator output separately, detect the controlled mutation through tool checkpoints, and inspect report drill-down. Repeat the workflow with held-out wording. If the installed backend cannot execute a required capability, report it and stop that dependent proof; do not label fake-adapter results as live evidence.
 - [x] Inspect live manifests, raw outputs, grades, adjudications, and reports transiently outside the repository, then discard the campaign directories after review. Commit reusable skill tests and fixtures, never campaign results or receipts. Do not require the candidate to pass every capability case.
 - [x] Align authoritative versions to `0.3.0-dev.5`, run `npm run build`, and `npm run plugin:package -- --validate-only`. Package a no-tag candidate ZIP in scratch and confirm skills ship while tests/campaign artifacts do not. Keep package inspection details in transient development output; do not commit receipts.
-- [ ] Stage and commit through the tracked hook's `npm run verify`; obtain fresh whole-branch review, fix findings and rerun affected checks, then publish a PR targeting develop under the existing roadmap authorization. Update roadmap with verified head/check/merge evidence after each system proves it. No stable release/tag.
-- [ ] After merge, resume Plan 4 by rebasing its retained branch onto the new develop and resolving shared docs/harness changes. Preserve completed Tasks 1-3, reassess generated contracts and focused product tests, replace preliminary Task 4 manual results with a frozen old/new campaign using this harness, and target `0.3.0-dev.6`. Update its JIT plan before executing resumed work.
+- [x] Stage and commit through the tracked hook's `npm run verify`; obtain fresh whole-branch review, fix findings and rerun affected checks, then publish a PR targeting develop under the existing roadmap authorization. No stable release/tag.
+- [x] Resume Plan 4 by rebasing its retained branch onto the merged develop, resolving shared harness/document changes, preserving completed product work, and updating its JIT campaign plan for `0.3.0-dev.6`.
 
 ## Completion evidence
 
-Return the execution base/worktree, validation outcome, concise live-campaign conclusions while transient output is available, candidate package exclusion, PR/head/check state, and the updated Plan 4 resume handoff. Do not preserve campaign outputs, test-result summaries, package receipts, or other development receipts in the repository. Use Git history for implementation history. A deterministic green gate alone does not prove skill improvement.
+Report the implementation and validation outcome in the conversation. Do not preserve campaign outputs, test-result summaries, package receipts, or other development receipts in the repository. Use Git history for implementation history. A deterministic green gate alone does not prove skill improvement.

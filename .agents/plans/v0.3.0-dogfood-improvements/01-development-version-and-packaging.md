@@ -91,7 +91,7 @@ Enable `resolveJsonModule` if needed for TypeScript NodeNext. esbuild must embed
 - [x] Implement `productVersion` and replace the MCP literal. Run `npm run typecheck` and `node --import tsx --test test/mcp.test.ts`.
 - [x] Run `npm run build` before copied-package tests so they exercise the changed generated runtime, not the old committed bundle.
 - [x] Run `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts`. The copied package must operate with no Git checkout and no dependency tree. Preserve existing worker, follow-on and deletion proofs.
-- [x] Run `npm run plugin:package -- --validate-only`, then `npm run plugin:package -- --output Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`. Inspect archive names with `py -3 scripts/package-plugin.py --list Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`. Record its SHA-256 with `Get-FileHash`.
+- [x] Run `npm run plugin:package -- --validate-only`, then package a local candidate in scratch and inspect its archive names. Discard the package after inspection; do not commit file listings or hashes.
 - [x] Confirm stable validation `npm run plugin:package -- --tag v0.3.0 --validate-only` fails against dev manifests, as a local validator check. This command does not create a Git tag.
 
 ## Task 3: Record the policy, regenerate and commit a passing checkpoint
@@ -107,27 +107,11 @@ Enable `resolveJsonModule` if needed for TypeScript NodeNext. esbuild must embed
 
 - [x] Write the version-policy ADR with status Accepted and partial supersession of ADR-0013's no-development-version-bump consequence. Retain Gitflow, stable tag identity, main ancestry and publication safeguards. Update the ADR index without rewriting the earlier decision text.
 - [x] Update the release guide and playbooks: deliberate dev/rc checkpoints may update aligned identity on develop; no bump per arbitrary merge; the current checkpoint is `0.3.0-dev.2`; stable promotion removes the suffix on its release branch; no-tag local candidate packaging publishes nothing.
-- [x] Document how dogfood evidence identifies the installed candidate using its package version and exact package digest or source evidence. Do not embed a guessed HEAD or timestamp in committed generated output. Skill-content provenance can use the archive digest until the later campaign work specifies its evidence format.
+- [x] Ensure the installed candidate identifies itself by its aligned package version. Do not embed a guessed HEAD or timestamp in generated output.
 - [x] Inspect the intentional diff with `git diff --check` and `git diff --stat`. Stage source, docs, manifests and regenerated outputs explicitly. Commit Tasks 1-3 as one passing checkpoint through `.githooks/pre-commit`; its staged `npm run verify` must pass. Do not run the same full gate immediately before or after a successful hooked commit without a new concern.
-- [x] Record focused commands, archive identity, hook result and commit SHA in this plan and update the roadmap's first row only after the system proves completion. A later evidence-only commit also goes through the hook.
+- [x] Keep the roadmap's current status accurate. Git history records implementation and validation changes; do not add a result-only commit.
 - [x] Re-read the agreed scope and check that no runtime semantic work or publication was smuggled into this slice.
 
-## Implementation evidence
+## Delivered scope
 
-- Product identity is `0.3.0-dev.2` in `package.json`, both root `package-lock.json` version fields, `plugin.json`, and the initialized MCP server. The copied packaged MCP reports the copied package version without its source checkout or dependency tree.
-- Focused verification passed: `node --import tsx --test test/release-package.test.ts` (7 tests); `npm run typecheck`; `node --import tsx --test test/mcp.test.ts` (10 tests); `npm run build`; `node --import tsx --test test/build.test.ts test/package.test.ts test/release-package.test.ts` (13 tests); `npm run plugin:package -- --validate-only`; stable-tag validation against `v0.3.0` failed as required for candidate manifests. The stable tagged archive fixture proves byte-for-byte reproducibility separately from the candidate ZIP.
-- Local candidate archive: `Z:/_agent-scratch/sheg/codex-v0.3.0-dogfood-improvements/sheg-v0.3.0-dev.2.zip`, 27 files, SHA-256 `9DABA37AA2921E4DC1A65A4B02E0078A4EEDF362BAC918E68DD126B288795B17`.
-- The tracked pre-commit staged-snapshot hook passed `npm run verify` with 327 tests, zero failures or skips after the fresh review correction. The generated-output check also passed.
-- Implementation checkpoint: `1b47095478ef`; `git diff --check` passed. No release tag, GitHub Release, npm publication or paid inference was used.
-
-## Next plan handoff
-
-After this PR is merged, create a fresh canonical worktree from current `develop`, record its merge evidence in the roadmap, then author Plan 2 for `0.3.0-dev.3`. Establish skill-owned baseline scenarios against current guidance before changing skills; retain fresh actor and evaluator traces and use no paid inference.
-
-## Handoff evidence
-
-Report exact base/head, worktree and status, the five matching product-identity surfaces, candidate packaging and copied-MCP results, stable-tag rejection, retained stable-fixture protections, focused checks and staged gate. The local ZIP is validation evidence, not a published release. After the authorized PR is merged and exact develop ancestry proves the merge, clean this plan's worktree and branch using the bundled cleanup helper. The next JIT plan starts from a fresh canonical worktree at current `develop`.
-
-## Planning-turn evidence
-
-This plan was authored on a clean linked worktree created with the installed `/using-git-worktrees` helper. The fetched develop base is `ad1f20bbe324f6858574c4c54be989faf77a3f4d`. Before planning edits, `npm test` passed 323 tests with zero failures or skips. All implementation checkboxes above remain unchecked. No application code, manifests, release policy or generated outputs were changed during planning.
+The plan established candidate package identity, product-version reporting, and stable-tag safeguards. Temporary candidate packages are inspected in scratch and discarded. Keep the roadmap current; Git history records completed implementation work.

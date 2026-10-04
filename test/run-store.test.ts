@@ -386,16 +386,19 @@ test('journey answer and route transition roll back together when next-turn pers
 test('two processes can initialize the same fresh datastore concurrently', async () => {
   const root = await temporaryRoot();
   const moduleUrl = new URL('../src/infrastructure/run-store.ts', import.meta.url).href;
-  const script = `import { openRunStore } from ${JSON.stringify(moduleUrl)}; const store = openRunStore(process.env.SHEG_TEST_ROOT); store.close();`;
+  const script = `import { readdirSync, writeFileSync } from 'node:fs'; import path from 'node:path'; import { openRunStore } from ${JSON.stringify(moduleUrl)}; const root = process.env.SHEG_TEST_ROOT; writeFileSync(path.join(root, 'ready-' + process.pid), ''); const deadline = Date.now() + 5000; while (readdirSync(root).filter((name) => name.startsWith('ready-')).length < 2) { if (Date.now() >= deadline) throw new Error('Initialization barrier timed out.'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); } const store = openRunStore(path.join(root, 'data')); store.close();`;
   const launch = () => new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
       cwd: process.cwd(),
       env: { ...process.env, SHEG_TEST_ROOT: root },
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
     });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
     child.once('error', reject);
-    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`Initializer exited with ${code}.`)));
+    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`Initializer exited with ${code}: ${stderr}`)));
   });
   try {
     await Promise.all([launch(), launch()]);

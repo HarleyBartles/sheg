@@ -22001,8 +22001,26 @@ function validateRunIds(runIds) {
     throw new RunStoreError("invalid_run_selection", "Select between 1 and 200 unique run IDs.");
   }
 }
+function isTransientSqliteLock(error62) {
+  return typeof error62 === "object" && error62 !== null && "errcode" in error62 && (error62.errcode === 5 || error62.errcode === 6);
+}
+function setWriteAheadLogMode(database) {
+  const deadline = Date.now() + 5e3;
+  const waitCell = new Int32Array(new SharedArrayBuffer(4));
+  while (true) {
+    try {
+      database.exec("PRAGMA journal_mode = WAL");
+      return;
+    } catch (error62) {
+      if (!isTransientSqliteLock(error62) || Date.now() >= deadline) throw error62;
+      Atomics.wait(waitCell, 0, 0, Math.min(25, deadline - Date.now()));
+    }
+  }
+}
 function initialize(database) {
-  database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
+  database.exec("PRAGMA foreign_keys = ON;");
+  setWriteAheadLogMode(database);
+  database.exec("PRAGMA synchronous = FULL;");
   database.exec("BEGIN IMMEDIATE");
   try {
     const versionRow = database.prepare("PRAGMA user_version").get();

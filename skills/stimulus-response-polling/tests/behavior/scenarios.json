@@ -1,15 +1,25 @@
 [
   {
     "id": "selected-material-isolation-no-fit",
-    "version": 5,
+    "version": 9,
     "ownerSkill": "stimulus-response-polling",
     "tags": ["selected-material", "material-history", "shared-safeguard"],
     "referencePaths": [
       "references/run-and-recovery.md"
     ],
-    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent the paragraph they picked by itself and ask whether it expresses the pull quote. Some may choose no fit. Tell me how to do that and what happens to those respondents.",
+    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent only the paragraph they picked plus the shared pull quote, then ask whether that paragraph expresses the quote. Some may choose no fit. Show me the exact shape of one follow-on request and what happens to those respondents. I want rich results: should I repeat the same inputs or use the smallest cohort? What should I vary?",
     "controlledEvidence": {
       "pullQuote": "A city is a promise people keep making to each other.",
+      "sourceQuestion": { "id": "q-pull-quote", "type": "choice", "prompt": "Which paragraph best represents the pull quote?", "options": ["p2", "p5", "no-fit"] },
+      "followOnQuestion": { "id": "quote-fit", "type": "noul", "prompt": "Does this paragraph express the pull quote?" },
+      "followOnState": { "mode": "fresh-material", "priorTurnVisibility": "empty", "includeSelectedMaterial": true },
+      "providerConfig": { "kind": "jev", "route": "openrouter", "model": "typesafe/jev-1.13" },
+      "maxCalls": 2,
+      "respondentProfiles": [
+        { "respondentId": "r1", "profile": "A first-time renter looking for stable housing." },
+        { "respondentId": "r2", "profile": "A parent weighing neighborhood access and school travel." },
+        { "respondentId": "r3", "profile": "A long-time resident concerned about displacement." }
+      ],
       "queryResult": {
         "items": [
           {
@@ -369,5 +379,200 @@
     "referencePaths": ["references/run-and-recovery.md"],
     "userRequest": "Inspect the Sheg datastore's health without changing any stored runs. Report only the health fields returned by Sheg.",
     "controlledEvidence": { "operation": "inspect", "source": "live Sheg MCP call required" }
+  },
+  {
+    "id": "selected-material-isolation-heldout",
+    "version": 2,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": [
+      "selected-material",
+      "material-history"
+    ],
+    "referencePaths": [
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "For everyone who chose a passage for this transit claim, use that person’s own saved passage with the shared claim and ask whether the passage supports it, with no earlier answers visible. Some people choose no fit. Show one exact follow-on request and explain who is excluded. I want useful differences in the simulated responses: should I repeat the same readers or use the smallest cohort? What should I vary?",
+    "controlledEvidence": {
+      "pullQuote": "A reliable bus makes every part of a city closer.",
+      "sourceQuestion": {
+        "id": "q-transit-claim",
+        "type": "choice",
+        "prompt": "Which passage best supports the transit claim?",
+        "options": [
+          "p1",
+          "p4",
+          "p6",
+          "no-fit"
+        ]
+      },
+      "followOnQuestion": {
+        "id": "transit-claim-support",
+        "type": "noul",
+        "prompt": "Does this passage support the transit claim?",
+        "criteria": {
+          "true": "The passage supports the transit claim.",
+          "false": "The passage does not support the transit claim."
+        }
+      },
+      "followOnState": {
+        "mode": "omit-history",
+        "priorTurnVisibility": "empty",
+        "includeSelectedMaterial": true
+      },
+      "providerConfig": {
+        "kind": "jev",
+        "route": "openrouter",
+        "model": "typesafe/jev-1.13"
+      },
+      "maxCalls": 3,
+      "respondentProfiles": [
+        {
+          "respondentId": "r1"
+        },
+        {
+          "respondentId": "r2"
+        },
+        {
+          "respondentId": "r3"
+        },
+        {
+          "respondentId": "r4"
+        }
+      ],
+      "queryResult": {
+        "items": [
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000301",
+            "contextId": "00000000-0000-4000-8000-000000000401",
+            "respondentId": "r1",
+            "result": {
+              "type": "choice",
+              "choice": "p1",
+              "probabilities": {
+                "p1": 1,
+                "p4": 0,
+                "p6": 0,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p1",
+              "text": "The new timetable adds early routes from the outer estates.",
+              "sourceId": "transit-article",
+              "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "textSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          },
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000302",
+            "contextId": "00000000-0000-4000-8000-000000000402",
+            "respondentId": "r2",
+            "result": {
+              "type": "choice",
+              "choice": "p4",
+              "probabilities": {
+                "p1": 0,
+                "p4": 1,
+                "p6": 0,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p4",
+              "text": "A monthly pass now costs less than two single tickets a day.",
+              "sourceId": "transit-article",
+              "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "textSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          },
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000303",
+            "contextId": "00000000-0000-4000-8000-000000000403",
+            "respondentId": "r3",
+            "result": {
+              "type": "choice",
+              "choice": "no-fit",
+              "probabilities": {
+                "p1": 0,
+                "p4": 0,
+                "p6": 0,
+                "no-fit": 1
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            }
+          },
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000304",
+            "contextId": "00000000-0000-4000-8000-000000000404",
+            "respondentId": "r4",
+            "result": {
+              "type": "choice",
+              "choice": "p6",
+              "probabilities": {
+                "p1": 0,
+                "p4": 0,
+                "p6": 1,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p6",
+              "text": "Night service now reaches the hospital and industrial park.",
+              "sourceId": "transit-article",
+              "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "textSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        ],
+        "totalMatches": 4,
+        "sourceRunId": "00000000-0000-4000-8000-000000000027",
+        "sourceStatus": "completed",
+        "sourceComplete": true,
+        "coverage": {
+          "totalEvaluations": 4,
+          "completedEvaluations": 4,
+          "failedEvaluations": 0,
+          "respondents": {
+            "total": 4,
+            "active": 0,
+            "completed": 4,
+            "failed": 0,
+            "unreached": 0
+          }
+        }
+      },
+      "mockOnly": true
+    }
   }
 ]

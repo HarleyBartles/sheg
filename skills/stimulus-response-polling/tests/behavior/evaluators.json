@@ -1,29 +1,35 @@
 [
   {
     "scenarioId": "selected-material-isolation-no-fit",
-    "version": 5,
+    "version": 9,
     "criteria": [
       {
         "id": "per-respondent-selection",
         "condition": "Understands the request as mapping each eligible respondent to that respondent's own selected paragraph."
       },
       {
-        "id": "honest-current-limit",
-        "condition": "States that the current one-material-per-request contract requires separate requests for different selected paragraphs, or clearly labels that per-selection batching is a feature gap; never implies one request can route a different selected material for every respondent."
+        "id": "one-follow-on-request",
+        "condition": "Shows one follow-on request with sourceRunId, selection.criteria.questionId and no answer filter, plus context.includeSelectedMaterial enabled in an isolation context; Sheg resolves each eligible respondent's exact saved material independently."
+      },
+      {
+        "id": "shared-frame-and-question",
+        "condition": "Includes the shared pull quote with each respondent's own selected paragraph and asks whether that paragraph expresses the quote."
       },
       {
         "id": "preserves-no-fit",
-        "condition": "Keeps no-fit respondents visible and does not assign them a paragraph."
+        "condition": "Keeps no-fit respondents visible in selection coverage or exclusions and does not assign them a paragraph or follow-on group."
       },
       {
-        "id": "valid-proposed-actions",
-        "condition": "If proposing executable run_inspect or run_start actions, each input follows the current single-request tool contract; does not present invented batch fields as executable."
+        "id": "input-variation",
+        "condition": "Explains that meaningful result diversity comes from varying respondent profile, stimulus, question or response, and state; it does not recommend repeating matching inputs to seek a different result or minimizing cohort size by default."
       }
     ],
     "prohibitedClaims": [
       "A single shared material is the per-respondent selected material.",
       "No-fit respondents selected a paragraph.",
-      "One run automatically expands a different selected material for every query match."
+      "Sheg extracts selected passage text from a respondent answer.",
+      "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
+      "The smallest possible cohort is always the best choice."
     ]
   },
   {
@@ -137,5 +143,38 @@
   {"scenarioId":"discover-polling-frontend-near-miss","version":1,"criteria":[{"id":"no-false-trigger","condition":"Selects no skill because the request is a frontend CSS fix and the polling interval is incidental."},{"id":"trigger-rationale","condition":"Explains that the request does not involve Sheg, respondent simulation, or study design."}],"prohibitedClaims":[]},
   {"scenarioId":"isolated-storage-inspection","version":1,"criteria":[{"id":"reports-observed-health","condition":"Uses run_storage inspect and reports the actual returned integrity status without inventing unavailable health facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
   {"scenarioId":"live-storage-inspection-heldout","version":1,"criteria":[{"id":"reports-observed-health","condition":"Calls Sheg MCP run_storage inspect and reports the actual returned health fields without inventing unavailable facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
-  {"scenarioId":"live-storage-inspection","version":1,"criteria":[{"id":"reports-observed-health","condition":"Calls Sheg MCP run_storage inspect and reports the actual returned health fields without inventing unavailable facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]}
+  {"scenarioId":"live-storage-inspection","version":1,"criteria":[{"id":"reports-observed-health","condition":"Calls Sheg MCP run_storage inspect and reports the actual returned health fields without inventing unavailable facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
+  {
+    "scenarioId": "selected-material-isolation-heldout",
+    "version": 2,
+    "criteria": [
+      {
+        "id": "per-respondent-selection",
+        "condition": "Understands the request as mapping each eligible respondent to that respondent’s own selected passage."
+      },
+      {
+        "id": "one-follow-on-request",
+        "condition": "Shows one follow-on request with sourceRunId, selection.criteria.questionId and no answer filter, plus context.includeSelectedMaterial enabled in an isolation context; Sheg resolves each eligible respondent’s exact saved material independently."
+      },
+      {
+        "id": "shared-frame-and-question",
+        "condition": "Includes the shared claim with each respondent’s own selected passage and asks the supplied follow-on question about that passage and claim."
+      },
+      {
+        "id": "preserves-no-fit",
+        "condition": "Keeps no-fit respondents visible in selection coverage or exclusions and does not assign them a passage or follow-on group."
+      },
+      {
+        "id": "input-variation",
+        "condition": "Explains that meaningful result diversity comes from varying respondent profile, stimulus, question or response, and state; it does not recommend repeating matching inputs to seek a different result or minimizing cohort size by default."
+      }
+    ],
+    "prohibitedClaims": [
+      "A single shared material is the per-respondent selected passage.",
+      "No-fit respondents selected a passage.",
+      "Sheg extracts selected passage text from a respondent answer.",
+      "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
+      "The smallest possible cohort is always the best choice."
+    ]
+  }
 ]

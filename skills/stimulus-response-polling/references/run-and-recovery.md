@@ -30,7 +30,38 @@ Use `run_query` to select recorded evidence from a source run. Criteria combine 
 
 For a Choice question that explicitly maps option IDs to exact material IDs with `materialOptions`, a matching answer also includes `selectedMaterial`: `materialId`, exact `text`, author-supplied `sourceId` and `sourceSha256`, and Sheg-computed `textSha256`. Unmapped options, including no-fit, have no material reference. The agent authors candidate boundaries and labels. Use the returned `materialId` in a follow-on request's `context.materialIds`, with the returned evaluation/context handles, to ask about the selected candidate in that respondent's chosen context.
 
-Build a follow-on request yourself from the user's intended question and the evidence you selected. Sheg does not decide which result is relevant or what unit counts as a section, paragraph, or “bit.” Selection can repeat the query criteria for a live result set or pass exact `{evaluationId, contextId}` pairs returned by `run_query`. A user with a clear question can supply it directly; when their expectation is broader, first decide what answers would satisfy them, then choose the smallest evidence selection and typed question that can answer it. Use `run_inspect` on that exact follow-on when a fit preview would help; `run_start` performs admission validation itself.
+Build a follow-on request yourself from the user's intended question and the evidence you selected. Sheg does not decide which result is relevant or what unit counts as a section, paragraph, or “bit.” Selection can repeat the query criteria for a live result set or pass exact `{evaluationId, contextId}` pairs returned by `run_query`. A user with a clear question can supply it directly; when their expectation is broader, decide which answers would satisfy them, then select the evidence and typed question that can answer it. Use `run_inspect` on that exact follow-on when a fit preview would help; `run_start` performs admission validation itself.
+
+### Reuse each respondent's selected material
+
+When a user wants to follow up on material respondents selected, query the source Choice question and pass the resulting source question selection to one follow-on request with `context.includeSelectedMaterial: true` and an isolation mode (`fresh-material` or `omit-history`). Sheg resolves each answered mapped Choice response to its exact saved material and uses that as the same respondent's next stimulus. Add shared framing, such as a pull quote, through the follow-on's explicit shared material fields. Ask the follow-up question about the selected material in that shared frame.
+
+For example, if respondents selected among seven paragraphs for a pull quote, include the paragraph each respondent selected and the shared pull quote, then ask whether that paragraph expresses the pull quote. Each respondent sees their own selected paragraph with the shared quote in isolation. Sheg does not extract a paragraph from an answer or infer a material mapping. Unmapped choices, including no-fit, remain visible in selection coverage and do not receive a follow-on group. Read `selectionCoverage` and `selectionExclusions` to report which source answers produced groups and why others were excluded. Do not split this into one follow-on run per paragraph.
+
+When a binary Noul question needs explicit meaning, put it in `criteria.true` and `criteria.false` on the question, for example `{"type":"noul","id":"quote-fit","instructions":"Does this paragraph express the pull quote?","criteria":{"true":"The paragraph expresses the pull quote.","false":"The paragraph does not express the pull quote."}}`. These keys define the proposition; do not use separate `trueCriterion` or `falseCriterion` fields.
+
+The request shape is one follow-on, with the source question selected without an answer filter. `includeSelectedMaterial` tells Sheg to resolve each eligible answer's exact saved Choice-to-material mapping. Put shared framing in `material`; do not list the respondents' different selected paragraphs there or in `context.materialIds`.
+
+```json
+{
+  "kind": "follow-on",
+  "sourceRunId": "00000000-0000-4000-8000-000000000017",
+  "selection": { "criteria": { "questionId": "q-pull-quote" } },
+  "context": { "mode": "fresh-material", "includeSelectedMaterial": true },
+  "material": [
+    { "id": "pull-quote", "text": "A city is a promise people keep making to each other." }
+  ],
+  "questions": [
+    { "type": "noul", "id": "quote-fit", "instructions": "Does this paragraph express the pull quote?" }
+  ],
+  "provider": { "kind": "jev", "route": "openrouter", "model": "typesafe/jev-1.13" },
+  "maxCalls": 2
+}
+```
+
+The ID above is illustrative; use the source run ID returned by Sheg. Choose the provider and call allowance for the user's actual setup and eligible response groups. Run `run_inspect` on the complete request before execution when a fit preview helps. A source-question criterion includes mapped and unmapped answers so Sheg can report coverage and exclusions; do not filter the follow-on to mapped Choice IDs.
+
+Design for substantive input variation. The main dimensions are respondent profile, stimulus, question or response, and state, including prior-turn visibility. The respondent cohort supplies profile variation; choose profiles and cohort size to represent the differences the user needs to understand rather than defaulting to the smallest cohort. Each respondent's selected paragraph varies the stimulus in an isolated follow-up while the shared framing and question remain interpretable. Inputs matching on all four dimensions are duplicates for study-design purposes: another run may show ordinary model variability, but it does not add substantive coverage. Vary the input deliberately when the user wants richer evidence.
 
 Choose a follow-on context explicitly:
 

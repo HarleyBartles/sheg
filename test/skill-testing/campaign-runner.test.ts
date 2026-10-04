@@ -61,8 +61,8 @@ test('resume recovers a complete output bundle written before the journal captur
     assert.equal(resumed.captured, 2);
     assert.equal(calls, 2, 'The recovered first trial must not be dispatched again; only the second planned trial runs.');
     const journal = readFileSync(path.join(input.campaign, 'attempts.jsonl'), 'utf8');
-    assert.equal(journal.match(/attempt-started.*selected-material-isolation-no-fit@v5:candidate:001/g)?.length, 1);
-    assert.match(journal, /output-captured.*selected-material-isolation-no-fit@v5:candidate:001/);
+    assert.equal(journal.match(/attempt-started.*selected-material-isolation-no-fit@v9:candidate:001/g)?.length, 1);
+    assert.match(journal, /output-captured.*selected-material-isolation-no-fit@v9:candidate:001/);
   } finally { input.cleanup(); }
 });
 
@@ -120,8 +120,8 @@ test('behavioral reruns append a stable new trial instead of replacing a failed 
   try {
     const added = addTrial(input.campaign, 'candidate');
     const again = addTrial(input.campaign, 'candidate');
-    assert.equal(added.trialId, 'selected-material-isolation-no-fit@v5:candidate:003');
-    assert.equal(again.trialId, 'selected-material-isolation-no-fit@v5:candidate:004');
+    assert.equal(added.trialId, 'selected-material-isolation-no-fit@v9:candidate:003');
+    assert.equal(again.trialId, 'selected-material-isolation-no-fit@v9:candidate:004');
     assert.notEqual(added.trialId, again.trialId);
     const events = readFileSync(path.join(input.campaign, 'attempts.jsonl'), 'utf8');
     assert.match(events, /trial-added/);

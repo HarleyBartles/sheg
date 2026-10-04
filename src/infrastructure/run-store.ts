@@ -206,8 +206,29 @@ function validateRunIds(runIds: string[]): void {
   }
 }
 
+function isTransientSqliteLock(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'errcode' in error &&
+    (error.errcode === 5 || error.errcode === 6);
+}
+
+function setWriteAheadLogMode(database: DatabaseSync): void {
+  const deadline = Date.now() + 5_000;
+  const waitCell = new Int32Array(new SharedArrayBuffer(4));
+  while (true) {
+    try {
+      database.exec('PRAGMA journal_mode = WAL');
+      return;
+    } catch (error) {
+      if (!isTransientSqliteLock(error) || Date.now() >= deadline) throw error;
+      Atomics.wait(waitCell, 0, 0, Math.min(25, deadline - Date.now()));
+    }
+  }
+}
+
 function initialize(database: DatabaseSync): void {
-  database.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
+  database.exec('PRAGMA foreign_keys = ON;');
+  setWriteAheadLogMode(database);
+  database.exec('PRAGMA synchronous = FULL;');
   database.exec('BEGIN IMMEDIATE');
   try {
     const versionRow = database.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
