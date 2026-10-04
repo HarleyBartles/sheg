@@ -1,6 +1,6 @@
 # Respondent-local journey recovery implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Mark each completed step in its checkbox.
 
 **Goal:** Allow an author to explicitly resume a partial journey at a safely retryable respondent-local failed turn while preserving all successful work and the original call limit.
 
@@ -52,55 +52,55 @@
 - `RunStore.resume(runId, nowMs)` remains the atomic enforcement point. For an eligible partial journey it reopens only failed evaluations belonging to failed respondents with exactly one failed turn each, restores their active pointers from those evaluation rows, retains their failed attempts, and leaves every other row and the original call limit intact.
 - The worker reserves that same evaluation and uses its frozen packet. After a valid answer, the normal journey transition records the answer and route, then appends the next reached turn. A retry failure leaves the same checkpoint available only if the normal safety gates still hold.
 
-- [ ] **Step 1: Add a failing lifecycle test for a partial journey checkpoint**
+- [x] **Step 1: Add a failing lifecycle test for a partial journey checkpoint**
 
 In `test/question-worker.test.ts`, run a durable journey where one respondent answers and routes through an earlier turn before a later local failure, while another respondent completes. Assert that status is `partial`, the failed respondent has null current-turn pointers as required by storage v7, and `lifecycle.resume` is eligible when allowance remains. Assert its completed route and response history remain intact. The test must fail specifically because current lifecycle projection returns `partial_journey`.
 
-- [ ] **Step 2: Add failing transactional resume assertions**
+- [x] **Step 2: Add failing transactional resume assertions**
 
 Extend the same worker behavior test to capture the failed evaluation ID, context ID, packet fingerprint, respondent events and route, successful sibling state, and failed attempt page before resume. After resume, assert that the same run and maxCalls remain, only the failed evaluation becomes pending, the failed respondent becomes active at the exact turn/context/node from that evaluation with revision advanced, every prior answer/event/route and successful sibling is unchanged, and the original failed attempt remains visible. Resume the worker and assert it dispatches only that failed respondent's saved turn and later reached work.
 
-- [ ] **Step 3: Run the store tests and witness the expected failures**
+- [x] **Step 3: Run the store tests and witness the expected failures**
 
 Run: `node --import tsx --test --test-name-pattern="partial journey failure retains" test/question-worker.test.ts`
 Expected: the new eligibility assertion fails with the existing `partial_journey` refusal; prior route and response history remain present.
 
-- [ ] **Step 4: Implement the smallest durable checkpoint and eligibility change**
+- [x] **Step 4: Implement the smallest durable checkpoint and eligibility change**
 
 Extend lifecycle facts/projection to allow a partial journey only when every failed evaluation belongs to a failed respondent and each such respondent has exactly one failed evaluation; keep the existing `partial_journey` reason for a missing or ambiguous checkpoint. In `run-store.ts`, atomically reopen those failed evaluation rows, restore each failed respondent's current node/turn/context from its exact frozen evaluation, and retain evaluation identity, packet fields, event/route JSON, attempts and maxCalls. Do not change the v7 table constraint, respondent-local settlement, run-scoped recovery or interrupted recovery.
 
-- [ ] **Step 5: Run the focused store tests and verify they pass**
+- [x] **Step 5: Run the focused store tests and verify they pass**
 
 Run: `node --import tsx --test --test-name-pattern="partial journey failure retains|failed retry stays partial|original allowance is exhausted|journey resume lifecycle refuses" test/question-worker.test.ts test/run-lifecycle.test.ts`
 Expected: PASS for exact failed-turn reactivation and attempt retention, with refusal for cancellation, unresolved attempts, exhausted allowance and missing checkpoint.
 
-- [ ] **Step 6: Add a failing durable worker continuation test**
+- [x] **Step 6: Add a failing durable worker continuation test**
 
 - Extend `test/question-worker.test.ts` using the real run store and worker with a deterministic provider: respondent A answers an earlier node then fails at a reached node; respondent B completes its path; explicit store resume retries A's failed node successfully and follows the returned branch. Assert only A's failed node is dispatched on resume, B is never called again, earlier successful A nodes are not repeated, A's previous events/route remain in order, the resumed packet and compiler identity are unchanged, a next turn appears only after retry success, the run ID/maxCalls remain the originals, and both the failed and successful retry attempts remain readable. Add a second case where the retry fails and the run remains partial with both attempts exposed; the public `run_resume` service boundary is covered in the MCP test.
 
-- [ ] **Step 7: Run the worker test and witness the expected failure**
+- [x] **Step 7: Run the worker test and witness the expected failure**
 
 Run: `node --import tsx --test --test-name-pattern="partial journey failure retains" test/question-worker.test.ts`
 Expected: FAIL because partial journey lifecycle currently refuses the otherwise safe failed evaluation; the test's checkpoint assertions pass under the existing schema.
 
-- [ ] **Step 8: Complete lifecycle schema and MCP-visible resume behavior**
+- [x] **Step 8: Complete lifecycle schema and MCP-visible resume behavior**
 
 Keep the existing lifecycle reason schema and test through MCP that status exposes eligible state while the respondent remains failed, reads do not mutate it, and only explicit `run_resume` restores the saved checkpoint. Verify provider readiness remains ahead of the transition, simultaneous resume requests still launch at most one worker, a rejected or unavailable credential does not mutate the checkpoint, and a resumed launch failure remains visible under the same run ID. Do not add automatic retry on reads.
 
-- [ ] **Step 9: Run focused service, MCP, and worker tests**
+- [x] **Step 9: Run focused service, MCP, and worker tests**
 
 Run: `node --import tsx --test test/mcp.test.ts test/question-worker.test.ts test/run-lifecycle.test.ts test/run-store.test.ts test/run-service.test.ts`
 Expected: PASS with existing poll resume semantics unchanged and partial journey recovery covered through the public tool contract.
 
-- [ ] **Step 10: Record the durable recovery contract**
+- [x] **Step 10: Record the durable recovery contract**
 
 Create ADR-0026 with status Accepted and date `2026-10-04`. Record the context, options (refuse partial journeys, restart the whole respondent, or resume the exact saved failed turn), decision to resume only the exact failed turn from its persisted packet/checkpoint, and consequences for attempts, allowance, lifecycle refusal and unchanged prior history. Add it to `docs/decisions/README.md` without editing ADR-0019 or ADR-0024 history.
 
-- [ ] **Step 11: Commit Task 1**
+- [x] **Step 11: Commit Task 1**
 
 Commit the tested lifecycle projection, storage transition, MCP and worker tests, and ADR together with message `feat: resume respondent-local journey failures`.
 
-- [ ] **Step 12: Mark Task 1 done against its commit base**
+- [x] **Step 12: Mark Task 1 done against its commit base**
 
 Run: `bash scripts/task-done <plan-file> 1 <BASE_FROM_TASK_START> -- node --import tsx --test test/mcp.test.ts test/question-worker.test.ts test/run-lifecycle.test.ts test/run-store.test.ts test/run-service.test.ts`
 Expected: ledger records Task 1 complete after the exact focused command passes.
@@ -123,44 +123,44 @@ Expected: ledger records Task 1 complete after the exact focused command passes.
 - The new source-owned behavior scenario requires inspection of journey progress and attempts, a clear explanation of the saved failed turn and preserved respondents, then an explicit user request before the actor calls `run_resume`.
 - The evaluator's private tool checkpoint distinguishes explanation from mutation: no resume call before explicit authorization; exactly one `run_resume` after authorization when eligible; no extra `run_start`.
 
-- [ ] **Step 1: Add the source-owned behavior scenario and evaluator**
+- [x] **Step 1: Add the source-owned behavior scenario and evaluator**
 
 Add a scenario identity and frozen evidence to `tests/behavior/scenarios.json`, evaluator criteria to `tests/behavior/evaluators.json`, and ordered turns/tool checkpoints to `tests/behavior/workflows/partial-journey-recovery.json`. Evidence describes a partial journey: one respondent completed, one has a prior answer and route plus a failed reached turn, original allowance remains, and no attempt is unresolved. The first turn reads status, journey, and attempts and explains safe recovery without mutation. A second user turn explicitly asks to continue; only then is `run_resume` expected. A final read reports the actual new state. Keep the scenario generic rather than tied to Portfolio.
 
-- [ ] **Step 2: Add a deterministic contract test for the scenario checkpoint**
+- [x] **Step 2: Add a deterministic contract test for the scenario checkpoint**
 
 Extend `test/skill-testing/campaign-suites.test.ts` to load the new scenario/evaluator through the owning catalog loader and assert that the workflow fixture's ordered tool checkpoints match: three read-only calls on the explanatory turn, exactly one `run_resume` on the explicit continuation turn, and read-only status/progress/attempt inspection afterward. The test validates source contracts only; it must not dispatch an actor or judge.
 
 Strengthen the Task 1 worker continuation test so the failed turn's eventual answer selects a route that differs from the path it would have taken under another answer. Assert the alternate branch is absent before retry, only the failed turn is dispatched on resume, and the chosen route is recorded only after the retry succeeds.
 
-- [ ] **Step 3: Run the focused harness test and witness RED**
+- [x] **Step 3: Run the focused harness test and witness RED**
 
 Run: `node --import tsx --test test/skill-testing/campaign-suites.test.ts`
 Expected: FAIL because the suite does not yet contain the new scenario/checkpoint contract.
 
-- [ ] **Step 4: Update current user-facing recovery guidance**
+- [x] **Step 4: Update current user-facing recovery guidance**
 
 In `run-and-recovery.md`, remove the claim that every partial journey is refused and explain that only a known respondent-local failed reached turn is eligible under lifecycle conditions. State that explicit resume keeps the same run ID and allowance, preserves answers/routes/exposures and failed attempt history, retries only the failed turn, and can proceed down a newly valid branch only after success. Keep refusal guidance for cancellation, uncertain attempts, exhausted allowance and missing retryable work. In `interpret-results.md`, explain that a partial run may resume without converting failed, pending or unreached evaluations into negative answers; require explicit user intent before `run_resume`.
 
-- [ ] **Step 5: Run the focused harness test and verify GREEN**
+- [x] **Step 5: Run the focused harness test and verify GREEN**
 
 Run: `node --import tsx --test test/skill-testing/campaign-suites.test.ts`
 Expected: PASS with the new deterministic source-fixture contract.
 
-- [ ] **Step 6: Set the deliberate development version and regenerate**
+- [x] **Step 6: Set the deliberate development version and regenerate**
 
 Set `package.json`'s sole authored version to `0.3.0-dev.9`, update `package-lock.json` through `npm version 0.3.0-dev.9 --no-git-tag-version`, then run `npm run build` to regenerate plugin metadata and packaged runtime. Do not tag or publish a release.
 
-- [ ] **Step 7: Verify the final repository gate and generated version**
+- [x] **Step 7: Verify the final repository gate and generated version**
 
 Run: `npm run build`
 Expected: PASS; confirm package, lockfile root/package entries, MCP initialization identity, plugin metadata and built runtime all report `0.3.0-dev.9`. The Task 2 commit's tracked pre-commit hook runs `npm run verify` against the staged snapshot; no skill actor/judge runs.
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 Commit guidance, skill-owned scenario/evaluator, deterministic harness coverage, version source and generated build outputs with message `docs: teach safe partial journey recovery`.
 
-- [ ] **Step 9: Mark Task 2 done against its commit base**
+- [x] **Step 9: Mark Task 2 done against its commit base**
 
 Run: `bash scripts/task-done <plan-file> 2 <BASE_FROM_TASK_START> -- node --import tsx --test test/skill-testing/campaign-suites.test.ts`
 Expected: ledger records Task 2 complete after the focused deterministic fixture-contract test passes; the commit hook is the canonical full gate.
