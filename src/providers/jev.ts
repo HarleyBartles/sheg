@@ -34,15 +34,25 @@ const scoreAnswerSchema = z.object({ type: z.literal('score'), score: z.number()
 const noulAnswerSchema = z.object({ type: z.literal('noul'), noul: z.number().finite().min(0).max(1) }).passthrough();
 const answerSchema = z.discriminatedUnion('type', [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
 
+const wireUsageSchema = z.object({
+  input_tokens: z.number().int().nonnegative().optional(),
+  output_tokens: z.number().int().nonnegative().optional(),
+  cost: z.number().finite().nonnegative().optional(),
+}).passthrough();
+const nativeWireUsageSchema = wireUsageSchema.extend({
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(),
+});
 const wireResponseSchema = z.object({
   model: z.string().min(1),
   answers: z.record(z.string(), z.unknown()),
-  usage: z.object({
-    input_tokens: z.number().int().nonnegative().optional(),
-    output_tokens: z.number().int().nonnegative().optional(),
-    cost: z.number().finite().nonnegative().optional(),
-  }).passthrough(),
+  usage: wireUsageSchema,
 }).passthrough();
+const nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
+
+function parseWireResponse(payload: unknown, route: JevConfig['route']) {
+  return (route === 'typesafe' ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
+}
 
 const retryableStatuses = new Set([429, 500, 502, 503, 524, 529]);
 const TYPESAFE_CONTEXT_UNVERIFIED = 'typesafe-model-context-unverified';
@@ -165,7 +175,7 @@ export class JevProvider implements DecisionProvider {
         throw new JevCallError('Jev returned an unreadable response.', attempts);
       }
 
-      const parsedResponse = wireResponseSchema.safeParse(payload);
+      const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) {
         throw new JevCallError('Jev response is missing required identity or usage fields.', attempts);
       }
@@ -250,7 +260,7 @@ export class JevProvider implements DecisionProvider {
       let payload: unknown;
       try { payload = await response.json(); }
       catch { throw new JevCallError('Jev returned an unreadable response.', attempts); }
-      const parsedResponse = wireResponseSchema.safeParse(payload);
+      const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) throw new JevCallError('Jev response is missing required identity or usage fields.', attempts);
 
       const cost = parsedResponse.data.usage.cost;

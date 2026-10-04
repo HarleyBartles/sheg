@@ -498,15 +498,45 @@ test('native authorization failure records one physical call and hides credentia
   assert.equal(physicalCalls, 1);
 });
 
+test('native responses without complete token usage fail safely after one physical request', async () => {
+  const nativeConfig = defaultJevConfig('typesafe');
+  const missingUsage = [
+    { output_tokens: 12 },
+    { input_tokens: 120 },
+  ];
+  for (const usage of missingUsage) {
+    let physicalCalls = 0;
+    const provider = new JevProvider(nativeConfig, fakeFetch(async () => {
+      physicalCalls += 1;
+      return response({ usage });
+    }), { credentialStore: testCredentialStore });
+    await assert.rejects(provider.decide(request, 1), (error: unknown) => {
+      assert.ok(error instanceof JevCallError);
+      assert.equal(error.attempts, 1);
+      assert.equal(error.message, 'Jev response is missing required identity or usage fields.');
+      assert.equal(JSON.stringify(error).includes('secret-test-key'), false);
+      return true;
+    });
+    assert.equal(physicalCalls, 1);
+  }
+
+  const batch: DecisionBatchRequest = { state: request.state, questions: [request.question, { type: 'noul', id: 'trust', instructions: 'Is it credible?' }] };
+  let batchCalls = 0;
+  const batchProvider = new JevProvider(nativeConfig, fakeFetch(async () => {
+    batchCalls += 1;
+    return response({ usage: {} });
+  }), { credentialStore: testCredentialStore });
+  await assert.rejects(batchProvider.decideBatch(batch, 1), (error: unknown) =>
+    error instanceof JevCallError && error.attempts === 1 && error.message === 'Jev response is missing required identity or usage fields.');
+  assert.equal(batchCalls, 1);
+});
+
 
 test('optional cost evidence uses only known served-model rates and complete token counts', async () => {
   const native = defaultJevConfig('typesafe');
   for (const [servedModel, usage, expected] of [
     ['jev-latest', { input_tokens: 120, output_tokens: 12 }, { amountUsd: 0.00000504, basis: 'published-rate-estimate' }],
     ['unknown-served-model', { input_tokens: 120, output_tokens: 12 }, undefined],
-    ['jev-latest', { input_tokens: 120 }, undefined],
-    ['jev-latest', {}, undefined],
-    ['unknown-served-model', { cost: 0 }, { amountUsd: 0, basis: 'provider-reported' }],
   ] as const) {
     const provider = new JevProvider(native, fakeFetch(async () => response({ model: servedModel, usage })), {
       credentialStore: testCredentialStore,
@@ -516,6 +546,14 @@ test('optional cost evidence uses only known served-model rates and complete tok
     assert.deepEqual(result.cost, expected);
     assert.equal(result.type, 'choice');
     assert.equal(result.model, servedModel);
+  }
+  for (const [usage, expected] of [
+    [{ input_tokens: 120 }, undefined],
+    [{}, undefined],
+    [{ cost: 0 }, { amountUsd: 0, basis: 'provider-reported' }],
+  ] as const) {
+    const openrouter = makeJevProvider(fakeFetch(async () => response({ model: config.model, usage })));
+    assert.deepEqual((await openrouter.decide(request, 1)).cost, expected);
   }
   const openrouter = makeJevProvider(fakeFetch(async () => response({ model: config.model, usage: { input_tokens: 120, output_tokens: 12 } })));
   assert.deepEqual((await openrouter.decide(request, 1)).cost, { amountUsd: 0.00000504, basis: 'published-rate-estimate' });
