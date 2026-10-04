@@ -81,19 +81,36 @@ For local candidate inspection, omit the release tag and use an explicit candida
 On Windows, the npm wrapper uses the Python launcher (`py -3`). By default the
 ZIP is written to `release-artifacts/sheg-v<version>.zip`.
 
-The archive has plugin-root paths and includes `plugin.json`, `package.json`,
-`mcp.json`, `.agents/plugins/marketplace.json`, `skills/`, `dist/`, and the
-license. It excludes source, tests, the dependency tree, and build tooling. The
-bundled MCP entrypoint runs with Node.js 24 and does not need TypeScript or
-`node_modules` at runtime.
+The archive has plugin-root paths and contains every file in the generated
+`plugins/sheg/` package. It excludes source, tests, the dependency tree, and
+build tooling. The bundled MCP entrypoint runs with Node.js 24 and does not
+need TypeScript or `node_modules` at runtime.
 
 ## Install a GitHub Release ZIP
 
 1. Download `sheg-v<version>.zip` from the matching GitHub Release.
-2. Extract the archive into a stable directory. Keep the archive's paths intact.
-3. Register the extracted directory as a local marketplace with
-   `codex plugin marketplace add <extracted-directory>`.
-4. Restart Codex, install or enable Sheg from the Plugins Directory, and
+2. Create a local marketplace directory with a `plugins/sheg/` subdirectory,
+   then extract the archive into `plugins/sheg/` and keep its paths intact.
+3. Create `.agents/plugins/marketplace.json` at the marketplace root with the
+   following catalog, using the existing Sheg identity and local package path:
+
+   ```json
+   {
+     "name": "sheg",
+     "plugins": [
+       {
+         "name": "sheg",
+         "source": { "source": "local", "path": "./plugins/sheg" },
+         "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+         "category": "Productivity"
+       }
+     ]
+   }
+   ```
+
+4. Register the marketplace root with
+   `codex plugin marketplace add <marketplace-root>`.
+5. Restart Codex, install or enable Sheg from the Plugins Directory, and
    confirm its polling tools load.
 
 Alternatively, continue to add the Git repository as a marketplace and install

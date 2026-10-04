@@ -35,15 +35,16 @@ def plugin_files() -> list[Path]:
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"required plugin package file is missing: {relative.as_posix()}")
         files.append(relative)
+    for path in PLUGIN_ROOT.rglob("*"):
+        relative = path.relative_to(PLUGIN_ROOT)
+        if path.is_symlink():
+            raise ValueError(f"plugin package cannot include symlinks: {relative.as_posix()}")
+        if path.is_file():
+            files.append(relative)
     for directory in (Path("skills"), Path("dist")):
         source = PLUGIN_ROOT / directory
         if source.is_symlink() or not source.is_dir():
             raise ValueError(f"required plugin directory is missing: {directory.as_posix()}")
-        for path in source.rglob("*"):
-            if path.is_symlink():
-                raise ValueError(f"plugin package cannot include symlinks: {path.relative_to(PLUGIN_ROOT).as_posix()}")
-            if path.is_file():
-                files.append(path.relative_to(PLUGIN_ROOT))
     for relative in files:
         path = PLUGIN_ROOT / relative
         if path.is_symlink():
