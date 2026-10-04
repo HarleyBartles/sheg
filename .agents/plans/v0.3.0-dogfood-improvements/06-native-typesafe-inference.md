@@ -33,23 +33,23 @@ For native `jev-latest`, use 32,000 tokens as Sheg's context ceiling for the com
 
 ## Tasks
 
-### 1. Prove native admission from official limits
+## Task 1: Prove native admission from official limits
 
 Add failing tests for native single and batch measurement before changing the implementation. Verify the published source/date, 32,000 context ceiling, 20% reserve, 25,600 effective estimated threshold, exact serialized request coverage, and distinction from OpenRouter metadata. Verify that an oversized native request is refused before Credential Manager reads or HTTP dispatch and reports zero physical attempts. Unknown native model names remain unavailable unless route-specific evidence exists. Add a native preflight case that reports fit for a small request when the credential is available, while missing credentials remain a separate status.
 
 Set `typesafe/jev-latest` metadata from the official evidence. Keep model alias movement explicit in provider documentation and require a fresh official-source check before stable release. Run `npm test -- --test-name-pattern` only if the repository's Node test runner accepts the filter; otherwise run the focused test file directly as `node --import tsx --test test/jev.test.ts test/application-preflight.test.ts`.
 
-### 2. Prove native transport and durable evidence
+## Task 2: Prove native transport and durable evidence
 
 Extend route-specific tests to assert the native endpoint, selected TypeSafe Credential Manager target, bearer-header construction, serialized model/state/questions, typed answers, actual served model identity, usage and one physical attempt per fetch. Add safe authorization/provider failure coverage proving credential and raw response text do not leak. Keep the existing OpenRouter path coverage intact.
 
 If existing tests do not prove stored provider/model identity and physical-call accounting through the application/store boundary, add a focused integration case using an injected deterministic provider. Do not duplicate provider tests in the MCP suite.
 
-### 3. Update decision and provider documentation
+## Task 3: Update decision and provider documentation
 
 Document the official limits, checked date, native Sheg estimate/reserve policy, alias movement, admission failure behavior, and the fact that fit is estimated rather than exact. Add an ADR with the chosen contract and update its index. Do not describe the estimate as a guarantee that TypeSafe will accept every request.
 
-### 4. Validate the built candidate with TypeSafe and an author follow-up
+## Task 4: Validate the built candidate with TypeSafe and an author follow-up
 
 Confirm `Sheg/Jev/TypeSafe` is available through the secure credential status path without printing, copying, or placing the token in arguments, environment variables, scratch logs, or test output. Inspect Portfolio read-only and select a real article with an author-supplied pull quote and enough distinct paragraphs for a meaningful choice study. Freeze varied respondent profiles appropriate to the author's decision; do not repeat identical inputs as a substitute for coverage.
 
@@ -57,7 +57,7 @@ Build the candidate and start the built MCP server in an isolated transient `SHE
 
 Verify both runs complete with typed answers, response model identity, provider route, usage, and attempt records matching actual physical requests. Restart the MCP process against the same transient data root and verify durable recall of requests, answers, selected-material lineage, attempts and status. Verify safe failure reporting through automated unauthorized/malformed-response tests; do not cause unnecessary paid failures. Keep total paid API calls within the authorized initial 500-call budget and request approval before exceeding it. Remove transient database and run outputs after validation.
 
-### 5. Set the development checkpoint and complete handoff checks
+## Task 5: Set the development checkpoint and complete handoff checks
 
 Set the product version to `0.3.0-dev.8` in the authoritative files, build generated artifacts, and verify extracted/copy-built MCP initialization reports the same product version. Run focused tests, `npm run build`, and `npm run verify`; let the tracked hook run its staged-snapshot gate. Prepare a feature PR into `develop` after all implementation and live acceptance evidence is reviewed. Do not tag or publish a release.
 
