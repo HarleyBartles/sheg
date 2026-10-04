@@ -38,7 +38,7 @@ For native `jev-latest`, use 32,000 tokens as Sheg's context ceiling for the com
 
 Add failing tests for native single and batch measurement before changing the implementation. Verify the published source/date, 32,000 context ceiling, 20% reserve, 25,600 effective estimated threshold, exact serialized request coverage, and distinction from OpenRouter metadata. Verify that an oversized native request is refused before Credential Manager reads or HTTP dispatch and reports zero physical attempts. Unknown native model names remain unavailable unless route-specific evidence exists. Exercise the real `prepareRun` inspection path with a small native request and assert it reports fit without inference. In `preflightStudy`, assert native packet measurements are available and configured credential availability remains separate; retain overall `unverified` when variable response history prevents conservative whole-study fit.
 
-Set `typesafe/jev-latest` metadata from the official evidence. Keep model alias movement explicit in provider documentation and require a fresh official-source check before stable release. Run `npm test -- --test-name-pattern` only if the repository's Node test runner accepts the filter; otherwise run the focused test file directly as `node --import tsx --test test/jev.test.ts test/application-preflight.test.ts`.
+Set `typesafe/jev-latest` metadata from the official evidence. Keep model alias movement explicit in provider documentation and require a fresh official-source check before stable release. Run the focused tests with `node --import tsx --test test/jev.test.ts test/application-preflight.test.ts test/run-inspection.test.ts`.
 
 ## Task 2: Prove native transport and durable evidence
 
