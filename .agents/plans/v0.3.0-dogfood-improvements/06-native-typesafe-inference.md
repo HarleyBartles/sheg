@@ -24,7 +24,8 @@ For native `jev-latest`, use 32,000 tokens as Sheg's context ceiling for the com
 - `src/providers/jev/model-metadata.ts` owns route-and-model-specific published context evidence and the native policy ceiling.
 - `src/providers/jev.ts` owns actual serialized request measurement and admission before credential retrieval or HTTP dispatch; change it only if tests prove metadata alone cannot express the native policy.
 - `test/jev.test.ts` owns estimator boundary, native admission-before-dispatch, native endpoint/auth, typed response, provider/model, usage, attempt-count and safe-failure behavior tests.
-- `test/application-preflight.test.ts` owns configured native-route fit and credential-availability projection.
+- `test/application-preflight.test.ts` owns provider-packet context measurements and credential-availability projection; a whole-study status can remain unverified when later packets depend on variable response history.
+- `test/run-inspection.test.ts` owns the real no-inference direct-request admission path used by `run_inspect`.
 - `test/mcp.test.ts` owns any needed stored-run accounting or durable-recall integration coverage not already present.
 - `docs/providers/jev.md` documents the current native fit policy, evidence limits, and behavior when served model identity or fit differs.
 - Add one accepted ADR in `docs/decisions/` for the native context-fit contract and update `docs/decisions/README.md` in the same change.
@@ -35,7 +36,7 @@ For native `jev-latest`, use 32,000 tokens as Sheg's context ceiling for the com
 
 ## Task 1: Prove native admission from official limits
 
-Add failing tests for native single and batch measurement before changing the implementation. Verify the published source/date, 32,000 context ceiling, 20% reserve, 25,600 effective estimated threshold, exact serialized request coverage, and distinction from OpenRouter metadata. Verify that an oversized native request is refused before Credential Manager reads or HTTP dispatch and reports zero physical attempts. Unknown native model names remain unavailable unless route-specific evidence exists. Add a native preflight case that reports fit for a small request when the credential is available, while missing credentials remain a separate status.
+Add failing tests for native single and batch measurement before changing the implementation. Verify the published source/date, 32,000 context ceiling, 20% reserve, 25,600 effective estimated threshold, exact serialized request coverage, and distinction from OpenRouter metadata. Verify that an oversized native request is refused before Credential Manager reads or HTTP dispatch and reports zero physical attempts. Unknown native model names remain unavailable unless route-specific evidence exists. Exercise the real `prepareRun` inspection path with a small native request and assert it reports fit without inference. In `preflightStudy`, assert native packet measurements are available and configured credential availability remains separate; retain overall `unverified` when variable response history prevents conservative whole-study fit.
 
 Set `typesafe/jev-latest` metadata from the official evidence. Keep model alias movement explicit in provider documentation and require a fresh official-source check before stable release. Run `npm test -- --test-name-pattern` only if the repository's Node test runner accepts the filter; otherwise run the focused test file directly as `node --import tsx --test test/jev.test.ts test/application-preflight.test.ts`.
 
