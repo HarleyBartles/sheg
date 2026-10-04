@@ -1333,7 +1333,9 @@ class SQLiteRunStore implements RunStore {
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
       const lifecycle = cursor?.lifecycle ?? currentLifecycle;
       const matchedCoverage = cursor?.matchedCoverage ?? (() => {
-        const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json
+        const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
+          (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+            WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
           FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters) as DatabaseRow[];
         const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
         const respondents = new Set<string>();
@@ -1347,11 +1349,11 @@ class SQLiteRunStore implements RunStore {
           const respondentId = asText(row.respondent_id, 'matched respondent ID');
           respondents.add(respondentId);
           if (status !== 'answered' || row.result_json === null) continue;
-          const result = decisionValueSchema.safeParse(parseJson(row.result_json, 'matched result'));
-          if (!result.success || result.data.type !== 'choice') continue;
+          const result = resultFromStorage(parseJson(row.result_json, 'matched result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'matched execution'));
+          if (result.type !== 'choice') continue;
           const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'matched packet'));
           if (packet.question.type !== 'choice') continue;
-          const materialId = packet.question.materialOptions?.[result.data.choice];
+          const materialId = packet.question.materialOptions?.[result.choice];
           if (materialId) {
             selectedMaterialEvaluations += 1;
             selectedMaterialIds.add(materialId);

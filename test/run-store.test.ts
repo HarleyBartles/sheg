@@ -147,10 +147,11 @@ test('acceptance survives a second connection and matching submission retries sh
 
 test('a physical batch reserves and settles once while preserving one typed evaluation per question', async () => {
   const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [
-    input.questions[0]!,
+    { type: 'choice', id: 'interest', instructions: 'Would you keep reading?',
+      options: { continue: input.material[0]!.text, leave: 'Leave' }, materialOptions: { continue: input.material[0]!.id } },
     { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Clear'] },
     { type: 'noul', id: 'appeal', instructions: 'Was it appealing?' },
-  ] };
+  ], material: [{ ...input.material[0]!, sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) }] };
   const batchProvider: DecisionProvider = { ...provider, measureBatch: () => fit };
   const prepared = await prepareRun(value, batchProvider);
   assert.ok(prepared.prepared);
@@ -177,6 +178,8 @@ test('a physical batch reserves and settles once while preserving one typed eval
     assert.equal(filtered.items[0]?.questionId, 'clarity');
     assert.equal(filtered.items[0]?.contextId, group.contextId);
     assert.equal(filtered.items[0]?.execution?.model, 'test-model');
+    const summary = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'interest' } });
+    assert.deepEqual(summary.matchedCoverage.selectedMaterials, { evaluations: 1, respondents: 1, distinctMaterials: 1 });
     store.finish(claim);
     const followRequest = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
       selection: { criteria: { questionId: 'interest' } }, context: { mode: 'recorded' },
@@ -973,6 +976,72 @@ test('evidence query resolves a mapped Choice answer to exact source-linked mate
     const unlinkedRunId = await completedRun(store, input);
     const unlinked = store.queryEvidence({ sourceRunId: unlinkedRunId, criteria: { answer: { type: 'choice', choiceId: 'continue' } } });
     assert.equal(unlinked.items[0]!.selectedMaterial, undefined);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('journey mapped Choice selections contribute to matched material coverage across pages', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root, { now: () => 10_000 });
+  const p3 = { id: 'paragraph-3', text: 'Paragraph three.', sourceId: 'article-v1', sourceSha256: '3'.repeat(64) };
+  const p7 = { id: 'paragraph-7', text: 'Paragraph seven.', sourceId: 'article-v1', sourceSha256: '7'.repeat(64) };
+  const choices = ['p3', 'p3', 'p7', 'no-fit'] as const;
+  const mappedJourney: InlineJourneyRequest = {
+    ...journeyRequest,
+    respondents: Array.from({ length: choices.length }, (_, index) => ({ ...input.respondents[index % input.respondents.length]!, id: `journey-reader-${index + 1}` })),
+    journey: {
+      ...journeyRequest.journey,
+      items: [p3, p7],
+      tasks: [{ type: 'choice', id: 'anchor', instructions: 'Which paragraph best represents the pull quote?',
+        options: { p3: p3.text, p7: p7.text, 'no-fit': 'Neither paragraph' }, materialOptions: { p3: p3.id, p7: p7.id } }],
+      presentation: { kind: 'graph', entryNodeId: 'ask-anchor', maxDecisions: 1, nodes: [
+        { id: 'ask-anchor', kind: 'ask', taskId: 'anchor' },
+        { id: 'finish-p3', kind: 'terminal', outcome: 'complete' },
+        { id: 'finish-p7', kind: 'terminal', outcome: 'complete' },
+        { id: 'finish-no-fit', kind: 'terminal', outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'ask-anchor', optionId: 'p3', toNodeId: 'finish-p3' },
+        { fromNodeId: 'ask-anchor', optionId: 'p7', toNodeId: 'finish-p7' },
+        { fromNodeId: 'ask-anchor', optionId: 'no-fit', toNodeId: 'finish-no-fit' },
+      ] },
+    },
+    maxCalls: choices.length,
+  };
+  try {
+    const admission = await prepareRun(mappedJourney, provider);
+    assert.ok(admission.journey, JSON.stringify(admission.inspection));
+    const accepted = store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey)).run;
+    const claim = store.claim(accepted.runId, 10_000, 1234);
+    assert.ok(claim);
+    for (const choice of choices) {
+      const reservation = store.reserveNext(claim, 10_000);
+      assert.ok(reservation);
+      const result: DecisionResult = { type: 'choice', choice,
+        probabilities: { p3: choice === 'p3' ? 1 : 0, p7: choice === 'p7' ? 1 : 0, 'no-fit': choice === 'no-fit' ? 1 : 0 },
+        attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} };
+      const current = store.getJourneyRun(accepted.runId).respondents.find(({ respondentId }) => respondentId === reservation.evaluation.respondentId)!;
+      const nextNodeId = `finish-${choice}`;
+      store.settleJourney(claim, reservation.attemptId, { kind: 'answered', result }, {
+        respondentId: current.respondentId, expectedRevision: current.revision,
+        state: { ...current, status: 'completed', currentNodeId: null, currentTurnId: null, currentContextId: null,
+          revision: current.revision + 1,
+          events: [...current.events, { type: 'response', sequence: current.events.length, nodeId: 'ask-anchor', taskId: 'anchor',
+            result: { type: 'choice', choice, probabilities: result.probabilities } }],
+          route: [{ nodeId: 'ask-anchor', response: { type: 'choice', choice, probabilities: result.probabilities }, toNodeId: nextNodeId }], outcome: 'complete' },
+      });
+    }
+    assert.equal(store.finish(claim).status, 'completed');
+
+    const firstPage = store.queryEvidence({ sourceRunId: accepted.runId, criteria: { questionId: 'anchor' }, limit: 2 });
+    assert.equal(firstPage.items.length, 2);
+    assert.ok(firstPage.nextCursor);
+    assert.ok(firstPage.items.every(({ selectedMaterial }) => selectedMaterial !== undefined));
+    assert.deepEqual(firstPage.matchedCoverage.selectedMaterials, { evaluations: 3, respondents: 3, distinctMaterials: 2 });
+
+    const secondPage = store.queryEvidence({ sourceRunId: accepted.runId, criteria: { questionId: 'anchor' }, cursor: firstPage.nextCursor, limit: 2 });
+    assert.equal(secondPage.items.length, 2);
+    assert.deepEqual(secondPage.matchedCoverage, firstPage.matchedCoverage);
+    assert.equal(secondPage.items.find(({ result }) => result?.type === 'choice' && result.choice === 'no-fit')?.selectedMaterial, undefined);
+    assert.equal(secondPage.items.filter(({ selectedMaterial }) => selectedMaterial !== undefined).length, 1);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

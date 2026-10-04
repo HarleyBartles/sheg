@@ -1,10 +1,10 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plans 1 through 9 are merged to `develop`; Plan 10 remains. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
+Status: Plans 1 through 10 are merged to `develop`; Plan 10 was retired in its successor slice. Plan 11 is active. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
 
 ## Workspace and base
 
-- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/v0.3.0-guidance-installed-proof`, branch `codex/v0.3.0-guidance-installed-proof`, based on Plan 9 merge `d77c4ebbbd978624e3934b104e7f68216f24155c`.
+- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/dev13-journey-coverage-summary`, branch `codex/dev13-journey-coverage-summary`, based on Plan 10 merge `716e1971640053162d4dcf2db11e1ec5e568dd59`.
 - Implementation follows `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
 
 ## Outcome
@@ -15,7 +15,7 @@ An author can ask an agent to stage a reading journey, select respondents' mater
 
 Rich results come from deliberate variation in the study inputs: respondent profile, stimulus, question/response, and state such as prior-turn visibility. Treat inputs matching across all four dimensions as duplicates for study-design purposes; rerunning them can sample ordinary model variability, but does not add substantive coverage. Do not advise agents to repeat the same input in search of a different result or to choose the smallest cohort by default. The cohort supplies respondent-profile variation, so size and compose it for the differences the author needs to understand.
 
-Carry this principle through Plans 5 and 10. Plan 5 makes represented respondents and selected inputs legible without equating call counts with input diversity. Plan 10 teaches purposeful variation across all four dimensions and pressure-tests duplicate-input recognition against useful changes. Add duplicate detection to runtime only if implementation evidence shows the contract needs it.
+Plans 5 and 10 delivered this principle. Plan 5 makes represented respondents and selected inputs legible without equating call counts with input diversity. Plan 10 teaches purposeful variation across all four dimensions and pressure-tests duplicate-input recognition against useful changes. Add duplicate detection to runtime only if implementation evidence shows the contract needs it.
 
 ## Remaining implementation plans
 
@@ -28,11 +28,12 @@ Each next executable plan is written against the delivered code of its predecess
 | 7 | Resume eligible respondent-local failures in partial journeys | merged to `develop` in PR #19 | Retired after merge | `0.3.0-dev.9` |
 | 8 | Ship one reproducible self-contained plugin package across Git and ZIP | merged to `develop` in PR #20 | Retired after merge | `0.3.0-dev.10` |
 | 9 | Establish datastore upgrade compatibility from the 0.3.0 baseline | merged to `develop` in PR #21 | Retired in this successor slice | `0.3.0-dev.11` |
-| 10 | Reconcile guidance and verify the installed author journey | active; plan written JIT | [Plan 10](10-guidance-and-installed-proof.md) | `0.3.0-dev.12` |
+| 10 | Reconcile guidance and verify the installed author journey | merged to `develop` in PR #22 | Retired in this successor slice | `0.3.0-dev.12` |
+| 11 | Count selected journey material in matched query coverage | active; plan written JIT | [Plan 11](11-journey-selected-material-summary.md) | `0.3.0-dev.13` |
 
-## Plan 10: combined guidance and installed proof
+## Plan 11: journey selected-material summary
 
-Own the study-design and comparison/interpretation guidance, the stale cohort-minimization wording, version-policy instructions that currently sound like manual synchronization, and final package integration scenarios. Explain purposeful variation across respondent profile, stimulus, question/response and state; identical fingerprints do not add substantive coverage, and cohorts should cover meaningful profile differences rather than default to the smallest size. State that `package.json` is the sole authored product version and build/package generation owns downstream copies. This final slice checks the conversation as a whole: staged reading, material selection, isolated reuse, changed framing, a local failure, explicit journey resume with preserved progress, durable recall, the 0.3.0 datastore upgrade contract, and both prerelease and stable package paths. Read current skills as an agent receives them; run versioned fresh-context scenarios with fixed criteria and transient campaign outputs. Include cases where an identical input is repeated and where one input dimension changes purposefully. Verify workflows that require Sheg use its real MCP tools against deterministic attempt-owned evidence. Report strengths preserved and remaining limitations.
+Normalize grouped-poll bare typed answers and full journey `DecisionResult` answers before matched-coverage counting so mapped journey Choice selections contribute to aggregate material counts. Preserve stored data and row-level source custody; exclude no-fit/unmapped Choices; keep summary values stable across pagination.
 
 ## Validation and handoff
 
