@@ -28,7 +28,7 @@ Ordinary feature branches start from the latest `develop` and PRs target `develo
 
 `main` is the stable release line. `develop` is the integration and default branch. Tags identify releases. The release process is documented in `docs/guides/releases.md`.
 
-Develop may carry deliberate dogfood checkpoints identified by aligned prerelease versions. Do not bump the version for every arbitrary merge. A planned checkpoint updates `package.json`, both root lockfile version fields, `plugin.json`, and the MCP initialization identity together. Stable releases continue through the release branch and use only `vMAJOR.MINOR.PATCH` tags after stable manifests are aligned and existing main-ancestry checks pass. A prerelease candidate is not a stable publication. Local no-tag packaging is for inspection and dogfooding only. See [ADR-0023](../../docs/decisions/0023-identify-development-and-candidate-builds.md).
+Apply [version alignment](semver-version-alignment.md) for deliberate development checkpoints and releases. Follow the [release guide](../../docs/guides/releases.md#branches-and-promotion) for planning artifact exclusion and reconciliation custody.
 
 ## Local commands and paths
 
@@ -41,10 +41,6 @@ Before handoff, report source branch, target branch, base SHA, final head SHA, a
 ## Prohibited combinations
 
 Do not target `main` from an ordinary feature branch, add unrelated features to a release branch, or leave release fixes only on `main`.
-
-## Composition
-
-Apply the repository's version-alignment rules whenever preparing a versioned release; the implementing and PR runbooks route to both relevant playbooks.
 
 ## Runbook routing
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runEvidencePageSchema } from '../src/domain/run/request.js';
@@ -104,7 +104,8 @@ test('typed recovery scenario supplies the routed recovery guidance it asks the 
   const prompt = renderActorPrompt(scenario.id);
 
   assert.ok(scenario.referencePaths.includes('references/run-and-recovery.md'));
-  assert.ok(prompt.includes('when the original call allowance permits'));
+  const recoveryGuidance = readFileSync(assertReferencePathContained(scenario.ownerSkill, 'references/run-and-recovery.md'), 'utf8');
+  assert.ok(prompt.includes(`## Reference: references/run-and-recovery.md\n\n${recoveryGuidance}`));
 });
 
 test('scenario CLI emits a reproducible no-guidance control prompt and digest', () => {

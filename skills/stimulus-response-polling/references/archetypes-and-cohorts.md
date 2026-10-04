@@ -5,7 +5,7 @@ Use this workflow when the user wants to create reusable respondent archetypes, 
 ## The three artifacts
 
 - A **respondent archetype** is a reusable pattern of motivation and perspective. It defines what remains true across its respondents and the dimensions that may vary.
-- A **respondent profile** is one concrete participant's starting perspective on the particular study subject. It is shaped by both the archetype and the material being polled.
+- A **respondent profile** is one modeled respondent's starting perspective on the study subject. It is shaped by the chosen archetype, when used, and the study question.
 - A **frozen cohort** is the ordered set of concrete profiles used in a poll. The harness polls these profiles, never archetypes directly.
 
 Use the skill's [respondent archetype](../assets/respondent-archetype.schema.json), [respondent archetype library](../assets/respondent-archetype-library.schema.json), [respondent profile](../assets/respondent-profile.schema.json), and [frozen cohort](../assets/respondent-cohort.schema.json) JSON Schemas for normative shapes and validation constraints. The schemas list cross-record rules that also receive runtime enforcement. The bundled archetypes are organized into semantic groups under `dist/data/respondent-archetypes/`; the catalog treats groups as navigation, not restrictions, so users can mix groups with custom archetypes. These bundled files are the installed source of archetype data.
@@ -32,4 +32,4 @@ The cohort snapshot makes expansion auditable and independent of later library e
 
 A user may skip archetypes and author a cohort of concrete respondent profiles directly. Follow the [respondent profile](../assets/respondent-profile.schema.json) and [frozen cohort](../assets/respondent-cohort.schema.json) contracts. Leave `archetypeId` and `variation` out of direct profiles and omit the cohort's top-level `archetypes` array when it is not needed. Keep profiles poll-specific, distinct, and frozen before outcomes are viewed.
 
-For the file-backed journey CLI, validate against the [study manifest schema](../assets/study-manifest.schema.json) and run `sheg check` on the exact manifest, cohort, provider configuration, and budgets. For the direct MCP request, include the authored profiles. Use `run_inspect` when a fit preview would help; `run_start` performs admission validation itself. Fix validation errors; do not silently rewrite the user's cohort.
+For the file-backed CLI, validate against the [study manifest schema](../assets/study-manifest.schema.json) and run `node dist/cli.js check --config <file>` with the exact manifest, cohort, provider, and call allowance. For MCP, include the authored profiles directly and use `run_inspect` when a fit preview helps. Fix validation errors without silently rewriting the user's cohort.

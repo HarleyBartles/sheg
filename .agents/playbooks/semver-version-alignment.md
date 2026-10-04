@@ -6,7 +6,7 @@ Use when selecting a release version, changing release metadata, or preparing a 
 
 ## Required capabilities
 
-The agent must compare the proposed bundle with the public compatibility contract and verify every authoritative version field and release tag.
+The agent must assess compatibility, select a version, regenerate derived identities, and validate the resulting package and any proposed release tag.
 
 ## Optional capabilities
 
@@ -22,11 +22,9 @@ None.
 
 ## Composition
 
-Before `1.0.0`, increment the patch for compatible fixes and the minor version for a coherent backward-compatible functionality bundle. Document breaking changes clearly. Edit only the root `package.json` `version`, then run `npm run build` to generate the lockfile root fields, `plugin.json`, bundled runtime identity, and `plugins/sheg/` metadata. Inspect generated diffs and run release validation; never hand-align generated copies. Tag a release as `v<version>` only after the release PR is merged to `main`. Reserve `1.0.0` for a stable usable product with an explicitly declared compatibility contract. After promotion, reconcile the release commit into `develop` so fixes and version metadata are retained.
+Select the version using the [release guide's version policy](../../docs/guides/releases.md#version-policy). Edit only root `package.json`, run `npm run build`, and inspect the generated lockfile, manifests, runtime, and package. Run `npm run verify` and tagged package validation before publication.
 
-`package.json` is the sole authored product-version authority, and the MCP initialization version must agree with it. Use stable `MAJOR.MINOR.PATCH` versions for releases, `MAJOR.MINOR.PATCH-dev.N` for planned dogfood feature merges to develop, and `MAJOR.MINOR.PATCH-rc.N` for prepared candidates. The roadmap records the version assigned to each planned develop merge; commits within a pull request do not increment it. Local packaging without a tag may create a prerelease archive for inspection, but does not publish it. Stable tags remain `vMAJOR.MINOR.PATCH`; prerelease tags are not publication triggers. See [ADR-0023](../../docs/decisions/0023-identify-development-and-candidate-builds.md).
-
-Before a planned develop feature merge, set only root `package.json` to its assigned `-dev.N` version and rebuild. The generated develop manifests advertise the candidate identity; this does not create a Git tag or publish a release.
+Apply [Gitflow routing](gitflow-branch-and-release.md) for promotion and reconciliation. A release tag is created only after its reviewed release PR merges to `main`; a development version or local archive does not publish a release.
 
 ## Doctrine and contracts
 
@@ -34,7 +32,7 @@ The tagged Git commit is source truth. `package.json` remains private; the relea
 
 ## Local commands and paths
 
-Use `npm run verify`, `npm run build`, and the release packaging command before tagging. The tag-triggered workflow rejects invalid or mismatched versions before publication.
+Use `npm run plugin:package -- --tag "v<version>" --validate-only`, substituting the selected stable version, to validate release identity. The tag-triggered workflow also checks main ancestry before publication.
 
 ## Evidence contract
 
@@ -43,10 +41,6 @@ Report the selected SemVer version, why patch or minor applies, compatibility im
 ## Prohibited combinations
 
 Do not infer a version bump from arbitrary commits, publish from an unverified tag, or publish to npm.
-
-## Composition
-
-- Apply [Gitflow branch and release routing](gitflow-branch-and-release.md) for the release branch and reconciliation path.
 
 ## Runbook routing
 

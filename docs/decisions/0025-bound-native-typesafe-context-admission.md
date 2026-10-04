@@ -1,4 +1,4 @@
-# 0025. Bound native TypeSafe context admission with published evidence
+# ADR-0025: Bound native TypeSafe context admission with published evidence
 
 Status: Accepted
 
@@ -10,9 +10,9 @@ The native TypeSafe route was blocked because Sheg had no context-limit evidence
 
 ## Decision
 
-For native `jev-latest`, Sheg uses 32,000 tokens as a conservative ceiling for the entire serialized request, including state and every question. It estimates tokens from serialized UTF-8 bytes divided by three, rounded up, and reserves 20%, yielding an effective estimated threshold of 25,600. This uses the published stricter 32k constraint across the full request and remains below the published 64k aggregate limit. Admission continues to run before Credential Manager access and network dispatch. Unknown native models remain unavailable until supported by route-specific evidence. The adapter records the returned served model and physical usage; an actual provider rejection remains a safe provider failure.
+For native `jev-latest`, Sheg uses 32,000 tokens as a conservative ceiling for the entire serialized request, including state and every question. It estimates tokens from serialized UTF-8 bytes divided by three, rounded up, and reserves 20%, yielding an effective estimated threshold of 25,600. This uses the published stricter 32k constraint across the full request and remains below the published 64k aggregate limit. The adapter checks fit before reading its authentication key or dispatching inference. MCP acceptance also checks credential readiness before persisting a new run. Unknown native models remain unavailable until supported by route-specific evidence. The adapter records the returned served model and physical usage; an actual provider rejection remains a safe provider failure.
 
-The estimate is not an exact TypeSafe tokenizer measurement and is not a guarantee that TypeSafe accepts every admitted request. The official evidence and alias mapping were checked 2026-10-04. Re-check them before stable release because `jev-latest` can move. Do not derive native limits from OpenRouter metadata.
+The estimate is not an exact TypeSafe tokenizer measurement and is not a guarantee that TypeSafe accepts every admitted request. The official evidence and alias mapping were checked 2026-10-04. Changes to supported aliases or admission limits require fresh native provider evidence. Do not derive native limits from OpenRouter metadata.
 
 ## Consequences
 
