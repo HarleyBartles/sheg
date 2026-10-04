@@ -28,10 +28,10 @@
 
 ## Task 2: Generate every product-version copy from the authored version
 
-- [ ] Add failing unit coverage showing that a changed `package.json` version regenerates the two root `package-lock.json` version fields, `plugin.json`, `dist/` runtime identity, and `plugins/sheg/` package metadata while preserving unrelated lockfile data.
-- [ ] Implement the narrow deterministic version synchronizer and call it from the supported build path; do not duplicate a version literal or require agents to hand-align generated files.
-- [ ] Update `docs/guides/releases.md` and `.agents/playbooks/semver-version-alignment.md` to direct contributors to change only root `package.json`, run the build, inspect generated diffs, and use release validation to catch stale outputs.
-- [ ] Set the intentional target version to `0.3.0-dev.12` through the authored source and regenerate all derived version surfaces.
+- [x] Add failing unit coverage showing that a changed `package.json` version regenerates the two root `package-lock.json` version fields, `plugin.json`, `dist/` runtime identity, and `plugins/sheg/` package metadata while preserving unrelated lockfile data.
+- [x] Implement the narrow deterministic version synchronizer and call it from the supported build path; do not duplicate a version literal or require agents to hand-align generated files.
+- [x] Update `docs/guides/releases.md` and `.agents/playbooks/semver-version-alignment.md` to direct contributors to change only root `package.json`, run the build, inspect generated diffs, and use release validation to catch stale outputs.
+- [x] Set the intentional target version to `0.3.0-dev.12` through the authored source and regenerate all derived version surfaces.
 
 ## Task 3: Align canonical study-design and polling guidance
 
