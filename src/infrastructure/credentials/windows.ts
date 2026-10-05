@@ -4,7 +4,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JevRoute } from '../../providers/jev/config.js';
 
-export type CredentialAvailability = 'available' | 'missing' | 'unavailable';
+export type CredentialAvailability = 'available' | 'missing' | 'malformed' | 'unavailable';
+export type CredentialStoreErrorCode = 'credential_malformed' | 'credential_missing' | 'credential_unavailable';
+
+export class CredentialStoreError extends Error {
+  constructor(readonly code: CredentialStoreErrorCode, readonly route: JevRoute) {
+    const message = code === 'credential_malformed'
+      ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.`
+      : code === 'credential_missing'
+        ? `The ${route} secure credential is missing.`
+        : `The ${route} secure credential is unavailable.`;
+    super(message);
+    this.name = 'CredentialStoreError';
+  }
+}
 
 export type WindowsCredentialStoreOptions = {
   helperPath?: string;
@@ -33,6 +46,7 @@ export class WindowsCredentialStore {
       const result = await this.run(this.arguments('Status', route));
       if (result.code === 0 && result.stdout.trim() === 'AVAILABLE') return 'available';
       if (result.code === 3 && result.stdout.trim() === 'MISSING') return 'missing';
+      if (result.code === 4 && result.stdout.trim() === 'MALFORMED') return 'malformed';
       return 'unavailable';
     } catch {
       return 'unavailable';
@@ -44,10 +58,11 @@ export class WindowsCredentialStore {
     try {
       result = await this.run(this.arguments('Read', route));
     } catch {
-      throw new Error(`The ${route} secure credential could not be read.`);
+      throw new CredentialStoreError('credential_unavailable', route);
     }
     const key = result.stdout.replace(/\r?\n$/, '');
-    if (result.code !== 0 || !key) throw new Error(`The ${route} secure credential could not be read.`);
+    if (result.code === 4 && result.stdout.trim() === 'MALFORMED') throw new CredentialStoreError('credential_malformed', route);
+    if (result.code !== 0 || !key) throw new CredentialStoreError('credential_unavailable', route);
     return key;
   }
 

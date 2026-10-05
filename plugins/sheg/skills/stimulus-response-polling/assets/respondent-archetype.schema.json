@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "desired_outcome": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "engagement_cues": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "friction_cues": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "invariants": {
+      "minItems": 2,
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "variation_axes": {
+      "minItems": 2,
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "values": {
+            "minItems": 2,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "id",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "values"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "intent",
+    "context",
+    "desired_outcome",
+    "engagement_cues",
+    "friction_cues",
+    "invariants",
+    "variation_axes"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:sheg:schema:respondent-archetype.schema.json",
+  "title": "Respondent archetype"
+}

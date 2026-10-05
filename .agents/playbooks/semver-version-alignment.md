@@ -1,50 +1,27 @@
 # SemVer and version alignment
 
-## When
+## Applicability
 
 Use when selecting a release version, changing release metadata, or preparing a tag.
 
-## Required capabilities
+## Method
 
-The agent must compare the proposed bundle with the public compatibility contract and verify every authoritative version field and release tag.
+Assess the compatibility impact using the release guide's version policy. Edit only root `package.json`, run `npm run build`, and inspect the generated lockfile, manifests, runtime, and package. Use repository commands and Git capabilities to validate the selected identity and any proposed tag. Release-note assistance is optional and must summarize the actual product change.
 
-## Optional capabilities
+Apply the Gitflow playbook for promotion and reconciliation. Create a release tag only after its reviewed release PR merges to `main`.
 
-Release-note generation may help summarize user-visible changes.
+## Constraints
 
-## Required repository-owned skills
+`package.json` is the single authored version source and remains private. The tagged Git commit is release source truth; the release artifact is the self-contained Codex plugin ZIP. Do not infer a bump from arbitrary commits, edit derived version identities directly, publish from an unverified tag, or publish to npm. A development version or local ZIP does not publish a release.
 
-None.
+## Verification
 
-## Optional repository-owned skills
+Run `npm run verify` and inspect generated parity. Use `npm run plugin:package -- --tag "v<version>" --validate-only` with the proposed stable version to validate release identity. The tag-triggered workflow checks main ancestry before publication. Report the selected version and its compatibility rationale, matching manifest identities, the tag commit when applicable, and verified ZIP contents. Version agreement proves identity consistency; runtime behavior still needs relevant package tests.
 
-None.
+## References and routing
 
-## Composition
+Use the [implementing runbook](../runbooks/implementing.md) for metadata changes and the [PR runbook](../runbooks/pr.md) for reviewed publication. The [release guide's version policy](../../docs/guides/releases.md#version-policy) owns compatibility declarations; [Gitflow routing](gitflow-branch-and-release.md) owns promotion and reconciliation.
 
-Before `1.0.0`, increment the patch for compatible fixes and the minor version for a coherent backward-compatible functionality bundle. Document breaking changes clearly. Do not bump on every merge. Keep `package.json`, both root version fields in `package-lock.json`, and `plugin.json` versions equal. Tag a release as `v<version>` only after the release PR is merged to `main`; the tag and all three version sources must agree. Reserve `1.0.0` for a stable usable product with an explicitly declared compatibility contract. After promotion, reconcile the release commit into `develop` so fixes and version metadata are retained.
+## Maintenance
 
-## Doctrine and contracts
-
-The tagged Git commit is source truth. `package.json` remains private; the release artifact is the self-contained Codex plugin ZIP. The current compatibility declaration is in `docs/guides/releases.md`.
-
-## Local commands and paths
-
-Use `npm run verify`, `npm run build`, and the release packaging command before tagging. The tag-triggered workflow rejects invalid or mismatched versions before publication.
-
-## Evidence contract
-
-Report the selected SemVer version, why patch or minor applies, compatibility impact, matching manifest values, tag commit, and ZIP contents.
-
-## Prohibited combinations
-
-Do not infer a version bump from arbitrary commits, publish from an unverified tag, or publish to npm.
-
-## Composition
-
-- Apply [Gitflow branch and release routing](gitflow-branch-and-release.md) for the release branch and reconciliation path.
-
-## Runbook routing
-
-- [Implementing](../runbooks/implementing.md)
-- [Pull request](../runbooks/pr.md)
+Revisit this playbook when version ownership, compatibility declarations, generated identities, package format, or tag workflows change. Check referenced commands and routes and maintain the operating standards certification with the resulting assessment.

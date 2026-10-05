@@ -1,21 +1,83 @@
 import { decisionValueSchema, type DecisionRequest, type DecisionResult, type DecisionValue } from '../decision/decision.js';
-import { compileDecisionPacket, type PromptHistoryEvent } from '../decision/prompt.js';
+import { compileDecisionPacket, compileDecisionPacketForCompiler, type PromptHistoryEvent } from '../decision/prompt.js';
 import type { RespondentProfile } from '../respondents/profile.js';
-import type { StudyArm } from '../study/arm.js';
+import type { JourneyDefinition } from '../study/arm.js';
+import type { PromptState } from '../decision/prompt.js';
+import { journeyTopology, journeyTransitionForResponse } from './topology.js';
 
 export type ExposureEvent = Extract<PromptHistoryEvent, { type: 'exposure' }>;
 export type ChoiceEvent = Extract<PromptHistoryEvent, { type: 'choice' }>;
 export type JourneyEvent = PromptHistoryEvent;
 export type JourneyResult = { events: JourneyEvent[]; outcome: string | null; status: 'completed' | 'decision-limit'; decisionCount: number };
-export type JourneyOptions = { arm: StudyArm; profile: RespondentProfile; ask: (request: DecisionRequest, nodeId: string) => Promise<DecisionResult | DecisionValue | { choice: string }> };
+export type JourneyOptions = { arm: JourneyDefinition; profile: RespondentProfile; ask: (request: DecisionRequest, nodeId: string) => Promise<DecisionResult | DecisionValue | { choice: string }> };
 
 export class JourneyExecutionError extends Error {
   constructor(message: string) { super(message); this.name = 'JourneyExecutionError'; }
 }
 
+export type JourneyProgress = {
+  events: JourneyEvent[];
+  route: Array<{ nodeId: string; response: DecisionValue; toNodeId: string }>;
+  status: 'active' | 'completed';
+  outcome: string | null;
+  next?: { nodeId: string; taskId: string; pathId: string; packet: DecisionRequest & { state: PromptState } };
+};
+
+export function advanceJourney(
+  arm: JourneyDefinition,
+  profile: RespondentProfile,
+  state: { currentNodeId: string; events: readonly JourneyEvent[]; route: readonly JourneyProgress['route'][number][] },
+  rawResult: DecisionValue,
+  compilerFingerprint?: string,
+): JourneyProgress {
+  const result = decisionValueSchema.parse(rawResult);
+  const events = [...state.events];
+  const route = [...state.route];
+  const nodeId = state.currentNodeId;
+  const graph = journeyTopology(arm);
+  let taskId: string;
+  let routeTarget: string;
+
+  {
+    const askNode = graph.nodes.find((node) => node.id === nodeId);
+    if (askNode?.kind !== 'ask') throw new JourneyExecutionError(`Node ${nodeId} is not a journey ask node.`);
+    taskId = askNode.taskId;
+    const task = arm.tasks.find((candidate) => candidate.id === taskId);
+    if (!task) throw new JourneyExecutionError(`Ask node ${nodeId} references unknown task ${taskId}.`);
+    const edge = journeyTransitionForResponse(graph, nodeId, result);
+    if (!edge) throw new JourneyExecutionError(`Task node ${nodeId} has no transition for ${result.type} response.`);
+    routeTarget = edge.toNodeId;
+  }
+
+  const answerEvent: Extract<JourneyEvent, { type: 'response' }> = { type: 'response', sequence: events.length, nodeId, taskId, result };
+  events.push(answerEvent);
+  route.push({ nodeId, response: result, toNodeId: routeTarget });
+  const pathId = route.length === 0 ? 'root' : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`}`).join('>');
+
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  let current = routeTarget;
+  while (true) {
+    const node = nodes.get(current);
+    if (!node) throw new JourneyExecutionError(`Graph points to unknown node ${current}.`);
+    if (node.kind === 'terminal') return { events, route, status: 'completed', outcome: node.outcome };
+    if (node.kind === 'expose') {
+      events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id);
+      if (!edge) throw new JourneyExecutionError(`Exposure node ${node.id} has no transition.`);
+      current = edge.toNodeId;
+      continue;
+    }
+    const packet = compilerFingerprint === undefined
+      ? compileDecisionPacket(arm, profile, node.taskId, events)
+      : compileDecisionPacketForCompiler(arm, profile, node.taskId, events, compilerFingerprint);
+    return { events, route, status: 'active', outcome: null, next: { nodeId: node.id, taskId: node.taskId, pathId, packet } };
+  }
+}
+
 export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise<JourneyResult> {
   const events: JourneyEvent[] = [];
   let decisionCount = 0;
+  const graph = journeyTopology(arm);
 
   const expose = (itemId: string, nodeId: string): void => {
     events.push({ type: 'exposure', sequence: events.length, nodeId, itemId });
@@ -30,13 +92,6 @@ export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise
     return result;
   };
 
-  if (arm.presentation.kind === 'sequence') {
-    for (const item of arm.items) expose(item.id, `sequence-expose-${item.id}`);
-    for (const task of arm.tasks) await answer(task.id, `sequence-ask-${task.id}`);
-    return { events, outcome: 'completed', status: 'completed', decisionCount };
-  }
-
-  const graph = arm.presentation;
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   let current = graph.entryNodeId;
   while (true) {
@@ -52,20 +107,13 @@ export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise
     }
     if (decisionCount >= graph.maxDecisions) return { events, outcome: null, status: 'decision-limit', decisionCount };
     const response = await answer(node.taskId, node.id);
-    const edge = graph.transitions.find((candidate) => {
-      if (candidate.fromNodeId !== node.id) return false;
-      if (response.type === 'choice') return candidate.optionId === response.choice;
-      if (!candidate.when || candidate.when.type !== response.type) return false;
-      const value = response.type === 'score' ? response.score : response.noul;
-      return (value > candidate.when.minimum || (candidate.when.minimumInclusive && value === candidate.when.minimum)) &&
-        (value < candidate.when.maximum || (candidate.when.maximumInclusive && value === candidate.when.maximum));
-    });
+    const edge = journeyTransitionForResponse(graph, node.id, response);
     if (!edge) throw new JourneyExecutionError(`Task node ${node.id} has no transition for ${response.type} response.`);
     current = edge.toNodeId;
   }
 }
 
-function normalizeResponse(answer: DecisionResult | DecisionValue | { choice: string }, expectedType: DecisionRequest['question']['type']): DecisionValue {
+export function normalizeResponse(answer: DecisionResult | DecisionValue | { choice: string }, expectedType: DecisionRequest['question']['type']): DecisionValue {
   if (typeof answer !== 'object' || answer === null) throw new JourneyExecutionError('Task returned a response that is not an object.');
   const raw = answer as unknown as Record<string, unknown>;
   const actualType = raw.type ?? expectedType;

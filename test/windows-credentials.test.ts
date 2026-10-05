@@ -39,15 +39,29 @@ test('credential status distinguishes a missing entry from an unavailable secure
   assert.equal(await unavailable.availability('openrouter'), 'unavailable');
 });
 
+test('credential status identifies a present but unreadable stored encoding without exposing its value', async () => {
+  const store = new WindowsCredentialStore({ helperPath: 'fixture-helper.ps1', run: async () => ({ code: 4, stdout: 'MALFORMED\n', stderr: '' }) });
+  assert.equal(await store.availability('openrouter'), 'malformed');
+  await assert.rejects(store.readForAuthentication('openrouter'), (error: Error & { code?: string }) => {
+    assert.equal(error.code, 'credential_malformed');
+    assert.match(error.message, /encoding/i);
+    assert.doesNotMatch(error.message, /MALFORMED|secret|bytes/i);
+    return true;
+  });
+});
+
 test('Windows vault reads, replaces, and removes a unique isolated fixture credential', { skip: process.platform !== 'win32' }, async () => {
   const targetName = `Sheg/Test/${randomUUID()}`;
   const helperPath = fileURLToPath(new URL('./fixtures/windows-credential-fixture.ps1', import.meta.url));
   const store = new WindowsCredentialStore({ credentialTargets: { typesafe: targetName, openrouter: targetName } });
-  const fixture = (value: string) => spawnSync('powershell.exe', [
+  const fixture = (value: string, rawEncoding: 'utf8' | 'invalid' | undefined = undefined) => spawnSync('powershell.exe', [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath,
+    ...(rawEncoding === 'utf8' ? ['-RawUtf8Bytes'] : []),
+    ...(rawEncoding === 'invalid' ? ['-RawInvalidBytes'] : []),
     '-TargetName', targetName,
   ], { input: `${value}\n`, encoding: 'utf8', windowsHide: true, shell: false });
   const fingerprint = (value: string) => createHash('sha256').update(value).digest('hex');
+  const request: DecisionRequest = { state: { text: 'fixture' }, question: { type: 'noul', id: 'trust', instructions: 'Credible?' } };
   try {
     const first = fixture('fixture-key-one-never-print-\u9f8d');
     assert.equal(first.status, 0, first.stderr);
@@ -66,7 +80,6 @@ test('Windows vault reads, replaces, and removes a unique isolated fixture crede
       manifestPath: path.resolve('test/fixtures/article.json'), cohortPath: path.resolve('test/fixtures/cohort.json'), providers: [nativeConfig],
     }, { credentialStore: store });
     assert.equal((await preflight()).providers[0]?.configuration, 'configured');
-    const request: DecisionRequest = { state: { text: 'fixture' }, question: { type: 'noul', id: 'trust', instructions: 'Credible?' } };
     let fetches = 0;
     const provider = new JevProvider(nativeConfig, (async (_url, init) => {
       fetches++;
@@ -87,6 +100,23 @@ test('Windows vault reads, replaces, and removes a unique isolated fixture crede
     });
     assert.equal(environmentOnly.status, 0, environmentOnly.stderr);
     assert.equal(await store.availability('typesafe'), 'missing');
+    const oddByteOpenRouterToken = 'x'.repeat(73);
+    const rawToken = fixture(oddByteOpenRouterToken, 'utf8');
+    assert.equal(rawToken.status, 0, rawToken.stderr);
+    assert.equal(await store.availability('openrouter'), 'available');
+    assert.equal(fingerprint(await store.readForAuthentication('openrouter')), fingerprint(oddByteOpenRouterToken));
+    const openRouterProvider = new JevProvider(defaultJevConfig('openrouter'), (async (_url, init) => {
+      assert.equal(fingerprint((init?.headers as Record<string, string>).Authorization ?? ''), fingerprint(`Bearer ${oddByteOpenRouterToken}`));
+      return new Response(JSON.stringify({ model: 'openrouter/fixture-model', answers: { trust: { type: 'noul', noul: 0.5 } }, usage: { input_tokens: 10, output_tokens: 1 } }));
+    }) as typeof fetch, {
+      credentialStore: store,
+      measureContext: () => ({ provider: 'jev', status: 'fits', method: 'fixture', modelIdentity: 'openrouter/fixture-model', tokenCount: 'estimated', tokens: 1, contextLimit: 100, headroomTokens: 0, effectiveLimit: 100, details: {} }),
+    });
+    assert.equal((await openRouterProvider.decide(request, 1)).type, 'noul');
+    const malformed = fixture('unused-fixture-input', 'invalid');
+    assert.equal(malformed.status, 0, malformed.stderr);
+    assert.equal(await store.availability('openrouter'), 'malformed');
+    await assert.rejects(store.readForAuthentication('openrouter'), (error: Error & { code?: string }) => error.code === 'credential_malformed');
   } finally {
     spawnSync('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',

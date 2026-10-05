@@ -2,9 +2,11 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPlugin } from './build.js';
+import { generatePluginPackage } from './generate-plugin-package.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const generatedDirectories = ['dist', 'skills/stimulus-response-polling/assets'];
+const generatedDirectories = ['dist', 'skills/stimulus-response-polling/assets', 'plugins/sheg'];
+const generatedFiles = ['package-lock.json', 'plugin.json'];
 
 async function snapshot(): Promise<Map<string, Buffer>> {
   const files = new Map<string, Buffer>();
@@ -16,12 +18,14 @@ async function snapshot(): Promise<Map<string, Buffer>> {
       files.set(path.relative(root, absolutePath), await readFile(absolutePath));
     }
   }
+  for (const file of generatedFiles) files.set(file, await readFile(path.join(root, file)));
   return files;
 }
 
 const before = await snapshot();
 await import('./generate-contracts.js');
 await buildPlugin();
+await generatePluginPackage(root);
 const after = await snapshot();
 const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
   (file) => !before.get(file)?.equals(after.get(file) ?? Buffer.alloc(0)) || !after.has(file),

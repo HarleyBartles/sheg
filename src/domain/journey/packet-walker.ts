@@ -3,7 +3,8 @@ import { compileDecisionPacket, type PromptHistoryEvent } from '../decision/prom
 import type { DecisionRequest } from '../decision/decision.js';
 import type { DecisionValue } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
-import { studyArmSchema, type StudyArm } from '../study/arm.js';
+import { journeyDefinitionSchema, studyArmSchema, type JourneyDefinition, type StudyArm } from '../study/arm.js';
+import { journeyTopology } from './topology.js';
 
 export const DEFAULT_MAX_PREFLIGHT_PACKETS = 100_000;
 export const DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
@@ -35,7 +36,7 @@ function pathIdentity(choices: readonly PathChoice[]): string {
 }
 
 export function walkStudyPackets(
-  arms: readonly StudyArm[],
+  arms: readonly (JourneyDefinition | StudyArm)[],
   respondents: readonly RespondentProfile[],
   visitPacket: PreflightPacketVisitor,
   options: JourneyWalkOptions = {},
@@ -64,7 +65,7 @@ export function walkStudyPackets(
     markIncomplete('Preflight requires at least one study arm and one respondent.');
   }
 
-  const emitPacket = (arm: StudyArm, respondent: RespondentProfile, taskId: string, nodeId: string, decisionIndex: number, choices: readonly PathChoice[], events: readonly PromptHistoryEvent[]): void => {
+  const emitPacket = (arm: JourneyDefinition, respondent: RespondentProfile, taskId: string, nodeId: string, decisionIndex: number, choices: readonly PathChoice[], events: readonly PromptHistoryEvent[]): void => {
     if (packetCount >= maxPackets) {
       markIncomplete(`Preflight packet limit (${maxPackets}) reached before traversal completed.`);
       return;
@@ -95,7 +96,7 @@ export function walkStudyPackets(
 
   for (const arm of arms) {
     if (stopped) break;
-    const validation = studyArmSchema.safeParse(arm);
+    const validation = ('sources' in arm ? studyArmSchema : journeyDefinitionSchema).safeParse(arm);
     if (!validation.success) {
       markIncomplete(`Study arm ${arm.id} is invalid: ${validation.error.issues.map((issue) => issue.message).join(' ')}`);
       break;
@@ -105,36 +106,7 @@ export function walkStudyPackets(
       const events: PromptHistoryEvent[] = [];
       const choices: PathChoice[] = [];
 
-      if (arm.presentation.kind === 'sequence') {
-        for (const item of arm.items) {
-          events.push({ type: 'exposure', sequence: events.length, nodeId: `sequence-expose-${item.id}`, itemId: item.id });
-        }
-        const visitTask = (taskIndex: number): void => {
-          if (stopped) return;
-          const task = arm.tasks[taskIndex];
-          if (!task) {
-            terminalJourneyCount += 1;
-            return;
-          }
-          const decisionIndex = taskIndex + 1;
-          const nodeId = `sequence-ask-${task.id}`;
-          emitPacket(arm, respondent, task.id, nodeId, decisionIndex, choices, events);
-          if (stopped) return;
-          for (const response of representativeResponses(task)) {
-            const choiceId = response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`;
-            choices.push({ nodeId, choiceId });
-            events.push({ type: 'response', sequence: events.length, nodeId, taskId: task.id, result: response });
-            visitTask(taskIndex + 1);
-            events.pop();
-            choices.pop();
-            if (stopped) return;
-          }
-        };
-        visitTask(0);
-        continue;
-      }
-
-      const graph = arm.presentation;
+      const graph = journeyTopology(arm);
       const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
       const activeNodes = new Set<string>();
       const visitNode = (nodeId: string, decisionCount: number): void => {
@@ -183,7 +155,7 @@ export function walkStudyPackets(
           activeNodes.delete(nodeId);
           return;
         }
-        const branches = 'options' in task
+        const branches = task.type === 'choice'
           ? Object.keys(task.options).map((choice) => ({ edge: graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choice), response: { type: 'choice' as const, choice } }))
           : graph.transitions.filter((candidate) => candidate.fromNodeId === nodeId && candidate.when !== undefined).map((edge) => ({ edge, response: representativeResponses(task, edge.when)[0]! }));
         for (const branch of branches) {
@@ -216,17 +188,17 @@ export function walkStudyPackets(
   };
 }
 
-function representativeResponses(task: StudyArm['tasks'][number], interval?: NonNullable<Extract<StudyArm['presentation'], { kind: 'graph' }>['transitions'][number]['when']>): DecisionValue[] {
-  if ('options' in task) return Object.keys(task.options).map((choice) => ({ type: 'choice', choice }));
+function representativeResponses(task: JourneyDefinition['tasks'][number], interval?: NonNullable<Extract<JourneyDefinition['presentation'], { kind: 'graph' }>['transitions'][number]['when']>): DecisionValue[] {
+  if (task.type === 'choice') return Object.keys(task.options).map((choice) => ({ type: 'choice', choice }));
   const values: number[] = [];
   if (interval) {
     values.push(interval.minimum === interval.maximum ? interval.minimum : (interval.minimum + interval.maximum) / 2);
-  } else if ('rubric' in task) {
+  } else if (task.type === 'score') {
     const last = task.rubric.length - 1;
     for (let level = 0; level <= last; level += 0.5) values.push(level);
   } else values.push(0, 0.5, 1);
   return values.map((value): DecisionValue => {
-    if ('rubric' in task) {
+    if (task.type === 'score') {
       const probabilities = Object.fromEntries(task.rubric.map((_meaning, index) => [String(index), 0]));
       const low = Math.floor(value);
       const high = Math.ceil(value);

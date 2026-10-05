@@ -8,7 +8,7 @@
       "name": "sheg",
       "source": {
         "source": "local",
-        "path": "./"
+        "path": "./plugins/sheg"
       },
       "policy": {
         "installation": "AVAILABLE",

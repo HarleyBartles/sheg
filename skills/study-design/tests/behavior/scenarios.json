@@ -1,0 +1,76 @@
+[
+  {
+    "id": "sequence-versus-linear-graph",
+    "version": 2,
+    "ownerSkill": "study-design",
+    "tags": ["journey", "context-history"],
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "I want readers to see paragraph A, then B, then C, with a question after each. Does a sequence mean each question remembers earlier answers, or is it just a straight graph? Please recommend a design that makes the history expectation explicit.",
+    "controlledEvidence": {
+      "materials": ["Paragraph A", "Paragraph B", "Paragraph C"],
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "independent-dependent-questions",
+    "version": 2,
+    "ownerSkill": "study-design",
+    "tags": ["question-design", "selected-material"],
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "Ask readers which of these seven paragraphs best represents my pull quote. Then, based on the paragraph they picked, ask whether that paragraph expresses the pull quote when read by itself.",
+    "controlledEvidence": {
+      "pullQuote": "A city is a promise people keep making to each other.",
+      "paragraphs": ["p1", "p2", "p3", "p4", "p5", "p6", "p7"],
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "purposeful-input-variation",
+    "version": 2,
+    "ownerSkill": "study-design",
+    "tags": ["study-design", "input-variation", "shared-safeguard"],
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "I have one pull quote, seven paragraphs, and three different kinds of readers I care about. I can spend up to six provider calls. Should I run the exact same readers, quote, question, and state twice to get richer results, or keep the cohort as small as possible? Help me plan useful coverage without changing what I am trying to learn.",
+    "controlledEvidence": {
+      "respondentPerspectives": ["first-time renter", "school-run parent", "long-time resident"],
+      "stimulus": {"pullQuote": "A city is a promise people keep making to each other.", "paragraphs": 7},
+      "questionResponse": {"type": "choice", "question": "Which paragraph best represents the pull quote?", "options": ["seven exact paragraphs", "no fit"]},
+      "state": "fresh exposure, no prior answer history",
+      "maxCalls": 6,
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "changed-rubric-comparison",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "tags": ["comparison", "interpretation"],
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "Compare whether this revised introduction is clearer than the old one. We ran one cohort on the old clarity rubric and a later run on a new clarity rubric. Can you interpret which version won?",
+    "controlledEvidence": {
+      "oldRun": {"question": "How engaging is the opening?", "rubric": ["low", "medium", "high"], "answers": {"low": 2, "medium": 3, "high": 5}},
+      "newRun": {"question": "How clear is the opening?", "rubric": ["unclear", "mostly clear", "very clear"], "answers": {"unclear": 1, "mostly clear": 4, "very clear": 5}},
+      "cohort": "same profile labels, separate simulated runs",
+      "mockOnly": true
+    }
+  }
+,
+  {
+    "id": "discover-study-design-positive",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "tags": ["discovery", "positive"],
+    "referencePaths": [],
+    "userRequest": "I'm testing an article with seven paragraphs and one pull quote. I want readers to choose the paragraph that best represents it, then assess that chosen paragraph on its own. How should I structure the study?",
+    "controlledEvidence": { "requestType": "study-design", "mockOnly": true }
+  },
+  {
+    "id": "discover-polling-vocabulary-near-miss",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "tags": ["discovery", "near-miss"],
+    "referencePaths": [],
+    "userRequest": "The headline says our neighborhood poll is open. Please fix the responsive CSS for the poll banner so it wraps on mobile.",
+    "controlledEvidence": { "requestType": "frontend-copy-and-css", "mockOnly": true }
+  }
+]

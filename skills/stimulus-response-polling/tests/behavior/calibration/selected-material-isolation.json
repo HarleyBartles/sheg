@@ -1,0 +1,24 @@
+{
+  "scenarioId": "selected-material-isolation-no-fit",
+  "version": 5,
+  "cases": [
+    {
+      "id": "valid-per-respondent-selection",
+      "label": "good",
+      "expected": { "per-respondent-selection": "pass", "one-follow-on-request": "pass", "shared-frame-and-question": "pass", "preserves-no-fit": "pass", "input-variation": "pass" },
+      "rationale": "Uses one isolation follow-on request, gives each eligible respondent their exact selected material with shared framing, retains no-fit rows, and explains purposeful input variation."
+    },
+    {
+      "id": "plausible-invalid-batch-request",
+      "label": "bad",
+      "expected": { "per-respondent-selection": "pass", "one-follow-on-request": "fail", "shared-frame-and-question": "uncertain", "preserves-no-fit": "uncertain", "input-variation": "fail" },
+      "rationale": "Uses invented batching fields, obscures no-fit coverage, and recommends rerunning matching inputs for more varied results."
+    },
+    {
+      "id": "clarify-unavailable-source-selections",
+      "label": "borderline",
+      "expected": { "per-respondent-selection": "uncertain", "one-follow-on-request": "uncertain", "shared-frame-and-question": "uncertain", "preserves-no-fit": "uncertain", "input-variation": "uncertain" },
+      "rationale": "Identifies required source question and selection data, then asks for missing source handles before claiming a runnable request or complete coverage."
+    }
+  ]
+}

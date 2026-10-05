@@ -1,0 +1,22 @@
+{
+  "id": "selected-material-follow-on",
+  "version": 1,
+  "setup": { "kind": "selected-material-follow-on", "version": 1 },
+  "turns": [
+    {
+      "user": "Use run_query on source run {{sourceRunId}} for question q-transit-claim. Report each respondent's choice and saved selectedMaterial. Do not start or inspect a follow-on yet.",
+      "expectedTools": ["run_query"],
+      "criteria": ["Call run_query on the supplied completed source run and report its observed answer-to-material mappings, including the no-fit row."]
+    },
+    {
+      "user": "Now prepare one follow-on that gives every respondent who chose a passage that exact saved passage plus the shared claim 'A reliable bus makes every part of a city closer.' Ask exactly 'Does this passage support the transit claim?' Set the Noul true criterion to 'The passage supports the transit claim.' and the false criterion to 'The passage does not support the transit claim.' Use Jev via OpenRouter with model typesafe/jev-1.13. Keep earlier answers invisible and the no-fit respondent visible in coverage. Inspect fit and coverage only; do not start the follow-on.",
+      "expectedTools": ["run_inspect"],
+      "criteria": ["Inspect one follow-on request using questionId q-transit-claim, includeSelectedMaterial, and an isolation context; preserve the no-fit exclusion and do not start inference."]
+    },
+    {
+      "user": "Explain what the actual inspection returned: the matched and eligible counts, the no-fit exclusion, whether inference ran, and what the follow-on can and cannot tell us. For any richer later study, explain which input dimensions to vary and why repeating matching inputs adds no substantive coverage. Do not call another tool.",
+      "expectedTools": [],
+      "criteria": ["Interpret the observed inspection and answer history precisely; report the follow-on remains unstarted and explain respondent profile, stimulus, question or response, and state as distinct input-variation dimensions."]
+    }
+  ]
+}

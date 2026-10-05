@@ -1,0 +1,650 @@
+[
+  {
+    "id": "selected-material-isolation-no-fit",
+    "version": 10,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["selected-material", "material-history", "shared-safeguard"],
+    "referencePaths": [
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "For every respondent who picked a paragraph for my pull quote, give that respondent only the paragraph they picked plus the shared pull quote, then ask whether that paragraph expresses the quote. Some may choose no fit. Show me the exact shape of one follow-on request and what happens to those respondents. I want useful differences in the results: should I repeat the same inputs or minimize the cohort? What should I vary?",
+    "controlledEvidence": {
+      "pullQuote": "A city is a promise people keep making to each other.",
+      "sourceQuestion": { "id": "q-pull-quote", "type": "choice", "prompt": "Which paragraph best represents the pull quote?", "options": ["p2", "p5", "no-fit"] },
+      "followOnQuestion": { "id": "quote-fit", "type": "noul", "prompt": "Does this paragraph express the pull quote?" },
+      "followOnState": { "mode": "fresh-material", "priorTurnVisibility": "empty", "includeSelectedMaterial": true },
+      "providerConfig": { "kind": "jev", "route": "openrouter", "model": "typesafe/jev-1.13" },
+      "maxCalls": 2,
+      "respondentProfiles": [
+        { "respondentId": "r1", "profile": "A first-time renter looking for stable housing." },
+        { "respondentId": "r2", "profile": "A parent weighing neighborhood access and school travel." },
+        { "respondentId": "r3", "profile": "A long-time resident concerned about displacement." }
+      ],
+      "queryResult": {
+        "items": [
+          {
+            "questionId": "q-pull-quote",
+            "status": "answered",
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            },
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000101",
+            "contextId": "00000000-0000-4000-8000-000000000201",
+            "respondentId": "r1",
+            "result": {
+              "type": "choice",
+              "choice": "p2",
+              "probabilities": {
+                "p2": 1,
+                "p5": 0,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p2",
+              "text": "Exact paragraph two.",
+              "sourceId": "paragraph-source",
+              "sourceSha256": "618b19dbef61b34f147530b8b6fadd678c76504989154ccab9f566b0936aa16c",
+              "textSha256": "618b19dbef61b34f147530b8b6fadd678c76504989154ccab9f566b0936aa16c"
+            }
+          },
+          {
+            "questionId": "q-pull-quote",
+            "status": "answered",
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            },
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000102",
+            "contextId": "00000000-0000-4000-8000-000000000202",
+            "respondentId": "r2",
+            "result": {
+              "type": "choice",
+              "choice": "no-fit",
+              "probabilities": {
+                "p2": 0,
+                "p5": 0,
+                "no-fit": 1
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            }
+          },
+          {
+            "questionId": "q-pull-quote",
+            "status": "answered",
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            },
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000103",
+            "contextId": "00000000-0000-4000-8000-000000000203",
+            "respondentId": "r3",
+            "result": {
+              "type": "choice",
+              "choice": "p5",
+              "probabilities": {
+                "p2": 0,
+                "p5": 1,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p5",
+              "text": "Exact paragraph five.",
+              "sourceId": "paragraph-source",
+              "sourceSha256": "0c3b47d4ba5d9934a4761fd067f2068ed8b78d05ccedd36870e33985cd45b03b",
+              "textSha256": "0c3b47d4ba5d9934a4761fd067f2068ed8b78d05ccedd36870e33985cd45b03b"
+            }
+          }
+        ],
+        "totalMatches": 3,
+        "sourceRunId": "00000000-0000-4000-8000-000000000017",
+        "sourceStatus": "completed",
+        "sourceComplete": true,
+        "lifecycle": { "state": "complete", "resume": { "eligible": false, "reason": "already_completed" } },
+        "coverage": {
+          "totalEvaluations": 3,
+          "completedEvaluations": 3,
+          "failedEvaluations": 0,
+          "respondents": {
+            "total": 3,
+            "active": 0,
+            "completed": 3,
+            "failed": 0,
+            "unreached": 0
+          }
+        },
+        "matchedCoverage": {
+          "evaluations": { "total": 3, "pending": 0, "answered": 3, "failed": 0, "unreached": 0 },
+          "representedRespondents": 3,
+          "selectedMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 }
+        }
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "selected-material-follow-on",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["selected-material", "workflow", "shared-safeguard"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Use my saved paragraph-selection run to inspect one follow-on: each respondent who selected a paragraph should get that exact paragraph with the shared transit claim and be asked whether it supports the claim. Keep the no-fit person in coverage and leave the follow-on unstarted. Then explain what the inspection did and did not establish.",
+    "controlledEvidence": {
+      "sourceQuestion": {"id": "q-transit-claim", "type": "choice", "prompt": "Which paragraph best represents the pull quote?"},
+      "respondents": ["reader-renter", "reader-parent", "reader-resident"],
+      "selectedMaterials": ["p2", "p5"],
+      "noFitChoice": "no-fit",
+      "followOnState": {"mode": "fresh-material", "priorTurnVisibility": "empty", "includeSelectedMaterial": true},
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "partial-run-selected-question",
+    "version": 3,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["partial-run", "failure", "lifecycle", "shared-safeguard"],
+    "referencePaths": [
+      "references/interpret-results.md",
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "The run is partial because one Q1 evaluation failed, but both respondents have Q2 answers. I only need Q2: report every Q2 choice and tell me whether the Q2 evidence is complete even though the overall run is partial.",
+    "controlledEvidence": {
+      "queryResult": {
+        "items": [
+          {
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000111",
+            "contextId": "00000000-0000-4000-8000-000000000201",
+            "respondentId": "r1",
+            "questionId": "Q2",
+            "status": "answered",
+            "result": {
+              "type": "choice",
+              "choice": "A",
+              "probabilities": { "A": 1, "B": 0 },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-1"
+            }
+          },
+          {
+            "sourceRunId": "00000000-0000-4000-8000-000000000017",
+            "evaluationId": "00000000-0000-4000-8000-000000000112",
+            "contextId": "00000000-0000-4000-8000-000000000202",
+            "respondentId": "r2",
+            "questionId": "Q2",
+            "status": "answered",
+            "result": {
+              "type": "choice",
+              "choice": "B",
+              "probabilities": { "A": 0, "B": 1 },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "provenance": {
+              "provider": "laya",
+              "model": "fixture-model",
+              "compilerFingerprint": "compiler-1",
+              "contextFingerprint": "context-2"
+            }
+          }
+        ],
+        "totalMatches": 2,
+        "sourceRunId": "00000000-0000-4000-8000-000000000017",
+        "sourceStatus": "partial",
+        "sourceComplete": false,
+        "lifecycle": { "state": "stopped", "resume": { "eligible": true } },
+        "coverage": {
+          "totalEvaluations": 3,
+          "completedEvaluations": 2,
+          "failedEvaluations": 1,
+          "respondents": {
+            "total": 2,
+            "active": 1,
+            "completed": 1,
+            "failed": 0,
+            "unreached": 0
+          }
+        },
+        "matchedCoverage": {
+          "evaluations": { "total": 2, "pending": 0, "answered": 2, "failed": 0, "unreached": 0 },
+          "representedRespondents": 2,
+          "selectedMaterials": { "evaluations": 0, "respondents": 0, "distinctMaterials": 0 }
+        }
+      },
+      "siblingFailure": {
+        "respondentId": "r1",
+        "questionId": "Q1",
+        "status": "failed",
+        "failureCode": "invalid_answer"
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "typed-answer-failure",
+    "version": 6,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["failure", "lifecycle", "shared-safeguard"],
+    "referencePaths": [
+      "references/interpret-results.md",
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "One respondent's answer failed with invalid_answer. I need the reason and want to recover that response. Explain what happened, whether this run can resume, and what I should do next. Do not assume a specific provider cause.",
+    "controlledEvidence": {
+      "statusView": {
+        "runId": "00000000-0000-4000-8000-000000000004",
+        "status": "partial",
+        "createdAt": "2026-10-02T10:00:00.000Z",
+        "completedEvaluations": 1,
+        "failedEvaluations": 1,
+        "totalEvaluations": 2,
+        "usedCalls": 2,
+        "reservedCalls": 0,
+        "maxCalls": 2,
+        "cancelRequested": false,
+        "lifecycle": { "state": "stopped", "resume": { "eligible": false, "reason": "call_allowance_exhausted" } }
+      },
+      "answersView": {
+        "items": [
+          {
+            "evaluationId": "00000000-0000-4000-8000-000000000401",
+            "contextId": "00000000-0000-4000-8000-000000000501",
+            "respondentId": "r1",
+            "questionId": "q1",
+            "status": "answered",
+            "result": {
+              "type": "choice",
+              "choice": "yes",
+              "probabilities": {
+                "yes": 1,
+                "no": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 16,
+              "usage": {}
+            }
+          },
+          {
+            "evaluationId": "00000000-0000-4000-8000-000000000402",
+            "contextId": "00000000-0000-4000-8000-000000000502",
+            "respondentId": "r2",
+            "questionId": "q1",
+            "status": "failed",
+            "failure": {
+              "code": "invalid_answer",
+              "message": "The selected option was not offered by this question.",
+              "detail": { "reason": "unknown_option", "field": "choice", "constraint": "offered_option" }
+            }
+          }
+        ]
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "cumulative-journey-material",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["journey", "material-history", "shared-safeguard"],
+    "referencePaths": [],
+    "userRequest": "Build a reading journey where everyone sees paragraph A and answers whether they would continue. Readers who continue see paragraph B, rate how clearly it follows A, then see paragraph A again and answer whether the later evidence changes their view. Readers who stop see paragraph C and answer why. Tell me what material and prior answers each question receives, whether sequence or graph fits, and how repeated exposure and answer history work.",
+    "controlledEvidence": {
+      "paragraphs": {
+        "A": "The council said repairs to the estate were complete.",
+        "B": "Two weeks later, residents still reported leaks in several homes.",
+        "C": "The council also published a new recycling schedule."
+      },
+      "questions": {
+        "Q1": "Would you keep reading?",
+        "Q2": "How clearly does B follow the promise in A?",
+        "Q3": "Does the later evidence change your view of A?",
+        "Q4": "Why did you stop?"
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "cumulative-journey-material-heldout",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["journey", "material-history", "shared-safeguard"],
+    "referencePaths": [],
+    "userRequest": "Map this editorial reading path. Everyone starts with paragraph A. Readers who continue see B, judge how well it follows A, revisit A, and say whether B changes their assessment. Readers who leave see C and explain their choice. Specify the material and earlier answers each question receives, including what happens when A appears again, and tell me whether a sequence or graph fits.",
+    "controlledEvidence": {
+      "paragraphs": {
+        "A": "The council said repairs to the estate were complete.",
+        "B": "Two weeks later, residents still reported leaks in several homes.",
+        "C": "The council also published a new recycling schedule."
+      },
+      "questions": {
+        "Q1": "Would you keep reading?",
+        "Q2": "How clearly does B follow the promise in A?",
+        "Q3": "Does the later evidence change your view of A?",
+        "Q4": "Why did you stop?"
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "discover-polling-positive",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["discovery", "positive"],
+    "referencePaths": [],
+    "userRequest": "A Sheg respondent run is partial: every reader answered the second question, one reader's first answer failed, and two respondents selected different paragraphs. Help me query the evidence accurately and design the selected-paragraph follow-up.",
+    "controlledEvidence": { "requestType": "Sheg execution and evidence interpretation", "mockOnly": true }
+  }
+,
+  {
+    "id": "discover-polling-frontend-near-miss",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["discovery", "near-miss"],
+    "referencePaths": [],
+    "userRequest": "The settings page has a polling interval field. Fix its responsive CSS so the choices fit on mobile; no reader study is involved.",
+    "controlledEvidence": { "requestType": "frontend CSS maintenance", "mockOnly": true }
+  },
+  {
+    "id": "isolated-storage-inspection",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["storage-health", "read-only"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Inspect the Sheg datastore's health without changing any stored runs. Report only the health fields returned by Sheg.",
+    "controlledEvidence": { "operation": "inspect", "mockOnly": true }
+  },
+  {
+    "id": "live-storage-inspection-heldout",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["storage-health", "read-only", "shared-safeguard"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Please give me a read-only storage health check for Sheg. Report its returned integrity status and record counts; do not alter the database.",
+    "controlledEvidence": { "operation": "inspect", "source": "live Sheg MCP call required", "wording": "held-out" }
+  },
+  {
+    "id": "live-storage-inspection",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["storage-health", "read-only", "shared-safeguard"],
+    "referencePaths": ["references/run-and-recovery.md"],
+    "userRequest": "Inspect the Sheg datastore's health without changing any stored runs. Report only the health fields returned by Sheg.",
+    "controlledEvidence": { "operation": "inspect", "source": "live Sheg MCP call required" }
+  },
+  {
+    "id": "selected-material-isolation-heldout",
+    "version": 2,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": [
+      "selected-material",
+      "material-history"
+    ],
+    "referencePaths": [
+      "references/run-and-recovery.md"
+    ],
+    "userRequest": "For everyone who chose a passage for this transit claim, use that person’s own saved passage with the shared claim and ask whether the passage supports it, with no earlier answers visible. Some people choose no fit. Show one exact follow-on request and explain who is excluded. I want useful differences in the simulated responses: should I repeat the same readers or use the smallest cohort? What should I vary?",
+    "controlledEvidence": {
+      "pullQuote": "A reliable bus makes every part of a city closer.",
+      "sourceQuestion": {
+        "id": "q-transit-claim",
+        "type": "choice",
+        "prompt": "Which passage best supports the transit claim?",
+        "options": [
+          "p1",
+          "p4",
+          "p6",
+          "no-fit"
+        ]
+      },
+      "followOnQuestion": {
+        "id": "transit-claim-support",
+        "type": "noul",
+        "prompt": "Does this passage support the transit claim?",
+        "criteria": {
+          "true": "The passage supports the transit claim.",
+          "false": "The passage does not support the transit claim."
+        }
+      },
+      "followOnState": {
+        "mode": "omit-history",
+        "priorTurnVisibility": "empty",
+        "includeSelectedMaterial": true
+      },
+      "providerConfig": {
+        "kind": "jev",
+        "route": "openrouter",
+        "model": "typesafe/jev-1.13"
+      },
+      "maxCalls": 3,
+      "respondentProfiles": [
+        {
+          "respondentId": "r1"
+        },
+        {
+          "respondentId": "r2"
+        },
+        {
+          "respondentId": "r3"
+        },
+        {
+          "respondentId": "r4"
+        }
+      ],
+      "queryResult": {
+        "items": [
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000301",
+            "contextId": "00000000-0000-4000-8000-000000000401",
+            "respondentId": "r1",
+            "result": {
+              "type": "choice",
+              "choice": "p1",
+              "probabilities": {
+                "p1": 1,
+                "p4": 0,
+                "p6": 0,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p1",
+              "text": "The new timetable adds early routes from the outer estates.",
+              "sourceId": "transit-article",
+              "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "textSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          },
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000302",
+            "contextId": "00000000-0000-4000-8000-000000000402",
+            "respondentId": "r2",
+            "result": {
+              "type": "choice",
+              "choice": "p4",
+              "probabilities": {
+                "p1": 0,
+                "p4": 1,
+                "p6": 0,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p4",
+              "text": "A monthly pass now costs less than two single tickets a day.",
+              "sourceId": "transit-article",
+              "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "textSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          },
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000303",
+            "contextId": "00000000-0000-4000-8000-000000000403",
+            "respondentId": "r3",
+            "result": {
+              "type": "choice",
+              "choice": "no-fit",
+              "probabilities": {
+                "p1": 0,
+                "p4": 0,
+                "p6": 0,
+                "no-fit": 1
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            }
+          },
+          {
+            "questionId": "q-transit-claim",
+            "status": "answered",
+            "sourceRunId": "00000000-0000-4000-8000-000000000027",
+            "evaluationId": "00000000-0000-4000-8000-000000000304",
+            "contextId": "00000000-0000-4000-8000-000000000404",
+            "respondentId": "r4",
+            "result": {
+              "type": "choice",
+              "choice": "p6",
+              "probabilities": {
+                "p1": 0,
+                "p4": 0,
+                "p6": 1,
+                "no-fit": 0
+              },
+              "attempts": 1,
+              "provider": "laya",
+              "model": "fixture-model",
+              "latencyMs": 12,
+              "usage": {}
+            },
+            "selectedMaterial": {
+              "materialId": "p6",
+              "text": "Night service now reaches the hospital and industrial park.",
+              "sourceId": "transit-article",
+              "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "textSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        ],
+        "totalMatches": 4,
+        "sourceRunId": "00000000-0000-4000-8000-000000000027",
+        "sourceStatus": "completed",
+        "sourceComplete": true,
+        "lifecycle": { "state": "complete", "resume": { "eligible": false, "reason": "already_completed" } },
+        "coverage": {
+          "totalEvaluations": 4,
+          "completedEvaluations": 4,
+          "failedEvaluations": 0,
+          "respondents": {
+            "total": 4,
+            "active": 0,
+            "completed": 4,
+            "failed": 0,
+            "unreached": 0
+          }
+        },
+        "matchedCoverage": {
+          "evaluations": { "total": 4, "pending": 0, "answered": 4, "failed": 0, "unreached": 0 },
+          "representedRespondents": 4,
+          "selectedMaterials": { "evaluations": 3, "respondents": 3, "distinctMaterials": 3 }
+        }
+      },
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "partial-journey-recovery",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["journey", "partial-run", "recovery", "user-authorization"],
+    "referencePaths": ["references/run-and-recovery.md", "references/interpret-results.md"],
+    "userRequest": "A reading journey stopped partway through. Inspect what happened, explain whether it can safely continue, and wait for my decision before resuming.",
+    "controlledEvidence": {
+      "runId": "{{runId}}",
+      "status": "partial",
+      "lifecycle": { "state": "stopped", "resume": { "eligible": true } },
+      "usedCalls": 3,
+      "maxCalls": 8,
+      "reservedCalls": 0,
+      "coverage": { "totalEvaluations": 3, "answered": 2, "failed": 1, "pending": 0, "unreached": 0 },
+      "respondents": [
+        { "respondentId": "reader-a", "status": "completed", "route": [{ "nodeId": "ask-interest", "response": "leave", "toNodeId": "left" }] },
+        {
+          "respondentId": "reader-b",
+          "status": "failed",
+          "events": [
+            { "type": "exposure", "itemId": "opening" },
+            { "type": "response", "questionId": "interest", "choice": "continue" },
+            { "type": "exposure", "itemId": "evidence" }
+          ],
+          "route": [{ "nodeId": "ask-interest", "response": "continue", "toNodeId": "evidence-node" }],
+          "failedTurn": { "nodeId": "ask-clarity", "questionId": "clarity", "status": "failed", "failure": { "code": "decision_failed" } }
+        }
+      ],
+      "attempts": [
+        { "respondentId": "reader-a", "status": "answered" },
+        { "respondentId": "reader-b", "status": "answered" },
+        { "respondentId": "reader-b", "status": "failed", "failureScope": "evaluation" }
+      ]
+    }
+  }
+]

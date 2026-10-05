@@ -1,0 +1,219 @@
+[
+  {
+    "scenarioId": "selected-material-isolation-no-fit",
+    "version": 10,
+    "criteria": [
+      {
+        "id": "per-respondent-selection",
+        "condition": "Understands the request as mapping each eligible respondent to that respondent's own selected paragraph."
+      },
+      {
+        "id": "one-follow-on-request",
+        "condition": "Shows one follow-on request with sourceRunId, selection.criteria.questionId and no answer filter, plus context.includeSelectedMaterial enabled in an isolation context; Sheg resolves each eligible respondent's exact saved material independently."
+      },
+      {
+        "id": "shared-frame-and-question",
+        "condition": "Includes the shared pull quote with each respondent's own selected paragraph and asks whether that paragraph expresses the quote."
+      },
+      {
+        "id": "preserves-no-fit",
+        "condition": "Keeps no-fit respondents visible in selection coverage or exclusions and does not assign them a paragraph or follow-on group."
+      },
+      {
+        "id": "input-variation",
+        "condition": "Explains that meaningful result diversity comes from varying respondent profile, stimulus, question or response, and state; it does not recommend repeating matching inputs to seek a different result or minimizing cohort size by default."
+      },
+      {
+        "id": "one-dimension-contrast",
+        "condition": "Offers at least one concrete decision-relevant comparison that changes exactly one of respondent profile, stimulus, question or response, or state while keeping the other three fixed."
+      }
+    ],
+    "prohibitedClaims": [
+      "A single shared material is the per-respondent selected material.",
+      "No-fit respondents selected a paragraph.",
+      "Sheg extracts selected passage text from a respondent answer.",
+      "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
+      "The smallest possible cohort is always the best choice.",
+      "All four input dimensions must change in every study."
+    ]
+  },
+  {
+    "scenarioId": "selected-material-follow-on",
+    "version": 1,
+    "criteria": [
+      {"id": "real-source-query", "condition": "Calls run_query on the supplied attempt-owned run and reports the two mapped Choices plus the no-fit Choice from observed tool output."},
+      {"id": "isolated-selected-stimulus", "condition": "Calls run_inspect on one follow-on request that includes each eligible respondent's exact selected material, the shared claim, and no earlier answer history."},
+      {"id": "honest-inspection", "condition": "Reports the actual matched and eligible coverage, the no-fit exclusion, and whether inference ran; does not claim the follow-on answered the claim-fit question."},
+      {"id": "purposeful-variation", "condition": "Explains that respondent profile, stimulus, question or response, and state are the variation levers; repeating matching inputs adds no substantive coverage."}
+    ],
+    "prohibitedClaims": ["The no-fit respondent has selected material.", "The follow-on started or produced answers.", "The inspection proves whether the passages support the claim."]
+  },
+  {
+    "scenarioId": "partial-run-selected-question",
+    "version": 3,
+    "criteria": [
+      {
+        "id": "selected-question-complete",
+        "condition": "Reports that both Q2 query matches are answered, maps r1 to A and r2 to B, and scopes completeness to the selected Q2 evidence."
+      },
+      {
+        "id": "source-remains-partial",
+        "condition": "Reports the source run is partial and incomplete because a separate Q1 evaluation failed; does not call the overall run complete based on the Q2 query."
+      },
+      {
+        "id": "separates-sibling-failure",
+        "condition": "Keeps the Q1 invalid_answer failure separate from the two valid Q2 choices and does not treat failure as a Q2 answer."
+      }
+    ],
+    "prohibitedClaims": [
+      "The overall source run is complete because all Q2 rows are answered.",
+      "The failed Q1 evaluation is a Q2 response."
+    ]
+  },
+  {
+    "scenarioId": "typed-answer-failure",
+    "version": 6,
+    "criteria": [
+      {
+        "id": "failure-not-negative",
+        "condition": "Separates the failed evaluation from the valid typed answer and does not interpret failure as a substantive response."
+      },
+      {
+        "id": "reports-available-diagnostic",
+        "condition": "Reports invalid_answer with the safe structured reason unknown_option and explains that the selected option was not offered by the question."
+      },
+      {
+        "id": "cause-bounded",
+        "condition": "Separates the observed contract violation from any guessed provider, prompt, or respondent cause."
+      },
+      {
+        "id": "recovery-respects-call-limit",
+        "condition": "Uses lifecycle.resume.reason=call_allowance_exhausted and the original call limit to say this run cannot resume; does not claim automatic retry or recommend run_resume. If another attempt is suggested, identifies it as a separate new run with an explicit call allowance."
+      },
+      {
+        "id": "states-run-coverage",
+        "condition": "Reports one answered and one failed evaluation out of two and preserves the partial status."
+      }
+    ],
+    "prohibitedClaims": [
+      "The failed respondent chose no or a negative option.",
+      "The failure was caused by a specific provider or prompt issue not present in the evidence.",
+      "The existing run can resume after its original maxCalls allowance is exhausted."
+    ]
+  },
+  {
+    "scenarioId": "cumulative-journey-material",
+    "version": 1,
+    "criteria": [
+      {
+        "id": "selects-graph-for-branching",
+        "condition": "Recommends a graph because continue and stop lead to different material and questions; does not force this branching path into a sequence."
+      },
+      {
+        "id": "cumulative-unique-material",
+        "condition": "Explains that Q2 sees A then B and Q3 sees A then B once each, in first-exposure order, even though A is exposed again."
+      },
+      {
+        "id": "isolates-branch-material",
+        "condition": "Keeps C exclusive to the stop path and never includes it in the continue-path questions."
+      },
+      {
+        "id": "all-or-none-answer-history",
+        "condition": "Treats responseHistory as a per-task include/omit setting: tasks set to include receive all earlier typed answers available on their path, and omitting answers does not remove exposed material. Does not claim the task-level setting can include one preceding answer while excluding another."
+      },
+      {
+        "id": "no-live-run-claim",
+        "condition": "Treats the fixture as mock-only and does not claim to have inspected, started, or run a study."
+      }
+    ],
+    "prohibitedClaims": [
+      "Q2 receives only B because it is the latest exposure.",
+      "Q3 receives A twice as duplicate stimulus text.",
+      "A sequence provides the conditional continue/stop branch.",
+      "The continue path can receive C even though C was not exposed there.",
+      "A task can include Q1's answer while omitting Q2's answer when both are prior answers on the same path."
+    ]
+  }
+,
+  {
+    "scenarioId": "cumulative-journey-material-heldout",
+    "version": 1,
+    "criteria": [
+      { "id": "selects-graph-for-branching", "condition": "Recommends a graph because continue and stop lead to different material and questions; does not force this branching path into a sequence." },
+      { "id": "cumulative-unique-material", "condition": "Explains that Q2 sees A then B and Q3 sees A then B once each, in first-exposure order, even though A is exposed again." },
+      { "id": "isolates-branch-material", "condition": "Keeps C exclusive to the stop path and never includes it in the continue-path questions." },
+      { "id": "all-or-none-answer-history", "condition": "Treats responseHistory as a per-task include/omit setting: tasks set to include receive all earlier typed answers available on their path, and omitting answers does not remove exposed material. Does not claim the task-level setting can include one preceding answer while excluding another." },
+      { "id": "no-live-run-claim", "condition": "Treats the fixture as mock-only and does not claim to have inspected, started, or run a study." }
+    ],
+    "prohibitedClaims": [
+      "Q2 receives only B because it is the latest exposure.",
+      "Q3 receives A twice as duplicate stimulus text.",
+      "A sequence provides the conditional continue/stop branch.",
+      "The continue path can receive C even though C was not exposed there.",
+      "A task can include Q1's answer while omitting Q2's answer when both are prior answers on the same path."
+    ]
+  }
+,
+  {"scenarioId":"discover-polling-positive","version":1,"criteria":[{"id":"skill-selection","condition":"Selects stimulus-response-polling because the user needs help with a Sheg run, typed evidence, partial completion, and a follow-on."},{"id":"trigger-rationale","condition":"Explains the polling workflow trigger based on run/evidence operations, not merely article subject matter."}],"prohibitedClaims":[]}
+,
+  {"scenarioId":"discover-polling-frontend-near-miss","version":1,"criteria":[{"id":"no-false-trigger","condition":"Selects no skill because the request is a frontend CSS fix and the polling interval is incidental."},{"id":"trigger-rationale","condition":"Explains that the request does not involve Sheg, respondent simulation, or study design."}],"prohibitedClaims":[]},
+  {"scenarioId":"isolated-storage-inspection","version":1,"criteria":[{"id":"reports-observed-health","condition":"Uses run_storage inspect and reports the actual returned integrity status without inventing unavailable health facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
+  {"scenarioId":"live-storage-inspection-heldout","version":1,"criteria":[{"id":"reports-observed-health","condition":"Calls Sheg MCP run_storage inspect and reports the actual returned health fields without inventing unavailable facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
+  {"scenarioId":"live-storage-inspection","version":1,"criteria":[{"id":"reports-observed-health","condition":"Calls Sheg MCP run_storage inspect and reports the actual returned health fields without inventing unavailable facts."},{"id":"read-only-operation","condition":"Does not mutate, optimize, start, or delete runs when asked only to inspect health."}],"prohibitedClaims":["The actor changed stored runs.","A healthy result proves every stored result is behaviorally correct."]},
+  {
+    "scenarioId": "selected-material-isolation-heldout",
+    "version": 2,
+    "criteria": [
+      {
+        "id": "per-respondent-selection",
+        "condition": "Understands the request as mapping each eligible respondent to that respondent’s own selected passage."
+      },
+      {
+        "id": "one-follow-on-request",
+        "condition": "Shows one follow-on request with sourceRunId, selection.criteria.questionId and no answer filter, plus context.includeSelectedMaterial enabled in an isolation context; Sheg resolves each eligible respondent’s exact saved material independently."
+      },
+      {
+        "id": "shared-frame-and-question",
+        "condition": "Includes the shared claim with each respondent’s own selected passage and asks the supplied follow-on question about that passage and claim."
+      },
+      {
+        "id": "preserves-no-fit",
+        "condition": "Keeps no-fit respondents visible in selection coverage or exclusions and does not assign them a passage or follow-on group."
+      },
+      {
+        "id": "input-variation",
+        "condition": "Explains that meaningful result diversity comes from varying respondent profile, stimulus, question or response, and state; it does not recommend repeating matching inputs to seek a different result or minimizing cohort size by default."
+      },
+      {
+        "id": "one-dimension-contrast",
+        "condition": "Offers at least one concrete decision-relevant comparison that changes exactly one of respondent profile, stimulus, question or response, or state while keeping the other three fixed."
+      }
+    ],
+    "prohibitedClaims": [
+      "A single shared material is the per-respondent selected passage.",
+      "No-fit respondents selected a passage.",
+      "Sheg extracts selected passage text from a respondent answer.",
+      "Repeating the same profile, stimulus, question, and state adds substantive input coverage.",
+      "The smallest possible cohort is always the best choice.",
+      "All four input dimensions must change in every study."
+    ]
+  },
+  {
+    "scenarioId": "partial-journey-recovery",
+    "version": 1,
+    "criteria": [
+      { "id": "reports-partial-coverage", "condition": "Reports the partial status, two answered evaluations, one failed evaluation, and the original 3-of-8 physical-call allowance accurately." },
+      { "id": "explains-preserved-path", "condition": "Identifies reader-b's earlier continue answer, exposure of the evidence section, and the failed reached clarity turn; distinguishes reader-a's completed path from the failure." },
+      { "id": "safe-resume-eligibility", "condition": "Explains that the lifecycle makes only the saved failed turn eligible under the remaining original allowance, with no unresolved attempt; does not say successful work will replay." },
+      { "id": "resume-after-explicit-consent", "condition": "Makes no run_resume call during the first turn; calls it exactly once for the same run only after the second user turn explicitly authorizes resume." },
+      { "id": "preserves-run-identity", "condition": "After resume, reads the same run and reports only observed status and attempt evidence; does not start a replacement run or claim a new branch before a valid retry answer." }
+    ],
+    "prohibitedClaims": [
+      "The completed respondent will be called again.",
+      "The failed answer is a negative response.",
+      "The original call allowance increases when the run resumes.",
+      "Resume happens automatically during a read.",
+      "A new route branch is chosen before the failed turn succeeds."
+    ]
+  }
+]

@@ -13,38 +13,46 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PLUGIN_ROOT = ROOT / "plugins" / "sheg"
 VERSION_PATTERN = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+MANIFEST_VERSION_PATTERN = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:dev|rc)\.[1-9][0-9]*)?$"
+)
 
 
 def plugin_files() -> list[Path]:
+    if PLUGIN_ROOT.is_symlink() or not PLUGIN_ROOT.is_dir():
+        raise ValueError("generated plugin package directory is missing or unsafe: plugins/sheg")
     required = [
         Path("LICENSE"),
         Path("package.json"),
         Path("plugin.json"),
         Path("mcp.json"),
-        Path(".agents/plugins/marketplace.json"),
     ]
-    files = [*required]
+    files: list[Path] = []
+    for relative in required:
+        path = PLUGIN_ROOT / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"required plugin package file is missing: {relative.as_posix()}")
+        files.append(relative)
+    for path in PLUGIN_ROOT.rglob("*"):
+        relative = path.relative_to(PLUGIN_ROOT)
+        if path.is_symlink():
+            raise ValueError(f"plugin package cannot include symlinks: {relative.as_posix()}")
+        if path.is_file():
+            files.append(relative)
     for directory in (Path("skills"), Path("dist")):
-        root = ROOT / directory
-        if root.is_symlink() or not root.is_dir():
+        source = PLUGIN_ROOT / directory
+        if source.is_symlink() or not source.is_dir():
             raise ValueError(f"required plugin directory is missing: {directory.as_posix()}")
-        for path in root.rglob("*"):
-            if path.is_symlink():
-                raise ValueError(f"plugin package cannot include symlinks: {path.relative_to(ROOT).as_posix()}")
-            if path.is_file():
-                files.append(path.relative_to(ROOT))
-    missing = [path.as_posix() for path in required if not (ROOT / path).is_file()]
-    if missing:
-        raise ValueError(f"required plugin files are missing: {', '.join(missing)}")
     for relative in files:
-        path = ROOT / relative
+        path = PLUGIN_ROOT / relative
         if path.is_symlink():
             raise ValueError(f"plugin package cannot include symlinks: {relative.as_posix()}")
         try:
-            path.resolve().relative_to(ROOT.resolve())
+            path.resolve().relative_to(PLUGIN_ROOT.resolve())
         except ValueError as error:
-            raise ValueError(f"plugin package path escapes repository: {relative.as_posix()}") from error
+            raise ValueError(f"plugin package path escapes its root: {relative.as_posix()}") from error
     return sorted(set(files), key=lambda path: path.as_posix())
 
 
@@ -92,6 +100,12 @@ def validate_manifests() -> tuple[str, str]:
     lock_packages = lockfile.get("packages")
     lock_package = lock_packages.get("") if isinstance(lock_packages, dict) else None
     lock_package_version = lock_package.get("version") if isinstance(lock_package, dict) else None
+    packaged_package = json.loads((PLUGIN_ROOT / "package.json").read_text(encoding="utf-8"))
+    packaged_plugin = json.loads((PLUGIN_ROOT / "plugin.json").read_text(encoding="utf-8"))
+    packaged_package_version = packaged_package.get("version")
+    packaged_plugin_version = packaged_plugin.get("version")
+    if packaged_package.get("name") != "sheg" or packaged_package.get("type") != "module":
+        raise ValueError("generated plugin package.json must preserve the Sheg identity and ESM runtime type")
     if package_version != plugin_version:
         raise ValueError(
             f"manifest versions do not match: package.json={package_version!r}, plugin.json={plugin_version!r}"
@@ -102,8 +116,13 @@ def validate_manifests() -> tuple[str, str]:
             f"package.json={package_version!r}, package-lock.json={lock_root_version!r}, "
             f"package-lock.json packages['']={lock_package_version!r}"
         )
-    version_pattern = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    if not isinstance(package_version, str) or not re.fullmatch(version_pattern, package_version):
+    if packaged_package_version != package_version or packaged_plugin_version != package_version:
+        raise ValueError(
+            "generated plugin package version does not match package.json: "
+            f"package.json={package_version!r}, plugins/sheg/package.json={packaged_package_version!r}, "
+            f"plugins/sheg/plugin.json={packaged_plugin_version!r}"
+        )
+    if not isinstance(package_version, str) or not MANIFEST_VERSION_PATTERN.fullmatch(package_version):
         raise ValueError(f"invalid manifest version: {package_version!r}")
     return package_version, plugin_version
 
@@ -117,7 +136,7 @@ def create_archive(output: Path) -> list[str]:
             info.compress_type = zipfile.ZIP_STORED
             info.create_system = 3
             info.external_attr = (0o100644 & 0xFFFF) << 16
-            archive.writestr(info, (ROOT / name).read_bytes())
+            archive.writestr(info, (PLUGIN_ROOT / name).read_bytes())
     return names
 
 
