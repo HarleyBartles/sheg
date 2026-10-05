@@ -45,7 +45,7 @@ for (const playbookPath of playbookPaths) {
   const markdown = guidance.get(playbookPath)!;
   assert.equal([...markdown.matchAll(/^# .+\r?$/gm)].length, 1, `${playbookPath} must have one concern title.`);
   const sections = [...markdown.matchAll(/^## (.+)\r?$/gm)];
-  assert.deepEqual(sections.map((match) => match[1]), playbookSections, `${playbookPath} must follow the Sheg playbook layout.`);
+  assert.deepEqual(sections.map((match) => match[1]!.trim()), playbookSections, `${playbookPath} must follow the Sheg playbook layout.`);
   for (let index = 0; index < sections.length; index += 1) {
     const start = sections[index]!.index! + sections[index]![0].length;
     const end = sections[index + 1]?.index ?? markdown.length;

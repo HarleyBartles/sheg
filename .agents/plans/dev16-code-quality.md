@@ -117,7 +117,7 @@
 
 **Files:** `README.md`, `AGENTS.md`, `.agents/doctrine/repo-runbook-policy.md`, `.agents/runbooks/{implementing,pr}.md`, existing/new concern playbooks; create `.agents/contracts/{operating-standards.json,standards-certification.md}` and `.agents/unslop/` profiles. Use repository-owned compliance commands if needed; no placeholder inventory.
 
-- [x] Define Sheg's playbook layout and substantive review obligations in repository policy. Apply it to every concern guide, preserve applicable stage navigation, certify the local implementation, and verify structural enforcement rejects malformed layouts, placeholders, missing routes, and unregistered guides.
+- [x] Define Sheg's playbook layout and substantive review obligations in repository policy. Apply it to every concern guide, preserve applicable stage navigation, certify the local implementation, and verify structural enforcement rejects malformed layouts, empty sections, missing routes, and unregistered guides.
 
 - [x] Resolve immutable upstream definition revisions for `unslop`, `playbook-composition`, and `runbook-composition`; read those definitions and register source repository, commit, path and certification reference. Do not treat installed plugin version alone as a source pin.
 - [x] Assess existing guides against the selected definitions. Keep lifecycle stages in runbooks and cross-stage concerns in playbooks. Correct redundant routing and capability availability claims. Root AGENTS links to subscriptions/certification and stage routing.
@@ -139,5 +139,5 @@
 
 - [x] Critically re-read every touched source and guidance file. Verify the approved spec's acceptance criteria, transaction ownership, codec guarantees, query resolution, unslop routes, and revised compatibility boundary against implementation. Resolve findings and rerun relevant checks.
 - [x] Record the pre-release report retirement decision in a superseding ADR and update the index. Keep this governing spec/plan through the PR and retain eligible completed-artifact custody rules. Do not write completion receipts.
-- [ ] Refresh `develop`, integrate any new changes, regenerate and validate if necessary. Push `codex/dev16-code-quality` and update the existing reviewable PR targeting `develop`, describing final behavior and relevant validation. Keep it draft and attached to this chat.
-- [ ] Report the PR link, meaningful changes, verified checks and any material limitations. Leave human review and merge outside the checklist. Clean the worktree/branch only after verifying merge and preserving any needed untracked work.
+- [x] Refresh `develop`, integrate any new changes, regenerate and validate if necessary. Push `codex/dev16-code-quality` and update the existing reviewable PR targeting `develop`, describing final behavior and relevant validation. Keep it draft and attached to this chat.
+- [x] Report the PR link, meaningful changes, verified checks and any material limitations. Leave human review and merge outside the checklist. Clean the worktree/branch only after verifying merge and preserving any needed untracked work.
