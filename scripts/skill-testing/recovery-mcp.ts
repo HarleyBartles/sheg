@@ -3,7 +3,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { createRunService } from '../../src/application/run-service.js';
 import { executeQuestionRun } from '../../src/application/question-worker.js';
 import { resolveDataRoot } from '../../src/infrastructure/data-root.js';
-import { openRunStore } from '../../src/infrastructure/run-store.js';
+import { openRunPersistence } from '../../src/infrastructure/run-store.js';
 import { createPollingServer } from '../../src/entrypoints/mcp.js';
 import { assertControlledRecoveryEnvironment, createControlledRecoveryProvider } from './controlled-recovery.js';
 
@@ -11,7 +11,7 @@ assertControlledRecoveryEnvironment(process.env);
 
 function createControlledRecoveryServer(): ReturnType<typeof createPollingServer> {
   const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
-  const store = openRunStore(dataRoot);
+  const store = openRunPersistence(dataRoot);
   const providerFactory = createControlledRecoveryProvider;
   const service = createRunService(
     store,

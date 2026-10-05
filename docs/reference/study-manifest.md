@@ -25,7 +25,7 @@ The [study manifest schema](../../skills/stimulus-response-polling/assets/study-
 
 ## Design and validate in human terms
 
-Start with the source material, what the person wants to learn, and whose perspective would help. Use `trace` with scripted Choice IDs or typed responses to inspect a particular manifest path without inference. Use `preflight` to assess a manifest and frozen cohort across reachable paths. Current direct requests use `inspect` for packet fit and call bounds; it returns identifiers for measured packets rather than a complete topology or material preview.
+Start with the source material, what the person wants to learn, and whose perspective would help. Use `trace` with scripted Choice IDs or typed responses to inspect a particular manifest path without inference. Use `preflight` to assess a manifest and frozen cohort across reachable paths. Current direct requests use `inspect` for initial journey packet fit and call bounds; each later reached turn is checked before inference and may stop one respondent if it does not fit.
 
 ## Check context fit
 

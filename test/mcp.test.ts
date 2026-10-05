@@ -8,8 +8,8 @@ import test from 'node:test';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import type { InlineRunRequest } from '../src/domain/run/request.js';
-import { createRunService } from '../src/application/run-service.js';
-import { openRunStore } from '../src/infrastructure/run-store.js';
+import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
+import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
 import { seedWorkflowState } from '../scripts/skill-testing/workflow-seeds.js';
@@ -190,7 +190,7 @@ test('MCP controlled recovery resumes the saved journey before the next workflow
   const store = openRunStore(root);
   const provider = createControlledRecoveryProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
   const service = createRunService(store, root, () => provider, {
-    async launch(_dataRoot, runId) { await executeQuestionRun(store, runId, () => provider); },
+    async launch(_dataRoot, runId) { await executeQuestionRun(splitRunStore(store), runId, () => provider); },
   }, { assertProviderReady: async () => undefined });
   const server = createPollingServer(service);
   const client = new Client({ name: 'sheg-controlled-recovery-test', version: '1.0.0' });

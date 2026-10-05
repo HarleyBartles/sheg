@@ -7,8 +7,8 @@ import { runCli } from '../src/entrypoints/cli.js';
 import { randomUUID } from 'node:crypto';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
-import { createRunService } from '../src/application/run-service.js';
-import { openRunStore } from '../src/infrastructure/run-store.js';
+import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
+import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { InlineRunRequest } from '../src/domain/run/request.js';
 
@@ -20,7 +20,7 @@ test('CLI and MCP share durable execution, submission retries, recall and cancel
   const fit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
   const provider = { measure: () => fit, async decide() { return { type: 'choice' as const, choice: 'yes', probabilities: { yes: 1, no: 0 }, attempts: 1, provider: 'jev' as const, model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }; } };
   let launches = 0;
-  const service = createRunService(store, root, () => provider, { async launch(_root, runId) { launches += 1; await executeQuestionRun(store, runId, () => provider); } });
+  const service = createRunService(store, root, () => provider, { async launch(_root, runId) { launches += 1; await executeQuestionRun(splitRunStore(store), runId, () => provider); } });
   const requestPath = path.join(root, 'request.json');
   await writeFile(requestPath, JSON.stringify(request));
   const output: string[] = []; const errors: string[] = [];

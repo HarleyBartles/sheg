@@ -533,7 +533,7 @@ function journeyRequest(maxCalls = 1, respondentCount = 1) {
   };
 }
 
-test('journey admission measures each reachable context and reports bounded call outcomes without inference', async () => {
+test('journey admission measures initial contexts and reports reached-turn fit checks without inference', async () => {
   const fixture = makeProvider();
   const result = await prepareRun(journeyRequest(), fixture.provider);
   assert.equal(result.inspection.valid, true);
@@ -541,12 +541,11 @@ test('journey admission measures each reachable context and reports bounded call
   assert.equal(result.inspection.minimumCalls, 1);
   assert.equal(result.inspection.maximumCalls, 2);
   assert.equal(result.inspection.warnings?.some(({ code }) => code === 'call_limit_may_stop_journey'), true);
-  assert.equal(result.inspection.fits.length, 2);
-  assert.equal(fixture.measured.length, 2);
-  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue', 'interest']);
-  assert.deepEqual(fixture.measured[1]!.state.encounteredItems, [{ id: 'section-three', text: 'Later section.' }]);
-  const history = fixture.measured[1]!.state.trajectory as { responses: Array<{ type: string }> };
-  assert.equal(history.responses[0]?.type, 'choice');
+  assert.equal(result.inspection.fits.length, 1);
+  assert.equal(fixture.measured.length, 1);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue']);
+  assert.deepEqual(fixture.measured[0]!.state.encounteredItems, []);
+  assert.equal(result.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
   assert.equal(fixture.decisions, 0);
 });
 
@@ -583,12 +582,42 @@ test('sequence admission measures each authored ask in order and applies the fin
   assert.equal(result.inspection.valid, true);
   assert.equal(result.inspection.minimumCalls, 2);
   assert.equal(result.inspection.maximumCalls, 2);
-  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue', 'interest', 'interest']);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue']);
+  assert.equal(result.inspection.fits.length, 1);
   assert.equal(fixture.decisions, 0);
 });
 
-test('journey admission rejects an overflowing branch and a cap below every possible minimum path', async () => {
-  const overflowFixture = makeProvider(['fits', 'overflow']);
+test('a large adaptive sequence admits each initial packet and reserves reached-turn fit checks for dispatch', async () => {
+  const base = journeyRequest(48, 2);
+  const respondents = Array.from({ length: 4 }, (_, index) => ({ ...base.respondents[0]!, id: `reader-${index + 1}`, ...(index >= 2 ? { context: 'Returning reader' } : {}) }));
+  const tasks = Array.from({ length: 12 }, (_, index) => ({
+    id: `question-${index + 1}`,
+    type: 'choice' as const,
+    instructions: `Question ${index + 1}?`,
+    options: { yes: 'Yes', no: 'No' },
+  }));
+  const input = {
+    ...base,
+    respondents,
+    maxCalls: respondents.length * tasks.length,
+    journey: { ...base.journey, tasks, presentation: { kind: 'sequence' as const } },
+  };
+  const fixture = makeProvider();
+  const result = await prepareRun(input, fixture.provider);
+
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 48);
+  assert.equal(result.inspection.maximumCalls, 48);
+  assert.equal(fixture.measured.length, 2);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['question-1', 'question-1']);
+  assert.equal(result.journey?.packets.length, respondents.length);
+  assert.equal(result.inspection.fits.length, respondents.length);
+  assert.equal(result.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
+  assert.equal(fixture.decisions, 0);
+});
+
+test('journey admission rejects an unfit initial packet and a cap below every possible minimum path', async () => {
+  const overflowFixture = makeProvider(['overflow']);
   const overflow = await prepareRun(journeyRequest(), overflowFixture.provider);
   assert.equal(overflow.inspection.valid, false);
   assert.equal(overflow.inspection.problems.some(({ code }) => code === 'context_overflow'), true);

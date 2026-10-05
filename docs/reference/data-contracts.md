@@ -15,7 +15,7 @@ For example, a profile may satisfy each field's 500-character limit while exceed
 
 ## Durable MCP runs
 
-CLI and MCP use one SQLite datastore and store requests, packets, and results as JSON validated on recall. These payloads do not currently carry separate format-version markers; saved compiler fingerprints identify packet semantics. Recall and query expose frozen inputs, typed answers, lineage, and physical attempts. [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md) requires explicit payload versions and upcasters when their contracts change.
+CLI and MCP use one SQLite datastore. Schema 9 is the first supported release baseline; earlier development schemas require explicit recovery. Stored answers and failure evidence use versioned envelopes; provider execution evidence belongs to the physical attempt, and public results are composed during recall. Requests, packets, and journey checkpoints remain validated JSON snapshots identified by their request/compiler/packet fingerprints. See [datastore health checks](datastore-health.md), [ADR-0030](../decisions/0030-use-drizzle-behind-typed-run-repositories.md), and [ADR-0031](../decisions/0031-set-schema-nine-as-release-baseline.md).
 
 Jev configuration selects `provider.route` and contains no key material or credential-source override. Authentication uses the selected Windows Credential Manager entry. Results may contain optional cost evidence with a `provider-reported` or `published-rate-estimate` basis. Cost is not aggregated into a run bill; published-rate estimates require metadata for the served model, not merely the requested alias.
 

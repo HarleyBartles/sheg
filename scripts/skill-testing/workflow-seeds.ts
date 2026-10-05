@@ -5,7 +5,7 @@ import type { PromptState } from '../../src/domain/decision/prompt.js';
 import { executeQuestionRun } from '../../src/application/question-worker.js';
 import { materializeJourneyRun, prepareRun } from '../../src/application/run-inspection.js';
 import { runRequestSchema } from '../../src/domain/run/request.js';
-import { openRunStore } from '../../src/infrastructure/run-store.js';
+import { openRunPersistence } from '../../src/infrastructure/run-store.js';
 import type { CampaignManifest } from './contracts.js';
 
 type WorkflowSetup = NonNullable<CampaignManifest['workflowSetup']>;
@@ -108,15 +108,15 @@ export async function seedWorkflowState(setup: WorkflowSetup, dataRoot: string):
   const admission = await prepareRun(isSelectedMaterial ? selectedMaterialRequest : partialJourneyRequest, seedProvider);
   if (isSelectedMaterial) {
     if (!admission.prepared) throw new Error(`Could not prepare selected-material source run: ${admission.inspection.problems.map(({ message }) => message).join('; ')}`);
-    const store = openRunStore(dataRoot);
+    const store = openRunPersistence(dataRoot);
     try {
-      const accepted = store.accept(randomUUID(), admission.prepared);
+      const accepted = store.commands.accept(randomUUID(), admission.prepared);
       await executeQuestionRun(store, accepted.run.runId, () => seedProvider);
-      const seeded = store.getStatus(accepted.run.runId);
+      const seeded = store.reads.getStatus(accepted.run.runId);
       if (seeded.status !== 'completed' || seeded.usedCalls !== 3 || seeded.maxCalls !== 3 || seeded.reservedCalls !== 0) {
         throw new Error('Selected-material workflow source did not complete at its expected controlled checkpoint.');
       }
-      const answers = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'q-transit-claim' } });
+      const answers = store.reads.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'q-transit-claim' } });
       if (answers.items.length !== 3 || answers.items.filter(({ selectedMaterial }) => selectedMaterial).length !== 2) {
         throw new Error('Selected-material workflow source does not contain two mapped Choices and one no-fit answer.');
       }
@@ -124,11 +124,11 @@ export async function seedWorkflowState(setup: WorkflowSetup, dataRoot: string):
     } finally { store.close(); }
   }
   if (!admission.journey) throw new Error(`Could not prepare partial-journey state: ${admission.inspection.problems.map(({ message }) => message).join('; ')}`);
-  const store = openRunStore(dataRoot);
+  const store = openRunPersistence(dataRoot);
   try {
-    const accepted = store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
+    const accepted = store.commands.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
     await executeQuestionRun(store, accepted.run.runId, () => seedProvider);
-    const seeded = store.getStatus(accepted.run.runId);
+    const seeded = store.reads.getStatus(accepted.run.runId);
     if (seeded.status !== 'partial' || seeded.usedCalls !== 3 || seeded.maxCalls !== 8 || seeded.reservedCalls !== 0) {
       throw new Error('Partial-journey workflow state did not settle at its expected safe checkpoint.');
     }

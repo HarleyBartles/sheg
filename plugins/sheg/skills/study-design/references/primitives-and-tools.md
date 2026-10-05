@@ -4,7 +4,7 @@ An MCP request supplies distinct respondent profiles, exact inline material, typ
 
 | Tool | Purpose |
 | --- | --- |
-| `run_inspect` | Validate a request, assess fit across measurable journey paths, and report call bounds without inference or run creation. |
+| `run_inspect` | Validate a request, measure initial journey inputs, explain reached-turn fit checks, and report call bounds without inference or run creation. |
 | `run_start` | Persist an admitted request and launch its worker; reuse an identical submission ID/request without launching again. |
 | `run_list` | Discover and paginate durable runs by status, label, time, or referenced material. |
 | `run_get` | Read status, request, answers, journey, one exact context, or physical attempts using its `view`. |

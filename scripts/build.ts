@@ -36,6 +36,21 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
     path.join(credentialDirectory, 'windows-credential.ps1'),
   );
 
+  const migrationDirectory = path.join(resolvedOutputDirectory, 'migrations/0000_baseline_v9');
+  await mkdir(migrationDirectory, { recursive: true });
+  await cp(
+    path.join(repositoryRoot, 'migrations/0000_baseline_v9/migration.sql'),
+    path.join(migrationDirectory, 'migration.sql'),
+  );
+  await cp(
+    path.join(repositoryRoot, 'licenses/drizzle-orm-Apache-2.0.txt'),
+    path.join(resolvedOutputDirectory, 'licenses/drizzle-orm-Apache-2.0.txt'),
+  );
+  await cp(
+    path.join(repositoryRoot, 'licenses/THIRD-PARTY-NOTICES.md'),
+    path.join(resolvedOutputDirectory, 'licenses/THIRD-PARTY-NOTICES.md'),
+  );
+
   const dataDirectory = path.join(resolvedOutputDirectory, 'data/respondent-archetypes');
   await mkdir(dataDirectory, { recursive: true });
   for (const group of respondentArchetypeGroups) {

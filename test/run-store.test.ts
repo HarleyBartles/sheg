@@ -14,6 +14,7 @@ import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
 import { openRunStore, RunStoreError } from '../src/infrastructure/run-store.js';
+import { queryEvidencePage } from '../src/infrastructure/sqlite/evidence-query.js';
 
 const input: InlineRunRequest = {
   kind: 'poll',
@@ -123,6 +124,76 @@ async function temporaryRoot(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'sheg-run-store-'));
 }
 
+test('acceptance and paginated evidence support ten thousand evaluations', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const respondents = Array.from({ length: 10_000 }, (_, index) => ({
+      ...input.respondents[0]!, id: `scale-reader-${index}`,
+    }));
+    const prepared = await preparedRun({ ...input, respondents, maxCalls: respondents.length });
+    const accepted = store.accept(`scale-${randomUUID()}`, prepared);
+    const page = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { status: 'pending' }, limit: 20 });
+    assert.equal(page.totalMatches, 10_000);
+    assert.equal(page.items.length, 20);
+    assert.ok(page.nextCursor);
+    assert.equal(page.matchedCoverage.evaluations.total, 10_000);
+    assert.equal(page.matchedCoverage.evaluations.pending, 10_000);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('evidence paging keeps coverage and rows on one snapshot while another connection writes', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { timeout: 5_000 });
+  const writer = new DatabaseSync(path.join(root, 'runs.sqlite'), { timeout: 5_000 });
+  try {
+    const accepted = store.accept(randomUUID(), await preparedRun({ ...input, respondents: [input.respondents[0]!] }));
+    const initialStatus = store.getStatus(accepted.run.runId);
+    let wrote = false;
+    const page = queryEvidencePage({
+      database,
+      now: Date.now,
+      ensureOpen() {},
+      readTransaction<T>(operation: () => T): T {
+        database.exec('BEGIN');
+        try {
+          const result = operation();
+          database.exec('COMMIT');
+          return result;
+        } catch (error) {
+          database.exec('ROLLBACK');
+          throw error;
+        }
+      },
+      statusInside(runId) {
+        if (!wrote) {
+          wrote = true;
+          writer.prepare("UPDATE evaluations SET status = 'failed' WHERE run_id = ?").run(runId);
+        }
+        return initialStatus;
+      },
+      notFound: () => new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.'),
+    }, { sourceRunId: accepted.run.runId, criteria: {}, limit: 10 });
+
+    assert.equal(wrote, true);
+    assert.equal(page.sourceStatus, 'prepared');
+    assert.equal(page.coverage.totalEvaluations, 1);
+    assert.equal(page.coverage.failedEvaluations, 0);
+    assert.equal(page.matchedCoverage.evaluations.pending, 1);
+    assert.equal(page.items[0]?.status, 'pending');
+    assert.equal(writer.prepare('SELECT status FROM evaluations WHERE run_id = ?').get(accepted.run.runId)?.status, 'failed');
+  } finally {
+    writer.close();
+    database.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('acceptance survives a second connection and matching submission retries share one run ID', async () => {
   const root = await temporaryRoot();
   const first = openRunStore(root);
@@ -141,6 +212,29 @@ test('acceptance survives a second connection and matching submission retries sh
   } finally {
     first.close();
     second.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('batch reconciliation surfaces reservation corruption and rolls back earlier state changes', async () => {
+  const root = await temporaryRoot();
+  let nowMs = 10_000;
+  const store = openRunStore(root, { now: () => nowMs });
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const first = store.accept(randomUUID(), await preparedRun());
+    const second = store.accept(randomUUID(), await preparedRun());
+    assert.ok(store.claim(first.run.runId, nowMs, 1234));
+    database.prepare('UPDATE runs SET reserved_calls = 1 WHERE run_id = ?').run(first.run.runId);
+    nowMs += 31_000;
+
+    assert.throws(() => store.reconcileMany([first.run.runId, second.run.runId], nowMs),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
+    assert.equal(store.getStatus(first.run.runId).status, 'running');
+    assert.equal(store.getStatus(second.run.runId).status, 'prepared');
+  } finally {
+    database.close();
+    store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -461,7 +555,7 @@ test('two processes can initialize the same fresh datastore concurrently', async
   }
 });
 
-test('unsupported pre-v1 datastore versions return explicit export or reset guidance', async () => {
+test('unsupported pre-release datastore versions require explicit recovery', async () => {
   const root = await temporaryRoot();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   try {
@@ -469,7 +563,7 @@ test('unsupported pre-v1 datastore versions return explicit export or reset guid
   } finally { database.close(); }
   try {
     assert.throws(() => openRunStore(root), (error: unknown) => error instanceof RunStoreError &&
-      error.code === 'unsupported_schema_version' && /Export or reset this pre-v1 datastore/.test(error.message));
+      error.code === 'unsupported_schema_version' && /predates the v0.3.0 release baseline/.test(error.message));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -482,6 +576,7 @@ test('resume preserves the run and saved answer and uses a fresh claim window', 
     assert.ok(first);
     f.store.settle(claim, first.attemptId, { kind: 'answered', result: savedAnswer });
     f.advance(30_001);
+    f.store.reconcile(f.runId, f.now());
     assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
 
     const resumed = f.store.resume(f.runId, f.now());
@@ -507,6 +602,7 @@ test('resume consumes an uncertain attempt once and never increases the original
     const reservation = f.store.reserveNext(claim, f.now());
     assert.ok(reservation);
     f.advance(30_001);
+    f.store.reconcile(f.runId, f.now());
     const interrupted = f.store.getStatus(f.runId);
     assert.equal(interrupted.status, 'interrupted');
     assert.equal(interrupted.usedCalls, 1);
@@ -596,7 +692,7 @@ test('resume selects the newest run-scoped failure when attempt timestamps tie',
   } finally { await f.close(); }
 });
 
-test('follow-on source resolution reconciles an expired worker lease before freezing source status', async () => {
+test('follow-on source reads observe reconciliation performed through the command repository', async () => {
   const root = await temporaryRoot();
   let nowMs = 10_000;
   const store = openRunStore(root, { now: () => nowMs });
@@ -616,6 +712,7 @@ test('follow-on source resolution reconciles an expired worker lease before free
       questions: [{ type: 'choice', id: 'next-question', instructions: 'What would you ask next?', options: { yes: 'Yes', no: 'No' } }],
       provider: input.provider, maxCalls: 1,
     });
+    store.reconcile(accepted.run.runId, nowMs);
     const sources = store.resolveFollowOnSources(request);
     assert.equal(sources.sourceStatus, 'interrupted');
     assert.equal(sources.version.usedCalls, 1);
@@ -647,10 +744,12 @@ test('resumed work that misses its launch window becomes interrupted without a r
   const f = await resumableFixture();
   try {
     f.advance(30_001);
+    f.store.reconcile(f.runId, f.now());
     assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
     const resumed = f.store.resume(f.runId, f.now());
     assert.equal(resumed.started, true);
     f.advance(30_001);
+    f.store.reconcile(f.runId, f.now());
     assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
     assert.equal(f.store.resume(f.runId, f.now()).started, true);
   } finally { await f.close(); }
@@ -662,8 +761,10 @@ test('a cancellation request prevents resuming after the worker lease expires', 
     assert.ok(f.store.claim(f.runId, f.now(), 1234));
     f.store.requestCancel(f.runId);
     f.advance(30_001);
+    f.store.reconcile(f.runId, f.now());
     assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
     assert.throws(() => f.store.resume(f.runId, f.now()), (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_resumable');
+    f.store.reconcile(f.runId, f.now());
     assert.equal(f.store.getStatus(f.runId).status, 'interrupted');
   } finally { await f.close(); }
 });
@@ -769,6 +870,24 @@ test('answers paginate in stable evaluation order and identify pending work', as
   }
 });
 
+test('persisted answers use the versioned typed-value contract and reject unknown versions on recall', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const runId = await completedRun(store);
+    const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try {
+      const saved = database.prepare('SELECT result_json FROM evaluations WHERE run_id = ? AND status = \'answered\' LIMIT 1').get(runId) as { result_json: string };
+      const envelope = JSON.parse(saved.result_json) as { formatVersion: number; kind: string; value: unknown };
+      assert.deepEqual({ formatVersion: envelope.formatVersion, kind: envelope.kind }, { formatVersion: 1, kind: 'decision-value' });
+      database.prepare('UPDATE evaluations SET result_json = ? WHERE run_id = ? AND status = \'answered\'').run(
+        JSON.stringify({ ...envelope, formatVersion: 2 }), runId,
+      );
+    } finally { database.close(); }
+    assert.throws(() => store.answers(runId), (error: unknown) => error instanceof RunStoreError && error.code === 'unsupported_payload_version');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('malformed run-list cursor fields return invalid_cursor', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
@@ -867,7 +986,7 @@ test('the physical call ceiling bounds reservations and valid answers settle ato
   }
 });
 
-test('run discovery reconciles stale workers before applying status filters', async () => {
+test('run discovery observes explicit batch reconciliation before applying status filters', async () => {
   const root = await temporaryRoot();
   let nowMs = 10_000;
   const store = openRunStore(root, { now: () => nowMs });
@@ -875,6 +994,7 @@ test('run discovery reconciles stale workers before applying status filters', as
     const accepted = store.accept(randomUUID(), await preparedRun());
     assert.ok(store.claim(accepted.run.runId, nowMs, 1234));
     nowMs += 31_000;
+    store.reconcileActive(nowMs);
     const page = store.list({ status: 'interrupted' });
     assert.equal(page.items.length, 1);
     assert.equal(page.items[0]!.runId, accepted.run.runId);
@@ -883,6 +1003,20 @@ test('run discovery reconciles stale workers before applying status filters', as
     store.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('status reads stay side-effect free until an explicit reconciliation command runs', async () => {
+  const root = await temporaryRoot();
+  let nowMs = 10_000;
+  const store = openRunStore(root, { now: () => nowMs });
+  try {
+    const runId = store.accept(randomUUID(), await preparedRun()).run.runId;
+    assert.ok(store.claim(runId, nowMs, 1234));
+    nowMs += 31_000;
+    assert.equal(store.getStatus(runId).status, 'running');
+    store.reconcile(runId, nowMs);
+    assert.equal(store.getStatus(runId).status, 'interrupted');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 async function completedRun(store: ReturnType<typeof openRunStore>, value: InlineRunRequest = input, answer: (index: number) => DecisionResult = () => savedAnswer, operationNow = Date.now()): Promise<string> {
@@ -1235,6 +1369,11 @@ test('follow-on resolves the full supported explicit-reference selection', async
     });
     const sources = store.resolveFollowOnSources(request);
     assert.equal(sources.turns.length, 1001);
+    const followOn = await prepareFollowOnRun(request, sources, provider);
+    assert.ok(followOn.prepared);
+    const accepted = store.accept(randomUUID(), followOn.prepared);
+    assert.equal(accepted.created, true);
+    assert.equal(store.getRequest(accepted.run.runId).evaluations.length, 1001);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -1566,7 +1705,7 @@ test('storage inspection reports failed integrity without calling corrupt data h
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('storage inspection reconciles expired workers without restarting them', async () => {
+test('storage inspection observes reconciliation without restarting expired workers', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
   try {
@@ -1575,6 +1714,7 @@ test('storage inspection reconciles expired workers without restarting them', as
     const db = new DatabaseSync(path.join(root, 'runs.sqlite'));
     try { db.prepare('UPDATE runs SET lease_expires_ms = 0 WHERE run_id = ?').run(runId); }
     finally { db.close(); }
+    store.reconcileActive(Date.now());
     const info = store.storageInfo();
     assert.equal(info.activeRunCount, 0);
     assert.equal(store.getStatus(runId).status, 'interrupted');

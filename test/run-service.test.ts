@@ -9,7 +9,8 @@ import type { FollowOnRunRequest, InlineRunRequest } from '../src/domain/run/req
 import { prepareRun } from '../src/application/run-inspection.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
-import { createRunService, RunServiceError } from '../src/application/run-service.js';
+import { RunServiceError } from '../src/application/run-service.js';
+import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
 
 function request(text = 'Section three') : InlineRunRequest {
   return {

@@ -5,6 +5,7 @@ import type { EvidenceCriteria, FollowOnSelectionExclusion, FrozenEvaluation, Ru
 import type { PromptHistoryEvent } from '../decision/prompt.js';
 import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
+import type { RespondentProfile } from '../respondents/profile.js';
 
 export type RunStatus = 'prepared' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted';
 
@@ -97,6 +98,13 @@ export type JourneyRunRecord = {
   compilerFingerprint: string;
   evaluations: JourneyEvaluationRecord[];
   respondents: JourneyRespondentState[];
+};
+
+export type JourneyWorkerTurn = {
+  evaluation: JourneyEvaluation;
+  respondent: JourneyRespondentState;
+  profile: RespondentProfile;
+  nextOrdinal: number;
 };
 
 export type Inspection = {

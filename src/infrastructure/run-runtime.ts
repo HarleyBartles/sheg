@@ -2,7 +2,8 @@ import os from 'node:os';
 import { createRunService, RunServiceError, type RunService } from '../application/run-service.js';
 import { resolveDataRoot } from './data-root.js';
 import { ProcessLock } from './process-lock.js';
-import { inspectRunStoreCompatibility, openRunStore, resetRunStore, runStoreBackupAvailable, RunStoreError, SCHEMA_VERSION, type RunStore } from './run-store.js';
+import { inspectRunStoreCompatibility, openRunPersistence, resetRunStore, runStoreBackupAvailable, RunStoreError, SCHEMA_VERSION } from './run-store.js';
+import type { RunPersistence } from '../application/run-store.js';
 import { DetachedWorkerLauncher } from './worker-launcher.js';
 import { assertProviderReady, createProvider } from '../providers/factory.js';
 import type { StorageOperation } from '../application/run-operations.js';
@@ -10,7 +11,7 @@ import type { StorageOperation } from '../application/run-operations.js';
 // Composition and datastore recovery are shared by all public entrypoints.
 export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platform, os.homedir()), service?: RunService) {
   let runtimeService: RunService;
-  let ownedStore: RunStore | undefined;
+  let ownedStore: RunPersistence | undefined;
   let storeReady = service !== undefined;
   let startupFailure: unknown;
   if (service) runtimeService = service;
@@ -80,8 +81,8 @@ function compatibilityStatus(observed: ReturnType<typeof inspectRunStoreCompatib
   return { status: observed.status, schemaVersion: observed.status === 'unreadable' ? null : observed.schemaVersion };
 }
 
-function createDefaultRunService(dataRoot: string): { service: RunService; store: RunStore } {
-  const store = openRunStore(dataRoot);
+function createDefaultRunService(dataRoot: string): { service: RunService; store: RunPersistence } {
+  const store = openRunPersistence(dataRoot);
   return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
 }
 
@@ -94,4 +95,3 @@ function unavailableRunService(): RunService {
 function recoveryRequiredError(): RunServiceError {
   return new RunServiceError('datastore_recovery_required', 'The Sheg datastore requires recovery. Inspect storage before using study operations.');
 }
-
