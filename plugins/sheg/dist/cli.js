@@ -21043,7 +21043,7 @@ var LegacyRunArchiveReader = class {
     const initial = await this.readValue(runId);
     const current = runCheckpointSchema.safeParse(initial);
     if (current.success) return current.data;
-    return this.readCurrentOrMigrate(runId);
+    return this.readCurrentOrMigrate(runId, initial);
   }
   async list() {
     let names;
@@ -21062,8 +21062,7 @@ var LegacyRunArchiveReader = class {
     if (!external_exports.string().uuid().safeParse(runId).success) throw new TypeError("Run ID must be a UUID.");
     return path2.join(this.directory, `run-${runId}.json`);
   }
-  async readCurrentOrMigrate(runId) {
-    const value = await this.readValue(runId);
+  async readCurrentOrMigrate(runId, value) {
     const current = runCheckpointSchema.safeParse(value);
     if (current.success) return current.data;
     const legacyShape = normalizeLegacyShape(value);
@@ -21375,11 +21374,7 @@ function compareReports(report, leftArmId, rightArmId) {
       pairedResponses += 1;
       if (!equivalentTasks(left, right, comparisonKey) || leftResponse.answer.type !== rightResponse.answer.type) continue;
       comparableResponses += 1;
-      if (leftResponse.answer.type === "choice" && rightResponse.answer.type === "choice") {
-        const row = optionTransitions[leftResponse.answer.choice] ??= {};
-        row[rightResponse.answer.choice] = (row[rightResponse.answer.choice] ?? 0) + 1;
-      } else if (leftResponse.answer.type === "score" && rightResponse.answer.type === "score") pairedScoreDifferences.push(rightResponse.answer.score - leftResponse.answer.score);
-      else if (leftResponse.answer.type === "noul" && rightResponse.answer.type === "noul") pairedNoulDifferences.push(rightResponse.answer.noul - leftResponse.answer.noul);
+      accumulateAnswerComparison({ choiceTransitions: optionTransitions, scoreDifferences: pairedScoreDifferences, noulDifferences: pairedNoulDifferences }, leftResponse.answer, rightResponse.answer);
     }
     return {
       comparisonKey,
@@ -21426,10 +21421,10 @@ function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
   const respondentIds = [...new Set([...left.journeys, ...right.journeys].map((journey) => journey.respondentId))].sort();
   const groups = /* @__PURE__ */ new Map([["all", new Set(respondentIds)]]);
   for (const journey of left.journeys) {
-    if (journey.archetypeId) (groups.get(`archetype:${journey.archetypeId}`) ?? groups.set(`archetype:${journey.archetypeId}`, /* @__PURE__ */ new Set()).get(`archetype:${journey.archetypeId}`)).add(journey.respondentId);
+    if (journey.archetypeId) addGroupMember(groups, `archetype:${journey.archetypeId}`, journey.respondentId);
     for (const [axis, value] of Object.entries(journey.variation ?? {})) {
       const key = `variation:${axis}=${value}`;
-      (groups.get(key) ?? groups.set(key, /* @__PURE__ */ new Set()).get(key)).add(journey.respondentId);
+      addGroupMember(groups, key, journey.respondentId);
     }
   }
   const keys = /* @__PURE__ */ new Set([
@@ -21456,11 +21451,7 @@ function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
       pairedResponses += 1;
       if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
       comparableResponses += 1;
-      if (a.answer.type === "choice" && b.answer.type === "choice") {
-        const row = choiceTransitions[a.answer.choice] ??= {};
-        row[b.answer.choice] = (row[b.answer.choice] ?? 0) + 1;
-      } else if (a.answer.type === "score" && b.answer.type === "score") scoreDifferences.push(b.answer.score - a.answer.score);
-      else if (a.answer.type === "noul" && b.answer.type === "noul") noulDifferences.push(b.answer.noul - a.answer.noul);
+      accumulateAnswerComparison({ choiceTransitions, scoreDifferences, noulDifferences }, a.answer, b.answer);
     }
     const profileGroups = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([group, members2]) => {
       const transitions = {};
@@ -21480,11 +21471,7 @@ function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
         groupPaired += 1;
         if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
         groupComparable += 1;
-        if (a.answer.type === "choice" && b.answer.type === "choice") {
-          const row = transitions[a.answer.choice] ??= {};
-          row[b.answer.choice] = (row[b.answer.choice] ?? 0) + 1;
-        } else if (a.answer.type === "score" && b.answer.type === "score") scores.push(b.answer.score - a.answer.score);
-        else if (a.answer.type === "noul" && b.answer.type === "noul") nouls.push(b.answer.noul - a.answer.noul);
+        accumulateAnswerComparison({ choiceTransitions: transitions, scoreDifferences: scores, noulDifferences: nouls }, a.answer, b.answer);
       }
       return {
         group,
@@ -21566,6 +21553,14 @@ function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
     }
   };
 }
+function addGroupMember(groups, key, respondentId) {
+  let members2 = groups.get(key);
+  if (!members2) {
+    members2 = /* @__PURE__ */ new Set();
+    groups.set(key, members2);
+  }
+  members2.add(respondentId);
+}
 function taskChangesBetween(left, right) {
   const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
   const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
@@ -21585,6 +21580,13 @@ function equivalentTasks(left, right, comparisonKey) {
   if (leftTask.type === "choice") return JSON.stringify(leftTask.options) === JSON.stringify(rightTask.options);
   if (leftTask.type === "score") return JSON.stringify(leftTask.rubric) === JSON.stringify(rightTask.rubric);
   return JSON.stringify(leftTask.criteria ?? null) === JSON.stringify(rightTask.criteria ?? null);
+}
+function accumulateAnswerComparison(totals, left, right) {
+  if (left.type === "choice" && right.type === "choice") {
+    const row = totals.choiceTransitions[left.choice] ??= {};
+    row[right.choice] = (row[right.choice] ?? 0) + 1;
+  } else if (left.type === "score" && right.type === "score") totals.scoreDifferences.push(right.score - left.score);
+  else if (left.type === "noul" && right.type === "noul") totals.noulDifferences.push(right.noul - left.noul);
 }
 
 // src/domain/journey/packet-walker.ts
@@ -24120,7 +24122,7 @@ async function restoreClaim(lockPath, claimPath, record2) {
 async function readLock(filePath) {
   try {
     const value = JSON.parse(await readFile4(filePath, "utf8"));
-    return Number.isInteger(value.pid) && typeof value.token === "string" ? { pid: value.pid, token: value.token } : null;
+    return Number.isSafeInteger(value.pid) && value.pid > 0 && typeof value.token === "string" && value.token.length > 0 ? { pid: value.pid, token: value.token } : null;
   } catch {
     return null;
   }
@@ -31239,7 +31241,7 @@ function runStoreBackupAvailable(dataRoot) {
     return false;
   }
 }
-function resetRunStore(dataRoot, openFreshStore) {
+function resetRunStore(dataRoot, openFreshStore, operations = {}) {
   if (!path11.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   const databasePath = path11.join(dataRoot, "runs.sqlite");
   let inspectionDatabase;
@@ -31251,7 +31253,7 @@ function resetRunStore(dataRoot, openFreshStore) {
     checkDatabaseIntegrity(inspectionDatabase, false);
   } catch {
     inspectionDatabase?.close();
-    return resetUnreadableRunStore(dataRoot, databasePath, openFreshStore);
+    return resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operations);
   }
   inspectionDatabase.close();
   const database = new DatabaseSync3(databasePath, { timeout: 5e3 });
@@ -31271,7 +31273,7 @@ function resetRunStore(dataRoot, openFreshStore) {
     for (const original of files) {
       if (!existsSync3(original)) continue;
       const archived = path11.join(recoveryRoot, path11.basename(original));
-      renameSync(original, archived);
+      (operations.rename ?? renameSync)(original, archived);
       moved.push({ original, archived });
     }
     openFreshStore();
@@ -31283,17 +31285,13 @@ function resetRunStore(dataRoot, openFreshStore) {
       } catch {
       }
     }
-    for (const item of moved.toReversed()) {
-      try {
-        renameSync(item.archived, item.original);
-      } catch {
-      }
-    }
-    if (error62 instanceof RunStoreError) throw error62;
-    throw new RunStoreError("recovery_reset_failed", "Sheg could not complete the explicit datastore reset; the original database and verified backup were preserved.", { cause: error62 });
+    const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
+    const restoration = retainedRecoveryFiles.length === 0 ? "Original files were restored to their active paths." : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(", ")}.`;
+    if (error62 instanceof RunStoreError) throw new RunStoreError(error62.code, `${error62.message} ${restoration}`, { cause: error62 });
+    throw new RunStoreError("recovery_reset_failed", `Sheg could not complete the explicit datastore reset; the verified backup remains available. ${restoration}`, { cause: error62 });
   }
 }
-function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
+function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operations) {
   if (!existsSync3(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
   const recoveryRoot = path11.join(dataRoot, "recovery", randomUUID5());
   mkdirSync2(recoveryRoot, { recursive: true });
@@ -31304,7 +31302,7 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
       if (!existsSync3(original)) continue;
       const size = statSync(original).size;
       const archived = path11.join(recoveryRoot, path11.basename(original));
-      renameSync(original, archived);
+      (operations.rename ?? renameSync)(original, archived);
       if (statSync(archived).size !== size) throw new Error("Quarantined datastore file size changed.");
       moved.push({ original, archived, size });
     }
@@ -31317,14 +31315,21 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
       } catch {
       }
     }
-    for (const item of moved.toReversed()) {
-      try {
-        renameSync(item.archived, item.original);
-      } catch {
-      }
-    }
-    throw new RunStoreError("recovery_reset_failed", "Sheg could not complete the explicit reset; the original database files were preserved.", { cause: error62 });
+    const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
+    const restoration = retainedRecoveryFiles.length === 0 ? "Original unreadable files were restored to their active paths." : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(", ")}.`;
+    throw new RunStoreError("recovery_reset_failed", `Sheg could not complete the explicit reset. ${restoration}`, { cause: error62 });
   }
+}
+function restoreMovedFiles(moved, rename2) {
+  const retained = [];
+  for (const item of moved.toReversed()) {
+    try {
+      rename2(item.archived, item.original);
+    } catch {
+      retained.push(path11.basename(item.archived));
+    }
+  }
+  return retained;
 }
 
 // src/infrastructure/sqlite/reads/status.ts
@@ -32275,11 +32280,27 @@ function createDefaultRunService(dataRoot) {
   return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
 }
 function unavailableRunService() {
-  return new Proxy(/* @__PURE__ */ Object.create(null), {
-    get: (_target, property) => property === "then" ? void 0 : () => {
-      throw recoveryRequiredError();
-    }
-  });
+  const unavailable2 = () => {
+    throw recoveryRequiredError();
+  };
+  return {
+    inspect: async () => unavailable2(),
+    start: async () => unavailable2(),
+    resume: async () => unavailable2(),
+    previewDelete: () => unavailable2(),
+    deleteRuns: () => unavailable2(),
+    storageInfo: () => unavailable2(),
+    optimizeStorage: () => unavailable2(),
+    list: () => unavailable2(),
+    queryEvidence: () => unavailable2(),
+    getContext: () => unavailable2(),
+    getStatus: () => unavailable2(),
+    getRequest: () => unavailable2(),
+    getJourneyRun: () => unavailable2(),
+    answers: () => unavailable2(),
+    attempts: () => unavailable2(),
+    cancel: () => unavailable2()
+  };
 }
 function recoveryRequiredError() {
   return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Inspect storage before using study operations.");

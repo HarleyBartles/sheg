@@ -43587,7 +43587,7 @@ function runStoreBackupAvailable(dataRoot) {
     return false;
   }
 }
-function resetRunStore(dataRoot, openFreshStore) {
+function resetRunStore(dataRoot, openFreshStore, operations = {}) {
   if (!path4.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   const databasePath = path4.join(dataRoot, "runs.sqlite");
   let inspectionDatabase;
@@ -43599,7 +43599,7 @@ function resetRunStore(dataRoot, openFreshStore) {
     checkDatabaseIntegrity(inspectionDatabase, false);
   } catch {
     inspectionDatabase?.close();
-    return resetUnreadableRunStore(dataRoot, databasePath, openFreshStore);
+    return resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operations);
   }
   inspectionDatabase.close();
   const database = new DatabaseSync3(databasePath, { timeout: 5e3 });
@@ -43619,7 +43619,7 @@ function resetRunStore(dataRoot, openFreshStore) {
     for (const original of files) {
       if (!existsSync2(original)) continue;
       const archived = path4.join(recoveryRoot, path4.basename(original));
-      renameSync(original, archived);
+      (operations.rename ?? renameSync)(original, archived);
       moved.push({ original, archived });
     }
     openFreshStore();
@@ -43631,17 +43631,13 @@ function resetRunStore(dataRoot, openFreshStore) {
       } catch {
       }
     }
-    for (const item of moved.toReversed()) {
-      try {
-        renameSync(item.archived, item.original);
-      } catch {
-      }
-    }
-    if (error62 instanceof RunStoreError) throw error62;
-    throw new RunStoreError("recovery_reset_failed", "Sheg could not complete the explicit datastore reset; the original database and verified backup were preserved.", { cause: error62 });
+    const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
+    const restoration = retainedRecoveryFiles.length === 0 ? "Original files were restored to their active paths." : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(", ")}.`;
+    if (error62 instanceof RunStoreError) throw new RunStoreError(error62.code, `${error62.message} ${restoration}`, { cause: error62 });
+    throw new RunStoreError("recovery_reset_failed", `Sheg could not complete the explicit datastore reset; the verified backup remains available. ${restoration}`, { cause: error62 });
   }
 }
-function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
+function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operations) {
   if (!existsSync2(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
   const recoveryRoot = path4.join(dataRoot, "recovery", randomUUID4());
   mkdirSync2(recoveryRoot, { recursive: true });
@@ -43652,7 +43648,7 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
       if (!existsSync2(original)) continue;
       const size = statSync(original).size;
       const archived = path4.join(recoveryRoot, path4.basename(original));
-      renameSync(original, archived);
+      (operations.rename ?? renameSync)(original, archived);
       if (statSync(archived).size !== size) throw new Error("Quarantined datastore file size changed.");
       moved.push({ original, archived, size });
     }
@@ -43665,14 +43661,21 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
       } catch {
       }
     }
-    for (const item of moved.toReversed()) {
-      try {
-        renameSync(item.archived, item.original);
-      } catch {
-      }
-    }
-    throw new RunStoreError("recovery_reset_failed", "Sheg could not complete the explicit reset; the original database files were preserved.", { cause: error62 });
+    const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
+    const restoration = retainedRecoveryFiles.length === 0 ? "Original unreadable files were restored to their active paths." : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(", ")}.`;
+    throw new RunStoreError("recovery_reset_failed", `Sheg could not complete the explicit reset. ${restoration}`, { cause: error62 });
   }
+}
+function restoreMovedFiles(moved, rename2) {
+  const retained = [];
+  for (const item of moved.toReversed()) {
+    try {
+      rename2(item.archived, item.original);
+    } catch {
+      retained.push(path4.basename(item.archived));
+    }
+  }
+  return retained;
 }
 
 // src/infrastructure/sqlite/reads/status.ts
@@ -44649,7 +44652,7 @@ async function restoreClaim(lockPath, claimPath, record2) {
 async function readLock(filePath) {
   try {
     const value = JSON.parse(await readFile(filePath, "utf8"));
-    return Number.isInteger(value.pid) && typeof value.token === "string" ? { pid: value.pid, token: value.token } : null;
+    return Number.isSafeInteger(value.pid) && value.pid > 0 && typeof value.token === "string" && value.token.length > 0 ? { pid: value.pid, token: value.token } : null;
   } catch {
     return null;
   }
@@ -45645,11 +45648,27 @@ function createDefaultRunService(dataRoot) {
   return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
 }
 function unavailableRunService() {
-  return new Proxy(/* @__PURE__ */ Object.create(null), {
-    get: (_target, property) => property === "then" ? void 0 : () => {
-      throw recoveryRequiredError();
-    }
-  });
+  const unavailable2 = () => {
+    throw recoveryRequiredError();
+  };
+  return {
+    inspect: async () => unavailable2(),
+    start: async () => unavailable2(),
+    resume: async () => unavailable2(),
+    previewDelete: () => unavailable2(),
+    deleteRuns: () => unavailable2(),
+    storageInfo: () => unavailable2(),
+    optimizeStorage: () => unavailable2(),
+    list: () => unavailable2(),
+    queryEvidence: () => unavailable2(),
+    getContext: () => unavailable2(),
+    getStatus: () => unavailable2(),
+    getRequest: () => unavailable2(),
+    getJourneyRun: () => unavailable2(),
+    answers: () => unavailable2(),
+    attempts: () => unavailable2(),
+    cancel: () => unavailable2()
+  };
 }
 function recoveryRequiredError() {
   return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Inspect storage before using study operations.");

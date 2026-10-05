@@ -107,11 +107,11 @@
 
 **Files:** `src/domain/attempt-ledger.ts`, `src/infrastructure/legacy/run-archive.ts`, `src/application/legacy/reports.ts`, `src/infrastructure/{data-root,process-lock,run-runtime}.ts`, `src/infrastructure/sqlite/recovery.ts`, relevant domain/material helpers, existing tests and fixtures importing moved helpers.
 
-- [ ] Recheck all callers before removing obsolete executable accounting. Move fixture-only construction into `test/helpers`; retain historical types and supported compatibility paths. Never delete vendored upstream APIs solely because current callers do not use them.
-- [ ] Pass already parsed archive content into migration rather than rereading it. Extract shared comparison accumulation without merging genuinely different report contracts. Name complex intermediate shapes and expand dense multi-statement control flow.
-- [ ] Remove dead parameters and unnecessary casts found in the audit. Validate lock PIDs as positive safe integers and preserve lock ownership semantics. Replace runtime proxies that falsely claim full service interfaces with an explicit unavailable-service boundary where warranted.
-- [ ] Make recovery diagnostics truthful when restoration itself fails: distinguish retained recovery files from restored active files. Exercise the corresponding failure path with fault injection if existing coverage does not establish it.
-- [ ] Run affected legacy, identity, runtime, recovery and domain tests. Re-read changed files for responsibility ownership and accidental behavior changes, then commit.
+- [x] Recheck all callers before removing obsolete executable accounting. Move fixture-only construction into `test/helpers`; retain historical types and supported compatibility paths. Never delete vendored upstream APIs solely because current callers do not use them.
+- [x] Pass already parsed archive content into migration rather than rereading it. Extract shared comparison accumulation without merging genuinely different report contracts. Name complex intermediate shapes and expand dense multi-statement control flow.
+- [x] Remove dead parameters and unnecessary casts found in the audit. Validate lock PIDs as positive safe integers and preserve lock ownership semantics. Replace runtime proxies that falsely claim full service interfaces with an explicit unavailable-service boundary where warranted.
+- [x] Make recovery diagnostics truthful when restoration itself fails: distinguish retained recovery files from restored active files. Exercise the corresponding failure path with fault injection if existing coverage does not establish it.
+- [x] Run affected legacy, identity, runtime, recovery and domain tests. Re-read changed files for responsibility ownership and accidental behavior changes, then commit.
 
 ## Task 8: Adopt routed standards and redesign human orientation
 

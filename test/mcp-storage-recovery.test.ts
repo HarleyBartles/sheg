@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir, rm, mkdtemp, writeFile } from 'node:fs/promises';
+import { renameSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,6 +9,7 @@ import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import test from 'node:test';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
+import { resetRunStore } from '../src/infrastructure/sqlite/recovery.js';
 
 const resetConfirmation = 'RESET SHEG DATASTORE';
 
@@ -135,6 +137,29 @@ test('an unreadable datastore can be explicitly reset after its original files a
     const recovered = await f.client.callTool({ name: 'run_list', arguments: {} });
     assert.equal(recovered.isError ?? false, false);
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('failed recovery restoration reports original files retained in recovery storage', async () => {
+  const root = await temporaryRoot();
+  const databasePath = path.join(root, 'runs.sqlite');
+  const original = Buffer.from('Not a valid SQLite database.');
+  await writeFile(databasePath, original);
+  const rename = (from: Parameters<typeof renameSync>[0], to: Parameters<typeof renameSync>[1]): void => {
+    if (from.toString().includes(`${path.sep}recovery${path.sep}`) && to.toString() === databasePath) throw new Error('Injected restoration failure.');
+    renameSync(from, to);
+  };
+
+  try {
+    assert.throws(() => resetRunStore(root, () => { throw new Error('Injected fresh-store failure.'); }, { rename }), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /remain in recovery storage: runs\.sqlite/);
+      return true;
+    });
+    assert.equal(await readFile(databasePath).then(() => true, () => false), false);
+    const recoveryDirectories = await readdir(path.join(root, 'recovery'));
+    assert.equal(recoveryDirectories.length, 1);
+    assert.deepEqual(await readFile(path.join(root, 'recovery', recoveryDirectories[0]!, 'runs.sqlite')), original);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('a damaged current schema enters recovery and preserves a verified copy before reset', async () => {

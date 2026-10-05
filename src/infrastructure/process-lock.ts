@@ -133,7 +133,9 @@ async function restoreClaim(lockPath: string, claimPath: string, record: LockRec
 async function readLock(filePath: string): Promise<LockRecord | null> {
   try {
     const value = JSON.parse(await readFile(filePath, 'utf8')) as Partial<LockRecord>;
-    return Number.isInteger(value.pid) && typeof value.token === 'string' ? { pid: value.pid!, token: value.token } : null;
+    return Number.isSafeInteger(value.pid) && value.pid! > 0 && typeof value.token === 'string' && value.token.length > 0
+      ? { pid: value.pid!, token: value.token }
+      : null;
   } catch {
     return null;
   }

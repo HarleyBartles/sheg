@@ -87,9 +87,25 @@ function createDefaultRunService(dataRoot: string): { service: RunService; store
 }
 
 function unavailableRunService(): RunService {
-  return new Proxy(Object.create(null) as RunService, {
-    get: (_target, property) => property === 'then' ? undefined : () => { throw recoveryRequiredError(); },
-  });
+  const unavailable = (): never => { throw recoveryRequiredError(); };
+  return {
+    inspect: async () => unavailable(),
+    start: async () => unavailable(),
+    resume: async () => unavailable(),
+    previewDelete: () => unavailable(),
+    deleteRuns: () => unavailable(),
+    storageInfo: () => unavailable(),
+    optimizeStorage: () => unavailable(),
+    list: () => unavailable(),
+    queryEvidence: () => unavailable(),
+    getContext: () => unavailable(),
+    getStatus: () => unavailable(),
+    getRequest: () => unavailable(),
+    getJourneyRun: () => unavailable(),
+    answers: () => unavailable(),
+    attempts: () => unavailable(),
+    cancel: () => unavailable(),
+  };
 }
 
 function recoveryRequiredError(): RunServiceError {

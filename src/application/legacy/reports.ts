@@ -10,6 +10,10 @@ import { promptContractHash } from '../../domain/decision/prompt.js';
 import type { StudyArm } from '../../domain/study/arm.js';
 
 const responseSchema = z.object({ taskId: z.string(), comparisonKey: z.string().nullable(), occurrence: z.number().int().positive(), presentationOccurrence: z.number().int().positive(), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), answer: decisionValueSchema, optionIds: z.array(z.string()), choice: z.string().optional(), correct: z.boolean().nullable(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), confidence: z.number().nullable(), cost: z.object({ amountUsd: z.number().nonnegative(), basis: z.enum(['provider-reported', 'published-rate-estimate']) }).strict().nullable() }).strict();
+type ComparisonAnswer = PollingReport['arms'][number]['journeys'][number]['responses'][number]['answer'];
+type AnswerComparisonTotals = { choiceTransitions: Record<string, Record<string, number>>; scoreDifferences: number[]; noulDifferences: number[] };
+type ReportArm = PollingReport['arms'][number];
+type ReportResponse = ReportArm['journeys'][number]['responses'][number];
 export const pollingReportSchema = z.object({
   formatVersion: z.literal(4), runId: z.string().uuid(), status: z.string(), stimulusFingerprint: z.string(), executionFingerprint: z.string(), cohortFingerprint: z.string().regex(/^[a-f\d]{64}$/i),
   provider: z.object({ kind: z.enum(['jev', 'laya']), model: z.string().nullable(), checkpoint: z.string().nullable(), route: z.enum(['openrouter', 'typesafe']).nullable(), endpoint: z.string().url().nullable() }).strict(),
@@ -239,11 +243,7 @@ export function compareReports(report: PollingReport, leftArmId: string, rightAr
       pairedResponses += 1;
       if (!equivalentTasks(left, right, comparisonKey) || leftResponse.answer.type !== rightResponse.answer.type) continue;
       comparableResponses += 1;
-      if (leftResponse.answer.type === 'choice' && rightResponse.answer.type === 'choice') {
-        const row = optionTransitions[leftResponse.answer.choice] ??= {};
-        row[rightResponse.answer.choice] = (row[rightResponse.answer.choice] ?? 0) + 1;
-      } else if (leftResponse.answer.type === 'score' && rightResponse.answer.type === 'score') pairedScoreDifferences.push(rightResponse.answer.score - leftResponse.answer.score);
-      else if (leftResponse.answer.type === 'noul' && rightResponse.answer.type === 'noul') pairedNoulDifferences.push(rightResponse.answer.noul - leftResponse.answer.noul);
+      accumulateAnswerComparison({ choiceTransitions: optionTransitions, scoreDifferences: pairedScoreDifferences, noulDifferences: pairedNoulDifferences }, leftResponse.answer, rightResponse.answer);
     }
     return { comparisonKey, occurrence, leftResponses, rightResponses, pairedResponses, comparableResponses, unpairedResponses: pairedResponses - comparableResponses, leftOnlyResponses: Math.max(0, leftResponses - pairedResponses), rightOnlyResponses: Math.max(0, rightResponses - pairedResponses), optionTransitions,
       ...(pairedScoreDifferences.length ? { meanScoreDifference: pairedScoreDifferences.reduce((sum, value) => sum + value, 0) / pairedScoreDifferences.length } : {}),
@@ -260,8 +260,8 @@ export function compareReports(report: PollingReport, leftArmId: string, rightAr
   return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, comparisonTasks, matched };
 }
 
-function indexResponses(journeys: PollingReport['arms'][number]['journeys']): Map<string, PollingReport['arms'][number]['journeys'][number]['responses'][number]> {
-  const indexed = new Map<string, PollingReport['arms'][number]['journeys'][number]['responses'][number]>();
+function indexResponses(journeys: ReportArm['journeys']): Map<string, ReportResponse> {
+  const indexed = new Map<string, ReportResponse>();
   for (const journey of journeys) {
     for (const response of journey.responses) {
       if (!response.comparisonKey) continue;
@@ -282,10 +282,10 @@ export function compareRunReports(leftReport: PollingReport, leftArmId: string, 
   const respondentIds = [...new Set([...left.journeys, ...right.journeys].map((journey) => journey.respondentId))].sort();
   const groups = new Map<string, Set<string>>([['all', new Set(respondentIds)]]);
   for (const journey of left.journeys) {
-    if (journey.archetypeId) (groups.get(`archetype:${journey.archetypeId}`) ?? groups.set(`archetype:${journey.archetypeId}`, new Set()).get(`archetype:${journey.archetypeId}`)!).add(journey.respondentId);
+    if (journey.archetypeId) addGroupMember(groups, `archetype:${journey.archetypeId}`, journey.respondentId);
     for (const [axis, value] of Object.entries(journey.variation ?? {})) {
       const key = `variation:${axis}=${value}`;
-      (groups.get(key) ?? groups.set(key, new Set()).get(key)!).add(journey.respondentId);
+      addGroupMember(groups, key, journey.respondentId);
     }
   }
   const keys = new Set([
@@ -296,8 +296,12 @@ export function compareRunReports(leftReport: PollingReport, leftArmId: string, 
     const [comparisonKey = '', occurrenceText = '1'] = key.split(':');
     const occurrence = Number(occurrenceText);
     const choiceTransitions: Record<string, Record<string, number>> = {};
-    const scoreDifferences: number[] = []; const noulDifferences: number[] = [];
-    let leftResponses = 0; let rightResponses = 0; let pairedResponses = 0; let comparableResponses = 0;
+    const scoreDifferences: number[] = [];
+    const noulDifferences: number[] = [];
+    let leftResponses = 0;
+    let rightResponses = 0;
+    let pairedResponses = 0;
+    let comparableResponses = 0;
     for (const respondentId of respondentIds) {
       const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
       const a = leftCells.get(cell); const b = rightCells.get(cell);
@@ -307,27 +311,27 @@ export function compareRunReports(leftReport: PollingReport, leftArmId: string, 
       pairedResponses += 1;
       if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
       comparableResponses += 1;
-      if (a.answer.type === 'choice' && b.answer.type === 'choice') {
-        const row = choiceTransitions[a.answer.choice] ??= {};
-        row[b.answer.choice] = (row[b.answer.choice] ?? 0) + 1;
-      } else if (a.answer.type === 'score' && b.answer.type === 'score') scoreDifferences.push(b.answer.score - a.answer.score);
-      else if (a.answer.type === 'noul' && b.answer.type === 'noul') noulDifferences.push(b.answer.noul - a.answer.noul);
+      accumulateAnswerComparison({ choiceTransitions, scoreDifferences, noulDifferences }, a.answer, b.answer);
     }
     const profileGroups = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([group, members]) => {
-      const transitions: Record<string, Record<string, number>> = {}; const scores: number[] = []; const nouls: number[] = [];
-      let groupLeft = 0; let groupRight = 0; let groupPaired = 0; let groupComparable = 0;
+      const transitions: Record<string, Record<string, number>> = {};
+      const scores: number[] = [];
+      const nouls: number[] = [];
+      let groupLeft = 0;
+      let groupRight = 0;
+      let groupPaired = 0;
+      let groupComparable = 0;
       for (const respondentId of members) {
-        const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`; const a = leftCells.get(cell); const b = rightCells.get(cell);
+        const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
+        const a = leftCells.get(cell);
+        const b = rightCells.get(cell);
         if (a) groupLeft += 1;
         if (b) groupRight += 1;
         if (!a || !b) continue;
         groupPaired += 1;
         if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
         groupComparable += 1;
-        if (a.answer.type === 'choice' && b.answer.type === 'choice') {
-          const row = transitions[a.answer.choice] ??= {}; row[b.answer.choice] = (row[b.answer.choice] ?? 0) + 1;
-        } else if (a.answer.type === 'score' && b.answer.type === 'score') scores.push(b.answer.score - a.answer.score);
-        else if (a.answer.type === 'noul' && b.answer.type === 'noul') nouls.push(b.answer.noul - a.answer.noul);
+        accumulateAnswerComparison({ choiceTransitions: transitions, scoreDifferences: scores, noulDifferences: nouls }, a.answer, b.answer);
       }
       return { group, denominator: members.size, leftResponses: groupLeft, rightResponses: groupRight, pairedResponses: groupPaired, comparableResponses: groupComparable, nonComparableResponses: groupPaired - groupComparable, choiceTransitions: transitions,
         ...(scores.length ? { meanScoreDifference: scores.reduce((sum, value) => sum + value, 0) / scores.length } : {}),
@@ -371,6 +375,15 @@ export function compareRunReports(leftReport: PollingReport, leftArmId: string, 
   };
 }
 
+function addGroupMember(groups: Map<string, Set<string>>, key: string, respondentId: string): void {
+  let members = groups.get(key);
+  if (!members) {
+    members = new Set<string>();
+    groups.set(key, members);
+  }
+  members.add(respondentId);
+}
+
 function taskChangesBetween(left: PollingReport['arms'][number], right: PollingReport['arms'][number]) {
   const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
   const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
@@ -391,4 +404,12 @@ function equivalentTasks(left: PollingReport['arms'][number], right: PollingRepo
   if (leftTask.type === 'choice') return JSON.stringify(leftTask.options) === JSON.stringify(rightTask.options);
   if (leftTask.type === 'score') return JSON.stringify(leftTask.rubric) === JSON.stringify(rightTask.rubric);
   return JSON.stringify(leftTask.criteria ?? null) === JSON.stringify(rightTask.criteria ?? null);
+}
+
+function accumulateAnswerComparison(totals: AnswerComparisonTotals, left: ComparisonAnswer, right: ComparisonAnswer): void {
+  if (left.type === 'choice' && right.type === 'choice') {
+    const row = totals.choiceTransitions[left.choice] ??= {};
+    row[right.choice] = (row[right.choice] ?? 0) + 1;
+  } else if (left.type === 'score' && right.type === 'score') totals.scoreDifferences.push(right.score - left.score);
+  else if (left.type === 'noul' && right.type === 'noul') totals.noulDifferences.push(right.noul - left.noul);
 }

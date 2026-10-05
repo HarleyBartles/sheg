@@ -6,7 +6,7 @@ import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import type { RunCheckpoint } from '../src/infrastructure/legacy/run-archive.js';
 import { buildReport, compareReports, compareRunReports, getLegacyReport } from '../src/application/legacy/reports.js';
-import { emptyAttemptSnapshot } from '../src/infrastructure/legacy/run-archive.js';
+import { emptyAttemptSnapshot } from './helpers/legacy-archive.js';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
 import { promptContractHash } from '../src/domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';

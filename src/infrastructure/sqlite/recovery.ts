@@ -13,6 +13,8 @@ export type StoreCompatibility =
   | { status: 'uninitialized'; schemaVersion: 0; targetSchemaVersion: number }
   | { status: 'unreadable'; schemaVersion: null; targetSchemaVersion: number };
 
+export type RecoveryFileOperations = { rename?: typeof renameSync };
+
 export function inspectRunStoreCompatibility(dataRoot: string): StoreCompatibility {
   if (!path.isAbsolute(dataRoot)) return { status: 'unreadable', schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
   const databasePath = path.join(dataRoot, 'runs.sqlite');
@@ -44,7 +46,7 @@ export function runStoreBackupAvailable(dataRoot: string): boolean {
   catch { return false; }
 }
 
-export function resetRunStore(dataRoot: string, openFreshStore: () => void): { reset: true; backupRetained: true; preservation: 'verified-sqlite-backup'; schemaVersion: number } | { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: number } {
+export function resetRunStore(dataRoot: string, openFreshStore: () => void, operations: RecoveryFileOperations = {}): { reset: true; backupRetained: true; preservation: 'verified-sqlite-backup'; schemaVersion: number } | { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: number } {
   if (!path.isAbsolute(dataRoot)) throw new RunStoreError('invalid_data_root', 'Sheg data directory must be an absolute path.');
   const databasePath = path.join(dataRoot, 'runs.sqlite');
   let inspectionDatabase: DatabaseSync | undefined;
@@ -56,7 +58,7 @@ export function resetRunStore(dataRoot: string, openFreshStore: () => void): { r
     checkDatabaseIntegrity(inspectionDatabase, false);
   } catch {
     inspectionDatabase?.close();
-    return resetUnreadableRunStore(dataRoot, databasePath, openFreshStore);
+    return resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operations);
   }
   inspectionDatabase.close();
   const database = new DatabaseSync(databasePath, { timeout: 5_000 });
@@ -77,7 +79,7 @@ export function resetRunStore(dataRoot: string, openFreshStore: () => void): { r
     for (const original of files) {
       if (!existsSync(original)) continue;
       const archived = path.join(recoveryRoot, path.basename(original));
-      renameSync(original, archived);
+      (operations.rename ?? renameSync)(original, archived);
       moved.push({ original, archived });
     }
     openFreshStore();
@@ -86,15 +88,16 @@ export function resetRunStore(dataRoot: string, openFreshStore: () => void): { r
     for (const original of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
       try { unlinkSync(original); } catch { /* Preserve the reset error. */ }
     }
-    for (const item of moved.toReversed()) {
-      try { renameSync(item.archived, item.original); } catch { /* The verified backup remains available. */ }
-    }
-    if (error instanceof RunStoreError) throw error;
-    throw new RunStoreError('recovery_reset_failed', 'Sheg could not complete the explicit datastore reset; the original database and verified backup were preserved.', { cause: error });
+    const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
+    const restoration = retainedRecoveryFiles.length === 0
+      ? 'Original files were restored to their active paths.'
+      : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(', ')}.`;
+    if (error instanceof RunStoreError) throw new RunStoreError(error.code, `${error.message} ${restoration}`, { cause: error });
+    throw new RunStoreError('recovery_reset_failed', `Sheg could not complete the explicit datastore reset; the verified backup remains available. ${restoration}`, { cause: error });
   }
 }
 
-function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFreshStore: () => void): { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: number } {
+function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFreshStore: () => void, operations: RecoveryFileOperations): { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: number } {
   if (!existsSync(databasePath)) throw new RunStoreError('recovery_backup_failed', 'Sheg could not find the original datastore files to preserve; no reset was performed.');
   const recoveryRoot = path.join(dataRoot, 'recovery', randomUUID());
   mkdirSync(recoveryRoot, { recursive: true });
@@ -105,7 +108,7 @@ function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFre
       if (!existsSync(original)) continue;
       const size = statSync(original).size;
       const archived = path.join(recoveryRoot, path.basename(original));
-      renameSync(original, archived);
+      (operations.rename ?? renameSync)(original, archived);
       if (statSync(archived).size !== size) throw new Error('Quarantined datastore file size changed.');
       moved.push({ original, archived, size });
     }
@@ -115,10 +118,20 @@ function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFre
     for (const original of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
       try { unlinkSync(original); } catch { /* Preserve the reset error. */ }
     }
-    for (const item of moved.toReversed()) {
-      try { renameSync(item.archived, item.original); } catch { /* The original remains in recovery when restoration fails. */ }
-    }
-    throw new RunStoreError('recovery_reset_failed', 'Sheg could not complete the explicit reset; the original database files were preserved.', { cause: error });
+    const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
+    const restoration = retainedRecoveryFiles.length === 0
+      ? 'Original unreadable files were restored to their active paths.'
+      : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(', ')}.`;
+    throw new RunStoreError('recovery_reset_failed', `Sheg could not complete the explicit reset. ${restoration}`, { cause: error });
   }
+}
+
+function restoreMovedFiles(moved: Array<{ original: string; archived: string }>, rename: typeof renameSync): string[] {
+  const retained: string[] = [];
+  for (const item of moved.toReversed()) {
+    try { rename(item.archived, item.original); }
+    catch { retained.push(path.basename(item.archived)); }
+  }
+  return retained;
 }
 

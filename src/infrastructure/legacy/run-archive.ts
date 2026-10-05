@@ -3,12 +3,13 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { JourneyResult } from '../../domain/journey/run.js';
 import { decisionResultSchema, decisionValueSchema, type DecisionResult } from '../../domain/decision/decision.js';
-import type { AttemptSnapshot } from '../../domain/attempt-ledger.js';
 import { jevConfigSchema } from '../../providers/jev/config.js';
 import { providerConfigSchema } from '../../providers/config.js';
 import { executionFingerprint, legacyExecutionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../identity.js';
 import { loadStudy } from '../study-loader.js';
 import { legacyPromptContractHash, promptContractHash } from '../../domain/decision/prompt.js';
+
+export type AttemptSnapshot = { maxCalls: number; usedCalls: number; reservedCalls: number; remainingCalls: number };
 
 const journeyResultSchema = z.object({
   events: z.array(z.discriminatedUnion('type', [
@@ -200,7 +201,7 @@ export class LegacyRunArchiveReader {
     const initial = await this.readValue(runId);
     const current = runCheckpointSchema.safeParse(initial);
     if (current.success) return current.data;
-    return this.readCurrentOrMigrate(runId);
+    return this.readCurrentOrMigrate(runId, initial);
   }
 
   async list(): Promise<RunCheckpoint[]> {
@@ -222,8 +223,7 @@ export class LegacyRunArchiveReader {
     return path.join(this.directory, `run-${runId}.json`);
   }
 
-  private async readCurrentOrMigrate(runId: string): Promise<RunCheckpoint> {
-    const value = await this.readValue(runId);
+  private async readCurrentOrMigrate(runId: string, value: unknown): Promise<RunCheckpoint> {
     const current = runCheckpointSchema.safeParse(value);
     if (current.success) return current.data;
     const legacyShape = normalizeLegacyShape(value);
@@ -250,9 +250,5 @@ export class LegacyRunArchiveReader {
   }
 
 
-}
-
-export function emptyAttemptSnapshot(maxCalls: number): AttemptSnapshot {
-  return { maxCalls, usedCalls: 0, reservedCalls: 0, remainingCalls: maxCalls };
 }
 
