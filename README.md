@@ -16,6 +16,12 @@ Add the [Sheg Git marketplace](https://github.com/HarleyBartles/sheg) with `code
 
 Start with a request such as: “I am choosing a pull quote for this article. Help me compare the strongest candidate paragraphs with distinct reader perspectives, then propose a follow-up that shows each selected paragraph in isolation and asks what it communicates.” Sheg helps shape the study and checks its fit before asking you to approve a run. Hosted inference needs your authorization and a call limit.
 
+## Shared local studies
+
+MCP and the standalone CLI use the same datastore by default for the same OS user: `%LOCALAPPDATA%\Sheg` on Windows, `~/Library/Application Support/Sheg` on macOS, and `${XDG_DATA_HOME:-~/.local/share}/sheg` on Linux. Switching entrypoints or plugin installations does not require a data-root flag. Set `SHEG_DATA_DIR` for an intentional alternative, or use CLI `--data-root` for one command.
+
+Earlier development builds used the plugin host's `PLUGIN_DATA` directory. Those databases remain untouched; dev.17 does not copy or merge them into the shared default. They can still be selected explicitly. See the [datastore guide](docs/guides/datastore.md) before switching an existing development installation.
+
 ## Learn more
 
 - [Design a study](skills/study-design/SKILL.md) and [run polls, queries, and follow-ups](skills/stimulus-response-polling/SKILL.md).

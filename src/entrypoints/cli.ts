@@ -158,6 +158,7 @@ Commands:
   storage --request <json-file>                 Inspect, optimize or explicitly reset the datastore
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
-  Use --data-root <dir> with durable commands to select the datastore.`;
+  CLI and MCP share the platform's Sheg data directory by default.
+  Set SHEG_DATA_DIR or use --data-root <dir> to select another datastore.`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cp, mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -27,6 +27,17 @@ type FollowOnRequestTestShape = {
 
 function pluginPackageSource(): string {
   return path.resolve(process.env.SHEG_PLUGIN_PACKAGE_ROOT ?? 'plugins/sheg');
+}
+
+function isolatedDefaultStorage(sandbox: string): { env: Record<string, string>; dataRoot: string } {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !['SHEG_DATA_DIR', 'PLUGIN_DATA', 'PLUGIN_ROOT'].includes(key))) as Record<string, string>;
+  env.LOCALAPPDATA = path.join(sandbox, 'local');
+  env.XDG_DATA_HOME = path.join(sandbox, 'xdg');
+  env.HOME = path.join(sandbox, 'home');
+  const dataRoot = process.platform === 'win32' ? path.join(env.LOCALAPPDATA, 'Sheg')
+    : process.platform === 'darwin' ? path.join(env.HOME, 'Library', 'Application Support', 'Sheg')
+      : path.join(env.XDG_DATA_HOME, 'sheg');
+  return { env, dataRoot };
 }
 
 test('a copied plugin launches its shipped MCP without checkout or node_modules', async (t) => {
@@ -83,7 +94,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   const tokenizerPath = path.join(sandbox, 'laya-tokenizer.json');
   await cp(path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerPath);
   const pluginData = path.join(sandbox, 'plugin-data');
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'SHEG_DATA_DIR')) as Record<string, string>;
+  const { env, dataRoot } = isolatedDefaultStorage(sandbox);
   env.PLUGIN_DATA = pluginData;
   env.PLUGIN_ROOT = plugin;
   const client = new Client({ name: 'copied-plugin-smoke', version: '1.0.0' });
@@ -104,18 +115,19 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   } } });
   assert.equal(result.isError ?? false, false);
   assert.equal((result.structuredContent as { valid?: boolean }).valid, true);
-  assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), true);
+  assert.equal(await exists(path.join(dataRoot, 'runs.sqlite')), true);
+  assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), false);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
-  const initialized = new DatabaseSync(path.join(pluginData, 'runs.sqlite'), { readOnly: true });
+  const initialized = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { readOnly: true });
   try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9); }
   finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
 
-test('a packaged run survives its requesting MCP and can be recalled from a new MCP connection', async (t) => {
+test('a packaged run survives its MCP and is recalled by standalone CLI and a new plugin connection', async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-cross-mcp-'));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
-  const dataRoot = path.join(sandbox, 'data');
+  const { env: standaloneEnv, dataRoot } = isolatedDefaultStorage(sandbox);
   const pluginBeforeUpdate = path.join(sandbox, 'plugin-before-update');
   const pluginAfterUpdate = path.join(sandbox, 'plugin-after-update');
   await cp(pluginPackageSource(), pluginBeforeUpdate, { recursive: true });
@@ -152,8 +164,7 @@ test('a packaged run survives its requesting MCP and can be recalled from a new 
     provider: { kind: 'laya', baseUrl: `http://127.0.0.1:${address.port}`, checkpoint: 'fixture-checkpoint', contextLimit: 4096, headLimit: 512, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 },
   };
   const submissionId = randomUUID();
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'SHEG_DATA_DIR')) as Record<string, string>;
-  env.PLUGIN_DATA = dataRoot;
+  const env = { ...standaloneEnv, PLUGIN_DATA: path.join(sandbox, 'plugin-data') };
   const clientA = new Client({ name: 'package-a', version: '1.0.0' });
   const transportA = new StdioClientTransport({ command: process.execPath, args: [path.join(pluginBeforeUpdate, 'dist', 'mcp.js')], cwd: pluginBeforeUpdate, env });
   await clientA.connect(transportA);
@@ -173,8 +184,16 @@ test('a packaged run survives its requesting MCP and can be recalled from a new 
     releaseFirst?.();
     await waitForCompleted(dataRoot, runId);
 
+    const getRequest = path.join(sandbox, 'get.json');
+    await writeFile(getRequest, JSON.stringify({ runId, view: 'answers' }));
+    const cli = spawnSync(process.execPath, [path.join(pluginAfterUpdate, 'dist', 'cli.js'), 'get', '--request', getRequest], { cwd: sandbox, env: standaloneEnv, encoding: 'utf8', windowsHide: true });
+    assert.equal(cli.status, 0, cli.stderr);
+    const cliAnswers = JSON.parse(cli.stdout) as { items: Array<{ status: string; result?: { choice: string } }> };
+    assert.equal(cliAnswers.items[0]?.status, 'answered');
+    assert.equal(cliAnswers.items[0]?.result?.choice, 'continue');
+
     const clientB = new Client({ name: 'package-b', version: '1.0.0' });
-    const transportB = new StdioClientTransport({ command: process.execPath, args: [path.join(pluginAfterUpdate, 'dist', 'mcp.js')], cwd: pluginAfterUpdate, env });
+    const transportB = new StdioClientTransport({ command: process.execPath, args: [path.join(pluginAfterUpdate, 'dist', 'mcp.js')], cwd: pluginAfterUpdate, env: { ...standaloneEnv, PLUGIN_DATA: path.join(sandbox, 'updated-plugin-data') } });
     try {
       await clientB.connect(transportB);
       const recalled = await clientB.callTool({ name: 'run_get', arguments: { runId, view: 'answers' } });
