@@ -19,9 +19,11 @@ import { findRunBySubmission, hasAllFollowOnSelections, loadAcceptedRequest, loa
 import { encodeStoredPayload } from './sqlite/payload-codecs.js';
 import { loadJourneyWorkerTurn } from './sqlite/journey-queries.js';
 import { loadFollowOnSources } from './sqlite/follow-on-queries.js';
-import { claimPreparedRun, refreshWorkerLease, requestRunCancellation } from './sqlite/commands/lifecycle.js';
+import { claimPreparedRun, failOwnedRun, failPreparedLaunch, finishRun, interruptExpiredRun, interruptReservedAttempts, interruptUnclaimedRun, refreshWorkerLease, requestRunCancellation } from './sqlite/commands/lifecycle.js';
 import { reservePhysicalAttempt } from './sqlite/commands/reservation.js';
-import { chargeReservedAttempt } from './sqlite/commands/settlement.js';
+import { chargeReservedAttempt, linkWinningAnswer, markAttemptAnswered, markAttemptFailed, markAttemptUncertain, markEvaluationAnswered, markEvaluationFailed, markRunFailed, saveAttemptEvaluationFailure } from './sqlite/commands/settlement.js';
+import { persistJourneyRespondentState, persistNextJourneyTurn } from './sqlite/commands/journey-transition.js';
+import { deleteRun, markActiveJourneyRespondentsUnreached, markPendingEvaluationsUnreached, prepareResumedRun, reopenFailedQuestions, reopenJourneyEvaluation, reopenSharedFailure, restoreFailedJourneyRespondent } from './sqlite/commands/recovery.js';
 import { insertAcceptedRun, insertPreparedJourneyData, insertPreparedRunData } from './sqlite/commands/acceptance.js';
 import { encounteredMaterialsFromState, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './sqlite/evidence-records.js';
 import { openSqliteConnection, type SqliteConnection } from './sqlite/connection.js';
@@ -701,30 +703,21 @@ class SQLiteRunStore implements RunStore {
       const canRetryQuestionFailures = status === 'partial' && asNumber(failed.count, 'failed evaluation count') > 0 &&
         !isJourney;
       if (canRetrySharedFailure && runFailure) {
-        this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
-          WHERE run_id = ? AND status = 'failed' AND evaluation_id IN (SELECT evaluation_id FROM attempt_evaluations WHERE attempt_id = ?)`)
-          .run(runId, asText(runFailure.attempt_id, 'failed attempt ID'));
+        reopenSharedFailure(this.connection.orm, runId, asText(runFailure.attempt_id, 'failed attempt ID'));
       }
-      if (canRetryQuestionFailures) this.database.prepare("UPDATE evaluations SET status = 'pending', result_json = NULL, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE run_id = ? AND status = 'failed'").run(runId);
+      if (canRetryQuestionFailures) reopenFailedQuestions(this.connection.orm, runId);
       for (const checkpoint of journeyFailures) {
         const evaluationId = asText(checkpoint.evaluation_id, 'failed evaluation ID');
         const respondentId = asText(checkpoint.respondent_id, 'failed respondent ID');
-        const reopened = this.database.prepare(`UPDATE evaluations SET status = 'pending', result_json = NULL,
-          failure_code = NULL, failure_message = NULL, failure_detail_json = NULL
-          WHERE run_id = ? AND evaluation_id = ? AND respondent_id = ? AND status = 'failed'`).run(runId, evaluationId, respondentId);
-        const restored = this.database.prepare(`UPDATE journey_respondents SET status = 'active',
-          current_node_id = ?, current_turn_id = ?, current_context_id = ?, revision = revision + 1
-          WHERE run_id = ? AND respondent_id = ? AND status = 'failed'`).run(
+        const reopened = reopenJourneyEvaluation(this.connection.orm, runId, evaluationId, respondentId);
+        const restored = restoreFailedJourneyRespondent(this.connection.orm, runId, respondentId,
           asText(checkpoint.node_id, 'failed turn node ID'), asText(checkpoint.turn_id, 'failed turn ID'),
-          asText(checkpoint.context_id, 'failed turn context ID'), runId, respondentId);
-        if (reopened.changes !== 1 || restored.changes !== 1) {
+          asText(checkpoint.context_id, 'failed turn context ID'));
+        if (!reopened || !restored) {
           throw new RunStoreError('data_integrity_error', 'The saved failed journey checkpoint changed during resume.');
         }
       }
-      this.database.prepare(`UPDATE runs SET status = 'prepared', failure_scope = NULL, failure_code = NULL,
-        failure_message = NULL, lease_expires_ms = ?, owner_token = NULL, owner_pid = NULL
-        WHERE run_id = ? AND status IN ('interrupted', 'failed', 'partial')`)
-        .run(nowMs + LEASE_MS, runId);
+      prepareResumedRun(this.connection.orm, runId, nowMs + LEASE_MS);
       return { started: true, run: this.statusInside(runId) };
     });
   }
@@ -769,7 +762,7 @@ class SQLiteRunStore implements RunStore {
           attempts: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as DatabaseRow).count, 'attempt count'),
         };
       });
-      for (const { runId } of counts) this.database.prepare('DELETE FROM runs WHERE run_id = ?').run(runId);
+      for (const { runId } of counts) deleteRun(this.connection.orm, runId);
       const violations = this.database.prepare('PRAGMA foreign_key_check').all() as DatabaseRow[];
       const integrity = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
       if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
@@ -896,36 +889,31 @@ class SQLiteRunStore implements RunStore {
       if (!rows.length) throw new RunStoreError('data_integrity_error', 'The provider attempt has no linked evaluations.');
       const chargedCalls = outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.execution.attempts;
       if (outcome.kind === 'failed') {
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
-          .run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
+        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, 'evaluation ID');
-          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-            .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
-          if (outcome.detail || outcome.providerFailure) this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-            .run(evaluationFailureJson({ code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) }), attemptId, evaluationId);
+          markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
+          if (outcome.detail || outcome.providerFailure) saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId,
+            evaluationFailureJson({ code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) }));
         }
-        if (outcome.scope === 'run') this.database.prepare('UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?').run(outcome.scope, outcome.code, outcome.message, claim.runId);
+        if (outcome.scope === 'run') markRunFailed(this.connection.orm, claim.runId, outcome.code, outcome.message);
       } else {
         const result = decisionBatchResultSchema.safeParse(outcome.result);
         if (!result.success) throw new RunStoreError('invalid_batch_result', 'The batch result envelope is invalid.');
         const expected = new Map(rows.map((row) => [asText(row.question_id, 'question ID'), row]));
         if (result.data.answers.some(({ questionId }) => !expected.has(questionId))) throw new RunStoreError('invalid_batch_result', 'The batch result contains an unknown question ID.');
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, execution_json = ? WHERE attempt_id = ?")
-          .run(nowMs, result.data.execution.attempts, JSON.stringify(result.data.execution), attemptId);
+        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.data.execution.attempts, JSON.stringify(result.data.execution));
         for (const [questionId, row] of expected) {
           const answer = result.data.answers.find((item) => item.questionId === questionId);
           const evaluationId = asText(row.evaluation_id, 'evaluation ID');
           if (!answer) {
-            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = 'missing_batch_answer', failure_message = 'Provider returned no answer for this question.' WHERE evaluation_id = ?").run(evaluationId);
-            this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-              .run(evaluationFailureJson({ code: 'missing_batch_answer', message: 'Provider returned no answer for this question.' }), attemptId, evaluationId);
+            markEvaluationFailed(this.connection.orm, evaluationId, 'missing_batch_answer', 'Provider returned no answer for this question.');
+            saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId,
+              evaluationFailureJson({ code: 'missing_batch_answer', message: 'Provider returned no answer for this question.' }));
           } else if ('failure' in answer) {
             const failure = { code: answer.failure.code, message: answer.failure.message, ...(answer.failure.detail ? { detail: answer.failure.detail } : {}) };
-            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-              .run(failure.code, failure.message, failureEvidenceJson(failure), evaluationId);
-            this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-              .run(evaluationFailureJson(failure), attemptId, evaluationId);
+            markEvaluationFailed(this.connection.orm, evaluationId, failure.code, failure.message, failureEvidenceJson(failure));
+            saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
           } else {
             const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet'));
             let validated: ReturnType<typeof validateDecision> | undefined;
@@ -934,14 +922,12 @@ class SQLiteRunStore implements RunStore {
               validated = validateDecision(packet, typed, { maxAttempts: 1 });
             } catch {
               const failure = { code: 'invalid_decision', message: 'The stored answer did not satisfy this question contract.', detail: decisionFailureDetailForReason('invalid_answer') };
-              this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-                .run(failure.code, failure.message, failureEvidenceJson(failure), evaluationId);
-              this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-                .run(evaluationFailureJson(failure), attemptId, evaluationId);
+              markEvaluationFailed(this.connection.orm, evaluationId, failure.code, failure.message, failureEvidenceJson(failure));
+              saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
             }
             if (validated) {
-              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(encodeStoredPayload('decision-value', answer.value, decisionValueSchema), evaluationId);
-              this.database.prepare('INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)').run(claim.runId, evaluationId, attemptId);
+              markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload('decision-value', answer.value, decisionValueSchema));
+              linkWinningAnswer(this.connection.orm, claim.runId, evaluationId, attemptId);
             }
           }
         }
@@ -967,23 +953,17 @@ class SQLiteRunStore implements RunStore {
 
       if (outcome.kind === 'answered') {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
-          .run(nowMs, result.attempts, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?")
-          .run(encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema), evaluationId);
-        this.database.prepare('INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)').run(claim.runId, evaluationId, attemptId);
+        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.attempts, JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), JSON.stringify(result));
+        markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema));
+        linkWinningAnswer(this.connection.orm, claim.runId, evaluationId, attemptId);
       } else {
         const chargedCalls = outcome.providerAttempts ?? 1;
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
-          .run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-          .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
+        markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
         const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
-        this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-          .run(evaluationFailureJson(failure), attemptId, evaluationId);
+        saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
         if (outcome.scope === 'run') {
-          this.database.prepare('UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?')
-            .run(outcome.scope, outcome.code, outcome.message, claim.runId);
+          markRunFailed(this.connection.orm, claim.runId, outcome.code, outcome.message);
         }
       }
       if (!chargeReservedAttempt(this.connection.orm, claim.runId, outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
@@ -1055,11 +1035,11 @@ class SQLiteRunStore implements RunStore {
         } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
           throw new RunStoreError('journey_transition_conflict', 'A terminal respondent state cannot have a next reached turn.');
         }
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
-          .run(nowMs, result.attempts, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?")
-          .run(encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema), evaluationId);
-        this.database.prepare('INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)').run(claim.runId, evaluationId, attemptId);
+        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.attempts,
+          JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }),
+          JSON.stringify(result));
+        markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema));
+        linkWinningAnswer(this.connection.orm, claim.runId, evaluationId, attemptId);
       } else {
         const sharedFailure = outcome.scope === 'run';
         if (transition.nextEvaluation || (sharedFailure
@@ -1068,17 +1048,11 @@ class SQLiteRunStore implements RunStore {
           throw new RunStoreError('journey_transition_conflict', 'A failed turn must preserve a resumable shared turn or stop only this respondent.');
         }
         const chargedCalls = outcome.providerAttempts ?? 1;
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
-          .run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-          .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
+        markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
         const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
-        this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-          .run(evaluationFailureJson(failure), attemptId, evaluationId);
-        if (outcome.scope === 'run') {
-          this.database.prepare('UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?')
-            .run(outcome.scope, outcome.code, outcome.message, claim.runId);
-        }
+        saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
+        if (outcome.scope === 'run') markRunFailed(this.connection.orm, claim.runId, outcome.code, outcome.message);
       }
       if (transition.nextEvaluation) {
         const next = transition.nextEvaluation;
@@ -1092,22 +1066,11 @@ class SQLiteRunStore implements RunStore {
             hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
           throw new RunStoreError('invalid_journey_turn', 'Next journey turn is invalid or does not follow the persisted evaluation order.');
         }
-        this.database.prepare(`INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`)
-          .run(next.contextId, claim.runId, next.ordinal, next.contextId, next.respondentId, JSON.stringify(next.packet.state), JSON.stringify([next.questionId]));
-        this.database.prepare(`INSERT INTO evaluations
-          (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
-          .run(next.evaluationId, claim.runId, next.ordinal, next.contextId, next.respondentId, next.questionId,
-            next.contextId, next.turnId, next.nodeId, next.pathId, next.occurrence, JSON.stringify(next.packet), next.packetFingerprint);
-        this.database.prepare('UPDATE runs SET evaluation_count = evaluation_count + 1 WHERE run_id = ?').run(claim.runId);
+        persistNextJourneyTurn(this.connection.orm, claim.runId, next);
       }
-      const updatedState = this.database.prepare(`UPDATE journey_respondents SET status = ?, current_node_id = ?, current_turn_id = ?, current_context_id = ?,
-        revision = ?, events_json = ?, route_json = ?, outcome = ? WHERE run_id = ? AND respondent_id = ? AND revision = ?`)
-        .run(transition.state.status, transition.state.currentNodeId, transition.state.currentTurnId, transition.state.currentContextId,
-          transition.state.revision, JSON.stringify(transition.state.events), JSON.stringify(transition.state.route), transition.state.outcome ?? null,
-          claim.runId, respondentId, transition.expectedRevision);
-      if (updatedState.changes !== 1) throw new RunStoreError('journey_transition_conflict', 'Journey respondent state changed before its transition committed.');
+      if (!persistJourneyRespondentState(this.connection.orm, claim.runId, transition)) {
+        throw new RunStoreError('journey_transition_conflict', 'Journey respondent state changed before its transition committed.');
+      }
       if (!chargeReservedAttempt(this.connection.orm, claim.runId, outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
         throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to settle.');
       }
@@ -1125,9 +1088,8 @@ class SQLiteRunStore implements RunStore {
       if (atCallCeiling && asNumber(run.cancel_requested, 'cancel flag') === 0 && run.failure_scope !== 'run') {
         const hasJourney = this.database.prepare('SELECT 1 FROM journey_respondents WHERE run_id = ? LIMIT 1').get(claim.runId) as DatabaseRow | undefined;
         if (hasJourney) {
-          this.database.prepare("UPDATE evaluations SET status = 'unreached' WHERE run_id = ? AND status = 'pending'").run(claim.runId);
-          this.database.prepare(`UPDATE journey_respondents SET status = 'unreached', current_node_id = NULL, current_turn_id = NULL,
-            current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND status = 'active'`).run(claim.runId);
+          markPendingEvaluationsUnreached(this.connection.orm, claim.runId);
+          markActiveJourneyRespondentsUnreached(this.connection.orm, claim.runId);
         }
       }
       let status: RunStatus;
@@ -1141,8 +1103,7 @@ class SQLiteRunStore implements RunStore {
           FROM evaluations WHERE run_id = ?`).get(claim.runId) as DatabaseRow;
         status = asNumber(counts.pending, 'pending count') === 0 && asNumber(counts.failed, 'failed count') === 0 && asNumber(counts.unreached, 'unreached count') === 0 ? 'completed' : 'partial';
       }
-      this.database.prepare('UPDATE runs SET status = ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL WHERE run_id = ?')
-        .run(status, claim.runId);
+      finishRun(this.connection.orm, claim.runId, status);
       return this.statusInside(claim.runId);
     });
   }
@@ -1150,9 +1111,7 @@ class SQLiteRunStore implements RunStore {
   failLaunch(runId: string, code: string): void {
     this.ensureOpen();
     this.transaction(() => {
-      const updated = this.database.prepare("UPDATE runs SET status = 'failed', failure_scope = 'run', failure_code = ?, failure_message = 'Worker could not be launched' WHERE run_id = ? AND status = 'prepared'")
-        .run(code, runId);
-      if (updated.changes === 0) this.statusInside(runId);
+      if (!failPreparedLaunch(this.connection.orm, runId, code)) this.statusInside(runId);
     });
   }
 
@@ -1162,12 +1121,14 @@ class SQLiteRunStore implements RunStore {
       this.ownedRun(claim, this.now());
       const reserved = this.database.prepare("SELECT attempt_id FROM attempts WHERE run_id = ? AND owner_token = ? AND status = 'reserved'").get(claim.runId, claim.ownerToken) as DatabaseRow | undefined;
       if (reserved) {
-        this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, charged_calls = 1, failure_code = 'worker_interrupted', failure_message = 'The provider outcome could not be confirmed' WHERE attempt_id = ?")
-          .run(this.now(), asText(reserved.attempt_id, 'attempt ID'));
-        this.database.prepare('UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0').run(claim.runId);
+        markAttemptUncertain(this.connection.orm, asText(reserved.attempt_id, 'attempt ID'), this.now(), 'The provider outcome could not be confirmed');
+        if (!chargeReservedAttempt(this.connection.orm, claim.runId, 1)) {
+          throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to account for.');
+        }
       }
-      this.database.prepare("UPDATE runs SET status = 'failed', failure_scope = 'run', failure_code = ?, failure_message = ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL WHERE run_id = ? AND owner_token = ?")
-        .run(code, message, claim.runId, claim.ownerToken);
+      if (!failOwnedRun(this.connection.orm, claim.runId, claim.ownerToken, code, message)) {
+        throw new RunStoreError('worker_ownership_lost', 'This worker no longer owns the run.');
+      }
     });
   }
 
@@ -1318,19 +1279,17 @@ class SQLiteRunStore implements RunStore {
     const status = asText(run.status, 'run status');
     const launchDeadline = run.lease_expires_ms === null ? asNumber(run.created_ms, 'created time') + LEASE_MS : asNumber(run.lease_expires_ms, 'launch deadline');
     if (status === 'prepared' && nowMs >= launchDeadline) {
-      this.database.prepare("UPDATE runs SET status = 'interrupted', failure_scope = 'run', failure_code = 'worker_not_claimed', failure_message = 'No worker claimed the accepted run before its launch window expired' WHERE run_id = ? AND status = 'prepared'").run(runId);
+      interruptUnclaimedRun(this.connection.orm, runId);
     } else if (status === 'running' && run.lease_expires_ms !== null && asNumber(run.lease_expires_ms, 'worker lease') <= nowMs) {
       const attempts = this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ? AND status = 'reserved'").get(runId) as DatabaseRow;
       const uncertain = asNumber(attempts.count, 'uncertain attempt count');
       if (uncertain !== asNumber(run.reserved_calls, 'reserved calls')) {
         throw new RunStoreError('data_integrity_error', 'Reserved call counters do not match reserved attempts.');
       }
-      this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, charged_calls = 1, failure_code = 'worker_interrupted', failure_message = 'Provider completion is unknown' WHERE run_id = ? AND status = 'reserved'").run(nowMs, runId);
-      this.database.prepare(`UPDATE runs SET status = 'interrupted', used_calls = used_calls + ?,
-        reserved_calls = reserved_calls - ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL,
-        failure_scope = 'run', failure_code = 'worker_interrupted', failure_message = 'Worker ownership expired; unfinished work requires explicit resume'
-        WHERE run_id = ? AND status = 'running' AND lease_expires_ms <= ? AND reserved_calls >= ?`)
-        .run(uncertain, uncertain, runId, nowMs, uncertain);
+      const updatedUncertainAttempts = interruptReservedAttempts(this.connection.orm, runId, nowMs);
+      if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(this.connection.orm, runId, nowMs, uncertain)) {
+        throw new RunStoreError('data_integrity_error', 'Expired worker reservations changed during reconciliation.');
+      }
     }
   }
 }

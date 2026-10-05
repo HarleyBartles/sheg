@@ -76,9 +76,9 @@
 
 **Interface:** `RunCommandRepository` owns acceptance, claims/heartbeats, attempt reservation and settlement, journey advancement, finish/failure, cancellation, resume, reconciliation, deletion and optimization. Batch reconciliation accepts the relevant run set; commands validate live preconditions and write under one immediate transaction.
 
-- [ ] Use typed Drizzle writes under one connection owner. Verify expected schema and command preconditions within the immediate transaction; keep provider I/O outside it. Account for zero, one, and uncertain physical calls in the attempt ledger and run projection together.
+- [x] Use typed Drizzle writes under one connection owner. Verify expected schema and command preconditions within the immediate transaction; keep provider I/O outside it. Account for zero, one, and uncertain physical calls in the attempt ledger and run projection together.
 - [x] Atomically settle attempt outcome, winning answers/links, respondent revision and next-turn creation. Preserve original call allowance, respondent-local retry, partial-batch success, cancellation, idempotency, and stale lease rejection.
-- [ ] Implement explicit batch reconciliation for service use without hidden mutations in reads. Verify failed reconciliation is surfaced, and prove settlement rollback and cross-run/group identity rejection with real SQLite behavior tests. Run focused checks and commit.
+- [x] Implement explicit batch reconciliation for service use without hidden mutations in reads. Verify failed reconciliation is surfaced, and prove settlement rollback and cross-run/group identity rejection with real SQLite behavior tests. Run focused checks and commit.
 
 ## Task 5: Cut application and entrypoints over to the repository owner
 

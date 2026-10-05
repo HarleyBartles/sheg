@@ -216,6 +216,29 @@ test('acceptance survives a second connection and matching submission retries sh
   }
 });
 
+test('batch reconciliation surfaces reservation corruption and rolls back earlier state changes', async () => {
+  const root = await temporaryRoot();
+  let nowMs = 10_000;
+  const store = openRunStore(root, { now: () => nowMs });
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const first = store.accept(randomUUID(), await preparedRun());
+    const second = store.accept(randomUUID(), await preparedRun());
+    assert.ok(store.claim(first.run.runId, nowMs, 1234));
+    database.prepare('UPDATE runs SET reserved_calls = 1 WHERE run_id = ?').run(first.run.runId);
+    nowMs += 31_000;
+
+    assert.throws(() => store.reconcileMany([first.run.runId, second.run.runId], nowMs),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
+    assert.equal(store.getStatus(first.run.runId).status, 'running');
+    assert.equal(store.getStatus(second.run.runId).status, 'prepared');
+  } finally {
+    database.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('a physical batch reserves and settles once while preserving one typed evaluation per question', async () => {
   const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [
     { type: 'choice', id: 'interest', instructions: 'Would you keep reading?',
