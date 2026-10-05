@@ -219,6 +219,7 @@ test('batch admission measures ordered mixed questions over one exact context pe
   const provider: DecisionProvider = {
     measureBatch(batch) { measured.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const questions = [
     { type: 'choice' as const, id: 'interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } },
@@ -256,6 +257,7 @@ test('batch admission greedily splits overflow into the largest fitting ordered 
       return fit(batch.questions.length <= 2 ? 'fits' : 'overflow');
     },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const questions = ['q1', 'q2', 'q3'].map((id) => ({ type: 'noul' as const, id, instructions: `Question ${id}?` }));
   const input = { ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 };
@@ -278,6 +280,7 @@ test('an unavailable group or overflowing singleton never becomes admitted throu
     const provider: DecisionProvider = {
       measureBatch: () => fit(resultStatus),
       async decide() { throw new Error('Inspection must not run inference.'); },
+      async decideBatch() { throw new Error('Inspection must not run inference.'); },
     };
     const result = await prepareRun({ ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 }, provider);
     assert.equal(result.inspection.valid, false, resultStatus);
@@ -294,6 +297,23 @@ test('providers without batch measurement receive singleton questions over each 
   assert.equal(result.inspection.minimumCalls, 4);
   assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['first', 'second', 'first', 'second']);
   assert.deepEqual(result.inspection.fits.map(({ questionIds }) => questionIds), [['first'], ['second'], ['first'], ['second']]);
+});
+
+test('a measurement-only batch capability falls back to singleton admission', async () => {
+  let batchMeasurements = 0;
+  let singleMeasurements = 0;
+  const provider: DecisionProvider = {
+    measure() { singleMeasurements += 1; return fit(); },
+    measureBatch() { batchMeasurements += 1; return fit(); },
+    async decide() { throw new Error('Inspection must not run inference.'); },
+  };
+  const questions = ['first', 'second'].map((id) => ({ type: 'noul' as const, id, instructions: `Is ${id} important?` }));
+  const result = await prepareRun({ ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 }, provider);
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 2);
+  assert.equal(batchMeasurements, 0);
+  assert.equal(singleMeasurements, 2);
+  assert.deepEqual(result.inspection.fits.map(({ questionIds }) => questionIds), [['first'], ['second']]);
 });
 
 test('follow-on batching groups distinct source contexts and never includes selection metadata in model state', async () => {
@@ -323,6 +343,7 @@ test('follow-on batching groups distinct source contexts and never includes sele
   const provider: DecisionProvider = {
     measureBatch(batch) { measured.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const admission = await prepareFollowOnRun(followOn, source, provider);
 
@@ -353,6 +374,7 @@ test('follow-on batching groups distinct source contexts and never includes sele
   const continuationProvider: DecisionProvider = {
     measureBatch(batch) { continuationProviderCalls.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const continued = await prepareFollowOnRun({ ...followOn, context: { mode: 'continue' }, maxCalls: 3 }, { ...source, turns: continuationTurns }, continuationProvider);
   assert.equal(continued.inspection.valid, true);
@@ -385,6 +407,7 @@ test('selected-material follow-on gives each mapped answer its own isolated pack
   const provider: DecisionProvider = {
     measureBatch(batch) { measured.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
 
   const admission = await prepareFollowOnRun(followOn, source, provider);

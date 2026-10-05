@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { RunService } from './run-service.js';
 
 export const resetConfirmation = 'RESET SHEG DATASTORE';
 export const runStorageSchema = z.discriminatedUnion('operation', [
@@ -17,3 +18,20 @@ export const runGetSchema = z.discriminatedUnion('view', [
 ]);
 
 export type StorageOperation = z.infer<typeof runStorageSchema>;
+export type RunGetOperation = z.infer<typeof runGetSchema>;
+
+export function dispatchRunGet(input: RunGetOperation, service: RunService): unknown {
+  switch (input.view) {
+    case 'status': return service.getStatus(input.runId);
+    case 'request': return service.getRequest(input.runId);
+    case 'journey': return service.getJourneyRun(input.runId);
+    case 'context': return service.getContext(input.runId, input.evaluationId, input.contextId);
+    case 'answers': return service.answers(input.runId, input.cursor, input.limit);
+    case 'attempts': return service.attempts(input.runId, input.cursor, input.limit);
+    default: return assertNever(input);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unsupported run view: ${JSON.stringify(value)}`);
+}

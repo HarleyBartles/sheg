@@ -34396,7 +34396,7 @@ import path11 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/application/run-service.ts
-import path2 from "node:path";
+import path from "node:path";
 
 // src/domain/decision/provider.ts
 var providerKinds = ["jev", "laya"];
@@ -35555,125 +35555,6 @@ var runEvidencePageSchema = external_exports.object({
 }).strict();
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
-// src/infrastructure/credentials/windows.ts
-import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-var CredentialStoreError = class extends Error {
-  constructor(code, route) {
-    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
-    super(message);
-    this.code = code;
-    this.route = route;
-    this.name = "CredentialStoreError";
-  }
-  code;
-  route;
-};
-var defaultTargets = {
-  typesafe: "Sheg/Jev/TypeSafe",
-  openrouter: "Sheg/Jev/OpenRouter"
-};
-var WindowsCredentialStore = class {
-  targets;
-  helperPath;
-  run;
-  constructor(options2 = {}) {
-    this.targets = { ...defaultTargets, ...options2.credentialTargets };
-    this.helperPath = options2.helperPath ?? locateHelper();
-    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
-  }
-  async availability(route) {
-    try {
-      const result = await this.run(this.arguments("Status", route));
-      if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
-      if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
-      if (result.code === 4 && result.stdout.trim() === "MALFORMED") return "malformed";
-      return "unavailable";
-    } catch {
-      return "unavailable";
-    }
-  }
-  async readForAuthentication(route) {
-    let result;
-    try {
-      result = await this.run(this.arguments("Read", route));
-    } catch {
-      throw new CredentialStoreError("credential_unavailable", route);
-    }
-    const key = result.stdout.replace(/\r?\n$/, "");
-    if (result.code === 4 && result.stdout.trim() === "MALFORMED") throw new CredentialStoreError("credential_malformed", route);
-    if (result.code !== 0 || !key) throw new CredentialStoreError("credential_unavailable", route);
-    return key;
-  }
-  async setup(route) {
-    const result = await this.run(this.arguments("Setup", route), true);
-    if (result.code !== 0) throw new Error(`The ${route} secure credential could not be saved.`);
-  }
-  async remove(route) {
-    const result = await this.run(this.arguments("Remove", route));
-    if (result.code !== 0 && result.code !== 3) throw new Error(`The ${route} secure credential could not be removed.`);
-  }
-  arguments(operation, route) {
-    return ["-Operation", operation, "-TargetName", this.targets[route]];
-  }
-};
-function locateHelper() {
-  const moduleDirectory2 = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.join(moduleDirectory2, "windows-credential.ps1"),
-    path.join(moduleDirectory2, "credentials", "windows-credential.ps1")
-  ];
-  const helper = candidates.find(existsSync);
-  if (!helper) throw new Error("The Windows credential helper is unavailable.");
-  return helper;
-}
-async function runPowerShell(helperPath, args, interactive = false) {
-  if (process.platform !== "win32") throw new Error("Windows secure credentials are unavailable on this platform.");
-  const childArgs = [
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File"
-  ];
-  if (interactive) childArgs.splice(2, 1);
-  childArgs.push(helperPath, ...args);
-  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name2) => process.env[name2] === void 0 ? [] : [[name2, process.env[name2]]]));
-  return new Promise((resolve, reject) => {
-    const child = nodeSpawn("powershell.exe", childArgs, {
-      windowsHide: !interactive,
-      shell: false,
-      stdio: interactive ? ["inherit", "inherit", "ignore"] : ["ignore", "pipe", "ignore"],
-      env
-    });
-    let stdout = "";
-    let settled = false;
-    const finish = (error62, code = 1) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error62) reject(error62);
-      else resolve({ code, stdout, stderr: "" });
-    };
-    const timer = setTimeout(() => {
-      child.kill();
-      finish(new Error("Credential helper timed out."));
-    }, interactive ? 3e5 : 1e4);
-    if (!interactive) child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-      if (stdout.length > 16384) {
-        child.kill();
-        finish(new Error("Credential helper output exceeded its limit."));
-      }
-    });
-    child.once("error", () => finish(new Error("Credential helper could not start.")));
-    child.once("close", (code) => finish(void 0, code ?? 1));
-  });
-}
-
 // src/application/run-inspection.ts
 import { createHash as createHash3, randomUUID } from "node:crypto";
 
@@ -36163,7 +36044,7 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
     const problem = problemForFit(respondentId, fit);
     if (problem) problems.push(problem);
   };
-  if (!provider.measureBatch) {
+  if (!provider.measureBatch || !provider.decideBatch) {
     for (let index2 = 0; index2 < questions.length; index2 += 1) {
       const question = questions[index2];
       const fit = await measureOne(index2);
@@ -36316,7 +36197,7 @@ function normalizeRequest(input2) {
   const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) throw new RunServiceError("invalid_request", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
   if (parsed.data.provider.kind === "laya") {
-    return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path2.resolve(parsed.data.provider.tokenizerJsonPath) } };
+    return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path.resolve(parsed.data.provider.tokenizerJsonPath) } };
   }
   return parsed.data;
 }
@@ -36327,9 +36208,10 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
       await options2.assertProviderReady?.(provider);
     } catch (error62) {
       if (error62 instanceof RunServiceError) throw error62;
-      if (error62 instanceof CredentialStoreError) {
-        const code = error62.code === "credential_malformed" ? "provider_credential_malformed" : error62.code === "credential_missing" ? "provider_credential_missing" : "provider_credential_unavailable";
-        throw new RunServiceError(code, error62.message, { cause: error62 });
+      const code = error62 instanceof Error && "code" in error62 ? String(error62.code) : "";
+      if (code === "credential_malformed" || code === "credential_missing" || code === "credential_unavailable") {
+        const mapped = code === "credential_malformed" ? "provider_credential_malformed" : code === "credential_missing" ? "provider_credential_missing" : "provider_credential_unavailable";
+        throw new RunServiceError(mapped, error62 instanceof Error ? error62.message : "Provider credential is unavailable.", { cause: error62 });
       }
       throw new RunServiceError("provider_credential_unavailable", "Provider credential is unavailable.", { cause: error62 });
     }
@@ -36457,7 +36339,7 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
 // src/infrastructure/run-store.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
 import { mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
-import path6 from "node:path";
+import path5 from "node:path";
 
 // src/application/run-store.ts
 var RunStoreError = class extends Error {
@@ -42085,11 +41967,11 @@ function storedJourneyIdentity(row) {
 
 // src/infrastructure/sqlite/query-library.ts
 import { readFileSync } from "node:fs";
-import path3 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-var moduleDirectory = path3.dirname(fileURLToPath2(import.meta.url));
+import path2 from "node:path";
+import { fileURLToPath } from "node:url";
+var moduleDirectory = path2.dirname(fileURLToPath(import.meta.url));
 function createSqliteQuery(name2, parametersSchema, rowsSchema) {
-  const assetPath = path3.join(moduleDirectory, "queries", `${name2}.sql`);
+  const assetPath = path2.join(moduleDirectory, "queries", `${name2}.sql`);
   let sql2;
   try {
     sql2 = readFileSync(assetPath, "utf8");
@@ -43317,9 +43199,9 @@ function drizzle(...params) {
 
 // src/infrastructure/sqlite/schema.ts
 import { createHash as createHash7, randomUUID as randomUUID3 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, unlinkSync } from "node:fs";
-import path4 from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { existsSync, mkdirSync, readFileSync as readFileSync2, unlinkSync } from "node:fs";
+import path3 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
 var BASELINE_SCHEMA_VERSION = 9;
 var SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
@@ -43329,10 +43211,10 @@ var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
 function baselineSqlPath() {
   const candidates = [
-    fileURLToPath3(new URL("../../../migrations/0000_baseline_v9/migration.sql", import.meta.url)),
-    fileURLToPath3(new URL("./migrations/0000_baseline_v9/migration.sql", import.meta.url))
+    fileURLToPath2(new URL("../../../migrations/0000_baseline_v9/migration.sql", import.meta.url)),
+    fileURLToPath2(new URL("./migrations/0000_baseline_v9/migration.sql", import.meta.url))
   ];
-  const match = candidates.find(existsSync2);
+  const match = candidates.find(existsSync);
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 9 migration asset is missing from this Sheg installation.");
   return match;
 }
@@ -43452,9 +43334,9 @@ function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   }
 }
 function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
-  const backupRoot = path4.join(dataRoot, "backups");
+  const backupRoot = path3.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path4.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
+  const backupPath = path3.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -43668,13 +43550,13 @@ function openSqliteConnection(databasePath, dataRoot) {
 
 // src/infrastructure/sqlite/recovery.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync, renameSync, statSync, unlinkSync as unlinkSync2 } from "node:fs";
-import path5 from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync, renameSync, statSync, unlinkSync as unlinkSync2 } from "node:fs";
+import path4 from "node:path";
 import { DatabaseSync as DatabaseSync3 } from "node:sqlite";
 function inspectRunStoreCompatibility(dataRoot) {
-  if (!path5.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
-  const databasePath = path5.join(dataRoot, "runs.sqlite");
-  if (!existsSync3(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
+  if (!path4.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
+  const databasePath = path4.join(dataRoot, "runs.sqlite");
+  if (!existsSync2(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
   let database;
   try {
     database = new DatabaseSync3(databasePath, { readOnly: true, timeout: 5e3 });
@@ -43697,8 +43579,8 @@ function inspectRunStoreCompatibility(dataRoot) {
   }
 }
 function runStoreBackupAvailable(dataRoot) {
-  const backupRoot = path5.join(dataRoot, "backups");
-  if (!existsSync3(backupRoot)) return false;
+  const backupRoot = path4.join(dataRoot, "backups");
+  if (!existsSync2(backupRoot)) return false;
   try {
     return readdirSync(backupRoot).some((name2) => name2.startsWith("runs-schema-") && name2.endsWith(".sqlite"));
   } catch {
@@ -43706,8 +43588,8 @@ function runStoreBackupAvailable(dataRoot) {
   }
 }
 function resetRunStore(dataRoot, openFreshStore) {
-  if (!path5.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
-  const databasePath = path5.join(dataRoot, "runs.sqlite");
+  if (!path4.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  const databasePath = path4.join(dataRoot, "runs.sqlite");
   let inspectionDatabase;
   let version2;
   try {
@@ -43729,14 +43611,14 @@ function resetRunStore(dataRoot, openFreshStore) {
     throw new RunStoreError("recovery_backup_failed", "Sheg could not verify a recoverable datastore backup; the original files were left untouched.", { cause: error62 });
   }
   database.close();
-  const recoveryRoot = path5.join(dataRoot, "recovery", randomUUID4());
+  const recoveryRoot = path4.join(dataRoot, "recovery", randomUUID4());
   mkdirSync2(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
   try {
     for (const original of files) {
-      if (!existsSync3(original)) continue;
-      const archived = path5.join(recoveryRoot, path5.basename(original));
+      if (!existsSync2(original)) continue;
+      const archived = path4.join(recoveryRoot, path4.basename(original));
       renameSync(original, archived);
       moved.push({ original, archived });
     }
@@ -43760,16 +43642,16 @@ function resetRunStore(dataRoot, openFreshStore) {
   }
 }
 function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
-  if (!existsSync3(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
-  const recoveryRoot = path5.join(dataRoot, "recovery", randomUUID4());
+  if (!existsSync2(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
+  const recoveryRoot = path4.join(dataRoot, "recovery", randomUUID4());
   mkdirSync2(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
   try {
     for (const original of files) {
-      if (!existsSync3(original)) continue;
+      if (!existsSync2(original)) continue;
       const size = statSync(original).size;
-      const archived = path5.join(recoveryRoot, path5.basename(original));
+      const archived = path4.join(recoveryRoot, path4.basename(original));
       renameSync(original, archived);
       if (statSync(archived).size !== size) throw new Error("Quarantined datastore file size changed.");
       moved.push({ original, archived, size });
@@ -44013,10 +43895,10 @@ function validateRunIds(runIds) {
   }
 }
 function openRunStore(dataRoot, options2 = {}) {
-  if (!path6.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  if (!path5.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync3(dataRoot, { recursive: true });
-  const connection = openSqliteConnection(path6.join(dataRoot, "runs.sqlite"), dataRoot);
-  return new SQLiteRunStore(connection, path6.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+  const connection = openSqliteConnection(path5.join(dataRoot, "runs.sqlite"), dataRoot);
+  return new SQLiteRunStore(connection, path5.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 function openRunPersistence(dataRoot, options2 = {}) {
   return splitRunStore(openRunStore(dataRoot, options2));
@@ -44612,9 +44494,9 @@ function resetRunStore2(dataRoot) {
 import os from "node:os";
 
 // src/infrastructure/data-root.ts
-import path7 from "node:path";
+import path6 from "node:path";
 function pathsFor(platform) {
-  return platform === "win32" ? path7.win32 : path7.posix;
+  return platform === "win32" ? path6.win32 : path6.posix;
 }
 function requiredAbsolute(value, name2, paths, allowMissing = false) {
   if (value === void 0 && allowMissing) return void 0;
@@ -44643,7 +44525,7 @@ function resolveDataRoot(env, platform, home) {
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
 import { link, mkdir, open as open2, readFile, readdir, rename, rm } from "node:fs/promises";
-import path8 from "node:path";
+import path7 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 var ProcessLockError = class extends Error {
   constructor(message) {
@@ -44660,7 +44542,7 @@ var ProcessLock = class _ProcessLock {
   record;
   static async acquire(directory, name2, operations = {}) {
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(name2)) throw new TypeError("Lock name contains unsupported characters.");
-    const lockPath = path8.join(directory, `${name2}.lock`);
+    const lockPath = path7.join(directory, `${name2}.lock`);
     const record2 = { pid: process.pid, token: randomUUID6() };
     const content = `${JSON.stringify(record2)}
 `;
@@ -44731,11 +44613,11 @@ var ProcessLock = class _ProcessLock {
   }
 };
 async function staleClaims(lockPath) {
-  const directory = path8.dirname(lockPath);
-  const prefix = `${path8.basename(lockPath)}.`;
+  const directory = path7.dirname(lockPath);
+  const prefix = `${path7.basename(lockPath)}.`;
   try {
     const entries = await readdir(directory);
-    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path8.join(directory, entry));
+    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path7.join(directory, entry));
   } catch (error62) {
     if (error62.code === "ENOENT") return [];
     throw error62;
@@ -44783,9 +44665,9 @@ function processExists(pid) {
 
 // src/infrastructure/worker-launcher.ts
 import { spawn } from "node:child_process";
-import path9 from "node:path";
+import path8 from "node:path";
 var DetachedWorkerLauncher = class {
-  constructor(workerPath = path9.join(path9.dirname(path9.resolve(process.argv[1] ?? process.execPath)), "worker.js")) {
+  constructor(workerPath = path8.join(path8.dirname(path8.resolve(process.argv[1] ?? process.execPath)), "worker.js")) {
     this.workerPath = workerPath;
   }
   workerPath;
@@ -44806,8 +44688,124 @@ var DetachedWorkerLauncher = class {
   }
 };
 
-// src/providers/jev.ts
-import { setTimeout as wait } from "node:timers/promises";
+// src/infrastructure/credentials/windows.ts
+import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync as existsSync3 } from "node:fs";
+import path9 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+var CredentialStoreError = class extends Error {
+  constructor(code, route) {
+    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
+    super(message);
+    this.code = code;
+    this.route = route;
+    this.name = "CredentialStoreError";
+  }
+  code;
+  route;
+};
+var defaultTargets = {
+  typesafe: "Sheg/Jev/TypeSafe",
+  openrouter: "Sheg/Jev/OpenRouter"
+};
+var WindowsCredentialStore = class {
+  targets;
+  helperPath;
+  run;
+  constructor(options2 = {}) {
+    this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    this.helperPath = options2.helperPath ?? locateHelper();
+    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
+  }
+  async availability(route) {
+    try {
+      const result = await this.run(this.arguments("Status", route));
+      if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
+      if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
+      if (result.code === 4 && result.stdout.trim() === "MALFORMED") return "malformed";
+      return "unavailable";
+    } catch {
+      return "unavailable";
+    }
+  }
+  async readForAuthentication(route) {
+    let result;
+    try {
+      result = await this.run(this.arguments("Read", route));
+    } catch {
+      throw new CredentialStoreError("credential_unavailable", route);
+    }
+    const key = result.stdout.replace(/\r?\n$/, "");
+    if (result.code === 4 && result.stdout.trim() === "MALFORMED") throw new CredentialStoreError("credential_malformed", route);
+    if (result.code !== 0 || !key) throw new CredentialStoreError("credential_unavailable", route);
+    return key;
+  }
+  async setup(route) {
+    const result = await this.run(this.arguments("Setup", route), true);
+    if (result.code !== 0) throw new Error(`The ${route} secure credential could not be saved.`);
+  }
+  async remove(route) {
+    const result = await this.run(this.arguments("Remove", route));
+    if (result.code !== 0 && result.code !== 3) throw new Error(`The ${route} secure credential could not be removed.`);
+  }
+  arguments(operation, route) {
+    return ["-Operation", operation, "-TargetName", this.targets[route]];
+  }
+};
+function locateHelper() {
+  const moduleDirectory2 = path9.dirname(fileURLToPath3(import.meta.url));
+  const candidates = [
+    path9.join(moduleDirectory2, "windows-credential.ps1"),
+    path9.join(moduleDirectory2, "credentials", "windows-credential.ps1")
+  ];
+  const helper = candidates.find(existsSync3);
+  if (!helper) throw new Error("The Windows credential helper is unavailable.");
+  return helper;
+}
+async function runPowerShell(helperPath, args, interactive = false) {
+  if (process.platform !== "win32") throw new Error("Windows secure credentials are unavailable on this platform.");
+  const childArgs = [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File"
+  ];
+  if (interactive) childArgs.splice(2, 1);
+  childArgs.push(helperPath, ...args);
+  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name2) => process.env[name2] === void 0 ? [] : [[name2, process.env[name2]]]));
+  return new Promise((resolve, reject) => {
+    const child = nodeSpawn("powershell.exe", childArgs, {
+      windowsHide: !interactive,
+      shell: false,
+      stdio: interactive ? ["inherit", "inherit", "ignore"] : ["ignore", "pipe", "ignore"],
+      env
+    });
+    let stdout = "";
+    let settled = false;
+    const finish = (error62, code = 1) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error62) reject(error62);
+      else resolve({ code, stdout, stderr: "" });
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(new Error("Credential helper timed out."));
+    }, interactive ? 3e5 : 1e4);
+    if (!interactive) child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > 16384) {
+        child.kill();
+        finish(new Error("Credential helper output exceeded its limit."));
+      }
+    });
+    child.once("error", () => finish(new Error("Credential helper could not start.")));
+    child.once("close", (code) => finish(void 0, code ?? 1));
+  });
+}
 
 // src/providers/jev/model-metadata.ts
 var jevModelMetadata = {
@@ -44846,6 +44844,107 @@ function jevMetadata(route, model) {
   return jevModelMetadata[route][model];
 }
 
+// src/providers/jev/transport.ts
+import { setTimeout as wait } from "node:timers/promises";
+var wireUsageSchema = external_exports.object({
+  input_tokens: external_exports.number().int().nonnegative().optional(),
+  output_tokens: external_exports.number().int().nonnegative().optional(),
+  cost: external_exports.number().finite().nonnegative().optional()
+}).passthrough();
+var nativeWireUsageSchema = wireUsageSchema.extend({
+  input_tokens: external_exports.number().int().nonnegative(),
+  output_tokens: external_exports.number().int().nonnegative()
+});
+var wireResponseSchema = external_exports.object({ model: external_exports.string().min(1), answers: external_exports.record(external_exports.string(), external_exports.unknown()), usage: wireUsageSchema }).passthrough();
+var nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
+var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
+var JevTransportError = class extends Error {
+  constructor(message, attempts2, scope, code, category, httpStatus) {
+    super(message);
+    this.attempts = attempts2;
+    this.scope = scope;
+    this.code = code;
+    this.category = category;
+    this.httpStatus = httpStatus;
+    this.name = "JevTransportError";
+  }
+  attempts;
+  scope;
+  code;
+  category;
+  httpStatus;
+};
+async function executeJevTransport(input2) {
+  let apiKey;
+  try {
+    apiKey = await input2.credentialStore.readForAuthentication(input2.config.route);
+  } catch (error62) {
+    if (error62 instanceof CredentialStoreError) {
+      throw new JevTransportError(error62.message, 0, "run", error62.code, "credential");
+    }
+    throw new JevTransportError(`The ${input2.config.route} secure credential is unavailable.`, 0, "run", "credential_unavailable", "credential");
+  }
+  const startedAt = performance.now();
+  for (let attempts2 = 1; attempts2 <= input2.maxAttempts; attempts2 += 1) {
+    let response;
+    try {
+      response = await input2.fetchRequest(input2.config.endpoint, {
+        method: "POST",
+        redirect: "error",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: input2.body,
+        signal: AbortSignal.timeout(input2.config.timeoutMs)
+      });
+    } catch {
+      if (attempts2 < input2.maxAttempts) {
+        await wait(retryDelayMs(attempts2));
+        continue;
+      }
+      throw new JevTransportError("Jev request failed at the transport boundary.", attempts2, "evaluation", "provider_unavailable", "transport");
+    }
+    if (!response.ok) {
+      if (retryableStatuses.has(response.status) && attempts2 < input2.maxAttempts) {
+        await wait(retryDelayMs(attempts2));
+        continue;
+      }
+      throw new JevTransportError(
+        `Jev request failed with HTTP ${response.status}.`,
+        attempts2,
+        response.status === 401 || response.status === 403 ? "run" : "evaluation",
+        "provider_unavailable",
+        "http",
+        response.status
+      );
+    }
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new JevTransportError("Jev returned an unreadable response.", attempts2, "evaluation", "provider_unavailable", "envelope");
+    }
+    const parsed = (input2.config.route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
+    if (!parsed.success) throw new JevTransportError("Jev response is missing required identity or usage fields.", attempts2, "evaluation", "provider_unavailable", "envelope");
+    const { model, usage } = parsed.data;
+    const metadata2 = jevMetadata(input2.config.route, model);
+    const estimatedAmount = usage.input_tokens !== void 0 && usage.output_tokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (usage.input_tokens * metadata2.inputUsdPerMillion + usage.output_tokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
+    return {
+      response: parsed.data,
+      execution: {
+        attempts: attempts2,
+        provider: "jev",
+        model,
+        latencyMs: performance.now() - startedAt,
+        usage: { ...usage.input_tokens === void 0 ? {} : { inputTokens: usage.input_tokens }, ...usage.output_tokens === void 0 ? {} : { outputTokens: usage.output_tokens } },
+        ...usage.cost !== void 0 ? { cost: { amountUsd: usage.cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
+      }
+    };
+  }
+  throw new JevTransportError("Jev call limit reached without a response.", input2.maxAttempts, "evaluation", "provider_unavailable", "transport");
+}
+function retryDelayMs(attempt) {
+  return Math.min(50 * 2 ** (attempt - 1), 1e3);
+}
+
 // src/providers/system-one-contract.ts
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal(decisionTypes.choice),
@@ -44863,32 +44962,13 @@ function systemOneQuestion(question) {
 
 // src/providers/jev.ts
 var JevCallError = class extends ProviderCallError {
-  constructor(message, attempts2, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
-    super(message, { attempts: attempts2, ...contextFit ? { contextFit } : {}, scope: failureScope, code: failureCode, ...validationFailure ? { validationFailure } : {}, ...evidence });
-    this.decisionId = decisionId;
+  decisionId;
+  constructor(message, options2) {
+    super(message, options2);
+    this.decisionId = options2.decisionId;
     this.name = "JevCallError";
   }
-  decisionId;
 };
-var wireUsageSchema = external_exports.object({
-  input_tokens: external_exports.number().int().nonnegative().optional(),
-  output_tokens: external_exports.number().int().nonnegative().optional(),
-  cost: external_exports.number().finite().nonnegative().optional()
-}).passthrough();
-var nativeWireUsageSchema = wireUsageSchema.extend({
-  input_tokens: external_exports.number().int().nonnegative(),
-  output_tokens: external_exports.number().int().nonnegative()
-});
-var wireResponseSchema = external_exports.object({
-  model: external_exports.string().min(1),
-  answers: external_exports.record(external_exports.string(), external_exports.unknown()),
-  usage: wireUsageSchema
-}).passthrough();
-var nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
-function parseWireResponse(payload, route) {
-  return (route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
-}
-var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
 function requestBody(request, model) {
@@ -44938,95 +45018,26 @@ var JevProvider = class {
   measureContext;
   measureBatchContext;
   async decide(request, maxAttempts) {
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new JevCallError("Jev call limit must be a positive integer.", 0);
-    }
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", { attempts: 0 });
     const parsedRequest = decisionRequestSchema.safeParse(request);
-    if (!parsedRequest.success) {
-      throw new JevCallError("Jev decision request is invalid.", 0);
-    }
+    if (!parsedRequest.success) throw new JevCallError("Jev decision request is invalid.", { attempts: 0 });
     const fit = this.measure(parsedRequest.data);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
-    let apiKey;
-    try {
-      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
-    } catch (error62) {
-      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
-    }
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, { attempts: 0, contextFit: fit, decisionId: parsedRequest.data.question.id });
     const { question } = parsedRequest.data;
-    const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
-    const startedAt = performance.now();
-    let attempts2 = 0;
-    while (attempts2 < maxAttempts) {
-      attempts2 += 1;
-      let response;
-      try {
-        response = await this.fetchRequest(this.config.endpoint, {
-          method: "POST",
-          redirect: "error",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body,
-          signal: AbortSignal.timeout(this.config.timeoutMs)
-        });
-      } catch {
-        if (attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
-      }
-      if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts2, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
-      }
-      let payload;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      }
-      const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      }
-      const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
-      if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts2, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
-      }
-      const cost = parsedResponse.data.usage.cost;
-      const inputTokens = parsedResponse.data.usage.input_tokens;
-      const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
-      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
-      const result = {
-        ...answer.data,
-        attempts: attempts2,
-        provider: "jev",
-        model: parsedResponse.data.model,
-        latencyMs: performance.now() - startedAt,
-        usage: {
-          ...inputTokens === void 0 ? {} : { inputTokens },
-          ...outputTokens === void 0 ? {} : { outputTokens }
-        },
-        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
-      };
-      try {
-        return validateDecision(request, result, { maxAttempts, provider: "jev" });
-      } catch (error62) {
-        if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation.", attempts2, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
-        }
-        throw error62;
-      }
+    const { response, execution } = await this.execute(JSON.stringify(requestBody(parsedRequest.data, this.config.model)), maxAttempts);
+    const answer = systemOneAnswerSchema.safeParse(response.answers[question.id]);
+    if (!answer.success) {
+      throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, { attempts: execution.attempts, decisionId: question.id, code: "decision_failed", validationFailure: decisionValidationFailureForReason("malformed_answer") });
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts2);
+    const result = { ...answer.data, ...execution };
+    try {
+      return validateDecision(request, result, { maxAttempts, provider: "jev" });
+    } catch (error62) {
+      if (error62 instanceof DecisionError) {
+        throw new JevCallError("Jev response failed decision validation.", { attempts: execution.attempts, code: "decision_failed", validationFailure: decisionValidationFailure(error62) });
+      }
+      throw error62;
+    }
   }
   measureBatch(request) {
     const parsed = decisionBatchRequestSchema.safeParse(request);
@@ -45034,80 +45045,39 @@ var JevProvider = class {
     return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
   }
   async decideBatch(request, maxAttempts) {
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", 0);
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", { attempts: 0 });
     const parsedRequest = decisionBatchRequestSchema.safeParse(request);
-    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", 0);
+    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", { attempts: 0 });
     const normalizedRequest = parsedRequest.data;
     const fit = this.measureBatch(normalizedRequest);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit);
-    let apiKey;
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, { attempts: 0, contextFit: fit });
+    const { response, execution } = await this.execute(JSON.stringify(batchRequestBody(normalizedRequest, this.config.model)), maxAttempts);
+    const answers = Object.entries(response.answers).map(([questionId, rawValue]) => {
+      const answer = systemOneAnswerSchema.safeParse(rawValue);
+      return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
+    });
     try {
-      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+      return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
     } catch (error62) {
-      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
+      if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", { attempts: execution.attempts, code: "decision_failed", validationFailure: decisionValidationFailure(error62) });
+      throw error62;
     }
-    const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
-    const startedAt = performance.now();
-    let attempts2 = 0;
-    while (attempts2 < maxAttempts) {
-      attempts2 += 1;
-      let response;
-      try {
-        response = await this.fetchRequest(this.config.endpoint, {
-          method: "POST",
-          redirect: "error",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body,
-          signal: AbortSignal.timeout(this.config.timeoutMs)
+  }
+  async execute(body, maxAttempts) {
+    try {
+      return await executeJevTransport({ config: this.config, credentialStore: this.credentialStore, fetchRequest: this.fetchRequest, body, maxAttempts });
+    } catch (error62) {
+      if (error62 instanceof JevTransportError) {
+        throw new JevCallError(error62.message, {
+          attempts: error62.attempts,
+          scope: error62.scope,
+          code: error62.code,
+          category: error62.category,
+          ...error62.httpStatus === void 0 ? {} : { httpStatus: error62.httpStatus }
         });
-      } catch {
-        if (attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
-      if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts2, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
-      }
-      let payload;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      }
-      const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      const cost = parsedResponse.data.usage.cost;
-      const inputTokens = parsedResponse.data.usage.input_tokens;
-      const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
-      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
-      const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
-        const answer = systemOneAnswerSchema.safeParse(rawValue);
-        return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
-      });
-      const execution = {
-        attempts: attempts2,
-        provider: "jev",
-        model: parsedResponse.data.model,
-        latencyMs: performance.now() - startedAt,
-        usage: { ...inputTokens === void 0 ? {} : { inputTokens }, ...outputTokens === void 0 ? {} : { outputTokens } },
-        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
-      };
-      try {
-        return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
-      } catch (error62) {
-        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts2);
-        throw error62;
-      }
+      throw error62;
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts2);
   }
   measure(request) {
     return this.measureContext(request, this.config);
@@ -45115,9 +45085,6 @@ var JevProvider = class {
 };
 function missingMeasureFit2(config2, reason) {
   return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
-}
-function retryDelayMs(attempt) {
-  return Math.min(50 * 2 ** (attempt - 1), 1e3);
 }
 
 // src/providers/laya/context-fit.ts
@@ -45704,6 +45671,27 @@ var runGetSchema = external_exports.discriminatedUnion("view", [
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
   external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
 ]);
+function dispatchRunGet(input2, service) {
+  switch (input2.view) {
+    case "status":
+      return service.getStatus(input2.runId);
+    case "request":
+      return service.getRequest(input2.runId);
+    case "journey":
+      return service.getJourneyRun(input2.runId);
+    case "context":
+      return service.getContext(input2.runId, input2.evaluationId, input2.contextId);
+    case "answers":
+      return service.answers(input2.runId, input2.cursor, input2.limit);
+    case "attempts":
+      return service.attempts(input2.runId, input2.cursor, input2.limit);
+    default:
+      return assertNever2(input2);
+  }
+}
+function assertNever2(value) {
+  throw new Error(`Unsupported run view: ${JSON.stringify(value)}`);
+}
 
 // package.json
 var package_default = {
@@ -45759,12 +45747,7 @@ function createPollingServer(service) {
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
   server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtime.service.queryEvidence(query)));
   server.registerTool("run_get", { description: "Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
-    if (input2.view === "status") return runtime.service.getStatus(input2.runId);
-    if (input2.view === "request") return runtime.service.getRequest(input2.runId);
-    if (input2.view === "journey") return runtime.service.getJourneyRun(input2.runId);
-    if (input2.view === "context") return runtime.service.getContext(input2.runId, input2.evaluationId, input2.contextId);
-    if (input2.view === "answers") return runtime.service.answers(input2.runId, input2.cursor, input2.limit);
-    return runtime.service.attempts(input2.runId, input2.cursor, input2.limit);
+    return dispatchRunGet(input2, runtime.service);
   }));
   server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.cancel(runId)));
   server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.resume(runId)));

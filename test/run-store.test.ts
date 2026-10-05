@@ -246,7 +246,7 @@ test('a physical batch reserves and settles once while preserving one typed eval
     { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Clear'] },
     { type: 'noul', id: 'appeal', instructions: 'Was it appealing?' },
   ], material: [{ ...input.material[0]!, sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) }] };
-  const batchProvider: DecisionProvider = { ...provider, measureBatch: () => fit };
+  const batchProvider: DecisionProvider = { ...provider, measureBatch: () => fit, async decideBatch() { throw new Error('Admission must not infer.'); } };
   const prepared = await prepareRun(value, batchProvider);
   assert.ok(prepared.prepared);
   const root = await temporaryRoot(); const store = openRunStore(root, { now: () => 10_000 });
@@ -297,7 +297,7 @@ test('a physical batch reserves and settles once while preserving one typed eval
 test('a batch-wide provider failure records one physical call and fails every reserved evaluation together', async () => {
   const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [input.questions[0]!,
     { type: 'noul', id: 'interest-score', instructions: 'Would you describe this material as interesting?' }] };
-  const prepared = await prepareRun(value, { ...provider, measureBatch: () => fit }); assert.ok(prepared.prepared);
+  const prepared = await prepareRun(value, { ...provider, measureBatch: () => fit, async decideBatch() { throw new Error('Admission must not infer.'); } }); assert.ok(prepared.prepared);
   const root = await temporaryRoot(); const store = openRunStore(root, { now: () => 10_000 });
   try {
     const accepted = store.accept(randomUUID(), prepared.prepared); const claim = store.claim(accepted.run.runId, 10_000, 1234); assert.ok(claim);

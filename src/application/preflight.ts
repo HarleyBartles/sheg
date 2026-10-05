@@ -6,11 +6,19 @@ import type { ProviderContextFit } from '../domain/decision/provider.js';
 import { JevProvider, type JevRoute } from '../providers/jev.js';
 import { LayaProvider } from '../providers/laya.js';
 import { providerConfigSchema, type ProviderConfigInput } from '../providers/config.js';
-import { WindowsCredentialStore, type CredentialAvailability } from '../infrastructure/credentials/windows.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 
 export type PreflightProviderConfig = ProviderConfigInput;
+type CredentialAvailability = 'available' | 'missing' | 'malformed' | 'unavailable';
+type PreflightCredentialStore = {
+  availability(route: JevRoute): Promise<CredentialAvailability>;
+  readForAuthentication(route: JevRoute): Promise<string>;
+};
+const unavailableCredentialStore: PreflightCredentialStore = {
+  async availability() { return 'unavailable'; },
+  async readForAuthentication() { throw new Error('Credential access is unavailable in this preflight context.'); },
+};
 export type StudyPreflightInput = {
   manifestPath: string;
   cohortPath?: string;
@@ -49,7 +57,7 @@ export type ProviderStudyFit = {
   incompleteReason?: string;
 };
 
-export async function preflightStudy(input: StudyPreflightInput, dependencies: { credentialStore?: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'> } = {}): Promise<{ provisional: boolean; mode: 'frozen-cohort' | 'maximum-profile'; inputFingerprint: string; compilerFingerprint: string; providers: ProviderStudyFit[] }> {
+export async function preflightStudy(input: StudyPreflightInput, dependencies: { credentialStore?: PreflightCredentialStore } = {}): Promise<{ provisional: boolean; mode: 'frozen-cohort' | 'maximum-profile'; inputFingerprint: string; compilerFingerprint: string; providers: ProviderStudyFit[] }> {
   const config = preflightInputSchema.parse(input);
   const study = await loadStudy(config.manifestPath, config.cohortPath, { allowMissingCohort: config.mode === 'maximum-profile' });
   const respondents = config.mode === 'maximum-profile' ? [maximumProfile()] : study.respondents;
@@ -59,7 +67,7 @@ export async function preflightStudy(input: StudyPreflightInput, dependencies: {
   const traversal = walkStudyPackets(study.manifest.arms, respondents, (packet) => { packets.push(packet); }, config.maxPackets === undefined ? {} : { maxPackets: config.maxPackets });
   const results: ProviderStudyFit[] = [];
 
-  const credentialStore = dependencies.credentialStore ?? new WindowsCredentialStore();
+  const credentialStore = dependencies.credentialStore ?? unavailableCredentialStore;
   for (const providerInput of config.providers) {
     const providerConfig = providerInput;
     const provider = providerConfig.kind === 'jev' ? new JevProvider(providerConfig, fetch, { credentialStore }) : new LayaProvider(providerConfig);

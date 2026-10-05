@@ -7,9 +7,10 @@ import { compareReports, compareRunReports, getLegacyReport } from '../applicati
 import { preflightStudy, type PreflightProviderConfig } from '../application/preflight.js';
 import { decisionValueSchema, type DecisionValue } from '../domain/decision/decision.js';
 import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
-import { runDeleteSchema, runGetSchema, runStorageSchema, type StorageOperation } from '../application/run-operations.js';
+import { dispatchRunGet, runDeleteSchema, runGetSchema, runStorageSchema, type StorageOperation } from '../application/run-operations.js';
 import { createRunRuntime } from '../infrastructure/run-runtime.js';
 import { RunServiceError } from '../application/run-service.js';
+import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import { RunStoreError } from '../infrastructure/run-store.js';
 import type { RunService } from '../application/run-service.js';
 
@@ -26,7 +27,7 @@ export async function runCli(args: readonly string[], io: CliIo = outputIo, serv
       const mode = options.mode ?? 'frozen-cohort';
       if (mode !== 'frozen-cohort' && mode !== 'maximum-profile') throw new CliInputError('Preflight mode must be frozen-cohort or maximum-profile.');
       const providers = await readJson<PreflightProviderConfig[]>(required(options, 'providers'));
-      const result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), ...(options.cohort === undefined ? {} : { cohortPath: path.resolve(options.cohort) }), mode, providers });
+      const result = await preflightStudy({ manifestPath: path.resolve(required(options, 'manifest')), ...(options.cohort === undefined ? {} : { cohortPath: path.resolve(options.cohort) }), mode, providers }, { credentialStore: new WindowsCredentialStore() });
       io.out(JSON.stringify(result));
       return 0;
     }
@@ -64,12 +65,7 @@ async function durableOperation(command: string, options: Record<string, string>
   if (command === 'query') return service.queryEvidence(runEvidenceQuerySchema.parse(await readJson(required(options, 'query'))));
   if (command === 'get') {
     const input = runGetSchema.parse(await readJson(required(options, 'request')));
-    if (input.view === 'status') return service.getStatus(input.runId);
-    if (input.view === 'request') return service.getRequest(input.runId);
-    if (input.view === 'journey') return service.getJourneyRun(input.runId);
-    if (input.view === 'context') return service.getContext(input.runId, input.evaluationId, input.contextId);
-    if (input.view === 'answers') return service.answers(input.runId, input.cursor, input.limit);
-    return service.attempts(input.runId, input.cursor, input.limit);
+    return dispatchRunGet(input, service);
   }
   if (command === 'cancel') return service.cancel(uuid(required(options, 'run-id')));
   if (command === 'resume') return service.resume(uuid(required(options, 'run-id')));

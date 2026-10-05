@@ -97,11 +97,11 @@
 
 **Interfaces:** Shared Jev transport returns decoded envelope and execution metadata or bounded provider failure. Single and batch decoders consume that result. Batch capability is coherent for measurement and inference. Shared application view dispatch is exhaustive over the existing operation schema.
 
-- [ ] Consolidate credential retrieval, permitted endpoint checks, retries, HTTP/envelope handling and accounting while retaining request-specific decoding. Replace fragile positional error arguments with the existing typed options contract where appropriate.
-- [ ] Verify mocked single/batch authentication failure, transport failure, HTTP rejection, malformed envelope, invalid typed answer, and call accounting. Preserve bounded validation details consistently and verify no credential appears in returned evidence.
-- [ ] Align inspection and worker capability selection; test a provider that supports only part of an optional batch capability and define a safe single-call fallback or explicit refusal consistently.
-- [ ] Share exhaustive CLI/MCP view dispatch. Remove concrete Windows credential types from application policy where a small capability port suffices; keep secure implementations at composition boundaries.
-- [ ] Run provider and entrypoint tests and typecheck; inspect that a shared helper has not absorbed answer-specific policy. Commit.
+- [x] Consolidate credential retrieval, permitted endpoint checks, retries, HTTP/envelope handling and accounting while retaining request-specific decoding. Replace fragile positional error arguments with the existing typed options contract where appropriate.
+- [x] Verify mocked single/batch authentication failure, transport failure, HTTP rejection, malformed envelope, invalid typed answer, and call accounting. Preserve bounded validation details consistently and verify no credential appears in returned evidence.
+- [x] Align inspection and worker capability selection; test a provider that supports only part of an optional batch capability and define a safe single-call fallback or explicit refusal consistently.
+- [x] Share exhaustive CLI/MCP view dispatch. Remove concrete Windows credential types from application policy where a small capability port suffices; keep secure implementations at composition boundaries.
+- [x] Run provider and entrypoint tests and typecheck; inspect that a shared helper has not absorbed answer-specific policy. Commit.
 
 ## Task 7: Remove remaining audited dead and fragile source
 

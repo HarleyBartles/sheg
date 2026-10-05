@@ -341,7 +341,7 @@ async function planQuestionBatches(
     if (problem) problems.push(problem);
   };
 
-  if (!provider.measureBatch) {
+  if (!provider.measureBatch || !provider.decideBatch) {
     for (let index = 0; index < questions.length; index += 1) {
       const question = questions[index]!;
       const fit = await measureOne(index);

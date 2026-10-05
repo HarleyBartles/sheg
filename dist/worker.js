@@ -29173,9 +29173,6 @@ async function runPowerShell(helperPath, args, interactive = false) {
   });
 }
 
-// src/providers/jev.ts
-import { setTimeout as wait } from "node:timers/promises";
-
 // src/providers/jev/model-metadata.ts
 var jevModelMetadata = {
   openrouter: {
@@ -29213,6 +29210,107 @@ function jevMetadata(route, model) {
   return jevModelMetadata[route][model];
 }
 
+// src/providers/jev/transport.ts
+import { setTimeout as wait } from "node:timers/promises";
+var wireUsageSchema = external_exports.object({
+  input_tokens: external_exports.number().int().nonnegative().optional(),
+  output_tokens: external_exports.number().int().nonnegative().optional(),
+  cost: external_exports.number().finite().nonnegative().optional()
+}).passthrough();
+var nativeWireUsageSchema = wireUsageSchema.extend({
+  input_tokens: external_exports.number().int().nonnegative(),
+  output_tokens: external_exports.number().int().nonnegative()
+});
+var wireResponseSchema = external_exports.object({ model: external_exports.string().min(1), answers: external_exports.record(external_exports.string(), external_exports.unknown()), usage: wireUsageSchema }).passthrough();
+var nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
+var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
+var JevTransportError = class extends Error {
+  constructor(message, attempts2, scope, code, category, httpStatus) {
+    super(message);
+    this.attempts = attempts2;
+    this.scope = scope;
+    this.code = code;
+    this.category = category;
+    this.httpStatus = httpStatus;
+    this.name = "JevTransportError";
+  }
+  attempts;
+  scope;
+  code;
+  category;
+  httpStatus;
+};
+async function executeJevTransport(input2) {
+  let apiKey;
+  try {
+    apiKey = await input2.credentialStore.readForAuthentication(input2.config.route);
+  } catch (error62) {
+    if (error62 instanceof CredentialStoreError) {
+      throw new JevTransportError(error62.message, 0, "run", error62.code, "credential");
+    }
+    throw new JevTransportError(`The ${input2.config.route} secure credential is unavailable.`, 0, "run", "credential_unavailable", "credential");
+  }
+  const startedAt = performance.now();
+  for (let attempts2 = 1; attempts2 <= input2.maxAttempts; attempts2 += 1) {
+    let response;
+    try {
+      response = await input2.fetchRequest(input2.config.endpoint, {
+        method: "POST",
+        redirect: "error",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: input2.body,
+        signal: AbortSignal.timeout(input2.config.timeoutMs)
+      });
+    } catch {
+      if (attempts2 < input2.maxAttempts) {
+        await wait(retryDelayMs(attempts2));
+        continue;
+      }
+      throw new JevTransportError("Jev request failed at the transport boundary.", attempts2, "evaluation", "provider_unavailable", "transport");
+    }
+    if (!response.ok) {
+      if (retryableStatuses.has(response.status) && attempts2 < input2.maxAttempts) {
+        await wait(retryDelayMs(attempts2));
+        continue;
+      }
+      throw new JevTransportError(
+        `Jev request failed with HTTP ${response.status}.`,
+        attempts2,
+        response.status === 401 || response.status === 403 ? "run" : "evaluation",
+        "provider_unavailable",
+        "http",
+        response.status
+      );
+    }
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new JevTransportError("Jev returned an unreadable response.", attempts2, "evaluation", "provider_unavailable", "envelope");
+    }
+    const parsed = (input2.config.route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
+    if (!parsed.success) throw new JevTransportError("Jev response is missing required identity or usage fields.", attempts2, "evaluation", "provider_unavailable", "envelope");
+    const { model, usage } = parsed.data;
+    const metadata2 = jevMetadata(input2.config.route, model);
+    const estimatedAmount = usage.input_tokens !== void 0 && usage.output_tokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (usage.input_tokens * metadata2.inputUsdPerMillion + usage.output_tokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
+    return {
+      response: parsed.data,
+      execution: {
+        attempts: attempts2,
+        provider: "jev",
+        model,
+        latencyMs: performance.now() - startedAt,
+        usage: { ...usage.input_tokens === void 0 ? {} : { inputTokens: usage.input_tokens }, ...usage.output_tokens === void 0 ? {} : { outputTokens: usage.output_tokens } },
+        ...usage.cost !== void 0 ? { cost: { amountUsd: usage.cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
+      }
+    };
+  }
+  throw new JevTransportError("Jev call limit reached without a response.", input2.maxAttempts, "evaluation", "provider_unavailable", "transport");
+}
+function retryDelayMs(attempt) {
+  return Math.min(50 * 2 ** (attempt - 1), 1e3);
+}
+
 // src/providers/system-one-contract.ts
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal(decisionTypes.choice),
@@ -29230,32 +29328,13 @@ function systemOneQuestion(question) {
 
 // src/providers/jev.ts
 var JevCallError = class extends ProviderCallError {
-  constructor(message, attempts2, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
-    super(message, { attempts: attempts2, ...contextFit ? { contextFit } : {}, scope: failureScope2, code: failureCode, ...validationFailure ? { validationFailure } : {}, ...evidence });
-    this.decisionId = decisionId;
+  decisionId;
+  constructor(message, options2) {
+    super(message, options2);
+    this.decisionId = options2.decisionId;
     this.name = "JevCallError";
   }
-  decisionId;
 };
-var wireUsageSchema = external_exports.object({
-  input_tokens: external_exports.number().int().nonnegative().optional(),
-  output_tokens: external_exports.number().int().nonnegative().optional(),
-  cost: external_exports.number().finite().nonnegative().optional()
-}).passthrough();
-var nativeWireUsageSchema = wireUsageSchema.extend({
-  input_tokens: external_exports.number().int().nonnegative(),
-  output_tokens: external_exports.number().int().nonnegative()
-});
-var wireResponseSchema = external_exports.object({
-  model: external_exports.string().min(1),
-  answers: external_exports.record(external_exports.string(), external_exports.unknown()),
-  usage: wireUsageSchema
-}).passthrough();
-var nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
-function parseWireResponse(payload, route) {
-  return (route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
-}
-var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
 function requestBody(request, model) {
@@ -29305,95 +29384,26 @@ var JevProvider = class {
   measureContext;
   measureBatchContext;
   async decide(request, maxAttempts) {
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new JevCallError("Jev call limit must be a positive integer.", 0);
-    }
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", { attempts: 0 });
     const parsedRequest = decisionRequestSchema.safeParse(request);
-    if (!parsedRequest.success) {
-      throw new JevCallError("Jev decision request is invalid.", 0);
-    }
+    if (!parsedRequest.success) throw new JevCallError("Jev decision request is invalid.", { attempts: 0 });
     const fit = this.measure(parsedRequest.data);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
-    let apiKey;
-    try {
-      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
-    } catch (error62) {
-      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
-    }
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, { attempts: 0, contextFit: fit, decisionId: parsedRequest.data.question.id });
     const { question } = parsedRequest.data;
-    const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
-    const startedAt = performance.now();
-    let attempts2 = 0;
-    while (attempts2 < maxAttempts) {
-      attempts2 += 1;
-      let response;
-      try {
-        response = await this.fetchRequest(this.config.endpoint, {
-          method: "POST",
-          redirect: "error",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body,
-          signal: AbortSignal.timeout(this.config.timeoutMs)
-        });
-      } catch {
-        if (attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
-      }
-      if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts2, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
-      }
-      let payload;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      }
-      const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      }
-      const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
-      if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts2, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
-      }
-      const cost = parsedResponse.data.usage.cost;
-      const inputTokens = parsedResponse.data.usage.input_tokens;
-      const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
-      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
-      const result = {
-        ...answer.data,
-        attempts: attempts2,
-        provider: "jev",
-        model: parsedResponse.data.model,
-        latencyMs: performance.now() - startedAt,
-        usage: {
-          ...inputTokens === void 0 ? {} : { inputTokens },
-          ...outputTokens === void 0 ? {} : { outputTokens }
-        },
-        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
-      };
-      try {
-        return validateDecision(request, result, { maxAttempts, provider: "jev" });
-      } catch (error62) {
-        if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation.", attempts2, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
-        }
-        throw error62;
-      }
+    const { response, execution } = await this.execute(JSON.stringify(requestBody(parsedRequest.data, this.config.model)), maxAttempts);
+    const answer = systemOneAnswerSchema.safeParse(response.answers[question.id]);
+    if (!answer.success) {
+      throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, { attempts: execution.attempts, decisionId: question.id, code: "decision_failed", validationFailure: decisionValidationFailureForReason("malformed_answer") });
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts2);
+    const result = { ...answer.data, ...execution };
+    try {
+      return validateDecision(request, result, { maxAttempts, provider: "jev" });
+    } catch (error62) {
+      if (error62 instanceof DecisionError) {
+        throw new JevCallError("Jev response failed decision validation.", { attempts: execution.attempts, code: "decision_failed", validationFailure: decisionValidationFailure(error62) });
+      }
+      throw error62;
+    }
   }
   measureBatch(request) {
     const parsed = decisionBatchRequestSchema.safeParse(request);
@@ -29401,80 +29411,39 @@ var JevProvider = class {
     return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
   }
   async decideBatch(request, maxAttempts) {
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", 0);
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", { attempts: 0 });
     const parsedRequest = decisionBatchRequestSchema.safeParse(request);
-    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", 0);
+    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", { attempts: 0 });
     const normalizedRequest = parsedRequest.data;
     const fit = this.measureBatch(normalizedRequest);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit);
-    let apiKey;
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, { attempts: 0, contextFit: fit });
+    const { response, execution } = await this.execute(JSON.stringify(batchRequestBody(normalizedRequest, this.config.model)), maxAttempts);
+    const answers = Object.entries(response.answers).map(([questionId, rawValue]) => {
+      const answer = systemOneAnswerSchema.safeParse(rawValue);
+      return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
+    });
     try {
-      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+      return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
     } catch (error62) {
-      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
+      if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", { attempts: execution.attempts, code: "decision_failed", validationFailure: decisionValidationFailure(error62) });
+      throw error62;
     }
-    const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
-    const startedAt = performance.now();
-    let attempts2 = 0;
-    while (attempts2 < maxAttempts) {
-      attempts2 += 1;
-      let response;
-      try {
-        response = await this.fetchRequest(this.config.endpoint, {
-          method: "POST",
-          redirect: "error",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body,
-          signal: AbortSignal.timeout(this.config.timeoutMs)
+  }
+  async execute(body, maxAttempts) {
+    try {
+      return await executeJevTransport({ config: this.config, credentialStore: this.credentialStore, fetchRequest: this.fetchRequest, body, maxAttempts });
+    } catch (error62) {
+      if (error62 instanceof JevTransportError) {
+        throw new JevCallError(error62.message, {
+          attempts: error62.attempts,
+          scope: error62.scope,
+          code: error62.code,
+          category: error62.category,
+          ...error62.httpStatus === void 0 ? {} : { httpStatus: error62.httpStatus }
         });
-      } catch {
-        if (attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
-      if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts2 < maxAttempts) {
-          await wait(retryDelayMs(attempts2));
-          continue;
-        }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts2, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
-      }
-      let payload;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      }
-      const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
-      const cost = parsedResponse.data.usage.cost;
-      const inputTokens = parsedResponse.data.usage.input_tokens;
-      const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
-      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
-      const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
-        const answer = systemOneAnswerSchema.safeParse(rawValue);
-        return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
-      });
-      const execution = {
-        attempts: attempts2,
-        provider: "jev",
-        model: parsedResponse.data.model,
-        latencyMs: performance.now() - startedAt,
-        usage: { ...inputTokens === void 0 ? {} : { inputTokens }, ...outputTokens === void 0 ? {} : { outputTokens } },
-        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
-      };
-      try {
-        return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
-      } catch (error62) {
-        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts2);
-        throw error62;
-      }
+      throw error62;
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts2);
   }
   measure(request) {
     return this.measureContext(request, this.config);
@@ -29482,9 +29451,6 @@ var JevProvider = class {
 };
 function missingMeasureFit(config2, reason) {
   return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
-}
-function retryDelayMs(attempt) {
-  return Math.min(50 * 2 ** (attempt - 1), 1e3);
 }
 
 // src/providers/laya/context-fit.ts

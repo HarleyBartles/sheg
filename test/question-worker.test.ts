@@ -40,7 +40,7 @@ function answer(): DecisionResult {
 async function fixture(input = request(), now = () => Date.now()) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-question-worker-'));
   const store = openRunStore(root, { now });
-  const prepared = await prepareRun(input, { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { return answer(); } });
+  const prepared = await prepareRun(input, { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { return answer(); }, async decideBatch() { throw new Error('Admission must not run inference.'); } });
   assert.ok(prepared.prepared);
   const accepted = store.accept(randomUUID(), prepared.prepared);
   return { root, store, runId: accepted.run.runId, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
@@ -282,7 +282,7 @@ test('a shared dispatched authorization failure consumes its call and explicit r
     async decide() { throw new Error('Expected grouped request.'); },
     async decideBatch(batch) {
       calls += 1; dispatched.push(batch.questions.map(({ id }) => id));
-      if (calls === 1) throw new JevCallError('authorization rejected', 1, undefined, undefined, 'run', 'credential_unavailable');
+      if (calls === 1) throw new JevCallError('authorization rejected', { attempts: 1, scope: 'run', code: 'credential_unavailable', category: 'credential' });
       return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => question.type === 'choice'
         ? { questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }
         : { questionId: question.id, value: { type: 'noul' as const, noul: 0.6 } }) };
@@ -308,7 +308,7 @@ test('a credential failure before dispatch preserves the call allowance for expl
     async decide() { throw new Error('Expected grouped request.'); },
     async decideBatch(batch) {
       calls += 1;
-      if (calls === 1) throw new JevCallError('credential unavailable', 0, undefined, undefined, 'run', 'credential_unavailable');
+      if (calls === 1) throw new JevCallError('credential unavailable', { attempts: 0, scope: 'run', code: 'credential_unavailable', category: 'credential' });
       return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => ({ questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } })) };
     },
   };
@@ -360,7 +360,7 @@ test('provider authentication failure ends the run without dispatching sibling r
   let calls = 0;
   try {
     const provider: DecisionProvider = {
-      async decide() { calls += 1; throw new JevCallError('secret detail', 0, undefined, undefined, 'run'); },
+      async decide() { calls += 1; throw new JevCallError('secret detail', { attempts: 0, scope: 'run' }); },
     };
     await executeQuestionRun(f.store, f.runId, factory(provider));
     const status = f.store.getStatus(f.runId);
@@ -375,7 +375,7 @@ test('known pre-dispatch context refusal retains fit evidence through query and 
   const f = await fixture(request(1));
   const fit = { provider: 'jev' as const, status: 'overflow' as const, method: 'estimated-json', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 1200, contextLimit: 1000, headroomTokens: 200, effectiveLimit: 800, details: {}, reason: 'estimated-context-over-limit' };
   try {
-    await executeQuestionRun(f.store, f.runId, factory({ async decide() { throw new JevCallError('Raw diagnostic must not escape', 0, fit); } }));
+    await executeQuestionRun(f.store, f.runId, factory({ async decide() { throw new JevCallError('Raw diagnostic must not escape', { attempts: 0, contextFit: fit }); } }));
     assert.equal(f.store.getStatus(f.runId).usedCalls, 0);
     const evidence = f.store.queryEvidence({ sourceRunId: f.runId, criteria: {} }).items[0]?.failure;
     assert.equal(evidence?.code, 'provider_context_overflow');
@@ -690,7 +690,7 @@ test('a reached journey turn that overflows fit stops only that respondent witho
         const profile = (packet.state as PromptState).respondent.profile.context;
         if (profile === 'Reader A' && packet.question.id === 'interest') return { ...answer(), choice: 'continue' };
         if (profile === 'Reader B' && packet.question.id === 'interest') return { ...answer(), choice: 'leave' };
-        if (profile === 'Reader A' && packet.question.id === 'clarity') throw new JevCallError('Fit changed for reached input.', 0, overflow);
+        if (profile === 'Reader A' && packet.question.id === 'clarity') throw new JevCallError('Fit changed for reached input.', { attempts: 0, contextFit: overflow });
         throw new Error(`Unexpected packet ${profile}/${packet.question.id}`);
       },
     }));
