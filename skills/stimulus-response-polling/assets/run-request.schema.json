@@ -298,7 +298,8 @@
                   "pattern": "^[a-f\\d]{64}$"
                 },
                 "precision": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1
                 },
                 "timeoutMs": {
                   "type": "integer",
@@ -929,7 +930,8 @@
                   "pattern": "^[a-f\\d]{64}$"
                 },
                 "precision": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1
                 },
                 "timeoutMs": {
                   "type": "integer",
@@ -1393,7 +1395,8 @@
                   "pattern": "^[a-f\\d]{64}$"
                 },
                 "precision": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1
                 },
                 "timeoutMs": {
                   "type": "integer",

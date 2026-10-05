@@ -1,0 +1,25 @@
+{
+  "standards": [
+    {
+      "id": "unslop",
+      "source_repository": "https://github.com/HarleyBartles/agent-asset-marketplace.git",
+      "commit": "88c02ec6804fd695e43bf6a632c61014a21738f4",
+      "definition_path": "skills/unslop/references/standard.md",
+      "certification": "standards-certification.md"
+    },
+    {
+      "id": "playbook-composition",
+      "source_repository": "https://github.com/HarleyBartles/agent-asset-marketplace.git",
+      "commit": "88c02ec6804fd695e43bf6a632c61014a21738f4",
+      "definition_path": "skills/playbook-composition/references/standard.md",
+      "certification": "standards-certification.md"
+    },
+    {
+      "id": "runbook-composition",
+      "source_repository": "https://github.com/HarleyBartles/agent-asset-marketplace.git",
+      "commit": "88c02ec6804fd695e43bf6a632c61014a21738f4",
+      "definition_path": "skills/runbook-composition/references/standard.md",
+      "certification": "standards-certification.md"
+    }
+  ]
+}

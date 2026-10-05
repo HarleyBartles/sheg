@@ -41,28 +41,6 @@ export const evaluatorResultSchema = z.object({
   notes: z.string(),
 }).strict();
 
-export const baselineTraceSchema = z.object({
-  scenarioId: z.string(),
-  scenarioVersion: z.number().int().positive(),
-  trialId: z.string().min(1),
-  mode: z.literal('guided'),
-  model: z.string().min(1),
-  reasoning: z.string().min(1),
-  skillReferenceHashes: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
-  guided: z.object({ actor: actorTraceSchema, evaluator: evaluatorResultSchema }).strict(),
-  controls: z.array(z.object({
-    mode: z.literal('no-guidance'),
-    model: z.string().min(1),
-    reasoning: z.string().min(1),
-    skillReferenceHashes: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
-    inputPromptSha256: z.string().regex(/^[a-f0-9]{64}$/),
-    actor: z.record(z.string(), z.unknown()),
-    evaluator: evaluatorResultSchema,
-  }).strict()),
-  simulationOnly: z.literal(true),
-  toolUseAudit: z.literal('not-captured'),
-}).strict();
-
 export type Scenario = z.infer<typeof scenarioSchema>;
 export type ActorTrace = z.infer<typeof actorTraceSchema>;
 

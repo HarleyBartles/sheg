@@ -1,15 +1,30 @@
-import type { DecisionFailureDetail, DecisionResult, DecisionValue } from '../decision/decision.js';
+import { z } from 'zod';
+import type { ProviderFailureEvidence } from '../decision/provider-failure.js';
+import { decisionValueSchema, type DecisionFailureDetail, type DecisionResult } from '../decision/decision.js';
 import type { ProviderContextFit } from '../decision/provider.js';
 import type { EvidenceCriteria, FollowOnSelectionExclusion, FrozenEvaluation, RunEvidenceItem, RunEvidencePage, RunEvidenceQuery, RunListQueryInput, SelectionCoverage } from './request.js';
-import type { PromptHistoryEvent } from '../decision/prompt.js';
+import { promptHistoryEventSchema, type PromptHistoryEvent } from '../decision/prompt.js';
 import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
+import type { RespondentProfile } from '../respondents/profile.js';
 
-export type RunStatus = 'prepared' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted';
+export const runStatuses = ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] as const;
+export const runStatusSchema = z.enum(runStatuses);
+export type RunStatus = z.infer<typeof runStatusSchema>;
+export const evaluationStatuses = ['pending', 'answered', 'failed', 'unreached'] as const;
+export const evaluationStatusSchema = z.enum(evaluationStatuses);
+export const journeyRespondentStatuses = ['active', 'completed', 'failed', 'unreached'] as const;
+export const journeyRespondentStatusSchema = z.enum(journeyRespondentStatuses);
+export const attemptStatuses = ['reserved', 'answered', 'failed', 'uncertain'] as const;
+export const attemptStatusSchema = z.enum(attemptStatuses);
+export const runLifecycleStates = ['active', 'stopped', 'complete'] as const;
+export const runLifecycleStateSchema = z.enum(runLifecycleStates);
+export const resumeRefusalReasons = ['already_active', 'already_completed', 'cancelled', 'unsupported_status', 'partial_journey', 'cancellation_requested', 'attempt_unresolved', 'call_allowance_exhausted', 'no_unfinished_work'] as const;
+export const resumeRefusalReasonSchema = z.enum(resumeRefusalReasons);
 
-export type ResumeRefusalReason = 'already_active' | 'already_completed' | 'cancelled' | 'unsupported_status' | 'partial_journey' | 'cancellation_requested' | 'attempt_unresolved' | 'call_allowance_exhausted' | 'no_unfinished_work';
+export type ResumeRefusalReason = z.infer<typeof resumeRefusalReasonSchema>;
 export type RunLifecycle = {
-  state: 'active' | 'stopped' | 'complete';
+  state: z.infer<typeof runLifecycleStateSchema>;
   resume: { eligible: true } | { eligible: false; reason: ResumeRefusalReason };
 };
 
@@ -61,7 +76,7 @@ export function resumeRefusalMessage(reason: ResumeRefusalReason): string {
 }
 
 export type RunProblem = { code: string; respondentId?: string; nodeId?: string; pathId?: string; message: string };
-export type EvaluationFailure = { code: string; message: string; detail?: DecisionFailureDetail };
+export type EvaluationFailure = { code: string; message: string; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence };
 
 export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: DecisionRequest & { state: PromptState } } & {
   turnId: string;
@@ -71,20 +86,29 @@ export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: Dec
   ordinal: number;
 };
 
+export const journeyRouteEntrySchema = z.object({
+  nodeId: z.string().min(1),
+  response: decisionValueSchema,
+  toNodeId: z.string().min(1),
+}).strict();
+export type JourneyRouteEntry = z.infer<typeof journeyRouteEntrySchema>;
+export const journeyEventsSchema = z.array(promptHistoryEventSchema);
+export const journeyRouteSchema = z.array(journeyRouteEntrySchema);
+
 export type JourneyRespondentState = {
   respondentId: string;
-  status: 'active' | 'completed' | 'failed' | 'unreached';
+  status: z.infer<typeof journeyRespondentStatusSchema>;
   currentNodeId: string | null;
   currentTurnId: string | null;
   currentContextId: string | null;
   revision: number;
   events: PromptHistoryEvent[];
-  route: Array<{ nodeId: string; response: DecisionValue; toNodeId: string }>;
+  route: JourneyRouteEntry[];
   outcome?: string;
 };
 
 export type JourneyEvaluationRecord = JourneyEvaluation & {
-  status: 'pending' | 'answered' | 'failed' | 'unreached';
+  status: z.infer<typeof evaluationStatusSchema>;
   result?: DecisionResult;
   execution?: import('../decision/decision.js').ProviderExecutionEvidence;
   failure?: EvaluationFailure;
@@ -96,6 +120,13 @@ export type JourneyRunRecord = {
   compilerFingerprint: string;
   evaluations: JourneyEvaluationRecord[];
   respondents: JourneyRespondentState[];
+};
+
+export type JourneyWorkerTurn = {
+  evaluation: JourneyEvaluation;
+  respondent: JourneyRespondentState;
+  profile: RespondentProfile;
+  nextOrdinal: number;
 };
 
 export type Inspection = {
@@ -133,7 +164,7 @@ export type AnswerRow = {
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
   execution?: import('../decision/decision.js').ProviderExecutionEvidence;
-  failure?: { code: string; message: string };
+  failure?: EvaluationFailure;
 };
 
 export type RunContextDetail = {
@@ -143,7 +174,7 @@ export type RunContextDetail = {
   respondentId: string;
   questionId: string;
   status: AnswerRow['status'];
-  packet: DecisionRequest & { state: PromptState };
+  packet: DecisionRequest;
   provenance: { compilerFingerprint: string; packetFingerprint: string; contextFingerprint: string };
 };
 
@@ -151,7 +182,7 @@ export type RunAttempt = {
   attemptId: string;
   groupId: string;
   evaluationIds: string[];
-  status: 'reserved' | 'answered' | 'failed' | 'uncertain';
+  status: z.infer<typeof attemptStatusSchema>;
   startedAt: string;
   settledAt?: string;
   failure?: { code: string; message: string; scope?: 'evaluation' | 'run' };

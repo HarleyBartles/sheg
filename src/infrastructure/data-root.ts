@@ -18,9 +18,6 @@ export function resolveDataRoot(env: NodeJS.ProcessEnv, platform: NodeJS.Platfor
   const explicit = env.SHEG_DATA_DIR;
   if (explicit !== undefined) return requiredAbsolute(explicit, 'SHEG_DATA_DIR', paths)!;
 
-  const pluginData = env.PLUGIN_DATA;
-  if (pluginData !== undefined) return requiredAbsolute(pluginData, 'PLUGIN_DATA', paths)!;
-
   const absoluteHome = requiredAbsolute(home, 'Home directory', paths)!;
   if (platform === 'win32') {
     const local = env.LOCALAPPDATA;

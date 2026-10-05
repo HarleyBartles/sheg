@@ -8,8 +8,8 @@ import test from 'node:test';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import type { InlineRunRequest } from '../src/domain/run/request.js';
-import { createRunService } from '../src/application/run-service.js';
-import { openRunStore } from '../src/infrastructure/run-store.js';
+import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
+import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
 import { seedWorkflowState } from '../scripts/skill-testing/workflow-seeds.js';
@@ -40,7 +40,7 @@ async function connectedFixture(assertProviderReady: () => Promise<void> = async
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-'));
   const store = openRunStore(root);
   const fit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
-  const provider: DecisionProvider = { measure: () => fit, measureBatch: () => fit, async decide() { throw new Error('MCP admission must not infer.'); } };
+  const provider: DecisionProvider = { measure: () => fit, measureBatch: () => fit, async decide() { throw new Error('MCP admission must not infer.'); }, async decideBatch() { throw new Error('MCP admission must not infer.'); } };
   const service = createRunService(store, root, () => provider, { async launch() {} }, { assertProviderReady });
   const server = createPollingServer(service);
   const client = new Client({ name: 'sheg-mcp-test', version: '1.0.0' });
@@ -190,7 +190,7 @@ test('MCP controlled recovery resumes the saved journey before the next workflow
   const store = openRunStore(root);
   const provider = createControlledRecoveryProvider({ kind: 'jev', route: 'typesafe', model: 'jev-latest' });
   const service = createRunService(store, root, () => provider, {
-    async launch(_dataRoot, runId) { await executeQuestionRun(store, runId, () => provider); },
+    async launch(_dataRoot, runId) { await executeQuestionRun(splitRunStore(store), runId, () => provider); },
   }, { assertProviderReady: async () => undefined });
   const server = createPollingServer(service);
   const client = new Client({ name: 'sheg-controlled-recovery-test', version: '1.0.0' });

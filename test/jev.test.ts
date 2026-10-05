@@ -492,6 +492,7 @@ test('native authorization failure records one physical call and hides credentia
     assert.ok(error instanceof JevCallError);
     assert.equal(error.attempts, 1);
     assert.equal(error.failureScope, 'run');
+    assert.deepEqual(error.evidence, { category: 'http', attempts: 1, scope: 'run', httpStatus: 401 });
     assert.doesNotMatch(error.message, new RegExp(`${token}|private-provider-body`));
     return true;
   });

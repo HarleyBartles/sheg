@@ -1,6 +1,6 @@
 # ADR-0018: Store durable runs in local SQLite
 
-- Status: Accepted
+- Status: Superseded by [ADR-0029](0029-share-the-durable-run-system-across-entrypoints.md) for the CLI persistence boundary; schema compatibility policy superseded by [ADR-0027](0027-migrate-supported-datastore-schemas.md).
 - Date: 2026-10-01
 - Supersedes: None
 
@@ -22,4 +22,4 @@ Persist and check a current schema version. Below v1, unsupported data receives 
 
 ## Consequences
 
-Users can retain and query run records across MCP connections without creating study files or depending on the caller's working directory. Sheg owns relational integrity, attempt accounting and later storage maintenance. The existing file-backed journey CLI remains separate until its just-in-time integration plan moves authored journeys onto this store. A later lifecycle slice must add explicit resume and controlled deletion without weakening the transaction and foreign-key guarantees.
+Users can retain and query run records across MCP connections without creating study files or depending on the caller's working directory. Sheg owns relational integrity, attempt accounting and storage maintenance. The file-backed journey CLI has a separate persistence contract.

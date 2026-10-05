@@ -219,6 +219,7 @@ test('batch admission measures ordered mixed questions over one exact context pe
   const provider: DecisionProvider = {
     measureBatch(batch) { measured.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const questions = [
     { type: 'choice' as const, id: 'interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } },
@@ -256,6 +257,7 @@ test('batch admission greedily splits overflow into the largest fitting ordered 
       return fit(batch.questions.length <= 2 ? 'fits' : 'overflow');
     },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const questions = ['q1', 'q2', 'q3'].map((id) => ({ type: 'noul' as const, id, instructions: `Question ${id}?` }));
   const input = { ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 };
@@ -278,6 +280,7 @@ test('an unavailable group or overflowing singleton never becomes admitted throu
     const provider: DecisionProvider = {
       measureBatch: () => fit(resultStatus),
       async decide() { throw new Error('Inspection must not run inference.'); },
+      async decideBatch() { throw new Error('Inspection must not run inference.'); },
     };
     const result = await prepareRun({ ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 }, provider);
     assert.equal(result.inspection.valid, false, resultStatus);
@@ -294,6 +297,23 @@ test('providers without batch measurement receive singleton questions over each 
   assert.equal(result.inspection.minimumCalls, 4);
   assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['first', 'second', 'first', 'second']);
   assert.deepEqual(result.inspection.fits.map(({ questionIds }) => questionIds), [['first'], ['second'], ['first'], ['second']]);
+});
+
+test('a measurement-only batch capability falls back to singleton admission', async () => {
+  let batchMeasurements = 0;
+  let singleMeasurements = 0;
+  const provider: DecisionProvider = {
+    measure() { singleMeasurements += 1; return fit(); },
+    measureBatch() { batchMeasurements += 1; return fit(); },
+    async decide() { throw new Error('Inspection must not run inference.'); },
+  };
+  const questions = ['first', 'second'].map((id) => ({ type: 'noul' as const, id, instructions: `Is ${id} important?` }));
+  const result = await prepareRun({ ...request(questions), respondents: [request(questions).respondents[0]!], maxCalls: 2 }, provider);
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 2);
+  assert.equal(batchMeasurements, 0);
+  assert.equal(singleMeasurements, 2);
+  assert.deepEqual(result.inspection.fits.map(({ questionIds }) => questionIds), [['first'], ['second']]);
 });
 
 test('follow-on batching groups distinct source contexts and never includes selection metadata in model state', async () => {
@@ -323,6 +343,7 @@ test('follow-on batching groups distinct source contexts and never includes sele
   const provider: DecisionProvider = {
     measureBatch(batch) { measured.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const admission = await prepareFollowOnRun(followOn, source, provider);
 
@@ -353,6 +374,7 @@ test('follow-on batching groups distinct source contexts and never includes sele
   const continuationProvider: DecisionProvider = {
     measureBatch(batch) { continuationProviderCalls.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
   const continued = await prepareFollowOnRun({ ...followOn, context: { mode: 'continue' }, maxCalls: 3 }, { ...source, turns: continuationTurns }, continuationProvider);
   assert.equal(continued.inspection.valid, true);
@@ -385,6 +407,7 @@ test('selected-material follow-on gives each mapped answer its own isolated pack
   const provider: DecisionProvider = {
     measureBatch(batch) { measured.push(batch); return fit(); },
     async decide() { throw new Error('Inspection must not run inference.'); },
+    async decideBatch() { throw new Error('Inspection must not run inference.'); },
   };
 
   const admission = await prepareFollowOnRun(followOn, source, provider);
@@ -533,7 +556,7 @@ function journeyRequest(maxCalls = 1, respondentCount = 1) {
   };
 }
 
-test('journey admission measures each reachable context and reports bounded call outcomes without inference', async () => {
+test('journey admission measures initial contexts and reports reached-turn fit checks without inference', async () => {
   const fixture = makeProvider();
   const result = await prepareRun(journeyRequest(), fixture.provider);
   assert.equal(result.inspection.valid, true);
@@ -541,12 +564,11 @@ test('journey admission measures each reachable context and reports bounded call
   assert.equal(result.inspection.minimumCalls, 1);
   assert.equal(result.inspection.maximumCalls, 2);
   assert.equal(result.inspection.warnings?.some(({ code }) => code === 'call_limit_may_stop_journey'), true);
-  assert.equal(result.inspection.fits.length, 2);
-  assert.equal(fixture.measured.length, 2);
-  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue', 'interest']);
-  assert.deepEqual(fixture.measured[1]!.state.encounteredItems, [{ id: 'section-three', text: 'Later section.' }]);
-  const history = fixture.measured[1]!.state.trajectory as { responses: Array<{ type: string }> };
-  assert.equal(history.responses[0]?.type, 'choice');
+  assert.equal(result.inspection.fits.length, 1);
+  assert.equal(fixture.measured.length, 1);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue']);
+  assert.deepEqual(fixture.measured[0]!.state.encounteredItems, []);
+  assert.equal(result.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
   assert.equal(fixture.decisions, 0);
 });
 
@@ -583,15 +605,47 @@ test('sequence admission measures each authored ask in order and applies the fin
   assert.equal(result.inspection.valid, true);
   assert.equal(result.inspection.minimumCalls, 2);
   assert.equal(result.inspection.maximumCalls, 2);
-  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue', 'interest', 'interest']);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue']);
+  assert.equal(result.inspection.fits.length, 1);
   assert.equal(fixture.decisions, 0);
 });
 
-test('journey admission rejects an overflowing branch and a cap below every possible minimum path', async () => {
-  const overflowFixture = makeProvider(['fits', 'overflow']);
+test('a large adaptive sequence admits each initial packet and reserves reached-turn fit checks for dispatch', async () => {
+  const base = journeyRequest(48, 2);
+  const respondents = Array.from({ length: 4 }, (_, index) => ({ ...base.respondents[0]!, id: `reader-${index + 1}`, ...(index >= 2 ? { context: 'Returning reader' } : {}) }));
+  const tasks = Array.from({ length: 12 }, (_, index) => ({
+    id: `question-${index + 1}`,
+    type: 'choice' as const,
+    instructions: `Question ${index + 1}?`,
+    options: { yes: 'Yes', no: 'No' },
+  }));
+  const input = {
+    ...base,
+    respondents,
+    maxCalls: respondents.length * tasks.length,
+    journey: { ...base.journey, tasks, presentation: { kind: 'sequence' as const } },
+  };
+  const fixture = makeProvider();
+  const result = await prepareRun(input, fixture.provider);
+
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 48);
+  assert.equal(result.inspection.maximumCalls, 48);
+  assert.equal(fixture.measured.length, 2);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['question-1', 'question-1']);
+  assert.equal(result.journey?.packets.length, respondents.length);
+  assert.equal(result.inspection.fits.length, respondents.length);
+  assert.equal(result.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
+  assert.equal(fixture.decisions, 0);
+});
+
+test('journey admission rejects an unfit initial packet and a cap below every possible minimum path', async () => {
+  const overflowFixture = makeProvider(['overflow']);
   const overflow = await prepareRun(journeyRequest(), overflowFixture.provider);
   assert.equal(overflow.inspection.valid, false);
   assert.equal(overflow.inspection.problems.some(({ code }) => code === 'context_overflow'), true);
+  assert.equal(overflow.inspection.warnings?.some(({ code, message }) => code === 'reached_turn_fit_check' && /initial packets passed/i.test(message)), false);
+  assert.equal(overflow.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
   assert.equal(overflowFixture.decisions, 0);
 
   const lowCap = await prepareRun(journeyRequest(1, 2), makeProvider().provider);

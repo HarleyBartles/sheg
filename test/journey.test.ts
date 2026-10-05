@@ -118,6 +118,27 @@ test('routes a fractional Score through the explicit interval that contains it',
   assert.equal(result.outcome, 'professional');
 });
 
+test('routes a Noul value exactly on a threshold to its inclusive branch', async () => {
+  const arm = {
+    ...chapter,
+    tasks: [{ id: 'credibility', type: 'noul', instructions: 'Was this credible?' }],
+    presentation: {
+      kind: 'graph', entryNodeId: 'ask', maxDecisions: 1,
+      nodes: [
+        { id: 'ask', kind: 'ask', taskId: 'credibility' },
+        { id: 'low', kind: 'terminal', outcome: 'low' },
+        { id: 'high', kind: 'terminal', outcome: 'high' },
+      ],
+      transitions: [
+        { fromNodeId: 'ask', toNodeId: 'low', when: { type: 'noul', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: false } },
+        { fromNodeId: 'ask', toNodeId: 'high', when: { type: 'noul', minimum: 0.5, maximum: 1, minimumInclusive: true, maximumInclusive: true } },
+      ],
+    },
+  } as unknown as StudyArm;
+  const result = await runJourney({ arm, profile, ask: async () => ({ type: 'noul', noul: 0.5 }) });
+  assert.equal(result.outcome, 'high');
+});
+
 function linearGraphEquivalent(arm: StudyArm): StudyArm {
   const itemNodes = arm.items.map((item) => ({ id: `sequence-expose-${item.id}`, kind: 'expose' as const, itemId: item.id }));
   const askNodes = arm.tasks.map((task) => ({ id: `sequence-ask-${task.id}`, kind: 'ask' as const, taskId: task.id }));

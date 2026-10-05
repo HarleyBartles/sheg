@@ -3,13 +3,22 @@ import { z } from 'zod';
 import { respondentProfileSchema } from '../domain/respondents/profile.js';
 import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
 import type { ProviderContextFit } from '../domain/decision/provider.js';
-import { JevProvider, jevConfigInputSchema, jevConfigSchema, type JevConfigInput, type JevRoute } from '../providers/jev.js';
-import { LayaProvider, type LayaConfig } from '../providers/laya.js';
-import { WindowsCredentialStore, type CredentialAvailability } from '../infrastructure/credentials/windows.js';
+import { JevProvider, type JevRoute } from '../providers/jev.js';
+import { LayaProvider } from '../providers/laya.js';
+import { providerConfigSchema, type ProviderConfigInput } from '../providers/config.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
 
-export type PreflightProviderConfig = JevConfigInput | LayaConfig;
+export type PreflightProviderConfig = ProviderConfigInput;
+type CredentialAvailability = 'available' | 'missing' | 'malformed' | 'unavailable';
+type PreflightCredentialStore = {
+  availability(route: JevRoute): Promise<CredentialAvailability>;
+  readForAuthentication(route: JevRoute): Promise<string>;
+};
+const unavailableCredentialStore: PreflightCredentialStore = {
+  async availability() { return 'unavailable'; },
+  async readForAuthentication() { throw new Error('Credential access is unavailable in this preflight context.'); },
+};
 export type StudyPreflightInput = {
   manifestPath: string;
   cohortPath?: string;
@@ -20,10 +29,7 @@ export type StudyPreflightInput = {
 
 export const preflightInputSchema = z.object({
   manifestPath: z.string().min(1), cohortPath: z.string().min(1).optional(), mode: z.enum(['frozen-cohort', 'maximum-profile']).default('frozen-cohort'),
-  providers: z.array(z.discriminatedUnion('kind', [
-    jevConfigInputSchema,
-    z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
-  ])).min(1), maxPackets: z.number().int().nonnegative().optional(),
+  providers: z.array(providerConfigSchema).min(1), maxPackets: z.number().int().nonnegative().optional(),
 }).strict().superRefine((input, context) => {
   if (input.mode === 'frozen-cohort' && !input.cohortPath) context.addIssue({ code: 'custom', path: ['cohortPath'], message: 'Frozen-cohort preflight requires a cohort path.' });
 });
@@ -51,7 +57,7 @@ export type ProviderStudyFit = {
   incompleteReason?: string;
 };
 
-export async function preflightStudy(input: StudyPreflightInput, dependencies: { credentialStore?: Pick<WindowsCredentialStore, 'availability' | 'readForAuthentication'> } = {}): Promise<{ provisional: boolean; mode: 'frozen-cohort' | 'maximum-profile'; inputFingerprint: string; compilerFingerprint: string; providers: ProviderStudyFit[] }> {
+export async function preflightStudy(input: StudyPreflightInput, dependencies: { credentialStore?: PreflightCredentialStore } = {}): Promise<{ provisional: boolean; mode: 'frozen-cohort' | 'maximum-profile'; inputFingerprint: string; compilerFingerprint: string; providers: ProviderStudyFit[] }> {
   const config = preflightInputSchema.parse(input);
   const study = await loadStudy(config.manifestPath, config.cohortPath, { allowMissingCohort: config.mode === 'maximum-profile' });
   const respondents = config.mode === 'maximum-profile' ? [maximumProfile()] : study.respondents;
@@ -61,10 +67,10 @@ export async function preflightStudy(input: StudyPreflightInput, dependencies: {
   const traversal = walkStudyPackets(study.manifest.arms, respondents, (packet) => { packets.push(packet); }, config.maxPackets === undefined ? {} : { maxPackets: config.maxPackets });
   const results: ProviderStudyFit[] = [];
 
-  const credentialStore = dependencies.credentialStore ?? new WindowsCredentialStore();
+  const credentialStore = dependencies.credentialStore ?? unavailableCredentialStore;
   for (const providerInput of config.providers) {
-    const providerConfig = providerInput.kind === 'jev' ? jevConfigSchema.parse(providerInput) : providerInput;
-    const provider = providerConfig.kind === 'jev' ? new JevProvider(providerConfig, fetch, { credentialStore }) : new LayaProvider(providerConfig as LayaConfig);
+    const providerConfig = providerInput;
+    const provider = providerConfig.kind === 'jev' ? new JevProvider(providerConfig, fetch, { credentialStore }) : new LayaProvider(providerConfig);
     const overflows: ProviderStudyFit['overflows'] = [];
     const unavailable: ProviderStudyFit['unavailable'] = [];
     let maximumTokens: number | null = null;

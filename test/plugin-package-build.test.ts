@@ -42,6 +42,7 @@ test('plugin package generation emits only reproducible runtime inputs from cano
   assert.ok(first.has('dist/mcp.js'));
   assert.ok(first.has('dist/worker.js'));
   assert.ok(first.has('dist/credentials/windows-credential.ps1'));
+  assert.ok(first.has('dist/queries/load-journey-worker-turn.sql'));
   assert.ok(first.has('dist/data/respondent-archetypes/story-craft-and-culture.json'));
   assert.ok(first.has('skills/stimulus-response-polling/SKILL.md'));
   assert.ok(first.has('skills/stimulus-response-polling/references/run-and-recovery.md'));

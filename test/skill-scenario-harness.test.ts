@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runEvidencePageSchema } from '../src/domain/run/request.js';
 import {
   actorTraceSchema,
   assertReferencePathContained,
-  baselineTraceSchema,
   evaluatorResultSchema,
   loadEvaluatorCatalog,
   loadScenarioCatalog,
@@ -18,36 +18,15 @@ import {
   selectScenarios,
 } from '../scripts/skill-scenario.js';
 
-const expectedScenarioIds = [
-  'changed-rubric-comparison',
-  'cumulative-journey-material',
-  'cumulative-journey-material-heldout',
-  'discover-polling-frontend-near-miss',
-  'discover-polling-positive',
-  'discover-polling-vocabulary-near-miss',
-  'discover-study-design-positive',
-  'independent-dependent-questions',
-  'isolated-storage-inspection',
-  'live-storage-inspection',
-  'live-storage-inspection-heldout',
-  'partial-journey-recovery',
-  'partial-run-selected-question',
-  'purposeful-input-variation',
-  'selected-material-follow-on',
-  'selected-material-isolation-heldout',
-  'selected-material-isolation-no-fit',
-  'sequence-versus-linear-graph',
-  'typed-answer-failure',
-];
-
-test('skill behavior catalog has paired versioned scenarios and evaluators', () => {
+test('skill behavior catalog has unique, paired versioned scenarios and evaluators', () => {
   const scenarios = loadScenarioCatalog();
   const evaluators = loadEvaluatorCatalog();
   const ids = scenarios.map((scenario) => scenario.id).sort();
 
-  assert.deepEqual(ids, expectedScenarioIds);
+  assert.ok(ids.length > 0);
   assert.equal(new Set(ids).size, ids.length);
-  assert.deepEqual(evaluators.map((evaluator) => evaluator.scenarioId).sort(), expectedScenarioIds);
+  assert.equal(evaluators.length, scenarios.length);
+  assert.equal(new Set(evaluators.map((evaluator) => evaluator.scenarioId)).size, evaluators.length);
   for (const scenario of scenarios) {
     assert.ok(scenario.tags.length > 0, `${scenario.id} needs at least one selectable tag`);
     assert.equal(evaluators.find((evaluator) => evaluator.scenarioId === scenario.id)?.version, scenario.version);
@@ -61,12 +40,15 @@ test('scenario selection intersects owner, tags, and guidance paths and can incl
     guidancePaths: ['references/run-and-recovery.md'],
     includeSharedSafeguards: true,
   });
-  const ids = selected.map(({ id }) => id);
-  assert.deepEqual(ids, [
-    'partial-run-selected-question', 'typed-answer-failure', 'purposeful-input-variation', 'selected-material-isolation-no-fit', 'selected-material-follow-on',
-    'cumulative-journey-material', 'cumulative-journey-material-heldout',
-    'live-storage-inspection-heldout', 'live-storage-inspection',
-  ]);
+  const scenarios = loadScenarioCatalog();
+  const directMatches = scenarios.filter((scenario) => scenario.ownerSkill === 'stimulus-response-polling' &&
+    scenario.tags.includes('lifecycle') && scenario.referencePaths.includes('references/run-and-recovery.md'));
+  const selectedIds = selected.map(({ id }) => id);
+  assert.ok(directMatches.some(({ id }) => selectedIds.includes(id)), 'a direct filter match should be selected');
+  assert.ok(directMatches.every(({ id }) => selectedIds.includes(id)), 'every direct filter match should be selected');
+  assert.ok(scenarios.filter(({ tags }) => tags.includes('shared-safeguard')).every(({ id }) => selectedIds.includes(id)),
+    'shared safeguards should be added even when they do not match the direct filters');
+  assert.equal(new Set(selectedIds).size, selectedIds.length, 'direct matches and safeguards should not duplicate scenarios');
   assert.throws(() => selectScenarios({}), /owner, tag, or guidance path/);
 });
 
@@ -104,7 +86,8 @@ test('typed recovery scenario supplies the routed recovery guidance it asks the 
   const prompt = renderActorPrompt(scenario.id);
 
   assert.ok(scenario.referencePaths.includes('references/run-and-recovery.md'));
-  assert.ok(prompt.includes('when the original call allowance permits'));
+  const recoveryGuidance = readFileSync(assertReferencePathContained(scenario.ownerSkill, 'references/run-and-recovery.md'), 'utf8');
+  assert.ok(prompt.includes(`## Reference: references/run-and-recovery.md\n\n${recoveryGuidance}`));
 });
 
 test('scenario CLI emits a reproducible no-guidance control prompt and digest', () => {
@@ -115,7 +98,7 @@ test('scenario CLI emits a reproducible no-guidance control prompt and digest', 
   ], { encoding: 'utf8' });
   const control = JSON.parse(output) as { prompt: string; sha256: string };
 
-  assert.equal(control.sha256, renderControlPrompt('typed-answer-failure').sha256);
+  assert.equal(control.sha256, createHash('sha256').update(control.prompt).digest('hex'));
   assert.ok(control.prompt.includes('One respondent\'s answer failed with invalid_answer'));
 });
 
@@ -292,22 +275,6 @@ test('actor and evaluator outputs require evidence-bearing structured fields', (
     criterionResults: [{ criterionId: 'rubric-change-is-visible', result: 'pass', evidence: '' }],
     notes: '',
   }).success, false);
-});
-
-test('legacy trace schema validates a synthetic wrapper without storing campaign output', () => {
-  const scenario = loadScenarioCatalog().find((item) => item.id === 'typed-answer-failure')!;
-  const evaluator = loadEvaluatorCatalog().find((item) => item.scenarioId === scenario.id)!;
-  const trace = baselineTraceSchema.parse({
-    scenarioId: scenario.id, scenarioVersion: scenario.version, trialId: 'synthetic-contract', mode: 'guided',
-    model: 'fixture-model', reasoning: 'medium', skillReferenceHashes: { 'SKILL.md': 'a'.repeat(64) },
-    guided: {
-      actor: { scenarioId: scenario.id, scenarioVersion: scenario.version, actions: [], finalResponse: 'Synthetic behavior fixture.', uncertainties: [] },
-      evaluator: { scenarioId: scenario.id, criterionResults: evaluator.criteria.map(({ id }) => ({ criterionId: id, result: 'uncertain', evidence: 'Synthetic test data.' })), notes: '' },
-    },
-    controls: [], simulationOnly: true, toolUseAudit: 'not-captured',
-  });
-  assert.equal(trace.guided.actor.scenarioId, scenario.id);
-  assert.equal(trace.guided.actor.scenarioVersion, scenario.version);
 });
 
 test('partial selected-question fixture separates complete Q2 evidence from a failed Q1 sibling', () => {

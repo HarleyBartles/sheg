@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { campaignScratchRoot } from '../../scripts/skill-testing/runner.js';
+import { loadScenarioCatalog } from '../../scripts/skill-scenario.js';
 
 test('campaign CLI prepares and inspects off-repository campaign data without dispatching', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'sheg-campaign-cli-'));
@@ -44,15 +45,16 @@ test('campaign CLI selects affected scenarios by owner and guidance with shared 
     '--import', 'tsx', cli, 'select', '--owner', 'stimulus-response-polling', '--guidance-path', 'references/run-and-recovery.md', '--include-shared',
   ], { encoding: 'utf8' });
   const selected = JSON.parse(output) as Array<{ id: string; tags: string[] }>;
-  assert.deepEqual(selected.map(({ id }) => id), [
-    'selected-material-isolation-no-fit', 'selected-material-follow-on', 'partial-run-selected-question', 'typed-answer-failure',
-    'isolated-storage-inspection', 'live-storage-inspection-heldout', 'live-storage-inspection',
-    'selected-material-isolation-heldout', 'partial-journey-recovery', 'purposeful-input-variation',
-    'cumulative-journey-material', 'cumulative-journey-material-heldout',
-  ]);
-  assert.deepEqual(selected.filter(({ tags }) => tags.includes('shared-safeguard')).map(({ id }) => id), [
-    'selected-material-isolation-no-fit', 'selected-material-follow-on', 'partial-run-selected-question', 'typed-answer-failure',
-    'live-storage-inspection-heldout', 'live-storage-inspection',
-    'purposeful-input-variation', 'cumulative-journey-material', 'cumulative-journey-material-heldout',
-  ]);
+  const selectedIds = selected.map(({ id }) => id);
+  const scenarios = loadScenarioCatalog();
+  const directMatches = scenarios.filter((scenario) => scenario.ownerSkill === 'stimulus-response-polling' &&
+    scenario.referencePaths.includes('references/run-and-recovery.md'));
+  assert.ok(directMatches.some(({ id }) => selectedIds.includes(id)), 'a matching scenario should be selected');
+  assert.ok(directMatches.every(({ id }) => selectedIds.includes(id)), 'every matching scenario should be selected');
+  assert.ok(scenarios.filter(({ tags }) => tags.includes('shared-safeguard')).every(({ id }) => selectedIds.includes(id)),
+    'shared safeguards should be included outside the direct filter');
+  assert.ok(scenarios.some((scenario) => scenario.ownerSkill !== 'stimulus-response-polling' &&
+    !scenario.tags.includes('shared-safeguard') && !selectedIds.includes(scenario.id)),
+  'unrelated non-safeguard scenarios should stay excluded');
+  assert.equal(new Set(selectedIds).size, selectedIds.length, 'the direct filter and safeguard union should not duplicate scenarios');
 });

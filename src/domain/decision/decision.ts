@@ -1,18 +1,25 @@
 import { z } from 'zod';
+import { providerKindSchema } from './provider.js';
 
 const identifier = z.string().min(1);
 const prose = z.string().min(1);
 const choiceText = z.string().min(1).refine((value) => value.trim().length > 0, 'Choice text must not be blank.');
 const probability = z.number().finite().min(0).max(1);
 const probabilities = z.record(z.string(), probability);
+export const decisionTypes = { choice: 'choice', score: 'score', noul: 'noul' } as const;
+export const decisionTypeSchema = z.enum(decisionTypes);
+export const routeableDecisionTypes = [decisionTypes.score, decisionTypes.noul] as const;
+export const routeableDecisionTypeSchema = z.enum(routeableDecisionTypes);
+export const costEvidenceBases = ['provider-reported', 'published-rate-estimate'] as const;
+export const costEvidenceBasisSchema = z.enum(costEvidenceBases);
 export const costEvidenceSchema = z.object({
   amountUsd: z.number().finite().nonnegative(),
-  basis: z.enum(['provider-reported', 'published-rate-estimate']),
+  basis: costEvidenceBasisSchema,
 }).strict();
 export type CostEvidence = z.infer<typeof costEvidenceSchema>;
 const metadata = z.object({
   attempts: z.number().int().positive(),
-  provider: z.enum(['jev', 'laya']),
+  provider: providerKindSchema,
   model: z.string().min(1),
   checkpoint: z.string().min(1).optional(),
   latencyMs: z.number().finite().nonnegative(),
@@ -24,7 +31,7 @@ const metadata = z.object({
 }).strict();
 
 const choiceQuestionSchema = z.object({
-  type: z.literal('choice'),
+  type: z.literal(decisionTypes.choice),
   id: identifier,
   instructions: prose,
   options: z.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
@@ -45,13 +52,13 @@ const choiceQuestionSchema = z.object({
   }
 });
 const scoreQuestionSchema = z.object({
-  type: z.literal('score'),
+  type: z.literal(decisionTypes.score),
   id: identifier,
   instructions: prose,
   rubric: z.array(prose).min(2),
 }).strict();
 const noulQuestionSchema = z.object({
-  type: z.literal('noul'),
+  type: z.literal(decisionTypes.noul),
   id: identifier,
   instructions: prose,
   criteria: z.object({ true: prose.optional(), false: prose.optional() }).strict().optional(),
@@ -86,37 +93,29 @@ const noulRequestSchema = requestStateSchema.extend({ question: noulQuestionSche
 export const decisionRequestSchema = z.union([choiceRequestSchema, scoreRequestSchema, noulRequestSchema]);
 
 const choiceResultSchema = z.object({
-  type: z.literal('choice').default('choice'),
+  type: z.literal(decisionTypes.choice).default(decisionTypes.choice),
   choice: identifier,
   probabilities,
   confidence: probability.optional(),
 }).extend(metadata.shape).strict();
 const scoreResultSchema = z.object({
-  type: z.literal('score'),
+  type: z.literal(decisionTypes.score),
   score: z.number().finite(),
   legend: z.record(z.string().regex(/^\d+$/), prose),
   probabilities: z.record(z.string().regex(/^\d+$/), probability),
   confidence: probability.optional(),
 }).extend(metadata.shape).strict();
-const noulResultSchema = z.object({ type: z.literal('noul'), noul: probability }).extend(metadata.shape).strict();
+const noulResultSchema = z.object({ type: z.literal(decisionTypes.noul), noul: probability }).extend(metadata.shape).strict();
 
 export const decisionResultSchema = z.discriminatedUnion('type', [choiceResultSchema, scoreResultSchema, noulResultSchema]);
 
 export const decisionValueSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('choice'), choice: identifier, probabilities: probabilities.optional(), confidence: probability.optional() }).strict(),
-  z.object({ type: z.literal('score'), score: z.number().finite(), legend: z.record(z.string().regex(/^\d+$/), prose), probabilities: z.record(z.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
-  z.object({ type: z.literal('noul'), noul: probability }).strict(),
+  z.object({ type: z.literal(decisionTypes.choice), choice: identifier, probabilities: probabilities.optional(), confidence: probability.optional() }).strict(),
+  z.object({ type: z.literal(decisionTypes.score), score: z.number().finite(), legend: z.record(z.string().regex(/^\d+$/), prose), probabilities: z.record(z.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
+  z.object({ type: z.literal(decisionTypes.noul), noul: probability }).strict(),
 ]);
 
-export const providerExecutionEvidenceSchema = z.object({
-  attempts: z.number().int().positive(),
-  provider: z.enum(['jev', 'laya']),
-  model: z.string().min(1),
-  checkpoint: z.string().min(1).optional(),
-  latencyMs: z.number().finite().nonnegative(),
-  usage: z.object({ inputTokens: z.number().int().nonnegative().optional(), outputTokens: z.number().int().nonnegative().optional() }).strict(),
-  cost: costEvidenceSchema.optional(),
-}).strict();
+export const providerExecutionEvidenceSchema = metadata;
 
 export const decisionFailureDetailSchema = z.object({
   reason: z.enum(['malformed_answer', 'answer_type_mismatch', 'unknown_option', 'probability_keys', 'probability_sum', 'score_out_of_range', 'score_legend_mismatch', 'invalid_answer']),
@@ -124,18 +123,19 @@ export const decisionFailureDetailSchema = z.object({
   constraint: z.enum(['typed_answer_shape', 'match_question_type', 'offered_option', 'declared_outcomes', 'sum_to_one', 'declared_rubric_range', 'match_declared_rubric', 'typed_answer_contract']),
 }).strict();
 export type DecisionFailureReason = z.infer<typeof decisionFailureDetailSchema>['reason'];
+const decisionFailureRules = {
+  malformed_answer: { field: 'answer', constraint: 'typed_answer_shape' },
+  answer_type_mismatch: { field: 'type', constraint: 'match_question_type' },
+  unknown_option: { field: 'choice', constraint: 'offered_option' },
+  probability_keys: { field: 'probabilities', constraint: 'declared_outcomes' },
+  probability_sum: { field: 'probabilities', constraint: 'sum_to_one' },
+  score_out_of_range: { field: 'score', constraint: 'declared_rubric_range' },
+  score_legend_mismatch: { field: 'legend', constraint: 'match_declared_rubric' },
+  invalid_answer: { field: 'answer', constraint: 'typed_answer_contract' },
+} satisfies Record<DecisionFailureReason, Omit<DecisionFailureDetail, 'reason'>>;
+
 export function decisionFailureDetailForReason(reason: DecisionFailureReason): DecisionFailureDetail {
-  const rule = {
-    malformed_answer: { field: 'answer', constraint: 'typed_answer_shape' },
-    answer_type_mismatch: { field: 'type', constraint: 'match_question_type' },
-    unknown_option: { field: 'choice', constraint: 'offered_option' },
-    probability_keys: { field: 'probabilities', constraint: 'declared_outcomes' },
-    probability_sum: { field: 'probabilities', constraint: 'sum_to_one' },
-    score_out_of_range: { field: 'score', constraint: 'declared_rubric_range' },
-    score_legend_mismatch: { field: 'legend', constraint: 'match_declared_rubric' },
-    invalid_answer: { field: 'answer', constraint: 'typed_answer_contract' },
-  }[reason];
-  return { reason, ...rule } as DecisionFailureDetail;
+  return { reason, ...decisionFailureRules[reason] };
 }
 
 export const decisionBatchResultSchema = z.object({
@@ -158,3 +158,12 @@ export type DecisionBatchResult = z.infer<typeof decisionBatchResultSchema>;
 export type DecisionFailureDetail = z.infer<typeof decisionFailureDetailSchema>;
 export type DecisionRequest = z.infer<typeof decisionRequestSchema>;
 export type DecisionResult = z.infer<typeof decisionResultSchema>;
+
+// Execution metadata is recorded separately from the respondent-visible typed answer.
+export function decisionValueFromResult(result: DecisionResult | DecisionValue): DecisionValue {
+  switch (result.type) {
+    case 'choice': return { type: 'choice', choice: result.choice, ...(result.probabilities === undefined ? {} : { probabilities: result.probabilities }), ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+    case 'score': return { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+    case 'noul': return { type: 'noul', noul: result.noul };
+  }
+}

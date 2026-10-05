@@ -9,7 +9,8 @@ import type { FollowOnRunRequest, InlineRunRequest } from '../src/domain/run/req
 import { prepareRun } from '../src/application/run-inspection.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
-import { createRunService, RunServiceError } from '../src/application/run-service.js';
+import { RunServiceError } from '../src/application/run-service.js';
+import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
 
 function request(text = 'Section three') : InlineRunRequest {
   return {
@@ -255,7 +256,7 @@ test('explicit resume reopens only failed questions in a partial grouped run', a
   const value = { ...request(), maxCalls: 2, questions: [request().questions[0]!, { type: 'noul' as const, id: 'interest-loss', instructions: 'Did anything reduce your interest?' }] };
   const fit: ProviderContextFit = { provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
   try {
-    const prepared = await prepareRun(value, { ...provider(), measureBatch: () => fit }); assert.ok(prepared.prepared);
+    const prepared = await prepareRun(value, { ...provider(), measureBatch: () => fit, async decideBatch() { throw new Error('Admission must not infer.'); } }); assert.ok(prepared.prepared);
     const accepted = fixture.store.accept(randomUUID(), prepared.prepared);
     const claim = fixture.store.claim(accepted.run.runId, Date.now(), 1234); assert.ok(claim);
     const batch = fixture.store.reserveBatch(claim, prepared.prepared.groups![0]!.groupId, prepared.prepared.evaluations.map(({ evaluationId }) => evaluationId), Date.now()); assert.ok(batch);

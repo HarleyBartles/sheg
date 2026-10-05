@@ -15,7 +15,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\dist\credentials\windo
 
 Use `Sheg/Jev/OpenRouter` to connect OpenRouter. The helper prompts without echoing the key and writes directly to Credential Manager. Run `Status` to check an entry, `Setup` again to replace it, or `Remove` to delete it. The setup prompt is local and interactive; never paste a key into chat or an MCP tool argument. An agent setting up Sheg can give the user this command or open a user-visible terminal and ask them to paste the key into the helper's hidden prompt. Connecting a key is optional until a Jev run starts; users can defer setup and use local Laya. Windows Credential Manager is the only secure-store backend in this implementation. macOS Keychain and Linux Secret Service support are future work.
 
-Credential Manager's generic credential blob is opaque bytes, so existing entries may contain a UTF-8 token or the UTF-16LE representation Sheg writes during setup. Sheg reads both formats. Earlier Sheg versions treated every blob as UTF-16LE: a valid odd-length UTF-8 OpenRouter token could therefore be reported as present by the status check but rejected before authentication when its byte length was odd. v0.3 validates readability as part of status and acceptance. If a stored value is present but neither supported text encoding, `run_start` returns the structured error `provider_credential_malformed` and a safe message to re-enter the key with Sheg's setup helper. The token and its bytes are never included in the error. `run_inspect` remains keyless.
+Sheg reads UTF-8 tokens and the UTF-16LE values written by its setup helper. If a stored value is unreadable, `run_start` returns `provider_credential_malformed` with a safe instruction to re-enter it through the helper. Errors never include token bytes. `run_inspect` remains keyless.
 
 ## Provider evidence
 
@@ -29,11 +29,18 @@ TypeSafe documents parallel independent questions in one System One request. She
 
 OpenRouter's Decisions endpoint is an alpha API. Its response may include `usage.cost`; when present, Sheg records that as provider-reported evidence. TypeSafe's published rate is $0.042 per million input tokens, with output tokens listed as free. Sheg may estimate per-decision cost from complete response token counts using a rate recorded for the served model and label it as a published-rate estimate. Account-specific billing remains visible in the selected provider's dashboard. Sheg does not present a cumulative bill or spend ceiling.
 
-Context fit is route- and model-specific. OpenRouter's pinned `typesafe/jev-1.13` path retains its existing 32,768-token context ceiling and estimates request tokens as serialized UTF-8 bytes divided by three, rounded up, with a 20% reserve. For native `jev-latest`, TypeSafe's official model reference reports that Jev 1.13 (`jev-1.13.0`) accepts 64k tokens per request and separately limits the combined state and longest question to 32k; the API schema reports the served model and usage but no context metadata. Checked 2026-10-04. Sheg conservatively applies the stricter 32,000-token bound to the complete serialized request, including all questions, then applies the same estimate and reserve for an effective estimated threshold of 25,600 tokens. This estimate is not tokenizer-exact and does not guarantee provider acceptance; an actual refusal is reported as a safe provider failure. Unknown native model names remain unavailable until route-specific evidence is added. TypeSafe documents `jev-latest` as a moving alias, so re-check official model documentation before a stable release and retain the actual served model in run evidence. The OpenRouter limit is not transferred to the native route by analogy.
+Context fit uses route-specific model metadata in `src/providers/jev/model-metadata.ts`. Sheg estimates the complete serialized request as `ceil(UTF-8 bytes / 3)` and reserves 20% of the supported bound:
+
+| Route and model | Bound | Estimated input threshold |
+| --- | --- | --- |
+| OpenRouter `typesafe/jev-1.13` | 32,768 tokens | 26,214 tokens |
+| Native TypeSafe `jev-latest` | 32,000 tokens | 25,600 tokens |
+
+The native policy conservatively applies TypeSafe's stricter state-plus-question limit to the entire request. [ADR-0025](../decisions/0025-bound-native-typesafe-context-admission.md) records its evidence and rationale. Estimates are not tokenizer-exact and do not guarantee provider acceptance. Unknown models remain unavailable until supported evidence is added. Updating limits or moving-alias support requires fresh provider evidence; retain the actual served model in run records.
 
 ## Attempts and recovery
 
-`maxCalls` bounds physical provider attempts, including retries. It is independent of the study's per-respondent `maxDecisions` journey limit. A failed or interrupted request consumes its attempt allowance because the provider may have received it. Unknown billing does not block resume and does not require reconciliation. Per-decision cost evidence is optional and is not summed into a run total. Status and reports expose the maximum, used, reserved, and remaining call allowance. Reports identify the route and endpoint, and preserve failed physical-attempt counts per respondent cell. Unknown provider errors conservatively consume the reserved attempt.
+`maxCalls` bounds physical provider attempts, including retries, independently of the per-respondent `maxDecisions` journey limit. Dispatched or uncertain requests consume allowance even if they fail; confirmed pre-dispatch failures consume none. Status and reports expose maximum, used, reserved, and remaining calls. Unknown billing does not block resume or require reconciliation.
 
 Route, model, and effective endpoint are part of execution identity. Changing any of these prevents resuming a run with different provider behavior. Credential rotation does not change execution identity.
 

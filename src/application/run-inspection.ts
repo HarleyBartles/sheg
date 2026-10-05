@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash } from '../domain/decision/prompt.js';
-import { decisionValueSchema } from '../domain/decision/decision.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { compileDecisionPacket, compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash } from '../domain/decision/prompt.js';
+import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
@@ -9,7 +9,7 @@ import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import type { PreparedJourneyRun } from '../domain/run/request.js';
 import { hashCanonical } from '../infrastructure/identity.js';
-import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
+import type { PreflightPacket } from '../domain/journey/packet-walker.js';
 import { estimateRunDecisionCalls } from '../domain/journey/route-bounds.js';
 import { journeyTopology } from '../domain/journey/topology.js';
 
@@ -92,11 +92,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
-    const rawResult = turn.result ? decisionValueSchema.parse(turn.result.type === 'choice'
-      ? { type: turn.result.type, choice: turn.result.choice, probabilities: turn.result.probabilities, confidence: turn.result.confidence }
-      : turn.result.type === 'score'
-        ? { type: turn.result.type, score: turn.result.score, probabilities: turn.result.probabilities, legend: turn.result.legend, confidence: turn.result.confidence }
-        : { type: turn.result.type, noul: turn.result.noul }) : undefined;
+    const rawResult = turn.result ? decisionValueFromResult(turn.result) : undefined;
     const packets: DecisionRequest[] = [];
     try {
       for (const question of request.questions) {
@@ -164,7 +160,7 @@ export function materializeJourneyRun(admission: PreparedJourneyAdmission): Prep
   const respondents: JourneyRespondentState[] = [];
   let ordinal = 0;
   for (const profile of request.respondents) {
-    const firstPacket = packets.find((packet) => packet.respondentId === profile.id && packet.decisionIndex === 1 && packet.pathId === 'root');
+    const firstPacket = packets.find((packet) => packet.respondentId === profile.id);
     if (!firstPacket) throw new Error(`Journey has no initial ask packet for respondent ${profile.id}.`);
     const evaluationId = randomUUID();
     const contextId = randomUUID();
@@ -175,7 +171,7 @@ export function materializeJourneyRun(admission: PreparedJourneyAdmission): Prep
       turnId, nodeId: firstPacket.nodeId, pathId: firstPacket.pathId, occurrence: 1, ordinal: ordinal++,
     };
     evaluations.push(evaluation);
-    const events = initialJourneyEvents(request.journey);
+    const events = initialJourneyPath(request.journey).events;
     respondents.push({
       respondentId: profile.id, status: 'active', currentNodeId: firstPacket.nodeId, currentTurnId: turnId,
       currentContextId: contextId, revision: 0, events, route: [],
@@ -184,7 +180,7 @@ export function materializeJourneyRun(admission: PreparedJourneyAdmission): Prep
   return { request, requestFingerprint, compilerFingerprint, evaluations, respondents };
 }
 
-function initialJourneyEvents(arm: ParsedInlineJourneyRequest['journey']): JourneyRespondentState['events'] {
+function initialJourneyPath(arm: ParsedInlineJourneyRequest['journey']): { events: JourneyRespondentState['events']; nodeId: string; taskId: string } {
   const events: JourneyRespondentState['events'] = [];
   const graph = journeyTopology(arm);
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -192,7 +188,7 @@ function initialJourneyEvents(arm: ParsedInlineJourneyRequest['journey']): Journ
   while (true) {
     const node = nodes.get(current);
     if (!node) throw new Error(`Journey points to unknown node ${current}.`);
-    if (node.kind === 'ask') return events;
+    if (node.kind === 'ask') return { events, nodeId: node.id, taskId: node.taskId };
     if (node.kind === 'terminal') throw new Error('Journey must reach an ask node before a terminal node.');
     events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
     const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id);
@@ -345,7 +341,7 @@ async function planQuestionBatches(
     if (problem) problems.push(problem);
   };
 
-  if (!provider.measureBatch) {
+  if (!provider.measureBatch || !provider.decideBatch) {
     for (let index = 0; index < questions.length; index += 1) {
       const question = questions[index]!;
       const fit = await measureOne(index);
@@ -403,35 +399,50 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
     warnings.push({ code: 'call_limit_may_stop_journey', message: `maxCalls (${request.maxCalls}) is below the journey maximum (${callBounds.maximumDecisionCalls}); some respondents may not reach a terminal node.` });
   }
 
-  const traversal = walkStudyPackets([request.journey], request.respondents, (packet) => { packets.push(packet); });
-  if (traversal.status !== 'complete') {
-    problems.push({ code: 'journey_preflight_incomplete', message: traversal.incompleteReason ?? 'Journey context traversal is incomplete.' });
-  }
-  const respondentsWithoutInitialAsk = request.respondents.filter((respondent) =>
-    !packets.some((packet) => packet.respondentId === respondent.id && packet.decisionIndex === 1 && packet.pathId === 'root'));
-  if (respondentsWithoutInitialAsk.length > 0) {
+  let initialPath: ReturnType<typeof initialJourneyPath>;
+  try { initialPath = initialJourneyPath(request.journey); }
+  catch (error) {
     return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
       maximumCalls: callBounds.maximumDecisionCalls,
-      problems: [...problems, ...respondentsWithoutInitialAsk.map((respondent) => ({ code: 'invalid_journey', respondentId: respondent.id,
-        message: `Journey has no initial ask packet for respondent ${respondent.id}.` }))],
+      problems: [...problems, { code: 'invalid_journey', message: error instanceof Error ? error.message : 'Journey has no initial ask packet.' }],
       ...(warnings.length === 0 ? {} : { warnings }), fits: [] } };
   }
-  if (traversal.unverifiedReason) {
-    warnings.push({ code: 'context_fit_unverified', message: `${traversal.unverifiedReason} Each actual packet is checked by the selected provider before inference.` });
+  const task = request.journey.tasks.find(({ id }) => id === initialPath.taskId);
+  if (!task) return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    problems: [...problems, { code: 'invalid_journey', message: `Initial ask references unknown task ${initialPath.taskId}.` }],
+    ...(warnings.length === 0 ? {} : { warnings }), fits: [] } };
+  for (const respondent of request.respondents) {
+    const packetRequest = compileDecisionPacket(request.journey, respondent, initialPath.taskId, initialPath.events);
+    const identity = JSON.stringify([respondent.id, request.journey.id, 'root', 1, initialPath.nodeId]);
+    packets.push({ packetId: `packet-${createHash('sha256').update(identity).digest('hex')}`,
+      respondentId: respondent.id, armId: request.journey.id, pathId: 'root', decisionIndex: 1,
+      nodeId: initialPath.nodeId, request: packetRequest });
   }
 
   const kind = request.provider.kind;
   const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+  const measuredByInput = new Map<string, ProviderContextFit>();
   for (const packet of packets) {
-    let fit: ProviderContextFit;
-    if (!provider.measure) fit = missingMeasureFit(provider, kind, modelIdentity);
-    else {
-      try { fit = await provider.measure(packet.request); }
-      catch { fit = { ...missingMeasureFit(provider, kind, modelIdentity), reason: 'provider-measurement-failed' }; }
+    const inputFingerprint = hashCanonical(packet.request);
+    let fit = measuredByInput.get(inputFingerprint);
+    if (!fit) {
+      if (!provider.measure) fit = missingMeasureFit(provider, kind, modelIdentity);
+      else {
+        try { fit = await provider.measure(packet.request); }
+        catch { fit = { ...missingMeasureFit(provider, kind, modelIdentity), reason: 'provider-measurement-failed' }; }
+      }
+      measuredByInput.set(inputFingerprint, fit);
     }
     fits.push({ respondentId: packet.respondentId, nodeId: packet.nodeId, pathId: packet.pathId, packetId: packet.packetId, fit });
     const problem = problemForFit(packet.respondentId, fit);
     if (problem) problems.push({ ...problem, nodeId: packet.nodeId, pathId: packet.pathId });
+  }
+  if (callBounds.maximumDecisionCalls > request.respondents.length) {
+    const initialFitMessage = fits.every(({ fit }) => fit.status === 'fits')
+      ? 'Initial packets passed fit checks.'
+      : 'One or more initial packets failed fit checks.';
+    warnings.push({ code: 'reached_turn_fit_check', message: `${initialFitMessage} Each later reached turn is checked by the provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
   }
 
   const inspection: Inspection = {

@@ -10,9 +10,9 @@ An agent submits a request through an MCP connection that may end before provide
 
 ## Decision
 
-The MCP service persists a fully validated and fit-admitted request before launching one detached Node worker with only the absolute Sheg data root and run ID as arguments. Workers claim runs with a fenced owner token and renewable lease, reserve each physical call before dispatch, and settle or conservatively reconcile it afterward. The worker handles one respondent at a time. Reads only reconcile expired ownership; they never launch a worker. Resume is an explicit later operation rather than an implicit side effect.
+The MCP service persists a fully validated and fit-admitted request before launching one detached Node worker with only the absolute Sheg data root and run ID as arguments. Workers claim runs with a fenced owner token and renewable lease, reserve each physical call before dispatch, and settle or conservatively reconcile it afterward. The worker handles one respondent at a time. Reads only reconcile expired ownership; they never launch a worker. Resume is explicit rather than an implicit side effect.
 
-Authentication and shared provider-access failures are run-wide. A malformed or failed answer is local to its respondent. Cancellation prevents the next call while preserving an answer whose request was already in flight.
+Authentication and shared provider-access failures are run-wide. A malformed answer is local to its evaluation; [ADR-0021](0021-independent-question-groups-and-batched-attempts.md) defines independent sibling questions. Cancellation prevents the next call while preserving an answer whose request was already in flight.
 
 ## Consequences
 

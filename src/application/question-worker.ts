@@ -1,46 +1,48 @@
 import { setInterval, clearInterval } from 'node:timers';
 import { randomUUID } from 'node:crypto';
-import type { RunStore } from '../infrastructure/run-store.js';
+import type { RunCommandRepository, RunPersistence, RunReadRepository } from './run-store.js';
 import { hashCanonical } from '../infrastructure/identity.js';
 import { advanceJourney, normalizeResponse } from '../domain/journey/run.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
-import { JevCallError } from '../providers/jev.js';
-import { LayaCallError } from '../providers/laya.js';
+import { ProviderCallError } from '../domain/decision/provider-failure.js';
+import type { EvaluationFailure } from '../domain/run/lifecycle.js';
 import type { ProviderFactory } from './run-service.js';
-import type { DecisionBatchRequest, DecisionBatchResult, DecisionFailureDetail, DecisionResult, DecisionValue } from '../domain/decision/decision.js';
+import { decisionValueFromResult } from '../domain/decision/decision.js';
+import type { DecisionBatchRequest, DecisionBatchResult } from '../domain/decision/decision.js';
 
 const HEARTBEAT_MS = 2_000;
-export async function executeQuestionRun(store: RunStore, runId: string, providerFactory: ProviderFactory): Promise<void> {
-  const claim = store.claim(runId, Date.now(), process.pid);
+export async function executeQuestionRun(persistence: RunPersistence, runId: string, providerFactory: ProviderFactory): Promise<void> {
+  const { reads, commands } = persistence;
+  const claim = commands.claim(runId, Date.now(), process.pid);
   if (!claim) return;
   const heartbeat = setInterval(() => {
     try {
-      if (!store.heartbeat(claim, Date.now())) clearInterval(heartbeat);
+      if (!commands.heartbeat(claim, Date.now())) clearInterval(heartbeat);
     } catch { clearInterval(heartbeat); }
   }, HEARTBEAT_MS);
   heartbeat.unref();
   try {
-    if (store.getRequestKind(runId) === 'journey') {
-      await executeJourney(store, runId, claim, providerFactory);
+    if (reads.getRequestKind(runId) === 'journey') {
+      await executeJourney(reads, commands, runId, claim, providerFactory);
     } else {
-      await executePoll(store, runId, claim, providerFactory);
+      await executePoll(reads, commands, runId, claim, providerFactory);
     }
-    store.finish(claim);
+    commands.finish(claim);
   } catch {
-    try { store.failRun(claim, 'worker_failed', 'The run worker stopped unexpectedly.'); } catch { /* Expired ownership is reconciled by a later read. */ }
+    try { commands.failRun(claim, 'worker_failed', 'The run worker stopped unexpectedly.'); } catch { /* Expired ownership is reconciled by a later read. */ }
   } finally {
     clearInterval(heartbeat);
   }
 }
 
-async function executePoll(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
-  const prepared = store.getRequest(runId);
+async function executePoll(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
+  const prepared = reads.getRequest(runId);
   const provider = providerFactory(prepared.request.provider);
-  const answers = new Map(store.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
+  const answers = new Map(reads.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
     while (true) {
-      if (!store.heartbeat(claim, Date.now())) return;
+      if (!commands.heartbeat(claim, Date.now())) return;
       const pending = evaluations.filter((evaluation) => answers.get(evaluation.evaluationId) === 'pending');
       if (!pending.length) break;
       let batchEvaluations = [pending[0]!];
@@ -55,66 +57,54 @@ async function executePoll(store: RunStore, runId: string, claim: import('../dom
         if (!selected.length) throw new Error('The remaining question does not fit the provider context.');
         batchEvaluations = selected;
       }
-      const reservation = store.reserveBatch(claim, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
+      const reservation = commands.reserveBatch(claim, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
       if (!reservation) break;
       const batch: DecisionBatchRequest = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
+      let settled: Array<{ evaluationId: string; status: import('../domain/run/lifecycle.js').AnswerRow['status'] }>;
       try {
         let result: DecisionBatchResult;
         if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
         else {
           const single = await provider.decide(reservation.evaluations[0]!.packet, 1);
-          result = { answers: [{ questionId: reservation.evaluations[0]!.questionId, value: valueOnly(single) }], execution: {
+          result = { answers: [{ questionId: reservation.evaluations[0]!.questionId, value: decisionValueFromResult(single) }], execution: {
             attempts: single.attempts, provider: single.provider, model: single.model,
             ...(single.checkpoint ? { checkpoint: single.checkpoint } : {}), latencyMs: single.latencyMs, usage: single.usage,
             ...(single.cost ? { cost: single.cost } : {}),
           } };
         }
-        store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result });
+        settled = commands.settleBatch(claim, reservation.attemptId, { kind: 'answered', result });
       } catch (error) {
         const scope = failureScope(error);
-        store.settleBatch(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope });
+        settled = commands.settleBatch(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope });
         if (scope === 'run') return;
       }
-      for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, 'answered');
-      const latest = new Map(store.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
-      for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId)!);
+      for (const evaluation of settled) answers.set(evaluation.evaluationId, evaluation.status);
     }
   }
 }
 
-function valueOnly(result: DecisionResult): DecisionValue {
-  if (result.type === 'choice') return { type: 'choice', choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
-  if (result.type === 'score') return { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
-  return { type: 'noul', noul: result.noul };
-}
-
-async function executeJourney(store: RunStore, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
-  const accepted = store.getJourneyRun(runId);
+async function executeJourney(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
+  const accepted = reads.getJourneyRun(runId);
   const provider = providerFactory(accepted.request.provider);
   while (true) {
-    if (!store.heartbeat(claim, Date.now())) return;
-    const reservation = store.reserveNext(claim, Date.now());
+    if (!commands.heartbeat(claim, Date.now())) return;
+    const reservation = commands.reserveNext(claim, Date.now());
     if (!reservation) break;
-    const currentRun = store.getJourneyRun(runId);
-    const currentEvaluation = currentRun.evaluations.find(({ evaluationId }) => evaluationId === reservation.evaluation.evaluationId);
-    const respondentState = currentRun.respondents.find(({ respondentId }) => respondentId === reservation.evaluation.respondentId);
-    const profile = currentRun.request.respondents.find(({ id }) => id === reservation.evaluation.respondentId);
-    if (!currentEvaluation || !respondentState || !profile || respondentState.status !== 'active' || respondentState.currentTurnId !== currentEvaluation.turnId) {
-      throw new Error('Reserved journey turn has no matching active respondent state.');
-    }
+    const currentTurn = reads.getJourneyWorkerTurn(runId, reservation.evaluation.evaluationId, reservation.evaluation.respondentId);
+    const { evaluation: currentEvaluation, respondent: respondentState, profile } = currentTurn;
     try {
       const result = await provider.decide(reservation.evaluation.packet, 1);
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
-      const progress = advanceJourney(currentRun.request.journey, profile, {
+      const progress = advanceJourney(accepted.request.journey, profile, {
         currentNodeId: currentEvaluation.nodeId, events: respondentState.events, route: respondentState.route,
-      }, value, currentRun.compilerFingerprint);
+      }, value, accepted.compilerFingerprint);
       const nextEvaluation = progress.next ? {
         evaluationId: randomUUID(), turnId: randomUUID(), contextId: randomUUID(),
         respondentId: respondentState.respondentId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,
         pathId: progress.next.pathId,
-        occurrence: currentRun.evaluations.filter(({ respondentId, nodeId }) => respondentId === respondentState.respondentId && nodeId === progress.next!.nodeId).length + 1,
-        ordinal: currentRun.evaluations.length, packet: progress.next.packet,
-        packetFingerprint: hashCanonical({ packet: progress.next.packet, compilerFingerprint: currentRun.compilerFingerprint }),
+        occurrence: progress.events.filter((event) => event.type === 'response' && event.taskId === progress.next!.taskId).length + 1,
+        ordinal: currentTurn.nextOrdinal, packet: progress.next.packet,
+        packetFingerprint: hashCanonical({ packet: progress.next.packet, compilerFingerprint: accepted.compilerFingerprint }),
       } : undefined;
       const state: JourneyRespondentState = {
         ...respondentState,
@@ -127,7 +117,7 @@ async function executeJourney(store: RunStore, runId: string, claim: import('../
         route: progress.route,
         ...(progress.outcome === null ? {} : { outcome: progress.outcome }),
       };
-      store.settleJourney(claim, reservation.attemptId, { kind: 'answered', result }, {
+      commands.settleJourney(claim, reservation.attemptId, { kind: 'answered', result }, {
         respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state, ...(nextEvaluation ? { nextEvaluation } : {}),
       });
     } catch (error) {
@@ -140,7 +130,7 @@ async function executeJourney(store: RunStore, runId: string, claim: import('../
         currentContextId: scope === 'run' ? currentEvaluation.contextId : null,
         revision: respondentState.revision + 1,
       };
-      store.settleJourney(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope }, {
+      commands.settleJourney(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope }, {
         respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state,
       });
       if (scope === 'run') break;
@@ -149,16 +139,14 @@ async function executeJourney(store: RunStore, runId: string, claim: import('../
 }
 
 function failureScope(error: unknown): 'evaluation' | 'run' {
-  return error instanceof JevCallError || error instanceof LayaCallError ? error.failureScope : 'evaluation';
+  return error instanceof ProviderCallError ? error.failureScope : 'evaluation';
 }
 
-function failureDetails(error: unknown, scope: 'evaluation' | 'run'): { code: string; message: string; detail?: DecisionFailureDetail; providerAttempts?: number } {
-  const validationFailure = error instanceof JevCallError || error instanceof LayaCallError ? error.validationFailure : undefined;
-  if (validationFailure) return { ...validationFailure, ...(error instanceof JevCallError || error instanceof LayaCallError ? { providerAttempts: error.attempts } : {}) };
-  const code = scope === 'run' && error instanceof JevCallError ? error.failureCode : scope === 'run' ? 'provider_unavailable' : 'decision_failed';
-  const message = scope === 'run' && error instanceof JevCallError && error.failureCode.startsWith('credential_')
-    ? error.message
-    : scope === 'run' ? 'Provider authentication or service access failed.' : 'The respondent evaluation did not produce a valid answer.';
-  const providerAttempts = error instanceof JevCallError || error instanceof LayaCallError ? error.attempts : undefined;
-  return { code, message, ...(providerAttempts === undefined ? {} : { providerAttempts }) };
+function failureDetails(error: unknown, scope: 'evaluation' | 'run'): EvaluationFailure & { providerAttempts?: number } {
+  if (!(error instanceof ProviderCallError)) return { code: scope === 'run' ? 'provider_unavailable' : 'decision_failed', message: 'The respondent evaluation did not produce a valid answer.' };
+  const evidence = { providerAttempts: error.attempts, providerFailure: error.evidence };
+  if (error.validationFailure) return { ...error.validationFailure, ...evidence };
+  if (error.contextFit) return { code: error.contextFit.status === 'overflow' ? 'provider_context_overflow' : 'provider_context_unavailable', message: error.contextFit.status === 'overflow' ? 'The decision packet exceeds the provider context allowance.' : 'Provider context fit could not be verified.', ...evidence };
+  const code = scope === 'run' ? error.failureCode : `provider_${error.evidence.category}_failed`;
+  return { code, message: scope === 'run' ? 'Provider authentication or service access failed.' : 'The provider could not complete this evaluation.', ...evidence };
 }

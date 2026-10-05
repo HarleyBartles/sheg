@@ -41,7 +41,7 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
   }
 
   for (const [taskIndex, task] of arm.tasks.entries()) {
-    if (!('options' in task) || !task.materialOptions) continue;
+    if (task.type !== 'choice' || !task.materialOptions) continue;
     for (const [optionId, materialId] of Object.entries(task.materialOptions)) {
       const item = arm.items.find((candidate) => candidate.id === materialId);
       if (!item) {

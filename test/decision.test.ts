@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DecisionError, validateDecision, validateDecisionBatch } from '../src/domain/decision/validate.js';
+import { DecisionError, decisionValidationFailure, validateDecision, validateDecisionBatch } from '../src/domain/decision/validate.js';
+import { taskSchema } from '../src/domain/study/task.js';
 import type { DecisionBatchRequest, DecisionBatchResult, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
 import { decisionQuestionSchema } from '../src/domain/decision/decision.js';
 
@@ -14,6 +15,28 @@ const request: DecisionRequest = {
   },
   optionIds: ['continue', 'leave'],
 };
+
+test('answer keys identify an own offered option rather than an inherited object member', () => {
+  const task = { id: 'check', instructions: 'Choose', options: { a: 'A' } };
+  assert.equal(taskSchema.safeParse({ ...task, answerKeyOptionId: 'constructor' }).success, false);
+  assert.equal(taskSchema.safeParse({ ...task, answerKeyOptionId: 'a' }).success, true);
+});
+
+test('typed validation reasons survive changes to the diagnostic message', () => {
+  const cases = [
+    { change: { choice: 'unknown' }, reason: 'unknown_option' },
+    { change: { probabilities: { continue: 1 } }, reason: 'probability_keys' },
+    { change: { probabilities: { continue: 0.1, leave: 0.1 } }, reason: 'probability_sum' },
+  ] as const;
+  for (const { change, reason } of cases) {
+    assert.throws(() => validateDecision(request, result(change)), (error: unknown) => {
+      assert.ok(error instanceof DecisionError);
+      error.message = 'A diagnostic was translated or reworded.';
+      assert.equal(decisionValidationFailure(error).detail.reason, reason);
+      return true;
+    });
+  }
+});
 
 test('choice questions preserve explicit material links and reject links to duplicate or missing options', () => {
   const candidate = { type: 'choice', id: 'candidate', instructions: 'Choose a section.', options: { section: 'Exact section text.', 'no-fit': 'Neither' }, materialOptions: { section: 'section-three' } };
@@ -237,6 +260,41 @@ test('isolates duplicate, missing, malformed and wrong-type batch answers by que
 
   const missing = validateDecisionBatch(batch, { answers: [], execution: sharedExecution });
   assert.deepEqual(missing.answers.map((answer) => 'failure' in answer ? answer.failure.code : 'answered'), ['missing_answer', 'missing_answer']);
+});
+
+test('validates shared batch execution even when answers are empty or all explicitly failed', () => {
+  const batch: DecisionBatchRequest = { state: request.state, questions: [request.question] };
+  const invalidExecutions = [
+    { attempts: 1, provider: 'laya', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+    { attempts: 1, provider: 'jev', model: 'another-model', latencyMs: 1, usage: {} },
+    { attempts: 2, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+  ] as const;
+  const answerSets = [
+    [],
+    [{ questionId: request.question.id, failure: { code: 'provider_error', message: 'The provider could not answer.' } }],
+  ] as const;
+
+  for (const answers of answerSets) for (const execution of invalidExecutions) {
+    assert.throws(() => validateDecisionBatch(batch, { answers, execution }, {
+      maxAttempts: 1, provider: 'jev', model: 'typesafe/jev-1.13',
+    }), DecisionError);
+  }
+});
+
+test('valid batch execution preserves a valid sibling beside an explicit answer failure', () => {
+  const batch: DecisionBatchRequest = { state: request.state, questions: [request.question,
+    { type: 'noul', id: 'trust', instructions: 'Credible?' }] };
+  const validated = validateDecisionBatch(batch, {
+    answers: [
+      { questionId: request.question.id, value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.7, leave: 0.3 } } },
+      { questionId: 'trust', failure: { code: 'provider_error', message: 'The provider could not answer.' } },
+    ],
+    execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+  }, { maxAttempts: 1, provider: 'jev', model: 'typesafe/jev-1.13' });
+
+  assert.ok('value' in validated.answers[0]!);
+  assert.ok('failure' in validated.answers[1]!);
+  if ('failure' in validated.answers[1]!) assert.equal(validated.answers[1].failure.code, 'provider_error');
 });
 
 test('typed-answer failures retain safe validation reasons beside successful sibling answers', () => {

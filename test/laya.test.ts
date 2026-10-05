@@ -231,6 +231,7 @@ test('provider classifies authorization responses as run-wide failures', async (
     const provider = new LayaProvider(config, { measureFit: measure, fetchRequest: async () => new Response(null, { status }) });
     await assert.rejects(provider.decide(request, 1), (error: unknown) => {
       assert.equal((error as { failureScope?: string }).failureScope, 'run');
+      assert.deepEqual((error as { evidence?: unknown }).evidence, { category: 'http', attempts: 1, scope: 'run', httpStatus: status });
       return true;
     });
   }

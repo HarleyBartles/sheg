@@ -1,35 +1,33 @@
-# Current primitives and tool contracts
+# Primitives and tool contracts
 
-The current MCP run shape is deliberately small. An agent supplies one or more distinct respondent profiles, exact inline text and typed Choice, Score, or Noul questions, one provider configuration, and a bounded physical-call limit. A direct poll or follow-on can contain one or more independent questions over the same frozen respondent context; use a finite authored sequence or graph when questions depend on earlier answers.
+An MCP request supplies distinct respondent profiles, exact inline material, typed Choice/Score/Noul questions, a provider, and a physical-call bound. Polls and follow-ons may group independent questions over the same state. Finite journeys provide staged exposure and answer-dependent routing. The [run request schema](../../stimulus-response-polling/assets/run-request.schema.json) defines the accepted shapes.
 
-| Tool | Purpose | Side effect |
-| --- | --- | --- |
-| `run_inspect` | Validate the strict request, measure context fit for planned provider calls or batches, and preview reachable journey paths. | Creates no new run and makes no inference call. Resolving a follow-on may reconcile an expired source-run lease; it never launches a worker. |
-| `run_start` | Persist a validated request, return a durable run ID, and launch its worker. An identical submission ID plus request returns the same run. | Starts inference after credential and fit admission. |
-| `run_list` | Find durable runs by status or label and paginate. | Reconcile expired ownership; never launch work. |
-| `run_get` with `view: status` | Read lifecycle state and counts. | Reconcile expired ownership; never launch work. |
-| `run_get` with `view: request` | Recall the frozen request, compiled packets, and their stable evaluation/context IDs. | Reconcile expired ownership; never launch work. |
-| `run_get` with `view: journey` | Recall reached turns, exact respondent packets, exposures, typed response history, route and terminal/failure state. | Reconcile expired ownership; never launch work. |
-| `run_get` with `view: answers` | Recall typed answers, failures, and pending evaluations with stable identifiers. | Reconcile expired ownership; never launch work. |
-| `run_query` | Reconcile expired ownership, then filter typed answers and journey outcomes; return evaluation/context handles and, for mapped Choice answers, selected material references. | Never launch work; a progressing source can gain more matches. |
-| `run_cancel` | Request that the worker stop before dispatching another respondent. | An in-flight call is allowed to settle. |
+| Tool | Purpose |
+| --- | --- |
+| `run_inspect` | Validate a request, measure initial journey inputs, explain reached-turn fit checks, and report call bounds without inference or run creation. |
+| `run_start` | Persist an admitted request and launch its worker; reuse an identical submission ID/request without launching again. |
+| `run_list` | Discover and paginate durable runs by status, label, time, or referenced material. |
+| `run_get` | Read status, request, answers, journey, one exact context, or physical attempts using its `view`. |
+| `run_query` | Filter evidence and return exact evaluation/context handles, coverage, and mapped selected-material references. |
+| `run_cancel` | Prevent the next dispatch while allowing an in-flight call to settle. |
+| `run_resume` | Explicitly resume eligible stopped work under its original request and call allowance. |
+| `run_delete` | Preview or delete an explicit selection of inactive runs. |
+| `run_storage` | Inspect compatibility/integrity, optimize healthy storage, or explicitly reset a datastore requiring recovery. |
+
+Reads may reconcile expired worker ownership but never launch or resume work. A progressing source can gain new query matches. See [run and recovery](../../stimulus-response-polling/references/run-and-recovery.md) for inputs, pagination, lifecycle, and recovery behavior.
 
 ## Request design
 
-The agent owns the meaning and granularity of the user's question. If the user asks which part of a page loses their interest, the agent can define the choices as sections, paragraphs, or another explicit unit. Sheg receives that choice structure; it does not decide what constitutes a meaningful “part.” Exact material text is preserved as supplied.
+The agent owns question meaning and material granularity. If the user asks which part loses interest, define an explicit unit such as sections or paragraphs. Preserve exact text; Sheg does not decide editorial boundaries.
 
-Choice option IDs are stable machine identifiers paired with user-meaningful labels. Score uses a typed ordered rubric. Noul represents probability. These types must match the information the user wants back; do not turn a probability or ranking request into a nominal Choice just because it is easy to encode. For Choice over authored material candidates, map option IDs to exact material IDs with `materialOptions`; linked labels must equal exact text and candidates must carry author-supplied source metadata. Keep no-fit options unlinked. Query returns the selected `materialId`, exact text, author source identity/digest, and Sheg-computed text digest. Pass the ID through follow-on `context.materialIds`.
+Choice selects one stable option ID with an authored meaning. Score uses an ordered rubric; Noul returns a probability for a proposition. Match the response type to the information needed. For material-selection Choice, use `materialOptions` to link option IDs to exact candidate items. Linked labels must equal candidate text, and candidates require author-supplied source identity/digest. Keep no-fit unlinked. These metadata support traceability; Sheg does not authenticate the external source.
 
-Sheg compiles one frozen decision packet per respondent and question evaluation. Independent questions share the respondent-visible state but remain separate evaluations; Jev may batch a question group into one provider request when it fits, while local Laya sends one question per physical request. Input order, exact material, typed questions, provider configuration, and the prompt contract determine the accepted request fingerprint. The submission ID is an idempotency key for one exact request, not a study name. A changed request uses a new submission ID.
+Each logical evaluation has a frozen packet and stable identity. Independent questions share the respondent-visible state and never see sibling answers. Jev can batch fitting questions while Laya sends singleton requests. Physical attempts, including retries and uncertain dispatches, count against `maxCalls`; answer rows do not measure call use or input diversity.
 
-## Current follow-on boundary
+A fresh UUID submission ID identifies one exact request. Reuse it only when retrying the unchanged submission; a changed request needs a new ID.
 
-`run_query` filters recorded typed answers and route outcomes in one run. The agent inspects those results, decides which respondents and answers matter, then submits a follow-on with explicit criteria or exact evaluation/context references. A follow-on's context mode determines whether the selected answer enters its trajectory and which saved or selected material is presented. Sheg does not decide relevance or compose the next question for the agent.
+## Follow-on evidence
 
-Likewise, run recall is not recovery. Reads discover expired workers as interrupted and do not resume them. Use `run_resume` explicitly to continue an eligible run under its original attempt allowance. Cancellation prevents the next dispatch, but does not discard an answer for a provider call that was already in flight.
+Query recorded answers or route outcomes, select exact evaluation/context references or supported criteria, then author the next question. The context mode determines which material and answer history the new request receives. A mapped Choice exposes exact selected material for reuse. Read the selection and context rules before composing a follow-on; Sheg does not infer relevance or write the question.
 
-## Interpreting evidence
-
-Use status and answer rows together. Completed, failed, pending, and total evaluation counts describe coverage. A respondent-local invalid or failed answer does not hide sibling results. A run-wide provider failure stops later dispatches. An uncertain in-flight call consumes the physical attempt allowance without inventing an answer.
-
-These are modeled respondent outputs for the supplied profiles, material, and question. They can help the user examine an artifact or compare possibilities; they are not claims about observed human behavior or population prevalence.
+Completed, failed, pending, and unreached evaluations describe coverage. A malformed answer does not hide independent sibling results. Shared provider failures stop later dispatches, and uncertain calls consume allowance without inventing answers. Interpret outputs as modeled responses to the supplied inputs, not observed human behavior or population prevalence.

@@ -1,0 +1,1 @@
+Sheg bundles drizzle-orm@1.0.0-rc.4, Copyright 2026 Drizzle Team, licensed under the Apache License, Version 2.0. The license text is included as `drizzle-orm-Apache-2.0.txt`.

@@ -1,4 +1,4 @@
-# Identify development and candidate builds
+# ADR-0023: Identify development and candidate builds
 
 - Status: Accepted
 - Date: 2026-10-02
@@ -12,7 +12,7 @@ Sheg needs dogfood builds on develop to identify which product behavior and pack
 
 The root package manifest is the authority for product version. The package lockfile root entries, plugin manifest, and MCP initialization version must agree with it. Keep the package private and do not publish it to npm.
 
-Use stable versions such as 0.3.0 for stable releases, 0.3.0-dev.N for deliberate development checkpoints, and 0.3.0-rc.N for prepared candidates. Increment versions at intentional checkpoints, not for every commit. The dogfood roadmap assigns 0.3.0-dev.2 through 0.3.0-dev.7 to its six planned develop merges. The existing develop identity 0.2.0 is historical dev.1 context; do not rewrite or tag it retrospectively.
+Use `MAJOR.MINOR.PATCH` for stable releases, `MAJOR.MINOR.PATCH-dev.N` for deliberate development checkpoints, and `MAJOR.MINOR.PATCH-rc.N` for prepared candidates. Increment versions at intentional checkpoints, not for every commit.
 
 Local packaging without a release tag may validate and create a prerelease ZIP for inspection and dogfood. That action does not publish a release. Stable publication accepts only vMAJOR.MINOR.PATCH tags, requires matching stable manifests, and retains the existing main-ancestry and triggering-commit checks. Prerelease tags must not publish.
 

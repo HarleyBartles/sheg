@@ -10,11 +10,16 @@ import type { DecisionBatchRequest, DecisionResult } from '../src/domain/decisio
 import { compileDecisionPacket, compileDecisionPacketForCompiler, promptContractHash, v6PromptContractHash, type PromptHistoryEvent, type PromptState } from '../src/domain/decision/prompt.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { runRequestSchema, type InlineRunRequest, type InlineJourneyRequest, type PreparedJourneyRun } from '../src/domain/run/request.js';
-import { prepareRun } from '../src/application/run-inspection.js';
-import { executeQuestionRun } from '../src/application/question-worker.js';
+import { materializeJourneyRun, prepareRun } from '../src/application/run-inspection.js';
+import { executeQuestionRun as executeWorker } from '../src/application/question-worker.js';
+import type { RunStore } from '../src/application/run-store.js';
+
+function executeQuestionRun(store: RunStore, runId: string, providerFactory: Parameters<typeof executeWorker>[2]): Promise<void> {
+  return executeWorker(splitRunStore(store), runId, providerFactory);
+}
 import { JevCallError } from '../src/providers/jev.js';
 import { LayaCallError } from '../src/providers/laya.js';
-import { openRunStore } from '../src/infrastructure/run-store.js';
+import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
 
 function request(respondents = 2): InlineRunRequest {
@@ -35,7 +40,7 @@ function answer(): DecisionResult {
 async function fixture(input = request(), now = () => Date.now()) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-question-worker-'));
   const store = openRunStore(root, { now });
-  const prepared = await prepareRun(input, { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { return answer(); } });
+  const prepared = await prepareRun(input, { measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { return answer(); }, async decideBatch() { throw new Error('Admission must not run inference.'); } });
   assert.ok(prepared.prepared);
   const accepted = store.accept(randomUUID(), prepared.prepared);
   return { root, store, runId: accepted.run.runId, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
@@ -175,6 +180,10 @@ test('a grouped poll batches independent questions and resumes only the failed q
     { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Mixed', 'Clear'] }];
   const settledAt = Date.now();
   const f = await fixture(input, () => settledAt); const dispatched: Array<{ ids: string[]; state: unknown }> = [];
+  const persistence = splitRunStore(f.store);
+  const readStatuses = persistence.reads.evaluationStatuses.bind(persistence.reads);
+  let statusReads = 0;
+  persistence.reads.evaluationStatuses = (runId) => { statusReads += 1; return readStatuses(runId); };
   try {
     const provider: DecisionProvider = { measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { throw new Error('Expected grouped request dispatch.'); }, async decideBatch(batch: DecisionBatchRequest) {
       dispatched.push({ ids: batch.questions.map(({ id }) => id), state: batch.state });
@@ -187,7 +196,8 @@ test('a grouped poll batches independent questions and resumes only the failed q
         { questionId: 'clarity', value: { type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 } } },
       ] };
     } };
-    await executeQuestionRun(f.store, f.runId, factory(provider));
+    await executeWorker(persistence, f.runId, factory(provider));
+    assert.equal(statusReads, 1, 'batch settlement returns affected statuses without a whole-run reload');
     assert.equal(f.store.getStatus(f.runId).status, 'partial');
     assert.equal(f.store.getStatus(f.runId).usedCalls, 1);
     const failedBefore = f.store.answers(f.runId).items.find(({ questionId }) => questionId === 'clarity')!;
@@ -195,7 +205,8 @@ test('a grouped poll batches independent questions and resumes only the failed q
     const resumed = f.store.resume(f.runId, Date.now()); assert.equal(resumed.started, true);
     assert.equal(f.store.getRequest(f.runId).groups?.length, 1);
     assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'pending']);
-    await executeQuestionRun(f.store, f.runId, factory(provider));
+    await executeWorker(persistence, f.runId, factory(provider));
+    assert.equal(statusReads, 2, 'resume reads the initial status snapshot once');
     assert.equal(f.store.getStatus(f.runId).status, 'completed', JSON.stringify(f.store.getStatus(f.runId)));
     assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'answered']);
     assert.deepEqual(dispatched.map(({ ids }) => ids), [['interest', 'interest-loss', 'clarity'], ['clarity']]);
@@ -271,7 +282,7 @@ test('a shared dispatched authorization failure consumes its call and explicit r
     async decide() { throw new Error('Expected grouped request.'); },
     async decideBatch(batch) {
       calls += 1; dispatched.push(batch.questions.map(({ id }) => id));
-      if (calls === 1) throw new JevCallError('authorization rejected', 1, undefined, undefined, 'run', 'credential_unavailable');
+      if (calls === 1) throw new JevCallError('authorization rejected', { attempts: 1, scope: 'run', code: 'credential_unavailable', category: 'credential' });
       return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => question.type === 'choice'
         ? { questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }
         : { questionId: question.id, value: { type: 'noul' as const, noul: 0.6 } }) };
@@ -297,7 +308,7 @@ test('a credential failure before dispatch preserves the call allowance for expl
     async decide() { throw new Error('Expected grouped request.'); },
     async decideBatch(batch) {
       calls += 1;
-      if (calls === 1) throw new JevCallError('credential unavailable', 0, undefined, undefined, 'run', 'credential_unavailable');
+      if (calls === 1) throw new JevCallError('credential unavailable', { attempts: 0, scope: 'run', code: 'credential_unavailable', category: 'credential' });
       return { execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} }, answers: batch.questions.map((question) => ({ questionId: question.id, value: { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } })) };
     },
   };
@@ -337,6 +348,7 @@ test('a typed provider validation failure gives safe reasons and the worker cont
     assert.deepEqual(f.store.answers(f.runId).items[0]?.failure, {
       code: 'invalid_answer', message: 'The selected option was not offered by this question.',
       detail: { reason: 'unknown_option', field: 'choice', constraint: 'offered_option' },
+      providerFailure: { category: 'answer', attempts: 1, scope: 'evaluation' },
     });
     assert.deepEqual(f.store.attempts(f.runId).items[0]?.evaluationFailures?.[0]?.failure, f.store.answers(f.runId).items[0]?.failure);
     assert.equal(status.usedCalls, 2);
@@ -348,7 +360,7 @@ test('provider authentication failure ends the run without dispatching sibling r
   let calls = 0;
   try {
     const provider: DecisionProvider = {
-      async decide() { calls += 1; throw new JevCallError('secret detail', 0, undefined, undefined, 'run'); },
+      async decide() { calls += 1; throw new JevCallError('secret detail', { attempts: 0, scope: 'run' }); },
     };
     await executeQuestionRun(f.store, f.runId, factory(provider));
     const status = f.store.getStatus(f.runId);
@@ -356,6 +368,25 @@ test('provider authentication failure ends the run without dispatching sibling r
     assert.equal(calls, 1);
     assert.equal(f.store.answers(f.runId).items[1]?.status, 'pending');
     assert.equal(status.failure?.message.includes('secret detail'), false);
+  } finally { await f.close(); }
+});
+
+test('known pre-dispatch context refusal retains fit evidence through query and attempt recall without charging a call', async () => {
+  const f = await fixture(request(1));
+  const fit = { provider: 'jev' as const, status: 'overflow' as const, method: 'estimated-json', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 1200, contextLimit: 1000, headroomTokens: 200, effectiveLimit: 800, details: {}, reason: 'estimated-context-over-limit' };
+  try {
+    await executeQuestionRun(f.store, f.runId, factory({ async decide() { throw new JevCallError('Raw diagnostic must not escape', { attempts: 0, contextFit: fit }); } }));
+    assert.equal(f.store.getStatus(f.runId).usedCalls, 0);
+    const evidence = f.store.queryEvidence({ sourceRunId: f.runId, criteria: {} }).items[0]?.failure;
+    assert.equal(evidence?.code, 'provider_context_overflow');
+    assert.deepEqual((evidence as { providerFailure?: unknown })?.providerFailure, { category: 'admission', attempts: 0, scope: 'evaluation', contextFit: fit });
+    const attempt = f.store.attempts(f.runId).items[0]?.evaluationFailures?.[0]?.failure;
+    assert.deepEqual(attempt, evidence);
+    assert.doesNotMatch(JSON.stringify(evidence), /Raw diagnostic/);
+    f.store.close();
+    const reopened = openRunStore(f.root);
+    try { assert.deepEqual(reopened.queryEvidence({ sourceRunId: f.runId, criteria: {} }).items[0]?.failure, evidence); }
+    finally { reopened.close(); }
   } finally { await f.close(); }
 });
 
@@ -467,6 +498,73 @@ test('a detached journey worker records reached Choice, Score and Noul turns thr
   } finally { await f.close(); }
 });
 
+test('a journey worker advances from its checkpoint without reading earlier turn packets', async () => {
+  const f = await journeyFixture(1, 6);
+  const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+  let calls = 0;
+  try {
+    database.exec(`CREATE TRIGGER corrupt_prior_journey_packet AFTER UPDATE OF status ON evaluations
+      WHEN NEW.run_id = '${f.runId}' AND NEW.question_id = 'interest' AND NEW.status = 'answered'
+      BEGIN UPDATE evaluations SET packet_json = '{' WHERE evaluation_id = NEW.evaluation_id; END`);
+    await executeQuestionRun(f.store, f.runId, factory({
+      async decide(request) {
+        calls += 1;
+        if (calls === 1) {
+          assert.equal(request.question.id, 'interest');
+          return { ...answer(), choice: 'continue' };
+        }
+        assert.equal(request.question.id, 'clarity');
+        database.prepare('UPDATE runs SET cancel_requested = 1 WHERE run_id = ?').run(f.runId);
+        return { type: 'score', score: 1, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.8, 2: 0.1 }, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
+      },
+    }));
+    assert.equal(calls, 2);
+    assert.equal(f.store.getStatus(f.runId).status, 'cancelled');
+    const rows = database.prepare('SELECT respondent_id, question_id, status FROM evaluations WHERE run_id = ? ORDER BY ordinal').all(f.runId) as Array<{ respondent_id: string; question_id: string; status: string }>;
+    assert.deepEqual(rows.map(({ question_id, status }) => [question_id, status]), [
+      ['interest', 'answered'], ['clarity', 'answered'], ['likely', 'pending'],
+    ]);
+  } finally { database.close(); await f.close(); }
+});
+
+test('repeated journey task nodes receive increasing task occurrences', async () => {
+  const base = authoredJourney(1, 2);
+  const input = {
+    ...base,
+    journey: {
+      ...base.journey,
+      tasks: [base.journey.tasks[0]!],
+      presentation: { kind: 'graph' as const, entryNodeId: 'ask-first', maxDecisions: 2, nodes: [
+        { id: 'ask-first', kind: 'ask' as const, taskId: 'interest' },
+        { id: 'ask-second', kind: 'ask' as const, taskId: 'interest' },
+        { id: 'done', kind: 'terminal' as const, outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'ask-first', optionId: 'continue', toNodeId: 'ask-second' },
+        { fromNodeId: 'ask-first', optionId: 'leave', toNodeId: 'done' },
+        { fromNodeId: 'ask-second', optionId: 'continue', toNodeId: 'done' },
+        { fromNodeId: 'ask-second', optionId: 'leave', toNodeId: 'done' },
+      ] },
+    },
+    maxCalls: 2,
+  };
+  const admission = await prepareRun(input, {
+    measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'mock', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }),
+    async decide() { throw new Error('Admission must not infer.'); },
+  });
+  assert.ok(admission.journey);
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-repeated-task-occurrence-'));
+  const store = openRunStore(root);
+  const accepted = store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
+  try {
+    await executeQuestionRun(store, accepted.run.runId, factory({ async decide() { return { ...answer(), choice: 'continue' }; } }));
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.deepEqual(run.evaluations.map(({ questionId, occurrence }) => [questionId, occurrence]), [['interest', 1], ['interest', 2]]);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('a respondent-local journey failure does not block another respondent', async () => {
   const f = await journeyFixture(2, 6);
   let calls = 0;
@@ -567,6 +665,53 @@ test('a partial journey failure retains the respondent-local checkpoint and prio
     const failedAttemptsAfter = f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(failedEvaluation.evaluationId));
     assert.deepEqual(failedAttemptsAfter.map(({ status }) => status), ['failed', 'answered']);
   } finally { await f.close(); }
+});
+
+test('a reached journey turn that overflows fit stops only that respondent without charging a provider call', async () => {
+  const input = authoredJourney(2, 8);
+  const initialFit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
+  const admission = await prepareRun(input, {
+    measure: () => initialFit,
+    async decide() { throw new Error('Admission must not infer.'); },
+  });
+  assert.equal(admission.inspection.valid, true);
+  assert.equal(admission.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
+  assert.ok(admission.journey);
+
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-late-journey-fit-'));
+  const store = openRunStore(root);
+  const accepted = store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
+  const overflow = { ...initialFit, status: 'overflow' as const, tokens: 1200, contextLimit: 1000, effectiveLimit: 900, reason: 'estimated-context-over-limit' };
+  let dispatches = 0;
+  try {
+    await executeQuestionRun(store, accepted.run.runId, factory({
+      async decide(packet) {
+        dispatches += 1;
+        const profile = (packet.state as PromptState).respondent.profile.context;
+        if (profile === 'Reader A' && packet.question.id === 'interest') return { ...answer(), choice: 'continue' };
+        if (profile === 'Reader B' && packet.question.id === 'interest') return { ...answer(), choice: 'leave' };
+        if (profile === 'Reader A' && packet.question.id === 'clarity') throw new JevCallError('Fit changed for reached input.', { attempts: 0, contextFit: overflow });
+        throw new Error(`Unexpected packet ${profile}/${packet.question.id}`);
+      },
+    }));
+
+    const run = store.getJourneyRun(accepted.run.runId);
+    const status = store.getStatus(accepted.run.runId);
+    const failedRespondent = run.respondents.find(({ respondentId }) => respondentId === 'reader-a');
+    const completedRespondent = run.respondents.find(({ respondentId }) => respondentId === 'reader-b');
+    const failedEvaluation = run.evaluations.find(({ respondentId, status: evaluationStatus }) => respondentId === 'reader-a' && evaluationStatus === 'failed');
+    assert.equal(status.status, 'partial');
+    assert.equal(status.usedCalls, 2);
+    assert.equal(dispatches, 3);
+    assert.equal(failedRespondent?.status, 'failed');
+    assert.equal(failedRespondent?.events.filter(({ type }) => type === 'response').length, 1);
+    assert.deepEqual(failedRespondent?.route.map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-interest', 'expose-section-three']]);
+    assert.equal(completedRespondent?.status, 'completed');
+    assert.equal(failedEvaluation?.failure?.code, 'provider_context_overflow');
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('a failed retry stays partial and preserves every attempt for the same reached turn', async () => {
