@@ -18,10 +18,11 @@ test('fresh stores use the explicit schema 9 baseline with non-null identities a
       assert.equal(runIdentity?.notnull, 1);
       const attemptColumns = new Set((database.prepare('PRAGMA table_info(attempts)').all() as Array<{ name: string }>).map(({ name }) => name));
       assert.ok(attemptColumns.has('charged_calls'));
-      const migration = database.prepare('SELECT version, migration_id, checksum FROM schema_migrations').get() as { version: number; migration_id: string; checksum: string };
+      const migration = database.prepare('SELECT version, migration_id, checksum, schema_fingerprint FROM schema_migrations').get() as { version: number; migration_id: string; checksum: string; schema_fingerprint: string };
       assert.equal(migration.version, 9);
       assert.equal(migration.migration_id, 'baseline-v9');
       assert.match(migration.checksum, /^[a-f0-9]{64}$/);
+      assert.match(migration.schema_fingerprint, /^[a-f0-9]{64}$/);
       assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
     } finally { database.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }

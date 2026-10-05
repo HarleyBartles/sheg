@@ -158,6 +158,7 @@ export const schemaMigrations = sqliteTable('schema_migrations', {
   version: integer('version').notNull(),
   migrationId: text('migration_id').notNull(),
   checksum: text('checksum').notNull(),
+  schemaFingerprint: text('schema_fingerprint').notNull(),
   appliedAt: text('applied_at').notNull(),
 }, (table) => [
   primaryKey({ name: 'schema_migrations_pk', columns: [table.migrationId] }),

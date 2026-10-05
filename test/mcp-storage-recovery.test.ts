@@ -96,12 +96,13 @@ test('a future schema keeps the MCP handshake and maintenance inspection while b
     assert.equal((reset.structuredContent as { backupRetained: boolean }).backupRetained, true);
     assert.equal((reset.structuredContent as { schemaVersion: number }).schemaVersion, 9);
     const markerDatabase = new DatabaseSync(path.join(root, 'runs.sqlite'));
-    try { markerDatabase.exec('CREATE TABLE reset_marker (value TEXT NOT NULL); INSERT INTO reset_marker (value) VALUES (\'saved-after-reset\')'); } finally { markerDatabase.close(); }
+    try { markerDatabase.prepare('UPDATE schema_migrations SET applied_at = ? WHERE version = 9').run('saved-after-reset'); }
+    finally { markerDatabase.close(); }
     const staleReset = await stale.client.callTool({ name: 'run_storage', arguments: { operation: 'reset', confirmation: resetConfirmation } });
     assert.equal(staleReset.isError, true);
     assert.equal((staleReset.structuredContent as { error: { code: string } }).error.code, 'recovery_not_required');
     const markerCheck = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
-    try { assert.equal((markerCheck.prepare('SELECT value FROM reset_marker').get() as { value: string }).value, 'saved-after-reset'); } finally { markerCheck.close(); }
+    try { assert.equal((markerCheck.prepare('SELECT applied_at FROM schema_migrations WHERE version = 9').get() as { applied_at: string }).applied_at, 'saved-after-reset'); } finally { markerCheck.close(); }
     const staleInspection = await stale.client.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
     assert.equal((staleInspection.structuredContent as { recoveryRequired: boolean }).recoveryRequired, false);
     const recovered = await f.client.callTool({ name: 'run_list', arguments: {} });

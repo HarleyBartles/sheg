@@ -55,7 +55,7 @@
 
 - [x] Pin `drizzle-orm` and development-only `drizzle-kit` to `1.0.0-rc.4`. Define schema 9 from the actual durable entities, with non-null identities, scoped foreign keys, status/count constraints, relevant unique keys and measured indexes. Generate the baseline migration, inspect its SQL, and verify fresh initialization produces exactly that schema.
 - [x] Define versioned stored representations for answer and failure payloads. Persist poll and journey answers as `DecisionValue`, retain execution evidence on the physical attempt, and decode composed public results through shared runtime codecs. Reject unknown payload versions and invalid values safely; relational status, range, link, and fingerprint validation is covered by constraints and runtime checks. Requests, packets, and checkpoints remain validated identity-bound snapshots.
-- [x] Implement a Sheg-owned migration runner with sequential checksummed history, verified SQLite-consistent backup, writer-locked backup freshness recheck, bounded retry, live lease/launch deferral, old-connection fencing, and transactional rollback. For table rebuilds, set foreign-key mode before the transaction, validate foreign keys and integrity before commit, and restore enforcement on every exit.
+- [x] Implement a Sheg-owned migration runner with sequential checksummed history, per-version schema fingerprints, verified SQLite-consistent backup, writer-locked source-schema and backup-freshness rechecks, bounded retry, live lease/launch deferral, old-connection fencing, and transactional rollback. For table rebuilds, set foreign-key mode before the transaction, validate foreign keys and integrity before commit, and restore enforcement on every exit.
 - [x] Exercise real SQLite constraints, JSON/version failures, atomic rollback, populated linked-evidence preservation, injected failure, concurrent migration, live-work deferral, and old-connection refusal. Use a test-only successor migration to prove the forward contract; do not ship an unused product migration or a second latest-schema DDL. Run focused tests.
 
 ## Task 3: Build side-effect-free read repositories
@@ -95,7 +95,7 @@
 **Files:** Read repository queries, `src/application/question-worker.ts`, existing worker/query tests, and justified SQLite indexes.
 
 - [x] Run representative mock-provider journeys at 4x12, 8x24 and 12x36 respondent/turn scales, plus evidence pages over 640 and 10,000 evaluations. Compare database query count, rows decoded, checkpoint/payload materialization, and memory growth with the Task 1 baseline; keep results off-repo.
-- [x] Fix any remaining per-turn full-run materialization, per-row follow-on/status/attempt lookups, or repeated coverage/page scans revealed by the comparison. Use the same materialized data twice when it serves both summary and page, and justify hot prepared statements/indexes from query plans.
+- [x] Fix any remaining per-turn full-run materialization, per-row follow-on/status/attempt lookups, repeated coverage/page scans, or per-selected-run deletion reads revealed by the comparison. Use the same materialized data twice when it serves both summary and page, and justify hot prepared statements/indexes from query plans.
 - [x] Verify unrelated history is not decoded on each turn and that malformed current-turn evidence fails safely. Add behavior tests only for actual contract gaps; avoid timing thresholds and query-text snapshots. Run focused checks and commit.
 
 ## Task 7: Set a measured normal-open integrity policy

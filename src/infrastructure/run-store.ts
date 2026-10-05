@@ -14,6 +14,7 @@ import { journeyTopology } from '../domain/journey/topology.js';
 import { asNumber, asNullableText, asText, parseJson, type DatabaseRow } from './sqlite/rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './sqlite/cursors.js';
 import { loadAttempts } from './sqlite/attempt-queries.js';
+import { loadRunDeletionSnapshot, type RunDeletionSnapshot } from './sqlite/run-deletion-queries.js';
 import { queryEvidencePage } from './sqlite/evidence-query.js';
 import { findRunBySubmission, hasAllFollowOnSelections, loadAcceptedRequest, loadEvaluationStatuses, loadPreparedEvaluations, loadQuestionGroups, runExists } from './sqlite/run-identity-queries.js';
 import { encodeStoredPayload } from './sqlite/payload-codecs.js';
@@ -23,7 +24,7 @@ import { claimPreparedRun, failOwnedRun, failPreparedLaunch, finishRun, interrup
 import { reservePhysicalAttempt } from './sqlite/commands/reservation.js';
 import { chargeReservedAttempt, linkWinningAnswer, markAttemptAnswered, markAttemptFailed, markAttemptUncertain, markEvaluationAnswered, markEvaluationFailed, markRunFailed, saveAttemptEvaluationFailure } from './sqlite/commands/settlement.js';
 import { persistJourneyRespondentState, persistNextJourneyTurn } from './sqlite/commands/journey-transition.js';
-import { deleteRun, markActiveJourneyRespondentsUnreached, markPendingEvaluationsUnreached, prepareResumedRun, reopenFailedQuestions, reopenJourneyEvaluation, reopenSharedFailure, restoreFailedJourneyRespondent } from './sqlite/commands/recovery.js';
+import { deleteRuns as deleteSelectedRuns, markActiveJourneyRespondentsUnreached, markPendingEvaluationsUnreached, prepareResumedRun, reopenFailedQuestions, reopenJourneyEvaluation, reopenSharedFailure, restoreFailedJourneyRespondent } from './sqlite/commands/recovery.js';
 import { insertAcceptedRun, insertPreparedJourneyData, insertPreparedRunData } from './sqlite/commands/acceptance.js';
 import { encounteredMaterialsFromState, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './sqlite/evidence-records.js';
 import { openSqliteConnection, type SqliteConnection } from './sqlite/connection.js';
@@ -726,20 +727,21 @@ class SQLiteRunStore implements RunStore {
     this.ensureOpen();
     validateRunIds(runIds);
     return this.transaction(() => {
+      const snapshot = loadRunDeletionSnapshot(this.connection.orm, runIds);
+      if (snapshot.runs.length !== runIds.length) throw this.notFound();
       const nowMs = this.now();
+      const selected = new Set(runIds);
       const runs = runIds.map((runId) => {
-        const row = this.database.prepare('SELECT status, created_ms, lease_expires_ms FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
-        if (!row) throw this.notFound();
-        const storedStatus = asText(row.status, 'run status') as RunStatus;
-        const leaseExpires = row.lease_expires_ms === null ? asNumber(row.created_ms, 'run creation time') + LEASE_MS : asNumber(row.lease_expires_ms, 'run lease expiry');
-        const expired = storedStatus === 'prepared' && leaseExpires <= nowMs ||
-          storedStatus === 'running' && row.lease_expires_ms !== null && leaseExpires <= nowMs;
-        const status: RunStatus = expired ? 'interrupted' : storedStatus;
-        const evaluationCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as DatabaseRow).count, 'evaluation count');
-        const attemptCount = asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as DatabaseRow).count, 'attempt count');
-        const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId) as DatabaseRow[];
-        const retainedFollowOnRunIds = dependentRows.map((row) => asText(row.run_id, 'dependent follow-on run ID')).filter((dependentId) => !runIds.includes(dependentId));
-        return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === 'prepared' || status === 'running', retainedFollowOnRunIds };
+        const row = snapshot.runs.find((candidate) => candidate.runId === runId)!;
+        const status = this.deletePreviewStatus(row, nowMs);
+        return {
+          runId,
+          status,
+          evaluationCount: snapshot.evaluationCounts.get(runId) ?? 0,
+          attemptCount: snapshot.attemptCounts.get(runId) ?? 0,
+          blockedByActiveWork: status === 'prepared' || status === 'running',
+          retainedFollowOnRunIds: (snapshot.dependentRunIds.get(runId) ?? []).filter((dependentId) => !selected.has(dependentId)),
+        };
       });
       return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
     });
@@ -750,19 +752,21 @@ class SQLiteRunStore implements RunStore {
     validateRunIds(runIds);
     const result = this.transaction(() => {
       const nowMs = this.now();
+      const snapshot = loadRunDeletionSnapshot(this.connection.orm, runIds, { includeReservedAttemptCounts: true });
+      if (snapshot.runs.length !== runIds.length) throw this.notFound();
+      const statuses = this.reconcileSelectedRuns(snapshot, nowMs);
       const counts = runIds.map((runId) => {
-        this.reconcileInside(runId, nowMs);
-        const status = asText((this.database.prepare('SELECT status FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined)?.status, 'run status') as RunStatus;
+        const status = statuses.get(runId)!;
         if (status === 'prepared' || status === 'running') {
           throw new RunStoreError('runs_active', 'Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.');
         }
         return {
           runId,
-          evaluations: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?').get(runId) as DatabaseRow).count, 'evaluation count'),
-          attempts: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?').get(runId) as DatabaseRow).count, 'attempt count'),
+          evaluations: snapshot.evaluationCounts.get(runId) ?? 0,
+          attempts: snapshot.attemptCounts.get(runId) ?? 0,
         };
       });
-      for (const { runId } of counts) deleteRun(this.connection.orm, runId);
+      deleteSelectedRuns(this.connection.orm, runIds);
       const violations = this.database.prepare('PRAGMA foreign_key_check').all() as DatabaseRow[];
       const integrity = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
       if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
@@ -1291,6 +1295,39 @@ class SQLiteRunStore implements RunStore {
         throw new RunStoreError('data_integrity_error', 'Expired worker reservations changed during reconciliation.');
       }
     }
+  }
+
+  private deletePreviewStatus(run: RunDeletionSnapshot['runs'][number], nowMs: number): RunStatus {
+    const status = asText(run.status, 'run status') as RunStatus;
+    const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
+    const expired = status === 'prepared' && leaseExpires <= nowMs ||
+      status === 'running' && run.leaseExpiresMs !== null && leaseExpires <= nowMs;
+    return expired ? 'interrupted' : status;
+  }
+
+  private reconcileSelectedRuns(snapshot: RunDeletionSnapshot, nowMs: number): Map<string, RunStatus> {
+    const statuses = new Map<string, RunStatus>();
+    for (const run of snapshot.runs) {
+      const status = asText(run.status, 'run status') as RunStatus;
+      const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
+      if (status === 'prepared' && nowMs >= leaseExpires) {
+        interruptUnclaimedRun(this.connection.orm, run.runId);
+        statuses.set(run.runId, 'interrupted');
+      } else if (status === 'running' && run.leaseExpiresMs !== null && run.leaseExpiresMs <= nowMs) {
+        const uncertain = snapshot.reservedAttemptCounts.get(run.runId) ?? 0;
+        if (uncertain !== run.reservedCalls) {
+          throw new RunStoreError('data_integrity_error', 'Reserved call counters do not match reserved attempts.');
+        }
+        const updatedUncertainAttempts = interruptReservedAttempts(this.connection.orm, run.runId, nowMs);
+        if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(this.connection.orm, run.runId, nowMs, uncertain)) {
+          throw new RunStoreError('data_integrity_error', 'Expired worker reservations changed during reconciliation.');
+        }
+        statuses.set(run.runId, 'interrupted');
+      } else {
+        statuses.set(run.runId, status);
+      }
+    }
+    return statuses;
   }
 }
 

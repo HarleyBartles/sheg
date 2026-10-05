@@ -1244,14 +1244,14 @@ function codePointLength(str) {
   const units = str.length;
   if (!highSurrogate.test(str))
     return units;
-  let count = units;
+  let count2 = units;
   for (let i = 0; i < units - 1; i++) {
     if ((str.charCodeAt(i) & 64512) === 55296 && (str.charCodeAt(i + 1) & 64512) === 56320) {
-      count--;
+      count2--;
       i++;
     }
   }
-  return count;
+  return count2;
 }
 function getLengthableOrigin(input2) {
   if (Array.isArray(input2))
@@ -3086,13 +3086,13 @@ var CC_SANITIZE = /[- ]/g;
 function isLuhnAlgo(digits) {
   let length = digits.length;
   let bit = 1;
-  let sum = 0;
+  let sum2 = 0;
   while (length) {
     const value = digits.charCodeAt(--length) - 48;
     bit ^= 1;
-    sum += bit ? [0, 2, 4, 6, 8, 1, 3, 5, 7, 9][value] : value;
+    sum2 += bit ? [0, 2, 4, 6, 8, 1, 3, 5, 7, 9][value] : value;
   }
-  return sum % 10 === 0;
+  return sum2 % 10 === 0;
 }
 function isValidCreditCard(input2) {
   if (!creditCard.test(input2))
@@ -5606,8 +5606,8 @@ function az_default() {
 }
 
 // node_modules/zod/v4/locales/be.js
-function getBelarusianPlural(count, one, few, many) {
-  const absCount = Math.abs(count);
+function getBelarusianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -8254,8 +8254,8 @@ function hu_default() {
 }
 
 // node_modules/zod/v4/locales/hy.js
-function getArmenianPlural(count, one, many) {
-  return Math.abs(count) === 1 ? one : many;
+function getArmenianPlural(count2, one, many) {
+  return Math.abs(count2) === 1 ? one : many;
 }
 function withDefiniteArticle(word) {
   if (!word)
@@ -10993,8 +10993,8 @@ function ro_default() {
 }
 
 // node_modules/zod/v4/locales/ru.js
-function getRussianPlural(count, one, few, many) {
-  const absCount = Math.abs(count);
+function getRussianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -13146,15 +13146,15 @@ function generateChecks(doc, ctx, schema, accessor) {
         generateNumberFormatCheck(doc, def, currentAccessor);
         break;
       case "min_length": {
-        const min = numericOperand(def.minimum, "min_length");
-        const len = codePointLengthVar(doc, ctx, currentAccessor, `${currentAccessor}.length >= ${min} && ${currentAccessor}.length < ${def.minimum * 2}`);
-        doc.write(`if (${len} < ${min}) return INVALID;`);
+        const min2 = numericOperand(def.minimum, "min_length");
+        const len = codePointLengthVar(doc, ctx, currentAccessor, `${currentAccessor}.length >= ${min2} && ${currentAccessor}.length < ${def.minimum * 2}`);
+        doc.write(`if (${len} < ${min2}) return INVALID;`);
         break;
       }
       case "max_length": {
-        const max = numericOperand(def.maximum, "max_length");
-        const len = codePointLengthVar(doc, ctx, currentAccessor, `${currentAccessor}.length > ${max}`);
-        doc.write(`if (${len} > ${max}) return INVALID;`);
+        const max2 = numericOperand(def.maximum, "max_length");
+        const len = codePointLengthVar(doc, ctx, currentAccessor, `${currentAccessor}.length > ${max2}`);
+        doc.write(`if (${len} > ${max2}) return INVALID;`);
         break;
       }
       case "length_equals": {
@@ -20417,7 +20417,7 @@ function validateDistribution(distribution, expectedIds, label) {
   if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
     throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`, { reason: "probability_keys" });
   }
-  const total = Object.values(distribution).reduce((sum, value) => sum + value, 0);
+  const total = Object.values(distribution).reduce((sum2, value) => sum2 + value, 0);
   if (Math.abs(total - 1) > probabilitySumTolerance) {
     throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`, { reason: "probability_sum" });
   }
@@ -20798,7 +20798,7 @@ function validateJourneyDefinition(arm, context) {
       } else {
         const edges = outgoing.get(nodeId) ?? [];
         const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
-        const completedContinuations = continuations.filter((count) => count !== null);
+        const completedContinuations = continuations.filter((count2) => count2 !== null);
         if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
           longest = null;
         } else {
@@ -21017,7 +21017,7 @@ var selectionCoverageSchema = external_exports.object({
     unmappedChoice: external_exports.number().int().nonnegative()
   }).strict()
 }).strict().superRefine((coverage, context) => {
-  const excludedCount = Object.values(coverage.excluded).reduce((sum, count) => sum + count, 0);
+  const excludedCount = Object.values(coverage.excluded).reduce((sum2, count2) => sum2 + count2, 0);
   if (coverage.eligible > coverage.matched || coverage.eligible + excludedCount !== coverage.matched) {
     context.addIssue({ code: "custom", path: ["excluded"], message: "Eligible and excluded counts must account for every matched source evaluation." });
   }
@@ -21942,11 +21942,11 @@ function exists(subquery) {
 function notExists(subquery) {
   return sql`not exists ${subquery}`;
 }
-function between(column, min, max) {
-  return sql`${column} between ${bindIfParam(min, column)} and ${bindIfParam(max, column)}`;
+function between(column, min2, max2) {
+  return sql`${column} between ${bindIfParam(min2, column)} and ${bindIfParam(max2, column)}`;
 }
-function notBetween(column, min, max) {
-  return sql`${column} not between ${bindIfParam(min, column)} and ${bindIfParam(max, column)}`;
+function notBetween(column, min2, max2) {
+  return sql`${column} not between ${bindIfParam(min2, column)} and ${bindIfParam(max2, column)}`;
 }
 function like(column, value) {
   return sql`${column} like ${value}`;
@@ -23036,6 +23036,11 @@ var NoopLogger = class {
   logQuery() {
   }
 };
+
+// node_modules/drizzle-orm/sql/functions/aggregate.js
+function count(expression) {
+  return sql`count(${expression || sql.raw("*")})`.mapWith(Number);
+}
 
 // src/infrastructure/sqlite/payload-codecs.ts
 var envelopeSchema = external_exports.object({
@@ -26288,6 +26293,7 @@ var schemaMigrations = sqliteTable("schema_migrations", {
   version: integer2("version").notNull(),
   migrationId: text("migration_id").notNull(),
   checksum: text("checksum").notNull(),
+  schemaFingerprint: text("schema_fingerprint").notNull(),
   appliedAt: text("applied_at").notNull()
 }, (table) => [
   primaryKey({ name: "schema_migrations_pk", columns: [table.migrationId] }),
@@ -26379,6 +26385,45 @@ function loadAttempts(database, runId2, cursorText, requestedLimit, ensureRun) {
     runId: runId2,
     sequence: asNumber(last.attemptSequence, "attempt sequence")
   }) } : {} };
+}
+
+// src/infrastructure/sqlite/run-deletion-queries.ts
+function countsByRun(rows) {
+  return new Map(rows.map((row) => [asText(row.runId, "run ID"), asNumber(row.count, "selected row count")]));
+}
+function loadRunDeletionSnapshot(database, runIds, options2 = {}) {
+  const runRows = database.select({
+    runId: runs.runId,
+    status: runs.status,
+    createdMs: runs.createdMs,
+    leaseExpiresMs: runs.leaseExpiresMs,
+    reservedCalls: runs.reservedCalls
+  }).from(runs).where(inArray(runs.runId, runIds)).all();
+  const evaluationCounts = countsByRun(database.select({ runId: evaluations.runId, count: count() }).from(evaluations).where(inArray(evaluations.runId, runIds)).groupBy(evaluations.runId).all());
+  const attemptCounts = countsByRun(database.select({ runId: attempts.runId, count: count() }).from(attempts).where(inArray(attempts.runId, runIds)).groupBy(attempts.runId).all());
+  const reservedAttemptCounts = options2.includeReservedAttemptCounts ? countsByRun(database.select({ runId: attempts.runId, count: count() }).from(attempts).where(and(inArray(attempts.runId, runIds), eq(attempts.status, "reserved"))).groupBy(attempts.runId).all()) : /* @__PURE__ */ new Map();
+  const sourceRunId = sql`json_extract(${runs.requestJson}, '$.lineage.sourceRunId')`;
+  const dependentRows = database.select({ runId: runs.runId, createdMs: runs.createdMs, sourceRunId }).from(runs).where(inArray(sourceRunId, runIds)).orderBy(asc(runs.createdMs), asc(runs.runId)).all();
+  const dependentRunIds = /* @__PURE__ */ new Map();
+  for (const row of dependentRows) {
+    if (row.sourceRunId === null) continue;
+    const dependents = dependentRunIds.get(row.sourceRunId) ?? [];
+    dependents.push(asText(row.runId, "dependent run ID"));
+    dependentRunIds.set(row.sourceRunId, dependents);
+  }
+  return {
+    runs: runRows.map((row) => ({
+      runId: asText(row.runId, "run ID"),
+      status: asText(row.status, "run status"),
+      createdMs: asNumber(row.createdMs, "run creation time"),
+      leaseExpiresMs: row.leaseExpiresMs === null ? null : asNumber(row.leaseExpiresMs, "run lease expiry"),
+      reservedCalls: asNumber(row.reservedCalls, "reserved calls")
+    })),
+    evaluationCounts,
+    attemptCounts,
+    reservedAttemptCounts,
+    dependentRunIds
+  };
 }
 
 // src/infrastructure/sqlite/evidence-query.ts
@@ -27050,8 +27095,8 @@ function markActiveJourneyRespondentsUnreached(database, runId2) {
     revision: sql`${journeyRespondents.revision} + 1`
   }).where(and(eq(journeyRespondents.runId, runId2), eq(journeyRespondents.status, "active"))).run();
 }
-function deleteRun(database, runId2) {
-  database.delete(runs).where(eq(runs.runId, runId2)).run();
+function deleteRuns(database, runIds) {
+  database.delete(runs).where(inArray(runs.runId, runIds)).run();
 }
 
 // src/infrastructure/sqlite/commands/acceptance.ts
@@ -27312,6 +27357,41 @@ function applicationTableCount(database) {
   const row = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
   return asNumber(row?.count, "application table count");
 }
+function migrationHistoryThrough(migrations, targetVersion) {
+  const history = [];
+  let version2 = 0;
+  while (version2 < targetVersion) {
+    const migration = migrations.find((candidate) => candidate.fromVersion === version2 && candidate.toVersion <= targetVersion);
+    if (!migration || version2 !== 0 && migration.toVersion !== version2 + 1) {
+      throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore has no recognized migration history for its source schema. Preserve its original files and use run_storage to inspect recovery options.");
+    }
+    history.push(migration);
+    version2 = migration.toVersion;
+  }
+  return history;
+}
+function schemaFingerprint(database) {
+  const objects = database.prepare(`SELECT type, name, tbl_name AS tableName, sql FROM sqlite_schema
+    WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name, tbl_name`).all();
+  return createHash5("sha256").update(JSON.stringify(objects)).digest("hex");
+}
+function validateMigrationSource(database, migrations, version2) {
+  if (pragmaNumber(database, "user_version") !== version2) {
+    throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore version changed before migration. Preserve its original files and use run_storage to inspect recovery options.");
+  }
+  const history = migrationHistoryThrough(migrations, version2);
+  const recorded = database.prepare("SELECT version, migration_id, checksum, schema_fingerprint FROM schema_migrations ORDER BY version").all();
+  if (recorded.length !== history.length || history.some((migration, index2) => {
+    const row = recorded[index2];
+    return asNumber(row?.version, "migration version") !== migration.toVersion || row?.migration_id !== migration.id || row.checksum !== migrationChecksum(migration);
+  })) {
+    throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore migration history does not match its source schema. Preserve its original files and use run_storage to inspect recovery options.");
+  }
+  const sourceFingerprint = recorded.at(-1)?.schema_fingerprint;
+  if (typeof sourceFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(sourceFingerprint) || sourceFingerprint !== schemaFingerprint(database)) {
+    throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore structure does not match its recorded source migrations. Preserve its original files and use run_storage to inspect recovery options.");
+  }
+}
 function validateSchemaShape(database, migrations = registeredMigrations()) {
   const existingTables = new Set(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all().map((row) => asText(row.name, "schema table name")));
   for (const table of Object.values(sqliteTables)) {
@@ -27327,16 +27407,16 @@ function validateSchemaShape(database, migrations = registeredMigrations()) {
       }
     }
   }
-  const applied = database.prepare("SELECT version, migration_id, checksum FROM schema_migrations ORDER BY version").all();
+  const applied = database.prepare("SELECT version, migration_id, checksum, schema_fingerprint FROM schema_migrations ORDER BY version").all();
   const expectedChain = [...migrations].sort((left, right) => left.toVersion - right.toVersion);
   let expectedFromVersion = 0;
   const historyMatches = expectedChain.length === applied.length && expectedChain.every((migration, index2) => {
     const row = applied[index2];
     const sequential = migration.fromVersion === expectedFromVersion && migration.toVersion === expectedFromVersion + (expectedFromVersion === 0 ? migration.toVersion : 1);
     expectedFromVersion = migration.toVersion;
-    return sequential && asNumber(row?.version, "migration version") === migration.toVersion && row?.migration_id === migration.id && row.checksum === migrationChecksum(migration);
+    return sequential && asNumber(row?.version, "migration version") === migration.toVersion && row?.migration_id === migration.id && row.checksum === migrationChecksum(migration) && typeof row.schema_fingerprint === "string" && /^[a-f0-9]{64}$/.test(row.schema_fingerprint);
   });
-  if (!historyMatches || pragmaNumber(database, "user_version") !== SCHEMA_VERSION || expectedChain.at(-1)?.toVersion !== SCHEMA_VERSION) {
+  if (!historyMatches || applied.at(-1)?.schema_fingerprint !== schemaFingerprint(database) || pragmaNumber(database, "user_version") !== SCHEMA_VERSION || expectedChain.at(-1)?.toVersion !== SCHEMA_VERSION) {
     throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore has no recognized migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.");
   }
 }
@@ -27381,12 +27461,12 @@ function liveWorkExists(database, nowMs) {
     LIMIT 1`).get(PREPARED_LAUNCH_WINDOW_MS, nowMs, nowMs);
   return row !== void 0;
 }
-function applyUpgrade(database, dataRoot, migration, now) {
+function applyUpgrade(database, dataRoot, migrations, migration, now) {
   for (let retry = 0; retry < MIGRATION_BACKUP_RETRIES; retry += 1) {
     const observedVersion = pragmaNumber(database, "user_version");
     if (observedVersion === migration.toVersion) return;
     if (observedVersion !== migration.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${observedVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
-    if (observedVersion === SCHEMA_VERSION) validateSchemaShape(database);
+    validateMigrationSource(database, migrations, migration.fromVersion);
     if (liveWorkExists(database, now())) throw new RunStoreError("migration_deferred", "A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.");
     const beforeBackupDataVersion = pragmaNumber(database, "data_version");
     const backupPath = verifiedBackup(database, dataRoot, migration.fromVersion, migration.toVersion);
@@ -27412,11 +27492,11 @@ function applyUpgrade(database, dataRoot, migration, now) {
         unlinkSync(backupPath);
         continue;
       }
+      validateMigrationSource(database, migrations, migration.fromVersion);
       if (liveWorkExists(database, now())) throw new RunStoreError("migration_deferred", "A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.");
       runMigrationSql(database, migration.sql);
-      const checksum = migrationChecksum(migration);
-      database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, applied_at) VALUES (?, ?, ?, ?)").run(migration.toVersion, migration.id, checksum, new Date(now()).toISOString());
       database.exec(`PRAGMA user_version = ${migration.toVersion}`);
+      database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), schemaFingerprint(database), new Date(now()).toISOString());
       checkDatabaseIntegrity(database);
       if (migration.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
       database.exec("COMMIT");
@@ -27464,8 +27544,8 @@ function applySchemaMigrations(database, dataRoot, migrations, targetVersion, no
         }
         if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError("unsupported_schema_version", "The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.");
         runMigrationSql(database, migration.sql);
-        database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, applied_at) VALUES (?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), new Date(now()).toISOString());
         database.exec(`PRAGMA user_version = ${migration.toVersion}`);
+        database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), schemaFingerprint(database), new Date(now()).toISOString());
         checkDatabaseIntegrity(database);
         validateSchemaShape(database);
         database.exec("COMMIT");
@@ -27478,7 +27558,7 @@ function applySchemaMigrations(database, dataRoot, migrations, targetVersion, no
         throw new RunStoreError("migration_failed", "Sheg could not initialize its schema; no partial schema was retained.", { cause: error62 });
       }
     } else {
-      applyUpgrade(database, dataRoot, migration, now);
+      applyUpgrade(database, dataRoot, migrations, migration, now);
     }
     currentVersion = pragmaNumber(database, "user_version");
   }
@@ -28201,19 +28281,21 @@ var SQLiteRunStore = class {
     this.ensureOpen();
     validateRunIds(runIds);
     return this.transaction(() => {
+      const snapshot = loadRunDeletionSnapshot(this.connection.orm, runIds);
+      if (snapshot.runs.length !== runIds.length) throw this.notFound();
       const nowMs = this.now();
+      const selected = new Set(runIds);
       const runs2 = runIds.map((runId2) => {
-        const row = this.database.prepare("SELECT status, created_ms, lease_expires_ms FROM runs WHERE run_id = ?").get(runId2);
-        if (!row) throw this.notFound();
-        const storedStatus = asText(row.status, "run status");
-        const leaseExpires = row.lease_expires_ms === null ? asNumber(row.created_ms, "run creation time") + LEASE_MS : asNumber(row.lease_expires_ms, "run lease expiry");
-        const expired = storedStatus === "prepared" && leaseExpires <= nowMs || storedStatus === "running" && row.lease_expires_ms !== null && leaseExpires <= nowMs;
-        const status = expired ? "interrupted" : storedStatus;
-        const evaluationCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId2).count, "evaluation count");
-        const attemptCount = asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId2).count, "attempt count");
-        const dependentRows = this.database.prepare("SELECT run_id FROM runs WHERE json_extract(request_json, '$.lineage.sourceRunId') = ? ORDER BY created_ms, run_id").all(runId2);
-        const retainedFollowOnRunIds = dependentRows.map((row2) => asText(row2.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
-        return { runId: runId2, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running", retainedFollowOnRunIds };
+        const row = snapshot.runs.find((candidate) => candidate.runId === runId2);
+        const status = this.deletePreviewStatus(row, nowMs);
+        return {
+          runId: runId2,
+          status,
+          evaluationCount: snapshot.evaluationCounts.get(runId2) ?? 0,
+          attemptCount: snapshot.attemptCounts.get(runId2) ?? 0,
+          blockedByActiveWork: status === "prepared" || status === "running",
+          retainedFollowOnRunIds: (snapshot.dependentRunIds.get(runId2) ?? []).filter((dependentId) => !selected.has(dependentId))
+        };
       });
       return { runs: runs2, blockedByActiveWork: runs2.some(({ blockedByActiveWork }) => blockedByActiveWork) };
     });
@@ -28223,25 +28305,27 @@ var SQLiteRunStore = class {
     validateRunIds(runIds);
     const result = this.transaction(() => {
       const nowMs = this.now();
+      const snapshot = loadRunDeletionSnapshot(this.connection.orm, runIds, { includeReservedAttemptCounts: true });
+      if (snapshot.runs.length !== runIds.length) throw this.notFound();
+      const statuses = this.reconcileSelectedRuns(snapshot, nowMs);
       const counts = runIds.map((runId2) => {
-        this.reconcileInside(runId2, nowMs);
-        const status = asText(this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId2)?.status, "run status");
+        const status = statuses.get(runId2);
         if (status === "prepared" || status === "running") {
           throw new RunStoreError("runs_active", "Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.");
         }
         return {
           runId: runId2,
-          evaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ?").get(runId2).count, "evaluation count"),
-          attempts: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ?").get(runId2).count, "attempt count")
+          evaluations: snapshot.evaluationCounts.get(runId2) ?? 0,
+          attempts: snapshot.attemptCounts.get(runId2) ?? 0
         };
       });
-      for (const { runId: runId2 } of counts) deleteRun(this.connection.orm, runId2);
+      deleteRuns(this.connection.orm, runIds);
       const violations = this.database.prepare("PRAGMA foreign_key_check").all();
       const integrity = this.database.prepare("PRAGMA integrity_check").all();
       if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
         throw new RunStoreError("storage_integrity_failed", "The datastore integrity check failed; no runs were deleted.");
       }
-      return { deletedRunIds: counts.map(({ runId: runId2 }) => runId2), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
+      return { deletedRunIds: counts.map(({ runId: runId2 }) => runId2), removed: { runs: counts.length, evaluations: counts.reduce((sum2, item) => sum2 + item.evaluations, 0), attempts: counts.reduce((sum2, item) => sum2 + item.attempts, 0) } };
     });
     let maintenance;
     try {
@@ -28259,14 +28343,14 @@ var SQLiteRunStore = class {
         const integrityRows = this.database.prepare("PRAGMA integrity_check").all();
         const foreignKeyViolations = this.database.prepare("PRAGMA foreign_key_check").all();
         const integrity = integrityRows.length === 1 && integrityRows[0]?.integrity_check === "ok" && foreignKeyViolations.length === 0 ? "ok" : "failed";
-        const count = (table, where = "") => asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count, `${table} count`);
+        const count2 = (table, where = "") => asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count, `${table} count`);
         return {
           integrity,
           databaseBytes: statSync(this.databasePath).size,
-          runCount: count("runs"),
-          evaluationCount: count("evaluations"),
-          attemptCount: count("attempts"),
-          activeRunCount: count("runs", "WHERE status IN ('prepared', 'running')")
+          runCount: count2("runs"),
+          evaluationCount: count2("evaluations"),
+          attemptCount: count2("attempts"),
+          activeRunCount: count2("runs", "WHERE status IN ('prepared', 'running')")
         };
       });
     } catch (error62) {
@@ -28759,6 +28843,36 @@ var SQLiteRunStore = class {
         throw new RunStoreError("data_integrity_error", "Expired worker reservations changed during reconciliation.");
       }
     }
+  }
+  deletePreviewStatus(run, nowMs) {
+    const status = asText(run.status, "run status");
+    const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
+    const expired = status === "prepared" && leaseExpires <= nowMs || status === "running" && run.leaseExpiresMs !== null && leaseExpires <= nowMs;
+    return expired ? "interrupted" : status;
+  }
+  reconcileSelectedRuns(snapshot, nowMs) {
+    const statuses = /* @__PURE__ */ new Map();
+    for (const run of snapshot.runs) {
+      const status = asText(run.status, "run status");
+      const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
+      if (status === "prepared" && nowMs >= leaseExpires) {
+        interruptUnclaimedRun(this.connection.orm, run.runId);
+        statuses.set(run.runId, "interrupted");
+      } else if (status === "running" && run.leaseExpiresMs !== null && run.leaseExpiresMs <= nowMs) {
+        const uncertain = snapshot.reservedAttemptCounts.get(run.runId) ?? 0;
+        if (uncertain !== run.reservedCalls) {
+          throw new RunStoreError("data_integrity_error", "Reserved call counters do not match reserved attempts.");
+        }
+        const updatedUncertainAttempts = interruptReservedAttempts(this.connection.orm, run.runId, nowMs);
+        if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(this.connection.orm, run.runId, nowMs, uncertain)) {
+          throw new RunStoreError("data_integrity_error", "Expired worker reservations changed during reconciliation.");
+        }
+        statuses.set(run.runId, "interrupted");
+      } else {
+        statuses.set(run.runId, status);
+      }
+    }
+    return statuses;
   }
 };
 

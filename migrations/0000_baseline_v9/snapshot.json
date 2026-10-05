@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "57f536d8-2cd0-477f-890f-bb28c4ee7abc",
+  "id": "eb0b524a-1866-4446-8150-d5acfbdf8e24",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -835,6 +835,16 @@
       "default": null,
       "generated": null,
       "name": "checksum",
+      "entityType": "columns",
+      "table": "schema_migrations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "schema_fingerprint",
       "entityType": "columns",
       "table": "schema_migrations"
     },

@@ -47,6 +47,6 @@ export function markActiveJourneyRespondentsUnreached(database: NodeSQLiteDataba
   }).where(and(eq(journeyRespondents.runId, runId), eq(journeyRespondents.status, 'active'))).run();
 }
 
-export function deleteRun(database: NodeSQLiteDatabase, runId: string): void {
-  database.delete(runs).where(eq(runs.runId, runId)).run();
+export function deleteRuns(database: NodeSQLiteDatabase, runIds: string[]): void {
+  database.delete(runs).where(inArray(runs.runId, runIds)).run();
 }

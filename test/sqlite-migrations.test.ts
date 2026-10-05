@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { RunStoreError } from '../src/application/run-store.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
-import { applySchemaMigrations } from '../src/infrastructure/sqlite/schema.js';
+import { applySchemaMigrations, baselineMigration } from '../src/infrastructure/sqlite/schema.js';
 
 async function baseline(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-migration-'));
@@ -56,15 +56,15 @@ test('a sequential upgrade keeps a verified source backup and commits its checks
   populateLinkedEvidence(database);
   const oldConnection = openRunStore(root);
   try {
-    applySchemaMigrations(database, root, [{
+    applySchemaMigrations(database, root, [baselineMigration(), {
       id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10,
       sql: rebuildQuestionGroups,
     }], 10);
     assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10);
-    const migrationRows = database.prepare('SELECT version, migration_id, length(checksum) AS checksum_length FROM schema_migrations ORDER BY version').all() as Array<{ version: number; migration_id: string; checksum_length: number }>;
-    assert.deepEqual(migrationRows.map(({ version, migration_id, checksum_length }) => ({ version, migration_id, checksum_length })), [
-      { version: 9, migration_id: 'baseline-v9', checksum_length: 64 },
-      { version: 10, migration_id: 'test-v9-to-v10', checksum_length: 64 },
+    const migrationRows = database.prepare('SELECT version, migration_id, length(checksum) AS checksum_length, length(schema_fingerprint) AS fingerprint_length FROM schema_migrations ORDER BY version').all() as Array<{ version: number; migration_id: string; checksum_length: number; fingerprint_length: number }>;
+    assert.deepEqual(migrationRows.map(({ version, migration_id, checksum_length, fingerprint_length }) => ({ version, migration_id, checksum_length, fingerprint_length })), [
+      { version: 9, migration_id: 'baseline-v9', checksum_length: 64, fingerprint_length: 64 },
+      { version: 10, migration_id: 'test-v9-to-v10', checksum_length: 64, fingerprint_length: 64 },
     ]);
     assert.equal((database.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys, 1);
     assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
@@ -98,7 +98,7 @@ test('a failed upgrade rolls back every schema change and retains the verified b
   const root = await baseline();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   try {
-    assert.throws(() => applySchemaMigrations(database, root, [{
+    assert.throws(() => applySchemaMigrations(database, root, [baselineMigration(), {
       id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10,
       sql: 'CREATE TABLE migration_probe (id TEXT PRIMARY KEY NOT NULL); CREATE TABLE runs (invalid TEXT);',
     }], 10), (error: unknown) => error instanceof RunStoreError && error.code === 'migration_failed');
@@ -117,10 +117,25 @@ test('migration waits for a prepared launch and does not leave a preflight backu
   try {
     database.prepare(`INSERT INTO runs (run_id, submission_id, request_fingerprint, created_at, created_ms, status, request_json, evaluation_count, max_calls)
       VALUES ('live', 'live-submit', 'fingerprint', ?, ?, 'prepared', '{}', 1, 1)`).run(new Date(now).toISOString(), now);
-    assert.throws(() => applySchemaMigrations(database, root, [{
+    assert.throws(() => applySchemaMigrations(database, root, [baselineMigration(), {
       id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10, sql: 'CREATE TABLE migration_probe (id TEXT);',
     }], 10, () => now), (error: unknown) => error instanceof RunStoreError && error.code === 'migration_deferred');
     assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9);
+    assert.deepEqual((await readdir(root)).filter((name) => name === 'backups'), []);
+  } finally { database.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('a successor migration refuses a source whose schema differs from its recorded migration chain', async () => {
+  const root = await baseline();
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    database.exec('DROP INDEX runs_expired_lease');
+    assert.throws(() => applySchemaMigrations(database, root, [
+      baselineMigration(),
+      { id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10, sql: 'CREATE TABLE migration_probe (id TEXT);' },
+    ], 10), (error: unknown) => error instanceof RunStoreError && error.code === 'datastore_schema_invalid');
+    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9);
+    assert.equal(database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'migration_probe'").get(), undefined);
     assert.deepEqual((await readdir(root)).filter((name) => name === 'backups'), []);
   } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });

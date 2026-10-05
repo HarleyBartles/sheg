@@ -141,6 +141,7 @@ CREATE TABLE `schema_migrations` (
 	`version` integer NOT NULL CONSTRAINT `schema_migrations_version_uq` UNIQUE,
 	`migration_id` text NOT NULL,
 	`checksum` text NOT NULL,
+	`schema_fingerprint` text NOT NULL,
 	`applied_at` text NOT NULL,
 	CONSTRAINT `schema_migrations_pk` PRIMARY KEY(`migration_id`),
 	CONSTRAINT "schema_migrations_version_ck" CHECK("version" > 0)
