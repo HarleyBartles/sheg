@@ -5,19 +5,19 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { decisionRequestSchema, decisionValueFromResult, decisionValueSchema } from '../domain/decision/decision.js';
 import { validateDecision } from '../domain/decision/validate.js';
-import { compileDecisionPacketForCompiler, decisionPacketSchema } from '../domain/decision/prompt.js';
+import { compileDecisionPacketForCompiler } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import { deriveRunLifecycle, evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord, type JourneyWorkerTurn, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
+import { evaluationStatusSchema, journeyEventsSchema, journeyRouteSchema, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyRespondentState, type JourneyRunRecord, type JourneyWorkerTurn, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
 import { decisionFailureDetailForReason, decisionResultSchema, decisionBatchResultSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
-import { followOnLineageSchema, followOnRunRequestSchema, inlineRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
+import { followOnLineageSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 import { journeyTopology } from '../domain/journey/topology.js';
-import { asNumber, asNullableText, asText, parseJson, parseJsonRecord, parseStored, type DatabaseRow } from './sqlite/rows.js';
+import { asNumber, asText, parseJson, parseJsonRecord, parseStored, type DatabaseRow } from './sqlite/rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './sqlite/cursors.js';
 import { loadAttempts } from './sqlite/attempt-queries.js';
 import { loadRunDeletionSnapshot, type RunDeletionSnapshot } from './sqlite/run-deletion-queries.js';
 import { queryEvidencePage } from './sqlite/evidence-query.js';
-import { findRunBySubmission, hasAllFollowOnSelections, loadAcceptedRequest, loadEvaluationStatuses, loadPreparedEvaluations, loadQuestionGroups, runExists } from './sqlite/run-identity-queries.js';
+import { findRunBySubmission, hasAllFollowOnSelections, loadEvaluationStatuses, runExists } from './sqlite/run-identity-queries.js';
 import { encodeStoredPayload } from './sqlite/payload-codecs.js';
 import { loadJourneyWorkerTurn } from './sqlite/journey-queries.js';
 import { loadFollowOnSources } from './sqlite/follow-on-queries.js';
@@ -37,25 +37,10 @@ export type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, Ru
 export { RunStoreError } from '../application/run-store.js';
 export { inspectRunStoreCompatibility, runStoreBackupAvailable, type StoreCompatibility } from './sqlite/recovery.js';
 import { resetRunStore as resetRunStoreInternal } from './sqlite/recovery.js';
-import { createSqliteQuery } from './sqlite/query-library.js';
-
-const sqliteInteger = z.union([z.number(), z.bigint()]);
-const sqliteFlag = z.union([z.number(), z.bigint(), z.boolean()]);
-const runStatusRowSchema = z.object({
-  run_id: z.string(), status: z.string(), created_at: z.string(), request_json: z.string(),
-  evaluation_count: sqliteInteger, used_calls: sqliteInteger, reserved_calls: sqliteInteger,
-  cancel_requested: sqliteFlag, failure_scope: z.string().nullable(), failure_code: z.string().nullable(),
-  failure_message: z.string().nullable(), completed_evaluations: sqliteInteger, failed_evaluations: sqliteInteger,
-  pending_evaluations: sqliteInteger, retryable_shared_failure: sqliteFlag, retryable_journey_failure: sqliteFlag,
-}).passthrough();
-const readRunStatusViewsQuery = createSqliteQuery('read-run-status-views', z.tuple([z.string()]), z.array(runStatusRowSchema));
-
-const preparedRunRecordSchema = z.object({
-  request: z.union([inlineRunRequestSchema, followOnRunRequestSchema]),
-  requestFingerprint: z.string().min(1),
-  compilerFingerprint: z.string().min(1),
-  lineage: followOnLineageSchema.optional(),
-});
+import { readStatusViews } from './sqlite/reads/status.js';
+import { readPreparedRun, readRunKind } from './sqlite/reads/requests.js';
+import { readJourneyRun } from './sqlite/reads/journeys.js';
+import { readRunContext } from './sqlite/reads/contexts.js';
 
 function sameDecisionValue(left: import('../domain/decision/decision.js').DecisionValue, right: import('../domain/decision/decision.js').DecisionValue): boolean {
   if (left.type !== right.type) return false;
@@ -402,62 +387,25 @@ class SQLiteRunStore implements RunStore {
   evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }> {
     this.ensureOpen();
     return this.readTransaction(() => {
-      this.statusInside(runId);
+      if (!runExists(this.connection.orm, runId)) throw this.notFound();
       return loadEvaluationStatuses(this.connection.orm, runId).map((row) => ({
         evaluationId: row.evaluationId,
-        status: row.status as AnswerRow['status'],
+        status: parseStored(evaluationStatusSchema, row.status, 'evaluation status'),
       }));
     });
   }
 
   getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on' {
     this.ensureOpen();
-    return this.readTransaction(() => {
-      this.statusInside(runId);
-      const row = loadAcceptedRequest(this.connection.orm, runId);
-      if (!row) throw this.notFound();
-      const stored = parseJsonRecord(row.requestJson, 'request');
-      if (typeof stored !== 'object' || stored === null || !('request' in stored)) {
-        throw new RunStoreError('data_integrity_error', 'Stored run request has an invalid shape.');
-      }
-      const request = runRequestSchema.safeParse(stored.request);
-      if (!request.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
-      return request.data.kind;
-    });
+    return this.readTransaction(() => readRunKind(this.connection.orm, runId, () => this.notFound()));
   }
 
   getRequest(runId: string): PreparedRun {
     this.ensureOpen();
-    return this.readTransaction(() => {
-    this.statusInside(runId);
-    const row = loadAcceptedRequest(this.connection.orm, runId);
-    if (!row) throw this.notFound();
-    const stored = parseStored(preparedRunRecordSchema, parseJson(row.requestJson, 'request'), 'run request');
-    const { lineage, ...storedBase } = stored;
-    const evaluations = loadPreparedEvaluations(this.connection.orm, runId);
-    const groups = loadQuestionGroups(this.connection.orm, runId);
-    const parsed = validatePrepared({ ...storedBase, ...(lineage === undefined ? {} : { lineage }), groups: groups.map((row) => ({
-      groupId: row.groupId, contextId: row.contextId, respondentId: row.respondentId,
-      state: parseStored(z.record(z.string(), z.unknown()), parseJson(row.stateJson, 'group state'), 'group state'),
-      questionIds: parseStored(z.array(z.string().min(1)), parseJson(row.questionIdsJson, 'group question IDs'), 'group question IDs'),
-    })), evaluations: evaluations.map((row) => ({
-      groupId: row.groupId,
-      evaluationId: row.evaluationId,
-      contextId: row.contextId,
-      respondentId: row.respondentId,
-      questionId: row.questionId,
-      packet: parseStored(decisionRequestSchema, parseJson(row.packetJson, 'frozen packet'), 'frozen packet'),
-      packetFingerprint: row.packetFingerprint,
-    })) });
-    if (parsed.requestFingerprint !== row.requestFingerprint) {
-      throw new RunStoreError('data_integrity_error', 'Stored run and request fingerprints do not match.');
-    }
-    if (parsed.request.kind === 'follow-on' && parsed.lineage) {
-      const sourceAvailable = runExists(this.connection.orm, parsed.lineage.sourceRunId);
-      return { ...parsed, lineage: { ...parsed.lineage, sourceAvailable, sourceRecordState: sourceAvailable ? 'live' : 'historical' } };
-    }
-    return parsed;
-    });
+    return this.readTransaction(() => readPreparedRun(this.connection.orm, runId, {
+      notFound: () => this.notFound(), validate: validatePrepared,
+      isRunAvailable: (sourceRunId) => runExists(this.connection.orm, sourceRunId),
+    }));
   }
 
   getJourneyWorkerTurn(runId: string, evaluationId: string, respondentId: string): JourneyWorkerTurn {
@@ -467,81 +415,7 @@ class SQLiteRunStore implements RunStore {
 
   getJourneyRun(runId: string): JourneyRunRecord {
     this.ensureOpen();
-    return this.readTransaction(() => {
-    this.statusInside(runId);
-    const row = this.database.prepare('SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
-    if (!row) throw this.notFound();
-    const stored = parseJsonRecord(row.request_json, 'request');
-    if (typeof stored !== 'object' || stored === null || !('request' in stored) || !('requestFingerprint' in stored) || !('compilerFingerprint' in stored)) {
-      throw new RunStoreError('data_integrity_error', 'Stored journey request has an invalid shape.');
-    }
-    const parsedRequest = runRequestSchema.safeParse(stored.request);
-    if (!parsedRequest.success || parsedRequest.data.kind !== 'journey' || typeof stored.compilerFingerprint !== 'string' ||
-        typeof stored.requestFingerprint !== 'string' || stored.requestFingerprint !== asText(row.request_fingerprint, 'request fingerprint') ||
-        hashCanonical({ request: parsedRequest.data, compilerFingerprint: stored.compilerFingerprint }) !== stored.requestFingerprint) {
-      throw new RunStoreError('data_integrity_error', 'Stored journey request or fingerprint is invalid.');
-    }
-    const evaluationRows = this.database.prepare(`SELECT e.*,
-      (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id) WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
-      FROM evaluations e WHERE e.run_id = ? ORDER BY e.ordinal`).all(runId) as DatabaseRow[];
-    const evaluations: JourneyEvaluationRecord[] = evaluationRows.map((evaluation) => {
-      const packet = parseStored(decisionPacketSchema, parseJson(evaluation.packet_json, 'frozen packet'), 'frozen packet');
-      const base: JourneyEvaluationRecord = {
-        evaluationId: asText(evaluation.evaluation_id, 'evaluation ID'),
-        contextId: asText(evaluation.context_id, 'context ID'),
-        respondentId: asText(evaluation.respondent_id, 'respondent ID'),
-        questionId: asText(evaluation.question_id, 'question ID'),
-        packet,
-        packetFingerprint: asText(evaluation.packet_fingerprint, 'packet fingerprint'),
-        turnId: asText(evaluation.turn_id, 'turn ID'),
-        nodeId: asText(evaluation.node_id, 'node ID'),
-        pathId: asText(evaluation.path_id, 'path ID'),
-        occurrence: asNumber(evaluation.occurrence, 'turn occurrence'),
-        ordinal: asNumber(evaluation.ordinal, 'evaluation ordinal'),
-        status: evaluationStatusSchema.parse(asText(evaluation.status, 'evaluation status')),
-      };
-      if (!['pending', 'answered', 'failed', 'unreached'].includes(base.status) ||
-          (base.status === 'answered' && evaluation.result_json === null) || (base.status === 'failed' && evaluation.failure_code === null)) {
-        throw new RunStoreError('data_integrity_error', 'Stored journey evaluation status does not match its answer evidence.');
-      }
-      if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
-        throw new RunStoreError('data_integrity_error', 'Stored journey packet does not match its context identity.');
-      }
-      if (evaluation.result_json !== null) {
-        const decoded = decodeResultAndExecution(parseJson(evaluation.result_json, 'decision value'), parseJson(evaluation.execution_json, 'provider execution'));
-        base.result = validateDecision(packet, decoded.result, { maxAttempts: decoded.result.attempts });
-        base.execution = decoded.execution;
-      }
-      const evaluationFailure = storedEvaluationFailure(evaluation);
-      if (evaluationFailure) base.failure = evaluationFailure;
-      return base;
-    });
-    const stateRows = this.database.prepare('SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id').all(runId) as DatabaseRow[];
-    const respondents: JourneyRespondentState[] = stateRows.map((state) => {
-      const status = parseStored(journeyRespondentStatusSchema, asText(state.status, 'journey respondent status'), 'journey respondent status');
-      const events = parseStored(journeyEventsSchema, parseJson(state.events_json, 'journey history'), 'journey history');
-      const route = parseStored(journeyRouteSchema, parseJson(state.route_json, 'journey route'), 'journey route');
-      return {
-        respondentId: asText(state.respondent_id, 'respondent ID'),
-        status,
-        currentNodeId: asNullableText(state.current_node_id, 'current node ID'),
-        currentTurnId: asNullableText(state.current_turn_id, 'current turn ID'),
-        currentContextId: asNullableText(state.current_context_id, 'current context ID'),
-        revision: asNumber(state.revision, 'journey state revision'),
-        events,
-        route,
-        ...(state.outcome === null ? {} : { outcome: asText(state.outcome, 'journey outcome') }),
-      };
-    });
-    const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-    if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size ||
-        respondents.some((state) => !respondentIds.has(state.respondentId)) ||
-        respondents.some((state) => state.status === 'active' && evaluations.filter((evaluation) => ['pending', 'failed'].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) ||
-        respondents.some((state) => state.status !== 'active' && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
-      throw new RunStoreError('data_integrity_error', 'Stored journey respondent states do not match the reached turns.');
-    }
-    return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations, respondents };
-    });
+    return this.readTransaction(() => readJourneyRun(this.database, runId, () => this.notFound()));
   }
 
   list(query: RunListQuery): Page<RunStatusView> {
@@ -609,36 +483,13 @@ class SQLiteRunStore implements RunStore {
 
   getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail {
     this.ensureOpen();
-    return this.readTransaction(() => {
-      const row = this.database.prepare(`SELECT e.*, r.request_json FROM evaluations e JOIN runs r USING (run_id)
-        WHERE e.run_id = ? AND e.evaluation_id = ? AND e.context_id = ?`).get(runId, evaluationId, contextId) as DatabaseRow | undefined;
-      if (!row) throw new RunStoreError('context_not_found', 'The evaluation and context handles do not identify a context in this run.');
-      const stored = parseJsonRecord(row.request_json, 'run request');
-      if (typeof stored.compilerFingerprint !== 'string' || stored.compilerFingerprint.length === 0) throw new RunStoreError('data_integrity_error', 'Stored compiler identity is invalid.');
-      const packet = parseStored(decisionRequestSchema, parseJson(row.packet_json, 'frozen packet'), 'frozen packet');
-      const packetFingerprint = asText(row.packet_fingerprint, 'packet fingerprint');
-      if (hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== packetFingerprint) throw new RunStoreError('data_integrity_error', 'Stored context packet fingerprint does not match its frozen input.');
-      return {
-        runId,
-        evaluationId,
-        contextId,
-        respondentId: asText(row.respondent_id, 'respondent ID'),
-        questionId: asText(row.question_id, 'question ID'),
-        status: asText(row.status, 'evaluation status') as RunContextDetail['status'],
-        packet,
-        provenance: {
-          compilerFingerprint: stored.compilerFingerprint,
-          packetFingerprint,
-          contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint: stored.compilerFingerprint }),
-        },
-      };
-    });
+    return this.readTransaction(() => readRunContext(this.database, runId, evaluationId, contextId));
   }
 
   answers(runId: string, cursorText?: string, requestedLimit?: number): Page<AnswerRow> {
     this.ensureOpen();
     return this.readTransaction(() => {
-    this.statusInside(runId);
+    if (!runExists(this.connection.orm, runId)) throw this.notFound();
     const limit = pageSize(requestedLimit);
     let cursor: AnswerCursorPayload | undefined;
     if (cursorText) {
@@ -662,7 +513,7 @@ class SQLiteRunStore implements RunStore {
         contextId: asText(row.context_id, 'context ID'),
         respondentId: asText(row.respondent_id, 'respondent ID'),
         questionId: asText(row.question_id, 'question ID'),
-        status: asText(row.status, 'evaluation status') as AnswerRow['status'],
+        status: parseStored(evaluationStatusSchema, asText(row.status, 'evaluation status'), 'evaluation status'),
         ...(decoded === undefined ? {} : { result: decoded.result, execution: decoded.execution }),
         ...(failure === undefined ? {} : { failure }),
       };
@@ -674,7 +525,9 @@ class SQLiteRunStore implements RunStore {
 
   attempts(runId: string, cursorText?: string, requestedLimit?: number): Page<RunAttempt> {
     this.ensureOpen();
-    return this.readTransaction(() => loadAttempts(this.connection.orm, runId, cursorText, requestedLimit, () => this.statusInside(runId)));
+    return this.readTransaction(() => loadAttempts(this.connection.orm, runId, cursorText, requestedLimit, () => {
+      if (!runExists(this.connection.orm, runId)) throw this.notFound();
+    }));
   }
 
   requestCancel(runId: string): RunStatusView {
@@ -744,7 +597,7 @@ class SQLiteRunStore implements RunStore {
   previewDelete(runIds: string[]): DeletePreview {
     this.ensureOpen();
     validateRunIds(runIds);
-    return this.transaction(() => {
+    return this.readTransaction(() => {
       const snapshot = loadRunDeletionSnapshot(this.connection.orm, runIds);
       if (snapshot.runs.length !== runIds.length) throw this.notFound();
       const nowMs = this.now();
@@ -1225,37 +1078,7 @@ class SQLiteRunStore implements RunStore {
   }
 
   private statusesInside(runIds: string[]): RunStatusView[] {
-    if (runIds.length === 0) return [];
-    const rows = readRunStatusViewsQuery.all(this.database, JSON.stringify(runIds));
-    return rows.map((row) => {
-      const stored = parseJsonRecord(row.request_json, 'run request');
-      const request = runRequestSchema.safeParse(stored.request);
-      if (!request.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
-      const status = asText(row.status, 'run status') as RunStatus;
-      const usedCalls = asNumber(row.used_calls, 'used calls');
-      const reservedCalls = asNumber(row.reserved_calls, 'reserved calls');
-      const maxCalls = asNumber(row.max_calls, 'maximum calls');
-      return {
-      runId: asText(row.run_id, 'run ID'),
-      status,
-      createdAt: asText(row.created_at, 'created time'),
-      completedEvaluations: asNumber(row.completed_evaluations, 'completed evaluation count'),
-      failedEvaluations: asNumber(row.failed_evaluations, 'failed evaluation count'),
-      totalEvaluations: asNumber(row.evaluation_count, 'evaluation count'),
-      usedCalls,
-      reservedCalls,
-      maxCalls,
-      cancelRequested: asNumber(row.cancel_requested, 'cancel flag') === 1,
-      lifecycle: deriveRunLifecycle({ status, kind: request.data.kind, cancelRequested: asNumber(row.cancel_requested, 'cancel flag') === 1,
-        ...(row.failure_scope === null ? {} : { failureScope: asText(row.failure_scope, 'failure scope') as 'evaluation' | 'run' }),
-        usedCalls, reservedCalls, maxCalls,
-        hasPendingEvaluations: asNumber(row.pending_evaluations, 'pending evaluation count') > 0,
-        hasFailedEvaluations: asNumber(row.failed_evaluations, 'failed evaluation count') > 0,
-        canRetrySharedFailure: asNumber(row.retryable_shared_failure, 'retryable shared failure') === 1,
-        hasRetryableJourneyFailure: asNumber(row.retryable_journey_failure, 'retryable journey failure') === 1 }),
-      ...(row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, 'failure code'), message: asText(row.failure_message, 'failure message') } }),
-      };
-    });
+    return readStatusViews(this.database, runIds);
   }
 
   private evaluationFromRow(row: DatabaseRow): FrozenEvaluation {

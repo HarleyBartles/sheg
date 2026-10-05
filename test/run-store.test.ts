@@ -1766,3 +1766,18 @@ test('storage inspection observes reconciliation without restarting expired work
     assert.equal(store.getStatus(runId).status, 'interrupted');
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test('narrow request, evaluation and answer reads preserve the missing-run error', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const missingRunId = randomUUID();
+  try {
+    const assertMissing = (operation: () => unknown) => assert.throws(operation, (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
+    assertMissing(() => store.getRequestKind(missingRunId));
+    assertMissing(() => store.getRequest(missingRunId));
+    assertMissing(() => store.getJourneyRun(missingRunId));
+    assertMissing(() => store.evaluationStatuses(missingRunId));
+    assertMissing(() => store.answers(missingRunId));
+    assertMissing(() => store.attempts(missingRunId));
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

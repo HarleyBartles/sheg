@@ -72,11 +72,11 @@
 
 **Interfaces:** `RunReadRepository` retains its application-facing methods and validated return shapes. Narrow existence/identity reads have their own internal projections. Multi-query public recall uses one deferred snapshot. Read implementations receive the same connection/transaction owner that commands use.
 
-- [ ] Extract reconstruction and projections into their semantic read owners, moving result types/errors to application/domain where appropriate. Keep imports acyclic and remove adapter compatibility re-exports once live callers no longer require them.
-- [ ] Replace aggregate status calls used only for existence/request-kind checks with narrow reads. Reuse statuses already obtained around reconciliation instead of projecting again. Share result/execution decoding.
-- [ ] Make deletion preview use a deferred transaction. Preserve source-consistent coverage, stale-cursor rejection and empty-page totals. Do not replace required all-match coverage with page-only counts.
-- [ ] Use temporary off-repo query instrumentation on increasing run/evaluation sizes to verify removed redundant work. Add stable operation/query-count behavior checks only where they express a meaningful complexity contract; no timing ceilings or stored measurement results.
-- [ ] Run storage/read/service/worker tests and typecheck. Review declared return shapes and transaction boundaries, then commit.
+- [x] Extract reconstruction and projections into their semantic read owners, moving result types/errors to application/domain where appropriate. Keep imports acyclic and remove adapter compatibility re-exports once live callers no longer require them.
+- [x] Replace aggregate status calls used only for existence/request-kind checks with narrow reads. Reuse statuses already obtained around reconciliation instead of projecting again. Share result/execution decoding.
+- [x] Make deletion preview use a deferred transaction. Preserve source-consistent coverage, stale-cursor rejection and empty-page totals. Do not replace required all-match coverage with page-only counts.
+- [x] Use temporary off-repo query instrumentation on increasing run/evaluation sizes to verify removed redundant work. Add stable operation/query-count behavior checks only where they express a meaningful complexity contract; no timing ceilings or stored measurement results.
+- [x] Run storage/read/service/worker tests and typecheck. Review declared return shapes and transaction boundaries, then commit.
 
 ## Task 5: Finish command extraction while preserving atomic operations
 
