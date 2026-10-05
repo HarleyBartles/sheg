@@ -1,4 +1,6 @@
 import { RunStoreError } from '../../application/run-store.js';
+
+export type AttemptCursorPayload = { kind: 'attempts'; runId: string; sequence: number };
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 

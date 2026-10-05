@@ -24110,328 +24110,6 @@ function pageSize(limit) {
   return size;
 }
 
-// src/infrastructure/sqlite/evidence-query.ts
-import { createHash as createHash7 } from "node:crypto";
-
-// src/infrastructure/sqlite/payload-codecs.ts
-var envelopeSchema = external_exports.object({
-  formatVersion: external_exports.number().int(),
-  kind: external_exports.string().min(1),
-  value: external_exports.unknown()
-}).strict();
-function encodeStoredPayload(kind, value, schema) {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) throw new RunStoreError("invalid_stored_payload", `Cannot store an invalid ${kind} payload.`);
-  return JSON.stringify({ formatVersion: 1, kind, value: parsed.data });
-}
-function decodeStoredPayload(json2, kind, schema) {
-  let raw;
-  try {
-    raw = JSON.parse(json2);
-  } catch (error62) {
-    throw new RunStoreError("data_integrity_error", `The stored ${kind} payload is not valid JSON.`, { cause: error62 });
-  }
-  const envelope = envelopeSchema.safeParse(raw);
-  if (!envelope.success || envelope.data.kind !== kind) throw new RunStoreError("data_integrity_error", `The stored ${kind} payload has an invalid envelope.`);
-  if (envelope.data.formatVersion !== 1) throw new RunStoreError("unsupported_payload_version", `Sheg cannot read unsupported stored ${kind} format version ${envelope.data.formatVersion}.`);
-  const parsed = schema.safeParse(envelope.data.value);
-  if (!parsed.success) throw new RunStoreError("data_integrity_error", `The stored ${kind} payload has an invalid stored ${kind} value.`);
-  return parsed.data;
-}
-
-// src/infrastructure/sqlite/evidence-records.ts
-var evaluationFailureEvidenceSchema = external_exports.object({
-  detail: decisionFailureDetailSchema.optional(),
-  providerFailure: providerFailureEvidenceSchema.optional()
-}).strict();
-var attemptEvaluationFailureSchema = evaluationFailureEvidenceSchema.extend({
-  code: external_exports.string().min(1),
-  message: external_exports.string()
-}).strict();
-function mergeMaterialCatalog(...collections) {
-  const merged = /* @__PURE__ */ new Map();
-  for (const collection of collections) for (const item of collection) {
-    const previous = merged.get(item.id);
-    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256)) {
-      throw new RunStoreError("data_integrity_error", `Stored material ${item.id} has conflicting text or source provenance.`);
-    }
-    merged.set(item.id, previous ? { ...previous, ...item.sourceId === void 0 ? {} : { sourceId: item.sourceId }, ...item.sourceSha256 === void 0 ? {} : { sourceSha256: item.sourceSha256 } } : { ...item });
-  }
-  return [...merged.values()];
-}
-function materialCatalogForRequest(request, lineage, contextId, respondentId, encountered = []) {
-  const source = request.kind === "poll" ? request.material : request.kind === "journey" ? request.journey.items : request.material ?? [];
-  const inherited = request.kind === "follow-on" ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? [] : [];
-  return mergeMaterialCatalog(source, inherited, encountered);
-}
-function encounteredMaterialsFromState(state) {
-  if (!Array.isArray(state.encounteredItems)) return [];
-  return state.encounteredItems.flatMap((item) => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "text" in item && typeof item.text === "string" ? [{ id: item.id, text: item.text }] : []);
-}
-function resultFromStorage(value, execution) {
-  const typed = decodeStoredPayload(JSON.stringify(value), "decision-value", decisionValueSchema);
-  const evidence = providerExecutionEvidenceSchema.parse(execution);
-  return decisionResultSchema.parse({ ...typed, ...evidence });
-}
-function failureEvidenceFromStorage(value) {
-  if (value === null || value === void 0) return {};
-  const decoded = decodeStoredPayload(asText(value, "evaluation failure evidence"), "evaluation-failure-evidence", evaluationFailureEvidenceSchema);
-  return { ...decoded.detail ? { detail: decoded.detail } : {}, ...decoded.providerFailure ? { providerFailure: decoded.providerFailure } : {} };
-}
-function failureEvidenceJson(failure2) {
-  if (!failure2.detail && !failure2.providerFailure) return null;
-  return encodeStoredPayload("evaluation-failure-evidence", {
-    ...failure2.detail ? { detail: failure2.detail } : {},
-    ...failure2.providerFailure ? { providerFailure: failure2.providerFailure } : {}
-  }, evaluationFailureEvidenceSchema);
-}
-function storedEvaluationFailure(row) {
-  if (row.failure_code === null) return void 0;
-  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
-  return {
-    code: asText(row.failure_code, "failure code"),
-    message: asText(row.failure_message, "failure message"),
-    ...evidence
-  };
-}
-function evaluationFailureJson(failure2) {
-  return encodeStoredPayload("attempt-evaluation-failure", failure2, attemptEvaluationFailureSchema);
-}
-function evaluationFailureFromJson(value) {
-  if (value === null || value === void 0) return void 0;
-  const decoded = decodeStoredPayload(asText(value, "attempt evaluation failure"), "attempt-evaluation-failure", attemptEvaluationFailureSchema);
-  return {
-    code: decoded.code,
-    message: decoded.message,
-    ...decoded.detail === void 0 ? {} : { detail: decoded.detail },
-    ...decoded.providerFailure === void 0 ? {} : { providerFailure: decoded.providerFailure }
-  };
-}
-
-// src/infrastructure/sqlite/evidence-query.ts
-function queryEvidencePage(context, input2) {
-  context.ensureOpen();
-  const parsed = runEvidenceQuerySchema.safeParse(input2);
-  if (!parsed.success) throw new RunStoreError("invalid_query", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
-  const query = parsed.data;
-  const limit = pageSize(query.limit);
-  const criteriaFingerprint = hashCanonical(query.criteria);
-  return context.readTransaction(() => {
-    const run = context.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(query.sourceRunId);
-    if (!run) throw context.notFound();
-    const sourceStatus = asText(run.status, "run status");
-    const usedCalls = asNumber(run.used_calls, "used calls");
-    const reservedCalls = asNumber(run.reserved_calls, "reserved calls");
-    const runRecord = parseJson(run.request_json, "run request");
-    const parsedRequest = runRequestSchema.safeParse(runRecord.request);
-    if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== "string") {
-      throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
-    }
-    const compilerFingerprint = runRecord.compilerFingerprint;
-    let lineage;
-    if (parsedRequest.data.kind === "follow-on") {
-      const parsedLineage = followOnLineageSchema.safeParse(runRecord.lineage);
-      if (!parsedLineage.success) throw new RunStoreError("data_integrity_error", "Stored follow-on material lineage is invalid.");
-      lineage = parsedLineage.data;
-    }
-    let cursor;
-    if (query.cursor) {
-      cursor = decodeCursor(query.cursor, "evidence");
-      if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
-        throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
-      }
-    }
-    const maximumOrdinal = asNumber(context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(query.sourceRunId).maximum, "maximum evaluation ordinal");
-    if (cursor && (cursor.maxOrdinal !== maximumOrdinal || cursor.sourceStatus !== sourceStatus || cursor.usedCalls !== usedCalls || cursor.reservedCalls !== reservedCalls)) {
-      throw new RunStoreError("stale_cursor", "The source run changed while paging this query. Start a fresh query to see its current evidence.");
-    }
-    const currentLifecycle = context.statusInside(query.sourceRunId).lifecycle;
-    if (cursor && hashCanonical(cursor.lifecycle) !== hashCanonical(currentLifecycle)) {
-      throw new RunStoreError("stale_cursor", "The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.");
-    }
-    const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
-    const where = ["e.run_id = ?", "e.ordinal <= ?"];
-    const parameters = [query.sourceRunId, maxOrdinal];
-    const criteria = query.criteria;
-    if (criteria.respondentId !== void 0) {
-      where.push("e.respondent_id = ?");
-      parameters.push(criteria.respondentId);
-    }
-    if (criteria.status !== void 0) {
-      where.push("e.status = ?");
-      parameters.push(criteria.status);
-    }
-    if (criteria.questionId !== void 0) {
-      where.push("e.question_id = ?");
-      parameters.push(criteria.questionId);
-    }
-    if (criteria.materialId !== void 0) {
-      where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-      parameters.push(criteria.materialId);
-    }
-    if (criteria.answer?.type === "choice") {
-      where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
-      parameters.push(criteria.answer.choiceId);
-    } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
-      const field = criteria.answer.type === "score" ? "score" : "noul";
-      const valueExpression = criteria.answer.type === "score" ? "json_extract(e.result_json, '$.value.score')" : "json_extract(e.result_json, '$.value.noul')";
-      where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">="} ?`);
-      parameters.push(criteria.answer.value);
-    }
-    if (criteria.outcome !== void 0) {
-      where.push("jr.outcome = ?");
-      parameters.push(criteria.outcome);
-    }
-    const whereSql = where.join(" AND ");
-    const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
-    const evaluationCoverage = {
-      totalEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
-      completedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
-      failedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal).count, "failed evaluation denominator")
-    };
-    let respondentCoverage;
-    {
-      const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(context.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
-      const statusCounts = parsedRequest.data.kind === "journey" ? context.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
-                SELECT respondent_id, CASE
-                  WHEN SUM(status = 'pending') > 0 THEN 'active'
-                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
-                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
-                  ELSE 'answered' END AS status
-                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
-              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) : context.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
-      const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, "respondent status"), asNumber(row.count, "respondent count")]));
-      const completed = countByStatus.get(parsedRequest.data.kind === "journey" ? "completed" : "answered") ?? 0;
-      const failed = countByStatus.get("failed") ?? 0;
-      const unreached = countByStatus.get("unreached") ?? 0;
-      respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
-    }
-    const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-    const lifecycle = currentLifecycle;
-    const matched = (() => {
-      const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id,
-          json_extract(e.packet_json, '$.question') AS question_json, e.result_json
-          FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters);
-      const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
-      const respondents = /* @__PURE__ */ new Set();
-      const selectedMaterialIds = /* @__PURE__ */ new Set();
-      const selectedMaterialRespondents = /* @__PURE__ */ new Set();
-      let selectedMaterialEvaluations = 0;
-      for (const row of matchedRows) {
-        const status = asText(row.status, "matched evaluation status");
-        if (!Object.hasOwn(counts, status)) throw new RunStoreError("data_integrity_error", "A matched evaluation has an unsupported status.");
-        counts.total += 1;
-        counts[status] += 1;
-        const respondentId = asText(row.respondent_id, "matched respondent ID");
-        respondents.add(respondentId);
-        if (status !== "answered" || row.result_json === null) continue;
-        if (typeof row.result_json !== "string") throw new RunStoreError("data_integrity_error", "A matched answer is not valid stored text.");
-        const value = decodeStoredPayload(row.result_json, "decision-value", decisionValueSchema);
-        const question = external_exports.object({ type: external_exports.string(), materialOptions: external_exports.record(external_exports.string(), external_exports.string()).optional() }).safeParse(parseJson(row.question_json, "matched question"));
-        if (!question.success) throw new RunStoreError("data_integrity_error", "A matched question has invalid material mapping evidence.");
-        if (value.type !== "choice" || question.data.type !== "choice") continue;
-        const materialId = question.data.materialOptions?.[value.choice];
-        if (materialId) {
-          selectedMaterialEvaluations += 1;
-          selectedMaterialIds.add(materialId);
-          selectedMaterialRespondents.add(respondentId);
-        }
-      }
-      return {
-        count: counts.total,
-        evaluations: counts,
-        representedRespondents: respondents.size,
-        selectedMaterialIds: [...selectedMaterialIds],
-        selectedMaterialRespondents,
-        selectedMaterialEvaluations,
-        selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size },
-        ordinals: matchedRows.map((row) => asNumber(row.ordinal, "matched evaluation ordinal")),
-        evaluationIds: matchedRows.map((row) => asText(row.evaluation_id, "matched evaluation ID"))
-      };
-    })();
-    const matchedCoverage = { evaluations: matched.evaluations, representedRespondents: matched.representedRespondents, selectedMaterials: matched.selectedMaterials };
-    const matchingOrdinalPairs = matched.ordinals.map((ordinal, index2) => ({ ordinal, evaluationId: matched.evaluationIds[index2] })).filter(({ ordinal }) => !cursor || ordinal > cursor.lastOrdinal);
-    const pageIds = matchingOrdinalPairs.slice(0, limit + 1).map(({ evaluationId }) => evaluationId);
-    const rows = pageIds.length === 0 ? [] : context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
-        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
-          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
-        FROM evaluations AS e ${join}
-        WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
-    const hasMore = rows.length > limit;
-    const pageRows = rows.slice(0, limit);
-    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.baseUrl;
-    const model = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
-    const items = pageRows.map((row) => {
-      const contextId = asText(row.context_id, "context ID");
-      const respondentId = asText(row.respondent_id, "respondent ID");
-      const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "evidence packet"));
-      const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
-      const failure2 = storedEvaluationFailure(row);
-      let selectedMaterial;
-      if (result?.type === "choice") {
-        const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
-        if (materialId) {
-          const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-          if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-          selectedMaterial = {
-            materialId,
-            text: candidate.text,
-            sourceId: candidate.sourceId,
-            sourceSha256: candidate.sourceSha256,
-            textSha256: createHash7("sha256").update(candidate.text, "utf8").digest("hex")
-          };
-        }
-      }
-      return {
-        sourceRunId: query.sourceRunId,
-        evaluationId: asText(row.evaluation_id, "evaluation ID"),
-        contextId,
-        respondentId,
-        questionId: asText(row.question_id, "question ID"),
-        status: asText(row.status, "evaluation status"),
-        ...result === void 0 ? {} : { result },
-        ...failure2 === void 0 ? {} : { failure: failure2 },
-        ...selectedMaterial === void 0 ? {} : { selectedMaterial },
-        ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
-        ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
-        ...row.node_id === null ? {} : { nodeId: asText(row.node_id, "node ID") },
-        ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
-        ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
-        provenance: {
-          provider: parsedRequest.data.provider.kind,
-          model,
-          endpoint,
-          compilerFingerprint,
-          contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint })
-        }
-      };
-    });
-    const last = pageRows.at(-1);
-    const sourceComplete = sourceStatus === "completed";
-    return {
-      items,
-      totalMatches: matched.count,
-      sourceRunId: query.sourceRunId,
-      sourceStatus,
-      sourceComplete,
-      lifecycle,
-      coverage,
-      matchedCoverage,
-      ...hasMore && last ? { nextCursor: encodeCursor({
-        kind: "evidence",
-        sourceRunId: query.sourceRunId,
-        criteriaFingerprint,
-        maxOrdinal,
-        lastOrdinal: asNumber(last.ordinal, "evaluation ordinal"),
-        sourceStatus,
-        lifecycle,
-        usedCalls,
-        reservedCalls
-      }) } : {}
-    };
-  });
-}
-
 // node_modules/drizzle-orm/entity.js
 var entityKind = /* @__PURE__ */ Symbol.for("drizzle:entityKind");
 function is(value, type) {
@@ -26298,6 +25976,101 @@ var NoopLogger = class {
   logQuery() {
   }
 };
+
+// src/infrastructure/sqlite/payload-codecs.ts
+var envelopeSchema = external_exports.object({
+  formatVersion: external_exports.number().int(),
+  kind: external_exports.string().min(1),
+  value: external_exports.unknown()
+}).strict();
+function encodeStoredPayload(kind, value, schema) {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new RunStoreError("invalid_stored_payload", `Cannot store an invalid ${kind} payload.`);
+  return JSON.stringify({ formatVersion: 1, kind, value: parsed.data });
+}
+function decodeStoredPayload(json2, kind, schema) {
+  let raw;
+  try {
+    raw = JSON.parse(json2);
+  } catch (error62) {
+    throw new RunStoreError("data_integrity_error", `The stored ${kind} payload is not valid JSON.`, { cause: error62 });
+  }
+  const envelope = envelopeSchema.safeParse(raw);
+  if (!envelope.success || envelope.data.kind !== kind) throw new RunStoreError("data_integrity_error", `The stored ${kind} payload has an invalid envelope.`);
+  if (envelope.data.formatVersion !== 1) throw new RunStoreError("unsupported_payload_version", `Sheg cannot read unsupported stored ${kind} format version ${envelope.data.formatVersion}.`);
+  const parsed = schema.safeParse(envelope.data.value);
+  if (!parsed.success) throw new RunStoreError("data_integrity_error", `The stored ${kind} payload has an invalid stored ${kind} value.`);
+  return parsed.data;
+}
+
+// src/infrastructure/sqlite/evidence-records.ts
+var evaluationFailureEvidenceSchema = external_exports.object({
+  detail: decisionFailureDetailSchema.optional(),
+  providerFailure: providerFailureEvidenceSchema.optional()
+}).strict();
+var attemptEvaluationFailureSchema = evaluationFailureEvidenceSchema.extend({
+  code: external_exports.string().min(1),
+  message: external_exports.string()
+}).strict();
+function mergeMaterialCatalog(...collections) {
+  const merged = /* @__PURE__ */ new Map();
+  for (const collection of collections) for (const item of collection) {
+    const previous = merged.get(item.id);
+    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256)) {
+      throw new RunStoreError("data_integrity_error", `Stored material ${item.id} has conflicting text or source provenance.`);
+    }
+    merged.set(item.id, previous ? { ...previous, ...item.sourceId === void 0 ? {} : { sourceId: item.sourceId }, ...item.sourceSha256 === void 0 ? {} : { sourceSha256: item.sourceSha256 } } : { ...item });
+  }
+  return [...merged.values()];
+}
+function materialCatalogForRequest(request, lineage, contextId, respondentId, encountered = []) {
+  const source = request.kind === "poll" ? request.material : request.kind === "journey" ? request.journey.items : request.material ?? [];
+  const inherited = request.kind === "follow-on" ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? [] : [];
+  return mergeMaterialCatalog(source, inherited, encountered);
+}
+function encounteredMaterialsFromState(state) {
+  if (!Array.isArray(state.encounteredItems)) return [];
+  return state.encounteredItems.flatMap((item) => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "text" in item && typeof item.text === "string" ? [{ id: item.id, text: item.text }] : []);
+}
+function resultFromStorage(value, execution) {
+  const typed = decodeStoredPayload(JSON.stringify(value), "decision-value", decisionValueSchema);
+  const evidence = providerExecutionEvidenceSchema.parse(execution);
+  return decisionResultSchema.parse({ ...typed, ...evidence });
+}
+function failureEvidenceFromStorage(value) {
+  if (value === null || value === void 0) return {};
+  const decoded = decodeStoredPayload(asText(value, "evaluation failure evidence"), "evaluation-failure-evidence", evaluationFailureEvidenceSchema);
+  return { ...decoded.detail ? { detail: decoded.detail } : {}, ...decoded.providerFailure ? { providerFailure: decoded.providerFailure } : {} };
+}
+function failureEvidenceJson(failure2) {
+  if (!failure2.detail && !failure2.providerFailure) return null;
+  return encodeStoredPayload("evaluation-failure-evidence", {
+    ...failure2.detail ? { detail: failure2.detail } : {},
+    ...failure2.providerFailure ? { providerFailure: failure2.providerFailure } : {}
+  }, evaluationFailureEvidenceSchema);
+}
+function storedEvaluationFailure(row) {
+  if (row.failure_code === null) return void 0;
+  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
+  return {
+    code: asText(row.failure_code, "failure code"),
+    message: asText(row.failure_message, "failure message"),
+    ...evidence
+  };
+}
+function evaluationFailureJson(failure2) {
+  return encodeStoredPayload("attempt-evaluation-failure", failure2, attemptEvaluationFailureSchema);
+}
+function evaluationFailureFromJson(value) {
+  if (value === null || value === void 0) return void 0;
+  const decoded = decodeStoredPayload(asText(value, "attempt evaluation failure"), "attempt-evaluation-failure", attemptEvaluationFailureSchema);
+  return {
+    code: decoded.code,
+    message: decoded.message,
+    ...decoded.detail === void 0 ? {} : { detail: decoded.detail },
+    ...decoded.providerFailure === void 0 ? {} : { providerFailure: decoded.providerFailure }
+  };
+}
 
 // node_modules/drizzle-orm/sqlite-core/foreign-keys.js
 var ForeignKeyBuilder = class {
@@ -29472,6 +29245,307 @@ var sqliteTables = {
   schemaMigrations
 };
 
+// src/infrastructure/sqlite/attempt-queries.ts
+function loadAttempts(database, runId, cursorText, requestedLimit, ensureRun) {
+  ensureRun();
+  const limit = pageSize(requestedLimit);
+  let cursor;
+  if (cursorText) {
+    cursor = decodeCursor(cursorText, "attempts");
+    if (cursor.kind !== "attempts" || cursor.runId !== runId || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 1) {
+      throw new RunStoreError("invalid_cursor", "The attempt cursor does not match this run.");
+    }
+  }
+  const where = cursor ? and(eq(attempts.runId, runId), gt(attempts.attemptSequence, cursor.sequence)) : eq(attempts.runId, runId);
+  const rows = database.select({
+    attemptId: attempts.attemptId,
+    attemptSequence: attempts.attemptSequence,
+    groupId: attempts.groupId,
+    status: attempts.status,
+    startedMs: attempts.startedMs,
+    settledMs: attempts.settledMs,
+    failureCode: attempts.failureCode,
+    failureMessage: attempts.failureMessage,
+    failureScope: attempts.failureScope,
+    executionJson: attempts.executionJson
+  }).from(attempts).where(where).orderBy(asc(attempts.attemptSequence)).limit(limit + 1).all();
+  const hasMore = rows.length > limit;
+  const pageRows = rows.slice(0, limit);
+  const attemptIds = pageRows.map(({ attemptId }) => attemptId);
+  const memberships = attemptIds.length === 0 ? [] : database.select({
+    attemptId: attemptEvaluations.attemptId,
+    evaluationId: attemptEvaluations.evaluationId,
+    questionId: evaluations.questionId,
+    failureJson: attemptEvaluations.failureJson
+  }).from(attemptEvaluations).innerJoin(evaluations, and(
+    eq(evaluations.runId, attemptEvaluations.runId),
+    eq(evaluations.evaluationId, attemptEvaluations.evaluationId)
+  )).where(and(eq(attemptEvaluations.runId, runId), inArray(attemptEvaluations.attemptId, attemptIds))).orderBy(asc(evaluations.ordinal)).all();
+  const membershipsByAttempt = /* @__PURE__ */ new Map();
+  const failuresByAttempt = /* @__PURE__ */ new Map();
+  for (const membership of memberships) {
+    const ids = membershipsByAttempt.get(membership.attemptId) ?? [];
+    ids.push(membership.evaluationId);
+    membershipsByAttempt.set(membership.attemptId, ids);
+    const failure2 = evaluationFailureFromJson(membership.failureJson);
+    if (failure2) {
+      const failures = failuresByAttempt.get(membership.attemptId) ?? [];
+      failures.push({ evaluationId: membership.evaluationId, questionId: membership.questionId, failure: failure2 });
+      failuresByAttempt.set(membership.attemptId, failures);
+    }
+  }
+  const items = pageRows.map((row) => {
+    const evaluationFailures = failuresByAttempt.get(row.attemptId) ?? [];
+    const attempt = {
+      attemptId: asText(row.attemptId, "attempt ID"),
+      groupId: asText(row.groupId, "question group ID"),
+      evaluationIds: membershipsByAttempt.get(row.attemptId) ?? [],
+      status: asText(row.status, "attempt status"),
+      startedAt: new Date(asNumber(row.startedMs, "attempt start time")).toISOString(),
+      ...row.settledMs === null ? {} : { settledAt: new Date(asNumber(row.settledMs, "attempt settlement time")).toISOString() },
+      ...row.failureCode === null ? {} : { failure: {
+        code: asText(row.failureCode, "attempt failure code"),
+        message: asText(row.failureMessage, "attempt failure message"),
+        ...row.failureScope === null ? {} : { scope: asText(row.failureScope, "attempt failure scope") }
+      } },
+      ...evaluationFailures.length === 0 ? {} : { evaluationFailures },
+      ...row.executionJson === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.executionJson, "attempt execution")) }
+    };
+    return attempt;
+  });
+  const last = pageRows.at(-1);
+  return { items, ...hasMore && last ? { nextCursor: encodeCursor({
+    kind: "attempts",
+    runId,
+    sequence: asNumber(last.attemptSequence, "attempt sequence")
+  }) } : {} };
+}
+
+// src/infrastructure/sqlite/evidence-query.ts
+import { createHash as createHash7 } from "node:crypto";
+function queryEvidencePage(context, input2) {
+  context.ensureOpen();
+  const parsed = runEvidenceQuerySchema.safeParse(input2);
+  if (!parsed.success) throw new RunStoreError("invalid_query", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
+  const query = parsed.data;
+  const limit = pageSize(query.limit);
+  const criteriaFingerprint = hashCanonical(query.criteria);
+  return context.readTransaction(() => {
+    const run = context.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(query.sourceRunId);
+    if (!run) throw context.notFound();
+    const sourceStatus = asText(run.status, "run status");
+    const usedCalls = asNumber(run.used_calls, "used calls");
+    const reservedCalls = asNumber(run.reserved_calls, "reserved calls");
+    const runRecord = parseJson(run.request_json, "run request");
+    const parsedRequest = runRequestSchema.safeParse(runRecord.request);
+    if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== "string") {
+      throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+    }
+    const compilerFingerprint = runRecord.compilerFingerprint;
+    let lineage;
+    if (parsedRequest.data.kind === "follow-on") {
+      const parsedLineage = followOnLineageSchema.safeParse(runRecord.lineage);
+      if (!parsedLineage.success) throw new RunStoreError("data_integrity_error", "Stored follow-on material lineage is invalid.");
+      lineage = parsedLineage.data;
+    }
+    let cursor;
+    if (query.cursor) {
+      cursor = decodeCursor(query.cursor, "evidence");
+      if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
+        throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
+      }
+    }
+    const maximumOrdinal = asNumber(context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(query.sourceRunId).maximum, "maximum evaluation ordinal");
+    if (cursor && (cursor.maxOrdinal !== maximumOrdinal || cursor.sourceStatus !== sourceStatus || cursor.usedCalls !== usedCalls || cursor.reservedCalls !== reservedCalls)) {
+      throw new RunStoreError("stale_cursor", "The source run changed while paging this query. Start a fresh query to see its current evidence.");
+    }
+    const currentLifecycle = context.statusInside(query.sourceRunId).lifecycle;
+    if (cursor && hashCanonical(cursor.lifecycle) !== hashCanonical(currentLifecycle)) {
+      throw new RunStoreError("stale_cursor", "The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.");
+    }
+    const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
+    const where = ["e.run_id = ?", "e.ordinal <= ?"];
+    const parameters = [query.sourceRunId, maxOrdinal];
+    const criteria = query.criteria;
+    if (criteria.respondentId !== void 0) {
+      where.push("e.respondent_id = ?");
+      parameters.push(criteria.respondentId);
+    }
+    if (criteria.status !== void 0) {
+      where.push("e.status = ?");
+      parameters.push(criteria.status);
+    }
+    if (criteria.questionId !== void 0) {
+      where.push("e.question_id = ?");
+      parameters.push(criteria.questionId);
+    }
+    if (criteria.materialId !== void 0) {
+      where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
+      parameters.push(criteria.materialId);
+    }
+    if (criteria.answer?.type === "choice") {
+      where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
+      parameters.push(criteria.answer.choiceId);
+    } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
+      const field = criteria.answer.type === "score" ? "score" : "noul";
+      const valueExpression = criteria.answer.type === "score" ? "json_extract(e.result_json, '$.value.score')" : "json_extract(e.result_json, '$.value.noul')";
+      where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">="} ?`);
+      parameters.push(criteria.answer.value);
+    }
+    if (criteria.outcome !== void 0) {
+      where.push("jr.outcome = ?");
+      parameters.push(criteria.outcome);
+    }
+    const whereSql = where.join(" AND ");
+    const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
+    const evaluationCoverage = {
+      totalEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
+      completedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
+      failedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal).count, "failed evaluation denominator")
+    };
+    let respondentCoverage;
+    {
+      const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(context.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
+      const statusCounts = parsedRequest.data.kind === "journey" ? context.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+                SELECT respondent_id, CASE
+                  WHEN SUM(status = 'pending') > 0 THEN 'active'
+                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
+                  ELSE 'answered' END AS status
+                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
+              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) : context.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
+      const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, "respondent status"), asNumber(row.count, "respondent count")]));
+      const completed = countByStatus.get(parsedRequest.data.kind === "journey" ? "completed" : "answered") ?? 0;
+      const failed = countByStatus.get("failed") ?? 0;
+      const unreached = countByStatus.get("unreached") ?? 0;
+      respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
+    }
+    const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
+    const lifecycle = currentLifecycle;
+    const matched = (() => {
+      const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id,
+          json_extract(e.packet_json, '$.question') AS question_json, e.result_json
+          FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters);
+      const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
+      const respondents = /* @__PURE__ */ new Set();
+      const selectedMaterialIds = /* @__PURE__ */ new Set();
+      const selectedMaterialRespondents = /* @__PURE__ */ new Set();
+      let selectedMaterialEvaluations = 0;
+      for (const row of matchedRows) {
+        const status = asText(row.status, "matched evaluation status");
+        if (!Object.hasOwn(counts, status)) throw new RunStoreError("data_integrity_error", "A matched evaluation has an unsupported status.");
+        counts.total += 1;
+        counts[status] += 1;
+        const respondentId = asText(row.respondent_id, "matched respondent ID");
+        respondents.add(respondentId);
+        if (status !== "answered" || row.result_json === null) continue;
+        if (typeof row.result_json !== "string") throw new RunStoreError("data_integrity_error", "A matched answer is not valid stored text.");
+        const value = decodeStoredPayload(row.result_json, "decision-value", decisionValueSchema);
+        const question = external_exports.object({ type: external_exports.string(), materialOptions: external_exports.record(external_exports.string(), external_exports.string()).optional() }).safeParse(parseJson(row.question_json, "matched question"));
+        if (!question.success) throw new RunStoreError("data_integrity_error", "A matched question has invalid material mapping evidence.");
+        if (value.type !== "choice" || question.data.type !== "choice") continue;
+        const materialId = question.data.materialOptions?.[value.choice];
+        if (materialId) {
+          selectedMaterialEvaluations += 1;
+          selectedMaterialIds.add(materialId);
+          selectedMaterialRespondents.add(respondentId);
+        }
+      }
+      return {
+        count: counts.total,
+        evaluations: counts,
+        representedRespondents: respondents.size,
+        selectedMaterialIds: [...selectedMaterialIds],
+        selectedMaterialRespondents,
+        selectedMaterialEvaluations,
+        selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size },
+        ordinals: matchedRows.map((row) => asNumber(row.ordinal, "matched evaluation ordinal")),
+        evaluationIds: matchedRows.map((row) => asText(row.evaluation_id, "matched evaluation ID"))
+      };
+    })();
+    const matchedCoverage = { evaluations: matched.evaluations, representedRespondents: matched.representedRespondents, selectedMaterials: matched.selectedMaterials };
+    const matchingOrdinalPairs = matched.ordinals.map((ordinal, index2) => ({ ordinal, evaluationId: matched.evaluationIds[index2] })).filter(({ ordinal }) => !cursor || ordinal > cursor.lastOrdinal);
+    const pageIds = matchingOrdinalPairs.slice(0, limit + 1).map(({ evaluationId }) => evaluationId);
+    const rows = pageIds.length === 0 ? [] : context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+        FROM evaluations AS e ${join}
+        WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.baseUrl;
+    const model = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
+    const items = pageRows.map((row) => {
+      const contextId = asText(row.context_id, "context ID");
+      const respondentId = asText(row.respondent_id, "respondent ID");
+      const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "evidence packet"));
+      const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
+      const failure2 = storedEvaluationFailure(row);
+      let selectedMaterial;
+      if (result?.type === "choice") {
+        const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
+        if (materialId) {
+          const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
+          if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+          selectedMaterial = {
+            materialId,
+            text: candidate.text,
+            sourceId: candidate.sourceId,
+            sourceSha256: candidate.sourceSha256,
+            textSha256: createHash7("sha256").update(candidate.text, "utf8").digest("hex")
+          };
+        }
+      }
+      return {
+        sourceRunId: query.sourceRunId,
+        evaluationId: asText(row.evaluation_id, "evaluation ID"),
+        contextId,
+        respondentId,
+        questionId: asText(row.question_id, "question ID"),
+        status: asText(row.status, "evaluation status"),
+        ...result === void 0 ? {} : { result },
+        ...failure2 === void 0 ? {} : { failure: failure2 },
+        ...selectedMaterial === void 0 ? {} : { selectedMaterial },
+        ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
+        ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
+        ...row.node_id === null ? {} : { nodeId: asText(row.node_id, "node ID") },
+        ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
+        ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
+        provenance: {
+          provider: parsedRequest.data.provider.kind,
+          model,
+          endpoint,
+          compilerFingerprint,
+          contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint })
+        }
+      };
+    });
+    const last = pageRows.at(-1);
+    const sourceComplete = sourceStatus === "completed";
+    return {
+      items,
+      totalMatches: matched.count,
+      sourceRunId: query.sourceRunId,
+      sourceStatus,
+      sourceComplete,
+      lifecycle,
+      coverage,
+      matchedCoverage,
+      ...hasMore && last ? { nextCursor: encodeCursor({
+        kind: "evidence",
+        sourceRunId: query.sourceRunId,
+        criteriaFingerprint,
+        maxOrdinal,
+        lastOrdinal: asNumber(last.ordinal, "evaluation ordinal"),
+        sourceStatus,
+        lifecycle,
+        usedCalls,
+        reservedCalls
+      }) } : {}
+    };
+  });
+}
+
 // src/infrastructure/sqlite/run-identity-queries.ts
 function findRunBySubmission(database, submissionId) {
   return database.select({ runId: runs.runId, requestFingerprint: runs.requestFingerprint }).from(runs).where(eq(runs.submissionId, submissionId)).limit(1).all()[0];
@@ -29704,6 +29778,23 @@ function loadFollowOnSources(database, input2, notFound) {
     version: { status: sourceStatus, usedCalls, reservedCalls, maxOrdinal },
     turns
   };
+}
+
+// src/infrastructure/sqlite/commands/lifecycle.ts
+function requestRunCancellation(database, runId, status) {
+  if (status === "prepared") {
+    database.update(runs).set({ status: "cancelled", cancelRequested: true }).where(and(eq(runs.runId, runId), eq(runs.status, "prepared"))).run();
+  } else if (status === "running") {
+    database.update(runs).set({ cancelRequested: true }).where(eq(runs.runId, runId)).run();
+  }
+}
+function refreshWorkerLease(database, claim2, nowMs, leaseMs) {
+  return database.update(runs).set({ leaseExpiresMs: nowMs + leaseMs }).where(and(
+    eq(runs.runId, claim2.runId),
+    eq(runs.status, "running"),
+    eq(runs.ownerToken, claim2.ownerToken),
+    gt(runs.leaseExpiresMs, nowMs)
+  )).returning({ runId: runs.runId }).all().length === 1;
 }
 
 // src/infrastructure/sqlite/commands/acceptance.ts
@@ -30911,64 +31002,7 @@ var SQLiteRunStore = class {
   }
   attempts(runId, cursorText, requestedLimit) {
     this.ensureOpen();
-    return this.readTransaction(() => {
-      this.statusInside(runId);
-      const limit = pageSize(requestedLimit);
-      let cursor;
-      if (cursorText) {
-        cursor = decodeCursor(cursorText, "attempts");
-        if (cursor.kind !== "attempts" || cursor.runId !== runId || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 1) {
-          throw new RunStoreError("invalid_cursor", "The attempt cursor does not match this run.");
-        }
-      }
-      const rows = this.database.prepare(`SELECT a.* FROM attempts a
-      WHERE a.run_id = ? ${cursor ? "AND a.attempt_sequence > ?" : ""}
-      ORDER BY a.attempt_sequence LIMIT ?`).all(...cursor ? [runId, cursor.sequence, limit + 1] : [runId, limit + 1]);
-      const hasMore = rows.length > limit;
-      const pageRows = rows.slice(0, limit);
-      const attemptIds = pageRows.map((row) => asText(row.attempt_id, "attempt ID"));
-      const memberships = attemptIds.length === 0 ? [] : this.database.prepare(`SELECT ae.attempt_id, ae.evaluation_id, e.question_id, ae.failure_json
-      FROM attempt_evaluations ae JOIN evaluations e ON e.run_id = ae.run_id AND e.evaluation_id = ae.evaluation_id
-      WHERE ae.run_id = ? AND ae.attempt_id IN (${attemptIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(runId, ...attemptIds);
-      const membershipsByAttempt = /* @__PURE__ */ new Map();
-      const failuresByAttempt = /* @__PURE__ */ new Map();
-      for (const membership of memberships) {
-        const attemptId = asText(membership.attempt_id, "attempt ID");
-        const evaluationId = asText(membership.evaluation_id, "attempt evaluation ID");
-        membershipsByAttempt.set(attemptId, [...membershipsByAttempt.get(attemptId) ?? [], evaluationId]);
-        const failure2 = evaluationFailureFromJson(membership.failure_json);
-        if (failure2) failuresByAttempt.set(attemptId, [...failuresByAttempt.get(attemptId) ?? [], {
-          evaluationId,
-          questionId: asText(membership.question_id, "attempt question ID"),
-          failure: failure2
-        }]);
-      }
-      const items = pageRows.map((row) => {
-        const attemptId = asText(row.attempt_id, "attempt ID");
-        const evaluationFailures = failuresByAttempt.get(attemptId) ?? [];
-        return {
-          attemptId,
-          groupId: asText(row.group_id, "question group ID"),
-          evaluationIds: membershipsByAttempt.get(attemptId) ?? [],
-          status: asText(row.status, "attempt status"),
-          startedAt: new Date(asNumber(row.started_ms, "attempt start time")).toISOString(),
-          ...row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, "attempt settlement time")).toISOString() },
-          ...row.failure_code === null ? {} : { failure: {
-            code: asText(row.failure_code, "attempt failure code"),
-            message: asText(row.failure_message, "attempt failure message"),
-            ...row.failure_scope === null ? {} : { scope: asText(row.failure_scope, "attempt failure scope") }
-          } },
-          ...evaluationFailures.length === 0 ? {} : { evaluationFailures },
-          ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "attempt execution")) }
-        };
-      });
-      const last = pageRows.at(-1);
-      return { items, ...hasMore && last ? { nextCursor: encodeCursor({
-        kind: "attempts",
-        runId,
-        sequence: asNumber(last.attempt_sequence, "attempt sequence")
-      }) } : {} };
-    });
+    return this.readTransaction(() => loadAttempts(this.connection.orm, runId, cursorText, requestedLimit, () => this.statusInside(runId)));
   }
   requestCancel(runId) {
     this.ensureOpen();
@@ -30976,11 +31010,7 @@ var SQLiteRunStore = class {
       const row = this.database.prepare("SELECT status FROM runs WHERE run_id = ?").get(runId);
       if (!row) throw this.notFound();
       const status = asText(row.status, "run status");
-      if (status === "prepared") {
-        this.database.prepare("UPDATE runs SET status = 'cancelled', cancel_requested = 1 WHERE run_id = ? AND status = 'prepared'").run(runId);
-      } else if (status === "running") {
-        this.database.prepare("UPDATE runs SET cancel_requested = 1 WHERE run_id = ?").run(runId);
-      }
+      requestRunCancellation(this.connection.orm, runId, status);
       return this.statusInside(runId);
     });
   }
@@ -31141,11 +31171,7 @@ var SQLiteRunStore = class {
   }
   heartbeat(claim2, nowMs) {
     this.ensureOpen();
-    return this.transaction(() => {
-      const updated = this.database.prepare(`UPDATE runs SET lease_expires_ms = ?
-        WHERE run_id = ? AND status = 'running' AND owner_token = ? AND lease_expires_ms > ?`).run(nowMs + LEASE_MS, claim2.runId, claim2.ownerToken, nowMs);
-      return updated.changes === 1;
-    });
+    return this.transaction(() => refreshWorkerLease(this.connection.orm, claim2, nowMs, LEASE_MS));
   }
   reserveNext(claim2, nowMs) {
     this.ensureOpen();

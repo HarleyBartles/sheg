@@ -16,7 +16,7 @@
 
 **Execution:** The user approved execution. Preserve completed Task 1 and keep this plan/spec through the completing PR.
 
-**Delivery order:** Tasks 2-4 add the new persistence owner alongside the working adapter; their commits must leave the existing runtime buildable. Task 5 changes runtime wiring and removes the old path after behavior parity is proved.
+**Delivery order:** Tasks 2-4 establish schema ownership and the application-facing repository ports over the shared SQLite owner while the existing runtime remains buildable. Task 5 routes services and entrypoints through those ports after behavior parity is proved.
 
 ## Contracts
 
@@ -68,7 +68,7 @@
 - [x] Read a worker's frozen identity, reserved evaluation, respondent checkpoint/profile and ordinal/occurrence facts without materializing unrelated respondents or every earlier packet. Preserve current-turn ownership, compiler/fingerprint checks, reconvergence, and full validation during public recall.
 - [x] Make evidence queries use one deferred snapshot. Reuse a lightweight materialized match set for coverage and page selection, hydrate full payloads only for the bounded page, and retain correct selected-material/no-fit counts, empty-page coverage, cursor rejection and partial-run semantics.
 - [x] Batch discovery status, attempt identity/failure, and acceptance-time source-selection lookups so result counts and selected handles do not introduce per-row queries. Resolve follow-on source records in one bounded projection.
-- [ ] Verify a concurrent writer cannot mix revisions within one evidence page, inspect query plans, and run any focused behavior tests needed for an identified gap.
+- [ ] Verify a concurrent writer cannot mix revisions within one evidence page and inspect query plans; add focused behavior coverage only if those checks reveal a contract gap.
 
 ## Task 4: Build transactional command repositories
 
@@ -77,12 +77,12 @@
 **Interface:** `RunCommandRepository` owns acceptance, claims/heartbeats, attempt reservation and settlement, journey advancement, finish/failure, cancellation, resume, reconciliation, deletion and optimization. Batch reconciliation accepts the relevant run set; commands validate live preconditions and write under one immediate transaction.
 
 - [ ] Use typed Drizzle writes under one connection owner. Verify expected schema and command preconditions within the immediate transaction; keep provider I/O outside it. Account for zero, one, and uncertain physical calls in the attempt ledger and run projection together.
-- [ ] Atomically settle attempt outcome, winning answers/links, respondent revision and next-turn creation. Preserve original call allowance, respondent-local retry, partial-batch success, cancellation, idempotency, and stale lease rejection.
+- [x] Atomically settle attempt outcome, winning answers/links, respondent revision and next-turn creation. Preserve original call allowance, respondent-local retry, partial-batch success, cancellation, idempotency, and stale lease rejection.
 - [ ] Implement explicit batch reconciliation for service use without hidden mutations in reads. Verify failed reconciliation is surfaced, and prove settlement rollback and cross-run/group identity rejection with real SQLite behavior tests. Run focused checks and commit.
 
 ## Task 5: Cut application and entrypoints over to the repository owner
 
-**Files:** Update `src/application/run-service.ts`, `src/application/question-worker.ts`, runtime wiring, CLI/MCP composition, and `src/infrastructure/run-store.ts`; add the repository-owner facade under `src/infrastructure/sqlite/`; update affected service, CLI, MCP and worker tests; add superseding ADRs and update `docs/decisions/README.md`.
+**Files:** Update `src/application/run-service.ts`, `src/application/question-worker.ts`, runtime wiring, CLI/MCP composition, and the shared SQLite owner in `src/infrastructure/run-store.ts`; add the connection and focused query/command modules under `src/infrastructure/sqlite/`; update affected service, CLI, MCP and worker tests; add superseding ADRs and update `docs/decisions/README.md`.
 
 **Interface:** `openRunPersistence` returns one `RunPersistence` owner with `{ reads: RunReadRepository, commands: RunCommandRepository, close(): void }`. Services explicitly invoke commands to reconcile before current-state reads, then call named read methods. CLI and MCP use the same services.
 
@@ -103,8 +103,8 @@
 **Files:** `src/infrastructure/sqlite/connection.ts`, migrations/recovery modules, targeted opening/recovery tests, and operational documentation.
 
 - [ ] Measure schema/history metadata checks, full integrity, foreign-key checks and total open time on representative populated stores. Use the measurements to keep cheap version/ledger/structural validation on normal open while reserving full scans for migration, verified backup and explicit health inspection.
-- [ ] Ensure missing schema, malformed/future version, damaged payload, old open connection and unsupported pre-release store report safe bounded maintenance outcomes without mutation. Document what normal open detects and what requires explicit inspection or record access.
-- [ ] Exercise malformed stores, current baseline initialization, test-only forward upgrade, backup recoverability and deliberate corruption in real SQLite; remeasure and commit.
+- [x] Ensure missing schema, malformed/future version, damaged payload, old open connection and unsupported pre-release store report safe bounded maintenance outcomes without mutation. Document what normal open detects and what requires explicit inspection or record access.
+- [x] Exercise malformed stores, current baseline initialization, test-only forward upgrade, backup recoverability and deliberate corruption in real SQLite.
 
 ## Task 8: Generate dev.15 distributions and open the review PR
 
