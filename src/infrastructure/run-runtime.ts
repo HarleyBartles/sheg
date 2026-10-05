@@ -2,7 +2,8 @@ import os from 'node:os';
 import { createRunService, RunServiceError, type RunService } from '../application/run-service.js';
 import { resolveDataRoot } from './data-root.js';
 import { ProcessLock } from './process-lock.js';
-import { inspectRunStoreCompatibility, openRunStore, resetRunStore, runStoreBackupAvailable, RunStoreError, SCHEMA_VERSION, type RunStore } from './run-store.js';
+import { inspectRunStoreCompatibility, openRunStore, resetRunStore, runStoreBackupAvailable, RunStoreError, SCHEMA_VERSION } from './run-store.js';
+import type { RunStore } from '../application/run-store.js';
 import { DetachedWorkerLauncher } from './worker-launcher.js';
 import { assertProviderReady, createProvider } from '../providers/factory.js';
 import type { StorageOperation } from '../application/run-operations.js';
@@ -94,4 +95,3 @@ function unavailableRunService(): RunService {
 function recoveryRequiredError(): RunServiceError {
   return new RunServiceError('datastore_recovery_required', 'The Sheg datastore requires recovery. Inspect storage before using study operations.');
 }
-

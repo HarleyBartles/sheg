@@ -19,10 +19,10 @@
 
 **Files:** `src/application/run-store.ts` for the consumer storage port and its types/errors; `src/infrastructure/sqlite/rows.ts` for strict SQL primitive decoding; `schema.ts` for schema identity, creation, migrations, backup verification and connection setup; `recovery.ts` for compatibility inspection and explicit reset; `evidence-query.ts` for criteria, cursor, coverage and page rendering. Keep `src/infrastructure/run-store.ts` as the adapter and compatibility export facade. Update application/runtime imports to the appropriate owner.
 
-- [ ] Map dependencies and capture a repeatable baseline for accumulated journey reads, paginated evidence queries and repeated opens using real SQLite and mock responses.
-- [ ] Extract the port, SQL decoding, schema/migration and recovery responsibilities without changing behavior. Avoid cycles between recovery and the adapter by sharing connection creation.
-- [ ] Extract evidence-query preparation, coverage and rendering as one cohesive responsibility, retaining the adapter's transaction coordination.
-- [ ] Run store, migration, recovery, service, worker and MCP behavior coverage; inspect the structural diff for responsibility ownership and commit.
+- [x] Map dependencies and capture a repeatable baseline for accumulated journey reads, paginated evidence queries and repeated opens using real SQLite and mock responses.
+- [x] Extract the port, SQL decoding, schema/migration and recovery responsibilities without changing behavior. Avoid cycles between recovery and the adapter by sharing connection creation.
+- [x] Extract evidence-query preparation, coverage and rendering as one cohesive responsibility, retaining the adapter's transaction coordination.
+- [x] Run store, migration, recovery, service, worker and MCP behavior coverage; inspect the structural diff for responsibility ownership and commit.
 
 ## Task 2: Bound worker reads to the reserved journey turn
 
@@ -38,7 +38,8 @@
 **Files:** SQLite adapter and evidence query module, store/query behavior tests.
 
 - [ ] Finish lease/launch reconciliation in a short write transaction, then establish one read snapshot for source status, lifecycle, cursor checks, denominators, matched coverage and page rows. A concurrent change before the snapshot is reflected or makes the cursor stale; a change after snapshot establishment cannot mix revisions within one page.
-- [ ] Reduce full packet materialization in matched selected-material counting by projecting only the required stored fields while preserving both historical answer representations, material mapping/no-fit semantics, and safe failure behavior.
+- [ ] Batch run-status shaping in `list()` and attempt-failure projection in `attempts()` so page size does not cause one status/failure query per row.
+- [ ] Reduce the duplicated matched-coverage/page read and full packet materialization in selected-material counting by projecting only required stored fields while preserving both historical answer representations, material mapping/no-fit semantics, and safe failure behavior.
 - [ ] Verify accurate pagination, forged/stale cursor rejection, partial-run coverage and read/write concurrency with deterministic synchronization. Keep atomic settlement separate from query processing.
 - [ ] Compare page workloads and contention before/after; run focused query, follow-on, worker and MCP coverage and commit.
 

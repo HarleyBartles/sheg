@@ -5,7 +5,7 @@ import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
 import type { PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
-import type { DeletePreview, DeleteResult, RunStore, StorageInfo } from '../infrastructure/run-store.js';
+import type { DeletePreview, DeleteResult, RunListQuery, RunStore, StorageInfo } from './run-store.js';
 import { CredentialStoreError } from '../infrastructure/credentials/windows.js';
 import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
 
@@ -28,7 +28,7 @@ export interface RunService {
   deleteRuns(runIds: string[]): DeleteResult;
   storageInfo(): StorageInfo;
   optimizeStorage(): void;
-  list(query: import('../infrastructure/run-store.js').RunListQuery): Page<RunStatusView>;
+  list(query: RunListQuery): Page<RunStatusView>;
   queryEvidence(query: import('../domain/run/request.js').RunEvidenceQuery): import('../domain/run/request.js').RunEvidencePage;
   getContext(runId: string, evaluationId: string, contextId: string): ReturnType<RunStore['getContext']>;
   getStatus(runId: string): RunStatusView;

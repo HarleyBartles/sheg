@@ -1,6 +1,6 @@
 import { setInterval, clearInterval } from 'node:timers';
 import { randomUUID } from 'node:crypto';
-import type { RunStore } from '../infrastructure/run-store.js';
+import type { RunStore } from './run-store.js';
 import { hashCanonical } from '../infrastructure/identity.js';
 import { advanceJourney, normalizeResponse } from '../domain/journey/run.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';

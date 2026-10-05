@@ -1,82 +1,33 @@
-import { providerFailureEvidenceSchema, type ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { decisionRequestSchema } from '../domain/decision/decision.js';
 import { validateDecision } from '../domain/decision/validate.js';
 import { compileDecisionPacketForCompiler } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import { deriveRunLifecycle, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyEvaluation, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
-import { decisionFailureDetailForReason, decisionFailureDetailSchema, decisionResultSchema, decisionValueSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult, type DecisionFailureDetail } from '../domain/decision/decision.js';
-import { followOnLineageSchema, followOnRunRequestSchema, runEvidenceQuerySchema, runLifecycleSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun, type RunListQueryInput, type RunMaterialItem } from '../domain/run/request.js';
+import { deriveRunLifecycle, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
+import { decisionFailureDetailForReason, decisionResultSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
+import { followOnLineageSchema, followOnRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 import { journeyTopology } from '../domain/journey/topology.js';
-import { hasSequentialMigrationPath } from './schema-migration-path.js';
-
-export const SCHEMA_VERSION = 8;
-const LEASE_MS = 30_000;
-const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 200;
-
-function mergeMaterialCatalog(...collections: readonly (readonly RunMaterialItem[])[]): RunMaterialItem[] {
-  const merged = new Map<string, RunMaterialItem>();
-  for (const collection of collections) for (const item of collection) {
-    const previous = merged.get(item.id);
-    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256)) {
-      throw new RunStoreError('data_integrity_error', `Stored material ${item.id} has conflicting text or source provenance.`);
-    }
-    merged.set(item.id, previous ? { ...previous, ...(item.sourceId === undefined ? {} : { sourceId: item.sourceId }), ...(item.sourceSha256 === undefined ? {} : { sourceSha256: item.sourceSha256 }) } : { ...item });
-  }
-  return [...merged.values()];
-}
-
-function materialCatalogForRequest(request: import('../domain/run/request.js').ParsedRunRequest, lineage: FollowOnLineage | undefined, contextId: string, respondentId: string, encountered: readonly { id: string; text: string }[] = []): RunMaterialItem[] {
-  const source = request.kind === 'poll' ? request.material : request.kind === 'journey' ? request.journey.items : request.material ?? [];
-  const inherited = request.kind === 'follow-on'
-    ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? []
-    : [];
-  return mergeMaterialCatalog(source, inherited, encountered);
-}
-
-function encounteredMaterialsFromState(state: Record<string, unknown>): Array<{ id: string; text: string }> {
-  if (!Array.isArray(state.encounteredItems)) return [];
-  return state.encounteredItems.flatMap((item) => typeof item === 'object' && item !== null &&
-    'id' in item && typeof item.id === 'string' && 'text' in item && typeof item.text === 'string'
-    ? [{ id: item.id, text: item.text }]
-    : []);
-}
-
-export type AttemptOutcome =
-  | { kind: 'answered'; result: import('../domain/decision/decision.js').DecisionResult }
-  | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run'; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence; providerAttempts?: number };
-
-export type RunListQuery = RunListQueryInput;
-export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean; retainedFollowOnRunIds: string[] }>; blockedByActiveWork: boolean };
-export type DeleteResult = {
-  deletedRunIds: string[];
-  removed: { runs: number; evaluations: number; attempts: number };
-  maintenance: { optimization: 'completed' } | { optimization: 'failed'; failureCode: string };
-};
-export type StorageInfo = { integrity: 'ok' | 'failed'; databaseBytes: number; runCount: number; evaluationCount: number; attemptCount: number; activeRunCount: number };
-export type JourneyTransition = { respondentId: string; expectedRevision: number; state: JourneyRespondentState; nextEvaluation?: JourneyEvaluation };
-
-export class RunStoreError extends Error {
-  constructor(readonly code: string, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'RunStoreError';
-  }
-}
+import { asNumber, asNullableText, asText, parseJson, type DatabaseRow } from './sqlite/rows.js';
+import { decodeCursor, encodeCursor, pageSize } from './sqlite/cursors.js';
+import { queryEvidencePage } from './sqlite/evidence-query.js';
+import { encounteredMaterialsFromState, evaluationFailureFromJson, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './sqlite/evidence-records.js';
+import { openInitializedDatabase } from './sqlite/schema.js';
+import { RunStoreError } from '../application/run-store.js';
+import type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, RunListQuery, RunStore, StorageInfo } from '../application/run-store.js';
+export { SCHEMA_VERSION } from './sqlite/schema.js';
+export type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, RunListQuery, RunStore, StorageInfo } from '../application/run-store.js';
+export { RunStoreError } from '../application/run-store.js';
+export { inspectRunStoreCompatibility, runStoreBackupAvailable, type StoreCompatibility } from './sqlite/recovery.js';
+import { resetRunStore as resetRunStoreInternal } from './sqlite/recovery.js';
 
 function sameDecisionValue(left: import('../domain/decision/decision.js').DecisionValue, right: import('../domain/decision/decision.js').DecisionValue): boolean {
   if (left.type !== right.type) return false;
-  if (left.type === 'choice' && right.type === 'choice') {
-    return left.choice === right.choice && hashCanonical(left.probabilities ?? null) === hashCanonical(right.probabilities ?? null) && left.confidence === right.confidence;
-  }
-  if (left.type === 'score' && right.type === 'score') {
-    return left.score === right.score && hashCanonical(left.probabilities) === hashCanonical(right.probabilities) &&
-      hashCanonical(left.legend) === hashCanonical(right.legend) && left.confidence === right.confidence;
-  }
+  if (left.type === 'choice' && right.type === 'choice') return left.choice === right.choice && hashCanonical(left.probabilities ?? null) === hashCanonical(right.probabilities ?? null) && left.confidence === right.confidence;
+  if (left.type === 'score' && right.type === 'score') return left.score === right.score && hashCanonical(left.probabilities) === hashCanonical(right.probabilities) && hashCanonical(left.legend) === hashCanonical(right.legend) && left.confidence === right.confidence;
   return left.type === 'noul' && right.type === 'noul' && left.noul === right.noul;
 }
 
@@ -89,8 +40,6 @@ function journeyRouteTarget(journey: JourneyDefinition, nodeId: string, response
   const graph = journeyTopology(journey);
   const node = graph.nodes.find((candidate) => candidate.id === nodeId);
   if (node?.kind !== 'ask') return undefined;
-  const task = journey.tasks.find((candidate) => candidate.id === node.taskId);
-  if (!task) return undefined;
   const edge = graph.transitions.find((candidate) => {
     if (candidate.fromNodeId !== nodeId) return false;
     if (response.type === 'choice') return candidate.optionId === response.choice;
@@ -103,138 +52,11 @@ function journeyRouteTarget(journey: JourneyDefinition, nodeId: string, response
   return edge?.toNodeId;
 }
 
-export interface RunStore {
-  findSubmission(submissionId: string, requestFingerprint: string): RunStatusView | null;
-  accept(submissionId: string, prepared: PreparedRun): { created: boolean; run: RunStatusView };
-  acceptJourney(submissionId: string, prepared: PreparedJourneyRun): { created: boolean; run: RunStatusView };
-  getStatus(runId: string): RunStatusView;
-  evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }>;
-  getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on';
-  getRequest(runId: string): PreparedRun;
-  getJourneyRun(runId: string): JourneyRunRecord;
-  list(query: RunListQuery): Page<RunStatusView>;
-  queryEvidence(query: RunEvidenceQuery): RunEvidencePage;
-  getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail;
-  resolveFollowOnSources(request: ParsedFollowOnRunRequest): FollowOnSourceSet;
-  answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
-  attempts(runId: string, cursor?: string, limit?: number): Page<RunAttempt>;
-  requestCancel(runId: string): RunStatusView;
-  resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
-  previewDelete(runIds: string[]): DeletePreview;
-  deleteRuns(runIds: string[]): DeleteResult;
-  storageInfo(): StorageInfo;
-  optimizeStorage(): void;
-  claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null;
-  heartbeat(claim: WorkerClaim, nowMs: number): boolean;
-  reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null;
-  reserveBatch(claim: WorkerClaim, groupId: string, evaluationIds: string[], nowMs: number): { attemptId: string; evaluations: FrozenEvaluation[] } | null;
-  settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): void;
-  settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void;
-  settleJourney(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome, transition: JourneyTransition): void;
-  finish(claim: WorkerClaim): RunStatusView;
-  failLaunch(runId: string, code: string): void;
-  failRun(claim: WorkerClaim, code: string, message: string): void;
-  reconcile(runId: string, nowMs: number): RunStatusView;
-  close(): void;
-}
+const LEASE_MS = 30_000;
 
-type DatabaseRow = Record<string, SQLOutputValue>;
 type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; filtersFingerprint: string };
 type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
 type AttemptCursorPayload = { kind: 'attempts'; runId: string; sequence: number };
-type EvidenceCursorPayload = {
-  kind: 'evidence'; sourceRunId: string; criteriaFingerprint: string; maxOrdinal: number; lastOrdinal: number;
-  sourceStatus: RunStatus; lifecycle: RunEvidencePage['lifecycle']; usedCalls: number; reservedCalls: number;
-};
-
-function asText(value: SQLOutputValue | undefined, label: string): string {
-  if (typeof value !== 'string') throw new RunStoreError('data_integrity_error', `Stored ${label} is not text.`);
-  return value;
-}
-
-function asNullableText(value: SQLOutputValue | undefined, label: string): string | null {
-  if (value === null) return null;
-  return asText(value, label);
-}
-
-function asNumber(value: SQLOutputValue | undefined, label: string): number {
-  if (typeof value !== 'number' && typeof value !== 'bigint') throw new RunStoreError('data_integrity_error', `Stored ${label} is not numeric.`);
-  const number = Number(value);
-  if (!Number.isSafeInteger(number)) throw new RunStoreError('data_integrity_error', `Stored ${label} is outside the safe integer range.`);
-  return number;
-}
-
-function resultFromStorage(value: unknown, execution: unknown): import('../domain/decision/decision.js').DecisionResult {
-  const complete = decisionResultSchema.safeParse(value);
-  if (complete.success) return complete.data;
-  const typed = decisionValueSchema.parse(value);
-  const evidence = providerExecutionEvidenceSchema.parse(execution);
-  return decisionResultSchema.parse({ ...typed, ...evidence });
-}
-
-function parseJson<T>(value: SQLOutputValue | undefined, label: string): T {
-  try { return JSON.parse(asText(value, label)) as T; }
-  catch (error) {
-    if (error instanceof RunStoreError) throw error;
-    throw new RunStoreError('data_integrity_error', `Stored ${label} is not valid JSON.`, { cause: error });
-  }
-}
-
-function failureEvidenceFromStorage(value: SQLOutputValue | undefined): Pick<import('../domain/run/lifecycle.js').EvaluationFailure, 'detail' | 'providerFailure'> {
-  if (value === null || value === undefined) return {};
-  const parsed = parseJson<Record<string, unknown>>(value, 'evaluation failure evidence');
-  // Original schema-8 records contain a bare typed-answer detail. Preserve their bytes and meaning.
-  if ('reason' in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
-  return { ...(parsed.detail === undefined ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
-}
-
-function failureEvidenceJson(failure: import('../domain/run/lifecycle.js').EvaluationFailure): string | null {
-  if (failure.providerFailure) return JSON.stringify({ ...(failure.detail ? { detail: failure.detail } : {}), providerFailure: providerFailureEvidenceSchema.parse(failure.providerFailure) });
-  return failure.detail ? JSON.stringify(failure.detail) : null;
-}
-
-function storedEvaluationFailure(row: DatabaseRow): import('../domain/run/lifecycle.js').EvaluationFailure | undefined {
-  if (row.failure_code === null) return undefined;
-  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
-  return {
-    code: asText(row.failure_code, 'failure code'),
-    message: asText(row.failure_message, 'failure message'),
-    ...evidence,
-  };
-}
-
-function evaluationFailureJson(failure: import('../domain/run/lifecycle.js').EvaluationFailure): string {
-  return JSON.stringify(failure);
-}
-
-function evaluationFailureFromJson(value: SQLOutputValue | undefined): import('../domain/run/lifecycle.js').EvaluationFailure | undefined {
-  if (value === null || value === undefined) return undefined;
-  const parsed = parseJson<Record<string, unknown>>(value, 'attempt evaluation failure');
-  if (typeof parsed.code !== 'string' || typeof parsed.message !== 'string') throw new RunStoreError('data_integrity_error', 'Stored attempt evaluation failure is invalid.');
-  const detail = parsed.detail === undefined ? undefined : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...(detail ? { detail } : {}), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
-}
-
-function encodeCursor(value: object): string {
-  return Buffer.from(JSON.stringify(value)).toString('base64url');
-}
-
-function decodeCursor<T>(value: string, label: string): T {
-  try {
-    const parsed: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new TypeError('Cursor must be an object.');
-    return parsed as T;
-  }
-  catch (error) { throw new RunStoreError('invalid_cursor', `The ${label} cursor is invalid.`, { cause: error }); }
-}
-
-function pageSize(limit: number | undefined): number {
-  const size = limit ?? DEFAULT_PAGE_SIZE;
-  if (!Number.isInteger(size) || size < 1 || size > MAX_PAGE_SIZE) {
-    throw new RunStoreError('invalid_page_size', `Page size must be an integer from 1 to ${MAX_PAGE_SIZE}.`);
-  }
-  return size;
-}
 
 function validateRunIds(runIds: string[]): void {
   if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
@@ -242,419 +64,6 @@ function validateRunIds(runIds: string[]): void {
   }
 }
 
-function isTransientSqliteLock(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'errcode' in error &&
-    (error.errcode === 5 || error.errcode === 6);
-}
-
-function setWriteAheadLogMode(database: DatabaseSync): void {
-  const deadline = Date.now() + 5_000;
-  const waitCell = new Int32Array(new SharedArrayBuffer(4));
-  while (true) {
-    try {
-      database.exec('PRAGMA journal_mode = WAL');
-      return;
-    } catch (error) {
-      if (!isTransientSqliteLock(error) || Date.now() >= deadline) throw error;
-      Atomics.wait(waitCell, 0, 0, Math.min(25, deadline - Date.now()));
-    }
-  }
-}
-
-type SchemaMigration = { fromVersion: number; toVersion: number; id: string; apply(database: DatabaseSync): void };
-
-const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [{
-  fromVersion: 7,
-  toVersion: 8,
-  id: 'schema-v7-to-v8-ledger',
-  apply(database) {
-    database.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL)');
-    database.prepare('INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (?, ?, ?)')
-      .run(8, 'schema-v7-to-v8-ledger', new Date().toISOString());
-  },
-}];
-
-function hasMigrationPath(fromVersion: number, targetVersion = SCHEMA_VERSION): boolean {
-  return hasSequentialMigrationPath(fromVersion, targetVersion, SCHEMA_MIGRATIONS);
-}
-
-const REQUIRED_SCHEMA_COLUMNS = {
-  runs: ['run_id', 'submission_id', 'request_fingerprint', 'created_at', 'created_ms', 'label', 'status', 'request_json', 'evaluation_count', 'max_calls', 'used_calls', 'reserved_calls', 'cancel_requested', 'owner_token', 'owner_pid', 'lease_expires_ms', 'failure_scope', 'failure_code', 'failure_message'],
-  question_groups: ['group_id', 'run_id', 'ordinal', 'context_id', 'respondent_id', 'state_json', 'question_ids_json'],
-  evaluations: ['evaluation_id', 'run_id', 'ordinal', 'context_id', 'respondent_id', 'question_id', 'group_id', 'turn_id', 'node_id', 'path_id', 'occurrence', 'packet_json', 'packet_fingerprint', 'status', 'result_json', 'failure_code', 'failure_message', 'failure_detail_json'],
-  journey_respondents: ['run_id', 'respondent_id', 'status', 'current_node_id', 'current_turn_id', 'current_context_id', 'revision', 'events_json', 'route_json', 'outcome'],
-  attempts: ['attempt_sequence', 'attempt_id', 'run_id', 'group_id', 'evaluation_id', 'packet_fingerprint', 'owner_token', 'status', 'started_ms', 'settled_ms', 'result_json', 'execution_json', 'failure_code', 'failure_message', 'failure_scope'],
-  attempt_evaluations: ['attempt_id', 'evaluation_id', 'failure_json'],
-  evaluation_answer_attempts: ['evaluation_id', 'attempt_id'],
-  schema_migrations: ['version', 'migration_id', 'applied_at'],
-} as const;
-
-function validateSchemaShape(database: DatabaseSync): void {
-  const rows = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as DatabaseRow[];
-  const actual = new Set(rows.map((row) => asText(row.name, 'schema table name')));
-  for (const [table, requiredColumns] of Object.entries(REQUIRED_SCHEMA_COLUMNS)) {
-    if (!actual.has(table)) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
-    const columns = database.prepare(`PRAGMA table_info("${table}")`).all() as DatabaseRow[];
-    const columnNames = new Set(columns.map((column) => asText(column.name, `${table} column name`)));
-    if (requiredColumns.some((column) => !columnNames.has(column))) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
-  }
-  const migration = database.prepare('SELECT migration_id FROM schema_migrations WHERE version = ?').get(SCHEMA_VERSION) as DatabaseRow | undefined;
-  const migrationId = migration?.migration_id;
-  const validMigrationIds = [`baseline-v${SCHEMA_VERSION}`, ...SCHEMA_MIGRATIONS.filter(({ toVersion }) => toVersion === SCHEMA_VERSION).map(({ id }) => id)];
-  if (typeof migrationId !== 'string' || !validMigrationIds.includes(migrationId)) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore has no recognized applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.');
-}
-
-function checkDatabaseIntegrity(database: DatabaseSync, checkForeignKeys = true): void {
-  const integrity = database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
-  if (integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
-    throw new RunStoreError('migration_integrity_failed', 'The datastore failed its SQLite integrity check during migration. The original database was left recoverable.');
-  }
-  const foreignKeys = checkForeignKeys ? database.prepare('PRAGMA foreign_key_check').all() : [];
-  if (foreignKeys.length > 0) {
-    throw new RunStoreError('migration_integrity_failed', 'The datastore has foreign-key violations during migration. The original database was left recoverable.');
-  }
-}
-
-function verifiedBackup(database: DatabaseSync, dataRoot: string, fromVersion: number, toVersion: number, purpose = `before-${toVersion}`, checkForeignKeys = true): string {
-  const backupRoot = path.join(dataRoot, 'backups');
-  mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID()}.sqlite`);
-  const escapedPath = backupPath.replaceAll("'", "''");
-  try {
-    database.exec(`VACUUM INTO '${escapedPath}'`);
-    const backup = new DatabaseSync(backupPath, { readOnly: true });
-    try {
-      const versionRow = backup.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
-      if (asNumber(versionRow?.user_version, 'backup schema version') !== fromVersion) {
-        throw new RunStoreError('migration_backup_failed', 'The datastore backup does not match the source schema version.');
-      }
-      checkDatabaseIntegrity(backup, checkForeignKeys);
-    } finally { backup.close(); }
-    return backupPath;
-  } catch (error) {
-    try { unlinkSync(backupPath); } catch { /* Preserve the backup error. */ }
-    if (error instanceof RunStoreError) throw error;
-    throw new RunStoreError('migration_backup_failed', 'Sheg could not verify a recoverable datastore backup; the source database was not migrated.', { cause: error });
-  }
-}
-
-function migrate(database: DatabaseSync, dataRoot: string, startingVersion: number): void {
-  let version = startingVersion;
-  while (version < SCHEMA_VERSION) {
-    const step = SCHEMA_MIGRATIONS.find(({ fromVersion }) => fromVersion === version);
-    if (!step || step.toVersion !== step.fromVersion + 1 || step.toVersion > SCHEMA_VERSION) {
-      throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema ${version} has no supported migration path to ${SCHEMA_VERSION}. Preserve the database and use run_storage to inspect recovery options.`);
-    }
-    const liveVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-    if (liveVersion === step.toVersion) { version = liveVersion; continue; }
-    if (liveVersion !== step.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${liveVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
-    try { verifiedBackup(database, dataRoot, step.fromVersion, step.toVersion); }
-    catch (error) {
-      const updatedVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-      if (updatedVersion === step.toVersion) { version = updatedVersion; continue; }
-      throw error;
-    }
-    database.exec('BEGIN IMMEDIATE');
-    try {
-      const lockedVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-      if (lockedVersion === step.toVersion) {
-        database.exec('COMMIT');
-        version = lockedVersion;
-        continue;
-      }
-      if (lockedVersion !== step.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
-      step.apply(database);
-      database.exec(`PRAGMA user_version = ${step.toVersion}`);
-      checkDatabaseIntegrity(database);
-      if (step.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
-      database.exec('COMMIT');
-      version = step.toVersion;
-    } catch (error) {
-      try { database.exec('ROLLBACK'); } catch { /* Preserve the migration error. */ }
-      if (error instanceof RunStoreError) throw error;
-      throw new RunStoreError('migration_failed', `Sheg could not migrate the datastore from schema ${step.fromVersion} to ${step.toVersion}. A verified backup was retained; use run_storage to inspect recovery options.`, { cause: error });
-    }
-  }
-}
-
-function initialize(database: DatabaseSync, dataRoot: string): void {
-  const versionRow = database.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
-  const version = asNumber(versionRow?.user_version, 'schema version');
-  const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() as DatabaseRow | undefined;
-  const tableCount = asNumber(existing?.count, 'table count');
-
-  if (version === 0 && tableCount !== 0) {
-    throw new RunStoreError('unsupported_schema_version', 'The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.');
-  }
-  if (version > SCHEMA_VERSION) {
-    throw new RunStoreError('unsupported_schema_version', `The Sheg database schema version ${version} is newer than this build. Preserve it and use run_storage to inspect recovery options.`);
-  }
-  if (version !== 0 && version < 7) {
-    throw new RunStoreError('unsupported_schema_version', `The Sheg database schema version ${version} is not supported. Export or reset this pre-v1 datastore only through explicit run_storage recovery.`);
-  }
-
-  database.exec('PRAGMA foreign_keys = ON;');
-  database.exec('PRAGMA synchronous = FULL;');
-
-  if (version === SCHEMA_VERSION) {
-    checkDatabaseIntegrity(database);
-    validateSchemaShape(database);
-    setWriteAheadLogMode(database);
-    return;
-  }
-  if (version >= 7 && version < SCHEMA_VERSION) {
-    migrate(database, dataRoot, version);
-    setWriteAheadLogMode(database);
-    return;
-  }
-
-  setWriteAheadLogMode(database);
-  database.exec('BEGIN IMMEDIATE');
-  try {
-    const lockedVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-    const lockedTables = asNumber((database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() as DatabaseRow).count, 'table count');
-    if (lockedVersion === SCHEMA_VERSION && lockedTables > 0) {
-      database.exec('COMMIT');
-      checkDatabaseIntegrity(database);
-      return;
-    }
-    if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError('unsupported_schema_version', 'The Sheg datastore changed while being initialized; preserve it and use run_storage to inspect compatibility.');
-    database.exec(`
-    CREATE TABLE runs (
-      run_id TEXT PRIMARY KEY,
-      submission_id TEXT NOT NULL UNIQUE,
-      request_fingerprint TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      created_ms INTEGER NOT NULL,
-      label TEXT,
-      status TEXT NOT NULL CHECK (status IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')),
-      request_json TEXT NOT NULL,
-      evaluation_count INTEGER NOT NULL CHECK (evaluation_count > 0),
-      max_calls INTEGER NOT NULL CHECK (max_calls > 0),
-      used_calls INTEGER NOT NULL DEFAULT 0 CHECK (used_calls >= 0),
-      reserved_calls INTEGER NOT NULL DEFAULT 0 CHECK (reserved_calls >= 0),
-      cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
-      owner_token TEXT,
-      owner_pid INTEGER,
-      lease_expires_ms INTEGER,
-      failure_scope TEXT CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run')),
-      failure_code TEXT,
-      failure_message TEXT,
-      CHECK (used_calls + reserved_calls <= max_calls)
-    );
-    CREATE TABLE evaluations (
-      evaluation_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-      context_id TEXT NOT NULL,
-      respondent_id TEXT NOT NULL,
-      question_id TEXT NOT NULL,
-      group_id TEXT NOT NULL,
-      turn_id TEXT,
-      node_id TEXT,
-      path_id TEXT,
-      occurrence INTEGER,
-      packet_json TEXT NOT NULL,
-      packet_fingerprint TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed', 'unreached')),
-      result_json TEXT,
-      failure_code TEXT,
-      failure_message TEXT,
-      failure_detail_json TEXT,
-      UNIQUE (run_id, ordinal),
-      UNIQUE (run_id, evaluation_id),
-      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE,
-      UNIQUE (run_id, turn_id),
-      UNIQUE (run_id, respondent_id, node_id, occurrence),
-      CHECK ((turn_id IS NULL AND node_id IS NULL AND path_id IS NULL AND occurrence IS NULL) OR
-             (turn_id IS NOT NULL AND node_id IS NOT NULL AND path_id IS NOT NULL AND occurrence IS NOT NULL AND occurrence >= 1))
-    );
-    CREATE TABLE journey_respondents (
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      respondent_id TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed', 'unreached')),
-      current_node_id TEXT,
-      current_turn_id TEXT,
-      current_context_id TEXT,
-      revision INTEGER NOT NULL CHECK (revision >= 0),
-      events_json TEXT NOT NULL,
-      route_json TEXT NOT NULL,
-      outcome TEXT,
-      PRIMARY KEY (run_id, respondent_id),
-      CHECK ((status = 'active' AND current_node_id IS NOT NULL AND current_turn_id IS NOT NULL AND current_context_id IS NOT NULL) OR
-             (status <> 'active' AND current_node_id IS NULL AND current_turn_id IS NULL AND current_context_id IS NULL))
-    );
-    CREATE TABLE attempts (
-      attempt_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-      attempt_id TEXT NOT NULL UNIQUE,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      group_id TEXT NOT NULL,
-      evaluation_id TEXT NOT NULL,
-      packet_fingerprint TEXT NOT NULL,
-      owner_token TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('reserved', 'answered', 'failed', 'uncertain')),
-      started_ms INTEGER NOT NULL,
-      settled_ms INTEGER,
-      result_json TEXT,
-      execution_json TEXT,
-      failure_code TEXT,
-      failure_message TEXT,
-      failure_scope TEXT CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run')),
-      FOREIGN KEY (run_id, evaluation_id) REFERENCES evaluations(run_id, evaluation_id) ON DELETE CASCADE,
-      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE
-    );
-    CREATE TABLE question_groups (
-      group_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      ordinal INTEGER NOT NULL,
-      context_id TEXT NOT NULL,
-      respondent_id TEXT NOT NULL,
-      state_json TEXT NOT NULL,
-      question_ids_json TEXT NOT NULL,
-      UNIQUE (run_id, ordinal),
-      UNIQUE (run_id, group_id)
-    );
-    CREATE TABLE attempt_evaluations (
-      attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
-      evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
-      failure_json TEXT,
-      PRIMARY KEY (attempt_id, evaluation_id)
-    );
-    CREATE TABLE evaluation_answer_attempts (
-      evaluation_id TEXT PRIMARY KEY REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
-      attempt_id TEXT NOT NULL,
-      FOREIGN KEY (attempt_id, evaluation_id) REFERENCES attempt_evaluations(attempt_id, evaluation_id) ON DELETE CASCADE
-    );
-    CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
-    CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
-    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL);
-    INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (${SCHEMA_VERSION}, 'baseline-v${SCHEMA_VERSION}', '${new Date().toISOString()}');
-    PRAGMA user_version = ${SCHEMA_VERSION};
-  `);
-    database.exec('COMMIT');
-  } catch (error) {
-    try { database.exec('ROLLBACK'); } catch { /* Preserve the initialization error. */ }
-    throw error;
-  }
-}
-
-export type StoreCompatibility =
-  | { status: 'current'; schemaVersion: 8 }
-  | { status: 'migration_available'; schemaVersion: number; targetSchemaVersion: 8 }
-  | { status: 'unsupported'; schemaVersion: number | null; targetSchemaVersion: 8 }
-  | { status: 'uninitialized'; schemaVersion: 0; targetSchemaVersion: 8 }
-  | { status: 'unreadable'; schemaVersion: null; targetSchemaVersion: 8 };
-
-export function inspectRunStoreCompatibility(dataRoot: string): StoreCompatibility {
-  if (!path.isAbsolute(dataRoot)) return { status: 'unreadable', schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
-  const databasePath = path.join(dataRoot, 'runs.sqlite');
-  if (!existsSync(databasePath)) return { status: 'uninitialized', schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
-  let database: DatabaseSync | undefined;
-  try {
-    database = new DatabaseSync(databasePath, { readOnly: true, timeout: 5_000 });
-    const versionRow = database.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
-    const version = asNumber(versionRow?.user_version, 'schema version');
-    const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() as DatabaseRow | undefined;
-    const tableCount = asNumber(existing?.count, 'table count');
-    if (version === SCHEMA_VERSION) {
-      checkDatabaseIntegrity(database);
-      validateSchemaShape(database);
-      return { status: 'current', schemaVersion: SCHEMA_VERSION };
-    }
-    if (version === 0 && tableCount === 0) return { status: 'uninitialized', schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
-    if (version >= 7 && version < SCHEMA_VERSION && hasMigrationPath(version)) return { status: 'migration_available', schemaVersion: version, targetSchemaVersion: SCHEMA_VERSION };
-    return { status: 'unsupported', schemaVersion: version, targetSchemaVersion: SCHEMA_VERSION };
-  } catch {
-    return { status: 'unreadable', schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
-  } finally { database?.close(); }
-}
-
-export function runStoreBackupAvailable(dataRoot: string): boolean {
-  const backupRoot = path.join(dataRoot, 'backups');
-  if (!existsSync(backupRoot)) return false;
-  try { return readdirSync(backupRoot).some((name) => name.startsWith('runs-schema-') && name.endsWith('.sqlite')); }
-  catch { return false; }
-}
-
-export function resetRunStore(dataRoot: string): { reset: true; backupRetained: true; preservation: 'verified-sqlite-backup'; schemaVersion: 8 } | { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: 8 } {
-  if (!path.isAbsolute(dataRoot)) throw new RunStoreError('invalid_data_root', 'Sheg data directory must be an absolute path.');
-  const databasePath = path.join(dataRoot, 'runs.sqlite');
-  let inspectionDatabase: DatabaseSync | undefined;
-  let version: number;
-  try {
-    inspectionDatabase = new DatabaseSync(databasePath, { readOnly: true, timeout: 5_000 });
-    const versionRow = inspectionDatabase.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
-    version = asNumber(versionRow?.user_version, 'schema version');
-    checkDatabaseIntegrity(inspectionDatabase, false);
-  } catch {
-    inspectionDatabase?.close();
-    return resetUnreadableRunStore(dataRoot, databasePath);
-  }
-  inspectionDatabase.close();
-  const database = new DatabaseSync(databasePath, { timeout: 5_000 });
-  try {
-    verifiedBackup(database, dataRoot, version, version, 'before-reset', false);
-  } catch (error) {
-    database.close();
-    if (error instanceof RunStoreError) throw error;
-    throw new RunStoreError('recovery_backup_failed', 'Sheg could not verify a recoverable datastore backup; the original files were left untouched.', { cause: error });
-  }
-  database.close();
-
-  const recoveryRoot = path.join(dataRoot, 'recovery', randomUUID());
-  mkdirSync(recoveryRoot, { recursive: true });
-  const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
-  const moved: Array<{ original: string; archived: string }> = [];
-  try {
-    for (const original of files) {
-      if (!existsSync(original)) continue;
-      const archived = path.join(recoveryRoot, path.basename(original));
-      renameSync(original, archived);
-      moved.push({ original, archived });
-    }
-    const freshStore = openRunStore(dataRoot);
-    freshStore.close();
-    return { reset: true, backupRetained: true, preservation: 'verified-sqlite-backup', schemaVersion: SCHEMA_VERSION };
-  } catch (error) {
-    for (const original of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
-      try { unlinkSync(original); } catch { /* Preserve the reset error. */ }
-    }
-    for (const item of moved.toReversed()) {
-      try { renameSync(item.archived, item.original); } catch { /* The verified backup remains available. */ }
-    }
-    if (error instanceof RunStoreError) throw error;
-    throw new RunStoreError('recovery_reset_failed', 'Sheg could not complete the explicit datastore reset; the original database and verified backup were preserved.', { cause: error });
-  }
-}
-
-function resetUnreadableRunStore(dataRoot: string, databasePath: string): { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: 8 } {
-  if (!existsSync(databasePath)) throw new RunStoreError('recovery_backup_failed', 'Sheg could not find the original datastore files to preserve; no reset was performed.');
-  const recoveryRoot = path.join(dataRoot, 'recovery', randomUUID());
-  mkdirSync(recoveryRoot, { recursive: true });
-  const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
-  const moved: Array<{ original: string; archived: string; size: number }> = [];
-  try {
-    for (const original of files) {
-      if (!existsSync(original)) continue;
-      const size = statSync(original).size;
-      const archived = path.join(recoveryRoot, path.basename(original));
-      renameSync(original, archived);
-      if (statSync(archived).size !== size) throw new Error('Quarantined datastore file size changed.');
-      moved.push({ original, archived, size });
-    }
-    const freshStore = openRunStore(dataRoot);
-    freshStore.close();
-    return { reset: true, backupRetained: false, preservation: 'quarantined-original-files', schemaVersion: SCHEMA_VERSION };
-  } catch (error) {
-    for (const original of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
-      try { unlinkSync(original); } catch { /* Preserve the reset error. */ }
-    }
-    for (const item of moved.toReversed()) {
-      try { renameSync(item.archived, item.original); } catch { /* The original remains in recovery when restoration fails. */ }
-    }
-    throw new RunStoreError('recovery_reset_failed', 'Sheg could not complete the explicit reset; the original database files were preserved.', { cause: error });
-  }
-}
 
 function validatePrepared(prepared: PreparedRun): PreparedRun {
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
@@ -839,9 +248,7 @@ function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJourneyR
 export function openRunStore(dataRoot: string, options: { now?: () => number } = {}): RunStore {
   if (!path.isAbsolute(dataRoot)) throw new RunStoreError('invalid_data_root', 'Sheg data directory must be an absolute path.');
   mkdirSync(dataRoot, { recursive: true });
-  const database = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { timeout: 5_000, enableForeignKeyConstraints: true });
-  try { initialize(database, dataRoot); }
-  catch (error) { database.close(); throw error; }
+  const database = openInitializedDatabase(path.join(dataRoot, 'runs.sqlite'), dataRoot);
   return new SQLiteRunStore(database, path.join(dataRoot, 'runs.sqlite'), options.now ?? Date.now);
 }
 
@@ -1226,211 +633,15 @@ class SQLiteRunStore implements RunStore {
   }
 
   queryEvidence(input: RunEvidenceQuery): RunEvidencePage {
-    this.ensureOpen();
-    const parsed = runEvidenceQuerySchema.safeParse(input);
-    if (!parsed.success) throw new RunStoreError('invalid_query', parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
-    const query = parsed.data;
-    const limit = pageSize(query.limit);
-    const criteriaFingerprint = hashCanonical(query.criteria);
-    return this.transaction(() => {
-      const nowMs = this.now();
-      this.reconcileInside(query.sourceRunId, nowMs);
-      const run = this.database.prepare('SELECT * FROM runs WHERE run_id = ?').get(query.sourceRunId) as DatabaseRow | undefined;
-      if (!run) throw this.notFound();
-      const sourceStatus = asText(run.status, 'run status') as RunStatus;
-      const usedCalls = asNumber(run.used_calls, 'used calls');
-      const reservedCalls = asNumber(run.reserved_calls, 'reserved calls');
-      const runRecord = parseJson<{ request?: unknown; compilerFingerprint?: unknown; lineage?: unknown }>(run.request_json, 'run request');
-      const parsedRequest = runRequestSchema.safeParse(runRecord.request);
-      if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== 'string') {
-        throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
-      }
-      const compilerFingerprint = runRecord.compilerFingerprint;
-      let lineage: FollowOnLineage | undefined;
-      if (parsedRequest.data.kind === 'follow-on') {
-        const parsedLineage = followOnLineageSchema.safeParse(runRecord.lineage);
-        if (!parsedLineage.success) throw new RunStoreError('data_integrity_error', 'Stored follow-on material lineage is invalid.');
-        lineage = parsedLineage.data;
-      }
-
-      let cursor: EvidenceCursorPayload | undefined;
-      if (query.cursor) {
-        cursor = decodeCursor<EvidenceCursorPayload>(query.cursor, 'evidence');
-        if (cursor.kind !== 'evidence' || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint ||
-            !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) ||
-            cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal ||
-            !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 ||
-            !['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'].includes(cursor.sourceStatus) ||
-            !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
-          throw new RunStoreError('invalid_cursor', 'The evidence cursor does not match this source run and criteria.');
-        }
-      }
-
-      const maximumOrdinal = asNumber((this.database.prepare('SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?').get(query.sourceRunId) as DatabaseRow).maximum, 'maximum evaluation ordinal');
-      if (cursor && (cursor.maxOrdinal !== maximumOrdinal || cursor.sourceStatus !== sourceStatus || cursor.usedCalls !== usedCalls || cursor.reservedCalls !== reservedCalls)) {
-        throw new RunStoreError('stale_cursor', 'The source run changed while paging this query. Start a fresh query to see its current evidence.');
-      }
-      const currentLifecycle = this.statusInside(query.sourceRunId).lifecycle;
-      if (cursor && hashCanonical(cursor.lifecycle) !== hashCanonical(currentLifecycle)) {
-        throw new RunStoreError('stale_cursor', 'The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.');
-      }
-      const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
-      const where: string[] = ['e.run_id = ?', 'e.ordinal <= ?'];
-      const parameters: Array<string | number> = [query.sourceRunId, maxOrdinal];
-      const criteria = query.criteria;
-      if (criteria.respondentId !== undefined) { where.push('e.respondent_id = ?'); parameters.push(criteria.respondentId); }
-      if (criteria.status !== undefined) { where.push('e.status = ?'); parameters.push(criteria.status); }
-      if (criteria.questionId !== undefined) { where.push('e.question_id = ?'); parameters.push(criteria.questionId); }
-      if (criteria.materialId !== undefined) {
-        where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-        parameters.push(criteria.materialId);
-      }
-      if (criteria.answer?.type === 'choice') {
-        where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
-        parameters.push(criteria.answer.choiceId);
-      } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
-        const field = criteria.answer.type === 'score' ? 'score' : 'noul';
-        const valueExpression = criteria.answer.type === 'score' ? "json_extract(e.result_json, '$.score')" : "json_extract(e.result_json, '$.noul')";
-        where.push(`json_extract(e.result_json, '$.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>='} ?`);
-        parameters.push(criteria.answer.value);
-      }
-      if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
-      const whereSql = where.join(' AND ');
-      const join = 'LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id';
-      const snapshotCount = asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters) as DatabaseRow).count, 'query match count');
-      const evaluationCoverage = {
-        totalEvaluations: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'evaluation denominator'),
-        completedEvaluations: asNumber((this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'completed evaluation denominator'),
-        failedEvaluations: asNumber((this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'failed evaluation denominator'),
-      };
-      let respondentCoverage: RunEvidencePage['coverage']['respondents'];
-      {
-        const total = parsedRequest.data.kind === 'journey' ? parsedRequest.data.respondents.length
-          : parsedRequest.data.kind === 'poll' ? parsedRequest.data.respondents.length
-            : asNumber((this.database.prepare('SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'respondent denominator');
-        const statusCounts = parsedRequest.data.kind === 'journey'
-          ? this.database.prepare('SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status').all(query.sourceRunId) as DatabaseRow[]
-          : parsedRequest.data.kind === 'follow-on' || parsedRequest.data.kind === 'poll'
-            ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
-                SELECT respondent_id, CASE
-                  WHEN SUM(status = 'pending') > 0 THEN 'active'
-                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
-                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
-                  ELSE 'answered' END AS status
-                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
-              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) as DatabaseRow[]
-            : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal) as DatabaseRow[];
-        const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, 'respondent status'), asNumber(row.count, 'respondent count')]));
-        const completed = countByStatus.get(parsedRequest.data.kind === 'journey' ? 'completed' : 'answered') ?? 0;
-        const failed = countByStatus.get('failed') ?? 0;
-        const unreached = countByStatus.get('unreached') ?? 0;
-        respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
-      }
-      const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-      const lifecycle = currentLifecycle;
-      const matchedCoverage = (() => {
-        const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
-          (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
-            WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
-          FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters) as DatabaseRow[];
-        const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
-        const respondents = new Set<string>();
-        const selectedMaterialIds = new Set<string>();
-        const selectedMaterialRespondents = new Set<string>();
-        let selectedMaterialEvaluations = 0;
-        for (const row of matchedRows) {
-          const status = asText(row.status, 'matched evaluation status') as keyof typeof counts;
-          counts.total += 1;
-          counts[status] += 1;
-          const respondentId = asText(row.respondent_id, 'matched respondent ID');
-          respondents.add(respondentId);
-          if (status !== 'answered' || row.result_json === null) continue;
-          const result = resultFromStorage(parseJson(row.result_json, 'matched result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'matched execution'));
-          if (result.type !== 'choice') continue;
-          const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'matched packet'));
-          if (packet.question.type !== 'choice') continue;
-          const materialId = packet.question.materialOptions?.[result.choice];
-          if (materialId) {
-            selectedMaterialEvaluations += 1;
-            selectedMaterialIds.add(materialId);
-            selectedMaterialRespondents.add(respondentId);
-          }
-        }
-        return { evaluations: counts, representedRespondents: respondents.size,
-          selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size } };
-      })();
-      const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
-        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
-          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
-        FROM evaluations AS e ${join}
-        WHERE ${whereSql} ${cursor ? 'AND e.ordinal > ?' : ''} ORDER BY e.ordinal LIMIT ?`)
-        .all(...parameters, ...(cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1])) as DatabaseRow[];
-      const hasMore = rows.length > limit;
-      const pageRows = rows.slice(0, limit);
-      const endpoint = parsedRequest.data.provider.kind === 'jev'
-        ? parsedRequest.data.provider.endpoint
-        : parsedRequest.data.provider.baseUrl;
-      const model = parsedRequest.data.provider.kind === 'jev'
-        ? parsedRequest.data.provider.model
-        : parsedRequest.data.provider.checkpoint;
-      const items: RunEvidencePage['items'] = pageRows.map((row) => {
-        const contextId = asText(row.context_id, 'context ID');
-        const respondentId = asText(row.respondent_id, 'respondent ID');
-        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'evidence packet'));
-        const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution'));
-        const failure = storedEvaluationFailure(row);
-        let selectedMaterial: RunEvidencePage['items'][number]['selectedMaterial'];
-        if (result?.type === 'choice') {
-          const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
-          if (materialId) {
-            const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-            if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            selectedMaterial = { materialId, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
-              textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') };
-          }
-        }
-        return {
-          sourceRunId: query.sourceRunId,
-          evaluationId: asText(row.evaluation_id, 'evaluation ID'),
-          contextId,
-          respondentId,
-          questionId: asText(row.question_id, 'question ID'),
-          status: asText(row.status, 'evaluation status') as RunEvidencePage['items'][number]['status'],
-          ...(result === undefined ? {} : { result }),
-          ...(failure === undefined ? {} : { failure }),
-          ...(selectedMaterial === undefined ? {} : { selectedMaterial }),
-          ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
-          ...(row.turn_id === null ? {} : { turnId: asText(row.turn_id, 'turn ID') }),
-          ...(row.node_id === null ? {} : { nodeId: asText(row.node_id, 'node ID') }),
-          ...(row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, 'turn occurrence') }),
-          ...(row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, 'route outcome') }),
-          provenance: {
-            provider: parsedRequest.data.provider.kind,
-            model,
-            endpoint,
-            compilerFingerprint,
-            contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint }),
-          },
-        };
-      });
-      const last = pageRows.at(-1);
-      const sourceComplete = sourceStatus === 'completed';
-      return {
-        items,
-        totalMatches: snapshotCount,
-        sourceRunId: query.sourceRunId,
-        sourceStatus,
-        sourceComplete,
-        lifecycle,
-        coverage,
-        matchedCoverage,
-        ...(hasMore && last ? { nextCursor: encodeCursor({
-          kind: 'evidence', sourceRunId: query.sourceRunId, criteriaFingerprint, maxOrdinal,
-          lastOrdinal: asNumber(last.ordinal, 'evaluation ordinal'), sourceStatus,
-          lifecycle, usedCalls, reservedCalls,
-        } satisfies EvidenceCursorPayload) } : {}),
-      };
-    });
+    return queryEvidencePage({
+      database: this.database,
+      now: this.now,
+      ensureOpen: () => this.ensureOpen(),
+      transaction: (operation) => this.transaction(operation),
+      reconcileInside: (runId, nowMs) => this.reconcileInside(runId, nowMs),
+      statusInside: (runId) => this.statusInside(runId),
+      notFound: () => this.notFound(),
+    }, input);
   }
 
   getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail {
@@ -2198,4 +1409,11 @@ class SQLiteRunStore implements RunStore {
         .run(uncertain, uncertain, runId, nowMs, uncertain);
     }
   }
+}
+
+export function resetRunStore(dataRoot: string): ReturnType<typeof import('./sqlite/recovery.js').resetRunStore> {
+  return resetRunStoreInternal(dataRoot, () => {
+    const store = openRunStore(dataRoot);
+    store.close();
+  });
 }

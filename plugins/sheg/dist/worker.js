@@ -846,10 +846,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path5) {
+  if (!path5)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path5.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1189,11 +1189,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path5, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path5);
     return iss;
   });
 }
@@ -1643,16 +1643,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path5 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1691,17 +1691,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path5 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1740,8 +1740,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path4) {
+  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path5) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18843,13 +18843,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path4 = ref.slice(1).split("/").filter(Boolean);
-  if (path4.length === 0) {
+  const path5 = ref.slice(1).split("/").filter(Boolean);
+  if (path5.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path4[0] === defsKey) {
-    const key = path4[1] === void 0 ? void 0 : decodeJSONPointerSegment(path4[1]);
+  if (path5[0] === defsKey) {
+    const key = path5[1] === void 0 ? void 0 : decodeJSONPointerSegment(path5[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -20281,10 +20281,9 @@ function failureDetails(error62, scope) {
 }
 
 // src/infrastructure/run-store.ts
-import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { createHash as createHash4, randomUUID as randomUUID3 } from "node:crypto";
+import { mkdirSync as mkdirSync2, statSync } from "node:fs";
+import path2 from "node:path";
 
 // src/domain/decision/validate.ts
 var DecisionError = class extends Error {
@@ -21118,11 +21117,67 @@ var runEvidencePageSchema = external_exports.object({
 }).strict();
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
-// src/infrastructure/run-store.ts
-var SCHEMA_VERSION = 8;
-var LEASE_MS = 3e4;
+// src/application/run-store.ts
+var RunStoreError = class extends Error {
+  constructor(code, message, options2) {
+    super(message, options2);
+    this.code = code;
+    this.name = "RunStoreError";
+  }
+  code;
+};
+
+// src/infrastructure/sqlite/rows.ts
+function asText(value, label) {
+  if (typeof value !== "string") throw new RunStoreError("data_integrity_error", `Stored ${label} is not text.`);
+  return value;
+}
+function asNullableText(value, label) {
+  if (value === null) return null;
+  return asText(value, label);
+}
+function asNumber(value, label) {
+  if (typeof value !== "number" && typeof value !== "bigint") throw new RunStoreError("data_integrity_error", `Stored ${label} is not numeric.`);
+  const number4 = Number(value);
+  if (!Number.isSafeInteger(number4)) throw new RunStoreError("data_integrity_error", `Stored ${label} is outside the safe integer range.`);
+  return number4;
+}
+function parseJson(value, label) {
+  try {
+    return JSON.parse(asText(value, label));
+  } catch (error62) {
+    if (error62 instanceof RunStoreError) throw error62;
+    throw new RunStoreError("data_integrity_error", `Stored ${label} is not valid JSON.`, { cause: error62 });
+  }
+}
+
+// src/infrastructure/sqlite/cursors.ts
 var DEFAULT_PAGE_SIZE = 50;
 var MAX_PAGE_SIZE = 200;
+function encodeCursor(value) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+function decodeCursor(value, label) {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new TypeError("Cursor must be an object.");
+    return parsed;
+  } catch (error62) {
+    throw new RunStoreError("invalid_cursor", `The ${label} cursor is invalid.`, { cause: error62 });
+  }
+}
+function pageSize(limit) {
+  const size = limit ?? DEFAULT_PAGE_SIZE;
+  if (!Number.isInteger(size) || size < 1 || size > MAX_PAGE_SIZE) {
+    throw new RunStoreError("invalid_page_size", `Page size must be an integer from 1 to ${MAX_PAGE_SIZE}.`);
+  }
+  return size;
+}
+
+// src/infrastructure/sqlite/evidence-query.ts
+import { createHash as createHash3 } from "node:crypto";
+
+// src/infrastructure/sqlite/evidence-records.ts
 function mergeMaterialCatalog(...collections) {
   const merged = /* @__PURE__ */ new Map();
   for (const collection of collections) for (const item of collection) {
@@ -21143,71 +21198,12 @@ function encounteredMaterialsFromState(state) {
   if (!Array.isArray(state.encounteredItems)) return [];
   return state.encounteredItems.flatMap((item) => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "text" in item && typeof item.text === "string" ? [{ id: item.id, text: item.text }] : []);
 }
-var RunStoreError = class extends Error {
-  constructor(code, message, options2) {
-    super(message, options2);
-    this.code = code;
-    this.name = "RunStoreError";
-  }
-  code;
-};
-function sameDecisionValue(left, right) {
-  if (left.type !== right.type) return false;
-  if (left.type === "choice" && right.type === "choice") {
-    return left.choice === right.choice && hashCanonical(left.probabilities ?? null) === hashCanonical(right.probabilities ?? null) && left.confidence === right.confidence;
-  }
-  if (left.type === "score" && right.type === "score") {
-    return left.score === right.score && hashCanonical(left.probabilities) === hashCanonical(right.probabilities) && hashCanonical(left.legend) === hashCanonical(right.legend) && left.confidence === right.confidence;
-  }
-  return left.type === "noul" && right.type === "noul" && left.noul === right.noul;
-}
-function isJourneyAskNode(journey, nodeId, questionId) {
-  const node2 = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
-  return node2?.kind === "ask" && node2.taskId === questionId;
-}
-function journeyRouteTarget(journey, nodeId, response) {
-  const graph = journeyTopology(journey);
-  const node2 = graph.nodes.find((candidate) => candidate.id === nodeId);
-  if (node2?.kind !== "ask") return void 0;
-  const task = journey.tasks.find((candidate) => candidate.id === node2.taskId);
-  if (!task) return void 0;
-  const edge = graph.transitions.find((candidate) => {
-    if (candidate.fromNodeId !== nodeId) return false;
-    if (response.type === "choice") return candidate.optionId === response.choice;
-    const interval = candidate.when;
-    const value = response.type === "score" ? response.score : response.noul;
-    return interval?.type === response.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
-  });
-  return edge?.toNodeId;
-}
-function asText(value, label) {
-  if (typeof value !== "string") throw new RunStoreError("data_integrity_error", `Stored ${label} is not text.`);
-  return value;
-}
-function asNullableText(value, label) {
-  if (value === null) return null;
-  return asText(value, label);
-}
-function asNumber(value, label) {
-  if (typeof value !== "number" && typeof value !== "bigint") throw new RunStoreError("data_integrity_error", `Stored ${label} is not numeric.`);
-  const number4 = Number(value);
-  if (!Number.isSafeInteger(number4)) throw new RunStoreError("data_integrity_error", `Stored ${label} is outside the safe integer range.`);
-  return number4;
-}
 function resultFromStorage(value, execution) {
   const complete = decisionResultSchema.safeParse(value);
   if (complete.success) return complete.data;
   const typed = decisionValueSchema.parse(value);
   const evidence = providerExecutionEvidenceSchema.parse(execution);
   return decisionResultSchema.parse({ ...typed, ...evidence });
-}
-function parseJson(value, label) {
-  try {
-    return JSON.parse(asText(value, label));
-  } catch (error62) {
-    if (error62 instanceof RunStoreError) throw error62;
-    throw new RunStoreError("data_integrity_error", `Stored ${label} is not valid JSON.`, { cause: error62 });
-  }
 }
 function failureEvidenceFromStorage(value) {
   if (value === null || value === void 0) return {};
@@ -21238,30 +21234,230 @@ function evaluationFailureFromJson(value) {
   const detail = parsed.detail === void 0 ? void 0 : decisionFailureDetailSchema.parse(parsed.detail);
   return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {}, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
 }
-function encodeCursor(value) {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
+
+// src/infrastructure/sqlite/evidence-query.ts
+function queryEvidencePage(context, input2) {
+  context.ensureOpen();
+  const parsed = runEvidenceQuerySchema.safeParse(input2);
+  if (!parsed.success) throw new RunStoreError("invalid_query", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
+  const query = parsed.data;
+  const limit = pageSize(query.limit);
+  const criteriaFingerprint = hashCanonical(query.criteria);
+  return context.transaction(() => {
+    const nowMs = context.now();
+    context.reconcileInside(query.sourceRunId, nowMs);
+    const run = context.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(query.sourceRunId);
+    if (!run) throw context.notFound();
+    const sourceStatus = asText(run.status, "run status");
+    const usedCalls = asNumber(run.used_calls, "used calls");
+    const reservedCalls = asNumber(run.reserved_calls, "reserved calls");
+    const runRecord = parseJson(run.request_json, "run request");
+    const parsedRequest = runRequestSchema.safeParse(runRecord.request);
+    if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== "string") {
+      throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+    }
+    const compilerFingerprint = runRecord.compilerFingerprint;
+    let lineage;
+    if (parsedRequest.data.kind === "follow-on") {
+      const parsedLineage = followOnLineageSchema.safeParse(runRecord.lineage);
+      if (!parsedLineage.success) throw new RunStoreError("data_integrity_error", "Stored follow-on material lineage is invalid.");
+      lineage = parsedLineage.data;
+    }
+    let cursor;
+    if (query.cursor) {
+      cursor = decodeCursor(query.cursor, "evidence");
+      if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
+        throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
+      }
+    }
+    const maximumOrdinal = asNumber(context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(query.sourceRunId).maximum, "maximum evaluation ordinal");
+    if (cursor && (cursor.maxOrdinal !== maximumOrdinal || cursor.sourceStatus !== sourceStatus || cursor.usedCalls !== usedCalls || cursor.reservedCalls !== reservedCalls)) {
+      throw new RunStoreError("stale_cursor", "The source run changed while paging this query. Start a fresh query to see its current evidence.");
+    }
+    const currentLifecycle = context.statusInside(query.sourceRunId).lifecycle;
+    if (cursor && hashCanonical(cursor.lifecycle) !== hashCanonical(currentLifecycle)) {
+      throw new RunStoreError("stale_cursor", "The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.");
+    }
+    const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
+    const where = ["e.run_id = ?", "e.ordinal <= ?"];
+    const parameters = [query.sourceRunId, maxOrdinal];
+    const criteria = query.criteria;
+    if (criteria.respondentId !== void 0) {
+      where.push("e.respondent_id = ?");
+      parameters.push(criteria.respondentId);
+    }
+    if (criteria.status !== void 0) {
+      where.push("e.status = ?");
+      parameters.push(criteria.status);
+    }
+    if (criteria.questionId !== void 0) {
+      where.push("e.question_id = ?");
+      parameters.push(criteria.questionId);
+    }
+    if (criteria.materialId !== void 0) {
+      where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
+      parameters.push(criteria.materialId);
+    }
+    if (criteria.answer?.type === "choice") {
+      where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
+      parameters.push(criteria.answer.choiceId);
+    } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
+      const field = criteria.answer.type === "score" ? "score" : "noul";
+      const valueExpression = criteria.answer.type === "score" ? "json_extract(e.result_json, '$.score')" : "json_extract(e.result_json, '$.noul')";
+      where.push(`json_extract(e.result_json, '$.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">="} ?`);
+      parameters.push(criteria.answer.value);
+    }
+    if (criteria.outcome !== void 0) {
+      where.push("jr.outcome = ?");
+      parameters.push(criteria.outcome);
+    }
+    const whereSql = where.join(" AND ");
+    const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
+    const snapshotCount = asNumber(context.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
+    const evaluationCoverage = {
+      totalEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
+      completedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
+      failedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal).count, "failed evaluation denominator")
+    };
+    let respondentCoverage;
+    {
+      const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(context.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
+      const statusCounts = parsedRequest.data.kind === "journey" ? context.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+                SELECT respondent_id, CASE
+                  WHEN SUM(status = 'pending') > 0 THEN 'active'
+                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
+                  ELSE 'answered' END AS status
+                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
+              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) : context.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
+      const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, "respondent status"), asNumber(row.count, "respondent count")]));
+      const completed = countByStatus.get(parsedRequest.data.kind === "journey" ? "completed" : "answered") ?? 0;
+      const failed = countByStatus.get("failed") ?? 0;
+      const unreached = countByStatus.get("unreached") ?? 0;
+      respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
+    }
+    const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
+    const lifecycle = currentLifecycle;
+    const matchedCoverage = (() => {
+      const matchedRows = context.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
+          (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+            WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+          FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters);
+      const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
+      const respondents = /* @__PURE__ */ new Set();
+      const selectedMaterialIds = /* @__PURE__ */ new Set();
+      const selectedMaterialRespondents = /* @__PURE__ */ new Set();
+      let selectedMaterialEvaluations = 0;
+      for (const row of matchedRows) {
+        const status = asText(row.status, "matched evaluation status");
+        counts.total += 1;
+        counts[status] += 1;
+        const respondentId = asText(row.respondent_id, "matched respondent ID");
+        respondents.add(respondentId);
+        if (status !== "answered" || row.result_json === null) continue;
+        const result = resultFromStorage(parseJson(row.result_json, "matched result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "matched execution"));
+        if (result.type !== "choice") continue;
+        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "matched packet"));
+        if (packet.question.type !== "choice") continue;
+        const materialId = packet.question.materialOptions?.[result.choice];
+        if (materialId) {
+          selectedMaterialEvaluations += 1;
+          selectedMaterialIds.add(materialId);
+          selectedMaterialRespondents.add(respondentId);
+        }
+      }
+      return {
+        evaluations: counts,
+        representedRespondents: respondents.size,
+        selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size }
+      };
+    })();
+    const rows = context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
+        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
+          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+        FROM evaluations AS e ${join}
+        WHERE ${whereSql} ${cursor ? "AND e.ordinal > ?" : ""} ORDER BY e.ordinal LIMIT ?`).all(...parameters, ...cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1]);
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.baseUrl;
+    const model = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
+    const items = pageRows.map((row) => {
+      const contextId = asText(row.context_id, "context ID");
+      const respondentId = asText(row.respondent_id, "respondent ID");
+      const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "evidence packet"));
+      const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
+      const failure2 = storedEvaluationFailure(row);
+      let selectedMaterial;
+      if (result?.type === "choice") {
+        const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
+        if (materialId) {
+          const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
+          if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+          selectedMaterial = {
+            materialId,
+            text: candidate.text,
+            sourceId: candidate.sourceId,
+            sourceSha256: candidate.sourceSha256,
+            textSha256: createHash3("sha256").update(candidate.text, "utf8").digest("hex")
+          };
+        }
+      }
+      return {
+        sourceRunId: query.sourceRunId,
+        evaluationId: asText(row.evaluation_id, "evaluation ID"),
+        contextId,
+        respondentId,
+        questionId: asText(row.question_id, "question ID"),
+        status: asText(row.status, "evaluation status"),
+        ...result === void 0 ? {} : { result },
+        ...failure2 === void 0 ? {} : { failure: failure2 },
+        ...selectedMaterial === void 0 ? {} : { selectedMaterial },
+        ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
+        ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
+        ...row.node_id === null ? {} : { nodeId: asText(row.node_id, "node ID") },
+        ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
+        ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
+        provenance: {
+          provider: parsedRequest.data.provider.kind,
+          model,
+          endpoint,
+          compilerFingerprint,
+          contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint })
+        }
+      };
+    });
+    const last = pageRows.at(-1);
+    const sourceComplete = sourceStatus === "completed";
+    return {
+      items,
+      totalMatches: snapshotCount,
+      sourceRunId: query.sourceRunId,
+      sourceStatus,
+      sourceComplete,
+      lifecycle,
+      coverage,
+      matchedCoverage,
+      ...hasMore && last ? { nextCursor: encodeCursor({
+        kind: "evidence",
+        sourceRunId: query.sourceRunId,
+        criteriaFingerprint,
+        maxOrdinal,
+        lastOrdinal: asNumber(last.ordinal, "evaluation ordinal"),
+        sourceStatus,
+        lifecycle,
+        usedCalls,
+        reservedCalls
+      }) } : {}
+    };
+  });
 }
-function decodeCursor(value, label) {
-  try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new TypeError("Cursor must be an object.");
-    return parsed;
-  } catch (error62) {
-    throw new RunStoreError("invalid_cursor", `The ${label} cursor is invalid.`, { cause: error62 });
-  }
-}
-function pageSize(limit) {
-  const size = limit ?? DEFAULT_PAGE_SIZE;
-  if (!Number.isInteger(size) || size < 1 || size > MAX_PAGE_SIZE) {
-    throw new RunStoreError("invalid_page_size", `Page size must be an integer from 1 to ${MAX_PAGE_SIZE}.`);
-  }
-  return size;
-}
-function validateRunIds(runIds) {
-  if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
-    throw new RunStoreError("invalid_run_selection", "Select between 1 and 200 unique run IDs.");
-  }
-}
+
+// src/infrastructure/sqlite/schema.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { mkdirSync, unlinkSync } from "node:fs";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+var SCHEMA_VERSION = 8;
 function isTransientSqliteLock(error62) {
   return typeof error62 === "object" && error62 !== null && "errcode" in error62 && (error62.errcode === 5 || error62.errcode === 6);
 }
@@ -21555,6 +21751,50 @@ function initialize(database, dataRoot) {
     throw error62;
   }
 }
+function openInitializedDatabase(databasePath, dataRoot) {
+  const database = new DatabaseSync(databasePath, { timeout: 5e3, enableForeignKeyConstraints: true });
+  try {
+    initialize(database, dataRoot);
+  } catch (error62) {
+    database.close();
+    throw error62;
+  }
+  return database;
+}
+
+// src/infrastructure/sqlite/recovery.ts
+import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
+
+// src/infrastructure/run-store.ts
+function sameDecisionValue(left, right) {
+  if (left.type !== right.type) return false;
+  if (left.type === "choice" && right.type === "choice") return left.choice === right.choice && hashCanonical(left.probabilities ?? null) === hashCanonical(right.probabilities ?? null) && left.confidence === right.confidence;
+  if (left.type === "score" && right.type === "score") return left.score === right.score && hashCanonical(left.probabilities) === hashCanonical(right.probabilities) && hashCanonical(left.legend) === hashCanonical(right.legend) && left.confidence === right.confidence;
+  return left.type === "noul" && right.type === "noul" && left.noul === right.noul;
+}
+function isJourneyAskNode(journey, nodeId, questionId) {
+  const node2 = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
+  return node2?.kind === "ask" && node2.taskId === questionId;
+}
+function journeyRouteTarget(journey, nodeId, response) {
+  const graph = journeyTopology(journey);
+  const node2 = graph.nodes.find((candidate) => candidate.id === nodeId);
+  if (node2?.kind !== "ask") return void 0;
+  const edge = graph.transitions.find((candidate) => {
+    if (candidate.fromNodeId !== nodeId) return false;
+    if (response.type === "choice") return candidate.optionId === response.choice;
+    const interval = candidate.when;
+    const value = response.type === "score" ? response.score : response.noul;
+    return interval?.type === response.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
+  });
+  return edge?.toNodeId;
+}
+var LEASE_MS = 3e4;
+function validateRunIds(runIds) {
+  if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
+    throw new RunStoreError("invalid_run_selection", "Select between 1 and 200 unique run IDs.");
+  }
+}
 function validatePrepared(prepared) {
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
@@ -21614,7 +21854,7 @@ function validatePrepared(prepared) {
         const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text }) => id === selected.materialId && text === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash3("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash4("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
         }
       }
@@ -21713,16 +21953,10 @@ function validatePreparedJourney(prepared) {
   return { ...prepared, request: parsedRequest.data };
 }
 function openRunStore(dataRoot, options2 = {}) {
-  if (!path.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
-  mkdirSync(dataRoot, { recursive: true });
-  const database = new DatabaseSync(path.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
-  try {
-    initialize(database, dataRoot);
-  } catch (error62) {
-    database.close();
-    throw error62;
-  }
-  return new SQLiteRunStore(database, path.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+  if (!path2.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  mkdirSync2(dataRoot, { recursive: true });
+  const database = openInitializedDatabase(path2.join(dataRoot, "runs.sqlite"), dataRoot);
+  return new SQLiteRunStore(database, path2.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 var SQLiteRunStore = class {
   constructor(database, databasePath, now) {
@@ -21769,7 +22003,7 @@ var SQLiteRunStore = class {
           if (!sourceEvaluation) throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
         }
       }
-      const runId2 = randomUUID2();
+      const runId2 = randomUUID3();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -21820,7 +22054,7 @@ var SQLiteRunStore = class {
         this.reconcileInside(runId3, this.now());
         return { created: false, run: this.statusInside(runId3) };
       }
-      const runId2 = randomUUID2();
+      const runId2 = randomUUID3();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -22156,7 +22390,7 @@ var SQLiteRunStore = class {
             const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
             const candidate = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems).find(({ id }) => id === materialId);
             if (!candidate?.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash3("sha256").update(candidate.text, "utf8").digest("hex") } };
+            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash4("sha256").update(candidate.text, "utf8").digest("hex") } };
           })() : {}
         };
       });
@@ -22170,219 +22404,15 @@ var SQLiteRunStore = class {
     });
   }
   queryEvidence(input2) {
-    this.ensureOpen();
-    const parsed = runEvidenceQuerySchema.safeParse(input2);
-    if (!parsed.success) throw new RunStoreError("invalid_query", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
-    const query = parsed.data;
-    const limit = pageSize(query.limit);
-    const criteriaFingerprint = hashCanonical(query.criteria);
-    return this.transaction(() => {
-      const nowMs = this.now();
-      this.reconcileInside(query.sourceRunId, nowMs);
-      const run = this.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(query.sourceRunId);
-      if (!run) throw this.notFound();
-      const sourceStatus = asText(run.status, "run status");
-      const usedCalls = asNumber(run.used_calls, "used calls");
-      const reservedCalls = asNumber(run.reserved_calls, "reserved calls");
-      const runRecord = parseJson(run.request_json, "run request");
-      const parsedRequest = runRequestSchema.safeParse(runRecord.request);
-      if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== "string") {
-        throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
-      }
-      const compilerFingerprint = runRecord.compilerFingerprint;
-      let lineage;
-      if (parsedRequest.data.kind === "follow-on") {
-        const parsedLineage = followOnLineageSchema.safeParse(runRecord.lineage);
-        if (!parsedLineage.success) throw new RunStoreError("data_integrity_error", "Stored follow-on material lineage is invalid.");
-        lineage = parsedLineage.data;
-      }
-      let cursor;
-      if (query.cursor) {
-        cursor = decodeCursor(query.cursor, "evidence");
-        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
-          throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
-        }
-      }
-      const maximumOrdinal = asNumber(this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(query.sourceRunId).maximum, "maximum evaluation ordinal");
-      if (cursor && (cursor.maxOrdinal !== maximumOrdinal || cursor.sourceStatus !== sourceStatus || cursor.usedCalls !== usedCalls || cursor.reservedCalls !== reservedCalls)) {
-        throw new RunStoreError("stale_cursor", "The source run changed while paging this query. Start a fresh query to see its current evidence.");
-      }
-      const currentLifecycle = this.statusInside(query.sourceRunId).lifecycle;
-      if (cursor && hashCanonical(cursor.lifecycle) !== hashCanonical(currentLifecycle)) {
-        throw new RunStoreError("stale_cursor", "The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.");
-      }
-      const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
-      const where = ["e.run_id = ?", "e.ordinal <= ?"];
-      const parameters = [query.sourceRunId, maxOrdinal];
-      const criteria = query.criteria;
-      if (criteria.respondentId !== void 0) {
-        where.push("e.respondent_id = ?");
-        parameters.push(criteria.respondentId);
-      }
-      if (criteria.status !== void 0) {
-        where.push("e.status = ?");
-        parameters.push(criteria.status);
-      }
-      if (criteria.questionId !== void 0) {
-        where.push("e.question_id = ?");
-        parameters.push(criteria.questionId);
-      }
-      if (criteria.materialId !== void 0) {
-        where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-        parameters.push(criteria.materialId);
-      }
-      if (criteria.answer?.type === "choice") {
-        where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
-        parameters.push(criteria.answer.choiceId);
-      } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
-        const field = criteria.answer.type === "score" ? "score" : "noul";
-        const valueExpression = criteria.answer.type === "score" ? "json_extract(e.result_json, '$.score')" : "json_extract(e.result_json, '$.noul')";
-        where.push(`json_extract(e.result_json, '$.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">="} ?`);
-        parameters.push(criteria.answer.value);
-      }
-      if (criteria.outcome !== void 0) {
-        where.push("jr.outcome = ?");
-        parameters.push(criteria.outcome);
-      }
-      const whereSql = where.join(" AND ");
-      const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
-      const snapshotCount = asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
-      const evaluationCoverage = {
-        totalEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
-        completedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
-        failedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal).count, "failed evaluation denominator")
-      };
-      let respondentCoverage;
-      {
-        const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
-        const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
-                SELECT respondent_id, CASE
-                  WHEN SUM(status = 'pending') > 0 THEN 'active'
-                  WHEN SUM(status = 'failed') > 0 THEN 'failed'
-                  WHEN SUM(status = 'unreached') > 0 THEN 'unreached'
-                  ELSE 'answered' END AS status
-                FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY respondent_id
-              ) GROUP BY status`).all(query.sourceRunId, maxOrdinal) : this.database.prepare("SELECT status, COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? GROUP BY status").all(query.sourceRunId, maxOrdinal);
-        const countByStatus = new Map(statusCounts.map((row) => [asText(row.status, "respondent status"), asNumber(row.count, "respondent count")]));
-        const completed = countByStatus.get(parsedRequest.data.kind === "journey" ? "completed" : "answered") ?? 0;
-        const failed = countByStatus.get("failed") ?? 0;
-        const unreached = countByStatus.get("unreached") ?? 0;
-        respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
-      }
-      const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-      const lifecycle = currentLifecycle;
-      const matchedCoverage = (() => {
-        const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
-          (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
-            WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
-          FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters);
-        const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
-        const respondents = /* @__PURE__ */ new Set();
-        const selectedMaterialIds = /* @__PURE__ */ new Set();
-        const selectedMaterialRespondents = /* @__PURE__ */ new Set();
-        let selectedMaterialEvaluations = 0;
-        for (const row of matchedRows) {
-          const status = asText(row.status, "matched evaluation status");
-          counts.total += 1;
-          counts[status] += 1;
-          const respondentId = asText(row.respondent_id, "matched respondent ID");
-          respondents.add(respondentId);
-          if (status !== "answered" || row.result_json === null) continue;
-          const result = resultFromStorage(parseJson(row.result_json, "matched result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "matched execution"));
-          if (result.type !== "choice") continue;
-          const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "matched packet"));
-          if (packet.question.type !== "choice") continue;
-          const materialId = packet.question.materialOptions?.[result.choice];
-          if (materialId) {
-            selectedMaterialEvaluations += 1;
-            selectedMaterialIds.add(materialId);
-            selectedMaterialRespondents.add(respondentId);
-          }
-        }
-        return {
-          evaluations: counts,
-          representedRespondents: respondents.size,
-          selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size }
-        };
-      })();
-      const rows = this.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
-        (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
-          WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
-        FROM evaluations AS e ${join}
-        WHERE ${whereSql} ${cursor ? "AND e.ordinal > ?" : ""} ORDER BY e.ordinal LIMIT ?`).all(...parameters, ...cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1]);
-      const hasMore = rows.length > limit;
-      const pageRows = rows.slice(0, limit);
-      const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.baseUrl;
-      const model = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
-      const items = pageRows.map((row) => {
-        const contextId = asText(row.context_id, "context ID");
-        const respondentId = asText(row.respondent_id, "respondent ID");
-        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "evidence packet"));
-        const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
-        const failure2 = storedEvaluationFailure(row);
-        let selectedMaterial;
-        if (result?.type === "choice") {
-          const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
-          if (materialId) {
-            const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-            if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            selectedMaterial = {
-              materialId,
-              text: candidate.text,
-              sourceId: candidate.sourceId,
-              sourceSha256: candidate.sourceSha256,
-              textSha256: createHash3("sha256").update(candidate.text, "utf8").digest("hex")
-            };
-          }
-        }
-        return {
-          sourceRunId: query.sourceRunId,
-          evaluationId: asText(row.evaluation_id, "evaluation ID"),
-          contextId,
-          respondentId,
-          questionId: asText(row.question_id, "question ID"),
-          status: asText(row.status, "evaluation status"),
-          ...result === void 0 ? {} : { result },
-          ...failure2 === void 0 ? {} : { failure: failure2 },
-          ...selectedMaterial === void 0 ? {} : { selectedMaterial },
-          ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
-          ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
-          ...row.node_id === null ? {} : { nodeId: asText(row.node_id, "node ID") },
-          ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
-          ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
-          provenance: {
-            provider: parsedRequest.data.provider.kind,
-            model,
-            endpoint,
-            compilerFingerprint,
-            contextFingerprint: hashCanonical({ state: packet.state, compilerFingerprint })
-          }
-        };
-      });
-      const last = pageRows.at(-1);
-      const sourceComplete = sourceStatus === "completed";
-      return {
-        items,
-        totalMatches: snapshotCount,
-        sourceRunId: query.sourceRunId,
-        sourceStatus,
-        sourceComplete,
-        lifecycle,
-        coverage,
-        matchedCoverage,
-        ...hasMore && last ? { nextCursor: encodeCursor({
-          kind: "evidence",
-          sourceRunId: query.sourceRunId,
-          criteriaFingerprint,
-          maxOrdinal,
-          lastOrdinal: asNumber(last.ordinal, "evaluation ordinal"),
-          sourceStatus,
-          lifecycle,
-          usedCalls,
-          reservedCalls
-        }) } : {}
-      };
-    });
+    return queryEvidencePage({
+      database: this.database,
+      now: this.now,
+      ensureOpen: () => this.ensureOpen(),
+      transaction: (operation) => this.transaction(operation),
+      reconcileInside: (runId2, nowMs) => this.reconcileInside(runId2, nowMs),
+      statusInside: (runId2) => this.statusInside(runId2),
+      notFound: () => this.notFound()
+    }, input2);
   }
   getContext(runId2, evaluationId, contextId) {
     this.ensureOpen();
@@ -22658,7 +22688,7 @@ var SQLiteRunStore = class {
       if (!row) throw this.notFound();
       const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, "created time") + LEASE_MS : asNumber(row.lease_expires_ms, "launch deadline");
       if (asText(row.status, "run status") !== "prepared" || asNumber(row.cancel_requested, "cancel flag") === 1 || nowMs >= launchDeadline) return null;
-      const ownerToken = randomUUID2();
+      const ownerToken = randomUUID3();
       this.database.prepare("UPDATE runs SET status = 'running', owner_token = ?, owner_pid = ?, lease_expires_ms = ? WHERE run_id = ? AND status = 'prepared'").run(ownerToken, workerPid, nowMs + LEASE_MS, runId2);
       return { runId: runId2, ownerToken };
     });
@@ -22680,7 +22710,7 @@ var SQLiteRunStore = class {
       if (asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
       const row = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
       if (!row) return null;
-      const attemptId = randomUUID2();
+      const attemptId = randomUUID3();
       const evaluationId = asText(row.evaluation_id, "evaluation ID");
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)").run(attemptId, claim2.runId, asText(row.group_id, "group ID"), evaluationId, asText(row.packet_fingerprint, "packet fingerprint"), claim2.ownerToken, nowMs);
       this.database.prepare("INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)").run(attemptId, evaluationId);
@@ -22703,7 +22733,7 @@ var SQLiteRunStore = class {
         throw new RunStoreError("invalid_batch_reservation", "A batch may reserve only pending evaluations from the requested group.");
       }
       const sorted = [...selected].sort((left, right) => orderedIds.indexOf(asText(left.question_id, "question ID")) - orderedIds.indexOf(asText(right.question_id, "question ID")));
-      const attemptId = randomUUID2();
+      const attemptId = randomUUID3();
       const anchorId = asText(sorted[0].evaluation_id, "evaluation ID");
       const state = parseJson(group.state_json, "group state");
       const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")).question);
@@ -23103,8 +23133,8 @@ var SQLiteRunStore = class {
 
 // src/infrastructure/credentials/windows.ts
 import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync as existsSync2 } from "node:fs";
-import path2 from "node:path";
+import { existsSync } from "node:fs";
+import path3 from "node:path";
 import { fileURLToPath } from "node:url";
 var CredentialStoreError = class extends Error {
   constructor(code, route) {
@@ -23166,12 +23196,12 @@ var WindowsCredentialStore = class {
   }
 };
 function locateHelper() {
-  const moduleDirectory = path2.dirname(fileURLToPath(import.meta.url));
+  const moduleDirectory = path3.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path2.join(moduleDirectory, "windows-credential.ps1"),
-    path2.join(moduleDirectory, "credentials", "windows-credential.ps1")
+    path3.join(moduleDirectory, "windows-credential.ps1"),
+    path3.join(moduleDirectory, "credentials", "windows-credential.ps1")
   ];
-  const helper = candidates.find(existsSync2);
+  const helper = candidates.find(existsSync);
   if (!helper) throw new Error("The Windows credential helper is unavailable.");
   return helper;
 }
@@ -23535,9 +23565,9 @@ function retryDelayMs(attempt) {
 }
 
 // src/providers/laya/context-fit.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import path3 from "node:path";
+import path4 from "node:path";
 
 // src/providers/laya/vendor/sequence.ts
 function pyJson(v) {
@@ -23766,7 +23796,7 @@ var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
 var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
 var tokenizerCache = /* @__PURE__ */ new Map();
 async function tokenizerPromise(config2) {
-  const absolutePath = path3.resolve(config2.tokenizerJsonPath);
+  const absolutePath = path4.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
   const metadata2 = await stat(absolutePath, { bigint: true });
   const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
@@ -23774,7 +23804,7 @@ async function tokenizerPromise(config2) {
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile(absolutePath);
-    const sha256 = createHash4("sha256").update(bytes).digest("hex");
+    const sha256 = createHash5("sha256").update(bytes).digest("hex");
     if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
     let raw;
     try {
