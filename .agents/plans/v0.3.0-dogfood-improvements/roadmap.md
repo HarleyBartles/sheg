@@ -1,10 +1,10 @@
 # Sheg v0.3.0 dogfood improvement roadmap
 
-Status: Plans 1 through 10 are merged to `develop`; Plan 10 was retired in its successor slice. Plan 11 is active. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades are required for the v0.3.0 launch. No release tag or publication is authorized.
+Status: Plans 1 through 11 are merged to `develop`; their executable artifacts have been retired in successor slices. Native TypeSafe inference, realistic native author validation, self-contained marketplace packaging, and forward-compatible datastore upgrades remain v0.3.0 release requirements. The approved candidate is undergoing further source-quality work before stable promotion. No release tag or publication is authorized.
 
 ## Workspace and base
 
-- Current planning worktree: `Z:/_agent-worktrees/sheg/codex/dev13-journey-coverage-summary`, branch `codex/dev13-journey-coverage-summary`, based on Plan 10 merge `716e1971640053162d4dcf2db11e1ec5e568dd59`.
+- Current SQLite quality slice: [dev.15 plan](../dev15-sqlite-quality.md), based on merged dev.14 commit `3e8876153d278241012e13f4301a7738ff03e837`.
 - Implementation follows `.agents/runbooks/implementing.md`, `.agents/playbooks/gitflow-branch-and-release.md`, `.agents/playbooks/semver-version-alignment.md`, and `AGENTS.md`.
 
 ## Outcome
@@ -29,7 +29,7 @@ Each next executable plan is written against the delivered code of its predecess
 | 8 | Ship one reproducible self-contained plugin package across Git and ZIP | merged to `develop` in PR #20 | Retired after merge | `0.3.0-dev.10` |
 | 9 | Establish datastore upgrade compatibility from the 0.3.0 baseline | merged to `develop` in PR #21 | Retired in this successor slice | `0.3.0-dev.11` |
 | 10 | Reconcile guidance and verify the installed author journey | merged to `develop` in PR #22 | Retired in this successor slice | `0.3.0-dev.12` |
-| 11 | Count selected journey material in matched query coverage | active; plan written JIT | [Plan 11](11-journey-selected-material-summary.md) | `0.3.0-dev.13` |
+| 11 | Count selected journey material in matched query coverage | merged to `develop` in PR #23 | Retired in this successor slice | `0.3.0-dev.13` |
 
 ## Plan 11: journey selected-material summary
 
