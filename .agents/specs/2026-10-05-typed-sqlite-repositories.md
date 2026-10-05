@@ -1,12 +1,12 @@
 # Typed repositories and the v0.3.0 SQLite baseline
 
-Status: Approved and in execution as the dev.15 work slice.
+Status: Active design for the dev.15 work slice.
 
 ## Purpose and scope
 
-Sheg needs a persistence boundary that callers can use without writing queries, knowing table layouts, or asserting that arbitrary database rows have a desired type. The v0.3.0 release must establish a sound local SQLite schema and a safe forward-upgrade contract. This design replaces the handwritten query and mapping machinery, completes the existing read-cost work, and keeps CLI and MCP on the same application services.
+Sheg needs a persistence boundary that callers can use without writing queries, knowing table layouts, or asserting that arbitrary database rows have a desired type. The v0.3.0 release must establish a sound local SQLite schema and a safe forward-upgrade contract. Named repositories keep query ownership and row decoding in infrastructure, while CLI and MCP use the same application services.
 
-The user has approved separate read and command interfaces and an exactly pinned Drizzle release candidate if the relevant behavior is proved. Existing development databases are disposable. The supported compatibility baseline begins with the schema actually shipped in v0.3.0. The work remains in the existing dev.15 worktree and targets `develop`; it does not publish the stable release.
+The compatibility baseline begins with the schema actually shipped in v0.3.0. Pre-release database layouts are unsupported and require explicit recovery; stable release publication is a separate step.
 
 ## Approach
 

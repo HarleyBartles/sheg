@@ -10,7 +10,7 @@
 
 **Spec:** [Typed repositories and the v0.3.0 SQLite baseline](../specs/2026-10-05-typed-sqlite-repositories.md).
 
-**Authority:** The user approved both the SQLite decomposition and read-cost work as a new slice into `develop`, assigned `0.3.0-dev.15`, and requested a fresh worktree from merged PR #25. Base: `3e8876153d278241012e13f4301a7738ff03e837`. Workspace: `Z:/_agent-worktrees/sheg/codex/dev15-sqlite-quality`, branch `codex/dev15-sqlite-quality`.
+**Scope:** Establish schema 9 as the v0.3.0 datastore baseline, provide typed read and command repositories over one Drizzle-backed owner, preserve forward-upgrade safety, and resolve bounded read costs before stable release.
 
 **Execution strategy:** `/executing-plans`, sequential inline work. The schema, codecs, repositories, application cutover, and migration safety share transaction contracts and fixtures. Follow `.agents/runbooks/implementing.md` and the required review/verification workflows. No inference, release tag, or stable publication is needed.
 
@@ -96,13 +96,13 @@
 
 - [ ] Run representative mock-provider journeys at 4x12, 8x24 and 12x36 respondent/turn scales, plus evidence pages over 640 and 10,000 evaluations. Compare database query count, rows decoded, checkpoint/payload materialization, and memory growth with the Task 1 baseline; keep results off-repo.
 - [ ] Fix any remaining per-turn full-run materialization, per-row follow-on/status/attempt lookups, or repeated coverage/page scans revealed by the comparison. Use the same materialized data twice when it serves both summary and page, and justify hot prepared statements/indexes from query plans.
-- [ ] Verify unrelated history is not decoded on each turn and that malformed current-turn evidence fails safely. Add behavior tests only for actual contract gaps; avoid timing thresholds and query-text snapshots. Run focused checks and commit.
+- [x] Verify unrelated history is not decoded on each turn and that malformed current-turn evidence fails safely. Add behavior tests only for actual contract gaps; avoid timing thresholds and query-text snapshots. Run focused checks and commit.
 
 ## Task 7: Set a measured normal-open integrity policy
 
 **Files:** `src/infrastructure/sqlite/connection.ts`, migrations/recovery modules, targeted opening/recovery tests, and operational documentation.
 
-- [ ] Measure schema/history metadata checks, full integrity, foreign-key checks and total open time on representative populated stores. Use the measurements to keep cheap version/ledger/structural validation on normal open while reserving full scans for migration, verified backup and explicit health inspection.
+- [x] Measure schema/history metadata checks, full integrity, foreign-key checks and total open time on representative populated stores. Use the measurements to keep cheap version/ledger/structural validation on normal open while reserving full scans for migration, verified backup and explicit health inspection.
 - [x] Ensure missing schema, malformed/future version, damaged payload, old open connection and unsupported pre-release store report safe bounded maintenance outcomes without mutation. Document what normal open detects and what requires explicit inspection or record access.
 - [x] Exercise malformed stores, current baseline initialization, test-only forward upgrade, backup recoverability and deliberate corruption in real SQLite.
 
