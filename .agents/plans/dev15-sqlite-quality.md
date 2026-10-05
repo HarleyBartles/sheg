@@ -64,11 +64,11 @@
 
 **Interface:** `RunReadRepository` supplies named operations for submission lookup, run discovery/status, accepted request, full journey, reserved worker turn, evidence page, context, follow-on source, answers, attempts, deletion preview, and storage inspection. Each method returns a validated application/domain shape and performs no reconciliation or mutation.
 
-- [ ] Write behavior tests around malformed persisted data and snapshot-consistent reads, then implement explicit Drizzle projections and runtime decoding. Keep Drizzle/SQLite types and unchecked raw SQL out of application code. If a complex query needs Drizzle SQL fragments, parse its unknown projection before returning it.
+- [x] Write behavior tests around malformed persisted data and snapshot-consistent reads, then implement explicit Drizzle projections and runtime decoding. Keep Drizzle/SQLite types and unchecked raw SQL out of application code. If a complex query needs Drizzle SQL fragments, parse its unknown projection before returning it.
 - [x] Read a worker's frozen identity, reserved evaluation, respondent checkpoint/profile and ordinal/occurrence facts without materializing unrelated respondents or every earlier packet. Preserve current-turn ownership, compiler/fingerprint checks, reconvergence, and full validation during public recall.
 - [x] Make evidence queries use one deferred snapshot. Reuse a lightweight materialized match set for coverage and page selection, hydrate full payloads only for the bounded page, and retain correct selected-material/no-fit counts, empty-page coverage, cursor rejection and partial-run semantics.
 - [x] Batch discovery status, attempt identity/failure, and acceptance-time source-selection lookups so result counts and selected handles do not introduce per-row queries. Resolve follow-on source records in one bounded projection.
-- [ ] Verify a concurrent writer cannot mix revisions within one evidence page and inspect query plans; add focused behavior coverage only if those checks reveal a contract gap.
+- [x] Verify a concurrent writer cannot mix revisions within one evidence page and inspect query plans; add focused behavior coverage only if those checks reveal a contract gap.
 
 ## Task 4: Build transactional command repositories
 

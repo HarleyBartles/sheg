@@ -14,6 +14,7 @@ import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
 import { openRunStore, RunStoreError } from '../src/infrastructure/run-store.js';
+import { queryEvidencePage } from '../src/infrastructure/sqlite/evidence-query.js';
 
 const input: InlineRunRequest = {
   kind: 'poll',
@@ -139,6 +140,55 @@ test('acceptance and paginated evidence support ten thousand evaluations', async
     assert.equal(page.matchedCoverage.evaluations.total, 10_000);
     assert.equal(page.matchedCoverage.evaluations.pending, 10_000);
   } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('evidence paging keeps coverage and rows on one snapshot while another connection writes', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { timeout: 5_000 });
+  const writer = new DatabaseSync(path.join(root, 'runs.sqlite'), { timeout: 5_000 });
+  try {
+    const accepted = store.accept(randomUUID(), await preparedRun({ ...input, respondents: [input.respondents[0]!] }));
+    const initialStatus = store.getStatus(accepted.run.runId);
+    let wrote = false;
+    const page = queryEvidencePage({
+      database,
+      now: Date.now,
+      ensureOpen() {},
+      readTransaction<T>(operation: () => T): T {
+        database.exec('BEGIN');
+        try {
+          const result = operation();
+          database.exec('COMMIT');
+          return result;
+        } catch (error) {
+          database.exec('ROLLBACK');
+          throw error;
+        }
+      },
+      statusInside(runId) {
+        if (!wrote) {
+          wrote = true;
+          writer.prepare("UPDATE evaluations SET status = 'failed' WHERE run_id = ?").run(runId);
+        }
+        return initialStatus;
+      },
+      notFound: () => new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.'),
+    }, { sourceRunId: accepted.run.runId, criteria: {}, limit: 10 });
+
+    assert.equal(wrote, true);
+    assert.equal(page.sourceStatus, 'prepared');
+    assert.equal(page.coverage.totalEvaluations, 1);
+    assert.equal(page.coverage.failedEvaluations, 0);
+    assert.equal(page.matchedCoverage.evaluations.pending, 1);
+    assert.equal(page.items[0]?.status, 'pending');
+    assert.equal(writer.prepare('SELECT status FROM evaluations WHERE run_id = ?').get(accepted.run.runId)?.status, 'failed');
+  } finally {
+    writer.close();
+    database.close();
     store.close();
     await rm(root, { recursive: true, force: true });
   }
