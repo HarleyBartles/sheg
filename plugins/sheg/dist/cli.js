@@ -23180,7 +23180,7 @@ function resumeRefusalMessage(reason) {
 }
 
 // src/application/run-inspection.ts
-import { randomUUID } from "node:crypto";
+import { createHash as createHash7, randomUUID } from "node:crypto";
 
 // src/domain/journey/route-bounds.ts
 function estimateRunDecisionCalls(arms, respondents) {
@@ -23418,7 +23418,7 @@ function materializeJourneyRun(admission) {
   const respondents = [];
   let ordinal = 0;
   for (const profile of request.respondents) {
-    const firstPacket = packets.find((packet) => packet.respondentId === profile.id && packet.decisionIndex === 1 && packet.pathId === "root");
+    const firstPacket = packets.find((packet) => packet.respondentId === profile.id);
     if (!firstPacket) throw new Error(`Journey has no initial ask packet for respondent ${profile.id}.`);
     const evaluationId = randomUUID();
     const contextId = randomUUID();
@@ -23437,7 +23437,7 @@ function materializeJourneyRun(admission) {
       ordinal: ordinal++
     };
     evaluations2.push(evaluation);
-    const events = initialJourneyEvents(request.journey);
+    const events = initialJourneyPath(request.journey).events;
     respondents.push({
       respondentId: profile.id,
       status: "active",
@@ -23451,7 +23451,7 @@ function materializeJourneyRun(admission) {
   }
   return { request, requestFingerprint, compilerFingerprint, evaluations: evaluations2, respondents };
 }
-function initialJourneyEvents(arm) {
+function initialJourneyPath(arm) {
   const events = [];
   const graph = journeyTopology(arm);
   const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
@@ -23459,7 +23459,7 @@ function initialJourneyEvents(arm) {
   while (true) {
     const node2 = nodes.get(current);
     if (!node2) throw new Error(`Journey points to unknown node ${current}.`);
-    if (node2.kind === "ask") return events;
+    if (node2.kind === "ask") return { events, nodeId: node2.id, taskId: node2.taskId };
     if (node2.kind === "terminal") throw new Error("Journey must reach an ask node before a terminal node.");
     events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
     const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
@@ -23663,46 +23663,66 @@ async function prepareJourneyAdmission(request, provider) {
   } else if (request.maxCalls < callBounds.maximumDecisionCalls) {
     warnings.push({ code: "call_limit_may_stop_journey", message: `maxCalls (${request.maxCalls}) is below the journey maximum (${callBounds.maximumDecisionCalls}); some respondents may not reach a terminal node.` });
   }
-  const traversal = walkStudyPackets([request.journey], request.respondents, (packet) => {
-    packets.push(packet);
-  });
-  if (traversal.status !== "complete") {
-    problems.push({ code: "journey_preflight_incomplete", message: traversal.incompleteReason ?? "Journey context traversal is incomplete." });
-  }
-  const respondentsWithoutInitialAsk = request.respondents.filter((respondent) => !packets.some((packet) => packet.respondentId === respondent.id && packet.decisionIndex === 1 && packet.pathId === "root"));
-  if (respondentsWithoutInitialAsk.length > 0) {
+  let initialPath;
+  try {
+    initialPath = initialJourneyPath(request.journey);
+  } catch (error62) {
     return { inspection: {
       valid: false,
       respondentCount: request.respondents.length,
       minimumCalls: callBounds.minimumDecisionCalls,
       maximumCalls: callBounds.maximumDecisionCalls,
-      problems: [...problems, ...respondentsWithoutInitialAsk.map((respondent) => ({
-        code: "invalid_journey",
-        respondentId: respondent.id,
-        message: `Journey has no initial ask packet for respondent ${respondent.id}.`
-      }))],
+      problems: [...problems, { code: "invalid_journey", message: error62 instanceof Error ? error62.message : "Journey has no initial ask packet." }],
       ...warnings.length === 0 ? {} : { warnings },
       fits: []
     } };
   }
-  if (traversal.unverifiedReason) {
-    warnings.push({ code: "context_fit_unverified", message: `${traversal.unverifiedReason} Each actual packet is checked by the selected provider before inference.` });
+  const task = request.journey.tasks.find(({ id }) => id === initialPath.taskId);
+  if (!task) return { inspection: {
+    valid: false,
+    respondentCount: request.respondents.length,
+    minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    problems: [...problems, { code: "invalid_journey", message: `Initial ask references unknown task ${initialPath.taskId}.` }],
+    ...warnings.length === 0 ? {} : { warnings },
+    fits: []
+  } };
+  for (const respondent of request.respondents) {
+    const packetRequest = compileDecisionPacket(request.journey, respondent, initialPath.taskId, initialPath.events);
+    const identity = JSON.stringify([respondent.id, request.journey.id, "root", 1, initialPath.nodeId]);
+    packets.push({
+      packetId: `packet-${createHash7("sha256").update(identity).digest("hex")}`,
+      respondentId: respondent.id,
+      armId: request.journey.id,
+      pathId: "root",
+      decisionIndex: 1,
+      nodeId: initialPath.nodeId,
+      request: packetRequest
+    });
   }
   const kind = request.provider.kind;
   const modelIdentity = kind === "jev" ? request.provider.model : request.provider.checkpoint;
+  const measuredByInput = /* @__PURE__ */ new Map();
   for (const packet of packets) {
-    let fit;
-    if (!provider.measure) fit = missingMeasureFit2(provider, kind, modelIdentity);
-    else {
-      try {
-        fit = await provider.measure(packet.request);
-      } catch {
-        fit = { ...missingMeasureFit2(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
+    const inputFingerprint = hashCanonical(packet.request);
+    let fit = measuredByInput.get(inputFingerprint);
+    if (!fit) {
+      if (!provider.measure) fit = missingMeasureFit2(provider, kind, modelIdentity);
+      else {
+        try {
+          fit = await provider.measure(packet.request);
+        } catch {
+          fit = { ...missingMeasureFit2(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
+        }
       }
+      measuredByInput.set(inputFingerprint, fit);
     }
     fits.push({ respondentId: packet.respondentId, nodeId: packet.nodeId, pathId: packet.pathId, packetId: packet.packetId, fit });
     const problem = problemForFit(packet.respondentId, fit);
     if (problem) problems.push({ ...problem, nodeId: packet.nodeId, pathId: packet.pathId });
+  }
+  if (callBounds.maximumDecisionCalls > request.respondents.length) {
+    warnings.push({ code: "reached_turn_fit_check", message: "Initial packets passed fit checks. Each later reached turn is checked by the provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial." });
   }
   const inspection = {
     valid: problems.length === 0,
@@ -24049,7 +24069,7 @@ function processExists(pid) {
 }
 
 // src/infrastructure/run-store.ts
-import { createHash as createHash10, randomUUID as randomUUID5 } from "node:crypto";
+import { createHash as createHash11, randomUUID as randomUUID5 } from "node:crypto";
 import { mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
 import path11 from "node:path";
 
@@ -29322,7 +29342,7 @@ function loadAttempts(database, runId, cursorText, requestedLimit, ensureRun) {
 }
 
 // src/infrastructure/sqlite/evidence-query.ts
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 function queryEvidencePage(context, input2) {
   context.ensureOpen();
   const parsed = runEvidenceQuerySchema.safeParse(input2);
@@ -29492,7 +29512,7 @@ function queryEvidencePage(context, input2) {
             text: candidate.text,
             sourceId: candidate.sourceId,
             sourceSha256: candidate.sourceSha256,
-            textSha256: createHash7("sha256").update(candidate.text, "utf8").digest("hex")
+            textSha256: createHash8("sha256").update(candidate.text, "utf8").digest("hex")
           };
         }
       }
@@ -29609,19 +29629,17 @@ function storedJourneyIdentity(row) {
 function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
   const rows = database.prepare(`WITH next_ordinal AS (
       SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
-    ), node_occurrences AS (
-      SELECT node_id, COUNT(*) AS count FROM evaluations WHERE run_id = ? AND respondent_id = ? GROUP BY node_id
     )
     SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
       jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
       jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
       jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
-      next_ordinal.value AS next_ordinal, node_occurrences.node_id AS occurrence_node_id, node_occurrences.count AS occurrence_count
+      next_ordinal.value AS next_ordinal
     FROM runs r JOIN evaluations e ON e.run_id = r.run_id
     JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-    CROSS JOIN next_ordinal LEFT JOIN node_occurrences ON 1 = 1
+    CROSS JOIN next_ordinal
     WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
-    ORDER BY node_occurrences.node_id`).all(runId, runId, respondentId, runId, evaluationId, respondentId);
+    `).all(runId, runId, evaluationId, respondentId);
   const first = rows[0];
   if (!first) throw new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
   const identity = storedJourneyIdentity(first);
@@ -29669,13 +29687,12 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
     evaluation,
     respondent,
     profile,
-    nextOrdinal: asNumber(first.next_ordinal, "next evaluation ordinal"),
-    nodeOccurrences: rows.flatMap((row) => row.occurrence_node_id === null ? [] : [{ nodeId: asText(row.occurrence_node_id, "occurrence node ID"), count: asNumber(row.occurrence_count, "node occurrence count") }])
+    nextOrdinal: asNumber(first.next_ordinal, "next evaluation ordinal")
   };
 }
 
 // src/infrastructure/sqlite/follow-on-queries.ts
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 function loadFollowOnSources(database, input2, notFound) {
   const request = followOnRunRequestSchema.parse(input2);
   const run = database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
@@ -29757,7 +29774,7 @@ function loadFollowOnSources(database, input2, notFound) {
       text: selectedMaterial.text,
       sourceId: selectedMaterial.sourceId,
       sourceSha256: selectedMaterial.sourceSha256,
-      textSha256: createHash8("sha256").update(selectedMaterial.text, "utf8").digest("hex")
+      textSha256: createHash9("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
     if (selectedMaterialId && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
@@ -30192,7 +30209,7 @@ function drizzle(...params) {
 })(drizzle || (drizzle = {}));
 
 // src/infrastructure/sqlite/schema.ts
-import { createHash as createHash9, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash10, randomUUID as randomUUID3 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import path9 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
@@ -30225,7 +30242,7 @@ function registeredMigrations() {
   return [baselineMigration()];
 }
 function migrationChecksum(migration) {
-  return createHash9("sha256").update(migration.sql).digest("hex");
+  return createHash10("sha256").update(migration.sql).digest("hex");
 }
 function isTransientSqliteLock(error62) {
   return typeof error62 === "object" && error62 !== null && "errcode" in error62 && typeof error62.errcode === "number" && SQLITE_TRANSIENT_LOCK_CODES.has(error62.errcode);
@@ -30696,7 +30713,7 @@ function validatePrepared(prepared) {
         const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text: text2 }) => id === selected.materialId && text2 === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash10("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash11("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
         }
       }

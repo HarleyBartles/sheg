@@ -35392,7 +35392,7 @@ async function runPowerShell(helperPath, args, interactive = false) {
 }
 
 // src/application/run-inspection.ts
-import { randomUUID } from "node:crypto";
+import { createHash as createHash3, randomUUID } from "node:crypto";
 
 // src/domain/decision/prompt.ts
 import { createHash } from "node:crypto";
@@ -35634,9 +35634,6 @@ function canonicalize(value) {
   throw new TypeError("Fingerprint input must contain only JSON values.");
 }
 
-// src/domain/journey/packet-walker.ts
-import { createHash as createHash3 } from "node:crypto";
-
 // src/domain/journey/topology.ts
 function journeyTopology(arm) {
   if (arm.presentation.kind === "graph") return arm.presentation;
@@ -35663,174 +35660,6 @@ function journeyTopology(arm) {
   });
   nodes.push({ id: terminal, kind: "terminal", outcome: "complete" });
   return { kind: "graph", nodes, transitions, entryNodeId: exposes[0], maxDecisions: arm.tasks.length };
-}
-
-// src/domain/journey/packet-walker.ts
-var DEFAULT_MAX_PREFLIGHT_PACKETS = 1e5;
-var DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
-function pathIdentity(choices) {
-  return choices.length === 0 ? "root" : choices.map(({ nodeId, choiceId }) => `${nodeId}=${choiceId}`).join(">");
-}
-function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
-  const maxPackets = options2.maxPackets ?? DEFAULT_MAX_PREFLIGHT_PACKETS;
-  const maxPacketBytes = options2.maxPacketBytes ?? DEFAULT_MAX_PREFLIGHT_PACKET_BYTES;
-  let packetCount = 0;
-  let packetBytes = 0;
-  let terminalJourneyCount = 0;
-  let incompleteReason;
-  let unverifiedReason;
-  let stopped = false;
-  const markIncomplete = (reason) => {
-    incompleteReason ??= reason;
-    stopped = true;
-  };
-  if (!Number.isSafeInteger(maxPackets) || maxPackets < 0) {
-    markIncomplete("Preflight packet limit must be a non-negative safe integer.");
-  }
-  if (!Number.isSafeInteger(maxPacketBytes) || maxPacketBytes < 0 || maxPacketBytes > DEFAULT_MAX_PREFLIGHT_PACKET_BYTES) {
-    markIncomplete(`Preflight byte limit must be between 0 and ${DEFAULT_MAX_PREFLIGHT_PACKET_BYTES}.`);
-  }
-  if (arms.length === 0 || respondents.length === 0) {
-    markIncomplete("Preflight requires at least one study arm and one respondent.");
-  }
-  const emitPacket = (arm, respondent, taskId, nodeId, decisionIndex, choices, events) => {
-    if (packetCount >= maxPackets) {
-      markIncomplete(`Preflight packet limit (${maxPackets}) reached before traversal completed.`);
-      return;
-    }
-    const pathId = pathIdentity(choices);
-    let request;
-    try {
-      request = compileDecisionPacket(arm, respondent, taskId, events);
-    } catch (error62) {
-      markIncomplete(`Could not compile request for ${respondent.id}/${arm.id}/${nodeId}: ${error62 instanceof Error ? error62.message : String(error62)}`);
-      return;
-    }
-    if (request.state.trajectory.responses.length > 0) {
-      unverifiedReason ??= "Prior response history can include provider probabilities or confidence with variable serialized size; future packet fit is not conservatively bounded.";
-    }
-    const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
-    const packetId = `packet-${createHash3("sha256").update(identity).digest("hex")}`;
-    const packet = { packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request };
-    const size = Buffer.byteLength(JSON.stringify(packet), "utf8");
-    if (packetBytes + size > maxPacketBytes) {
-      markIncomplete(`Preflight packet byte limit (${maxPacketBytes}) reached before traversal completed.`);
-      return;
-    }
-    visitPacket(packet);
-    packetCount += 1;
-    packetBytes += size;
-  };
-  for (const arm of arms) {
-    if (stopped) break;
-    const validation = ("sources" in arm ? studyArmSchema : journeyDefinitionSchema).safeParse(arm);
-    if (!validation.success) {
-      markIncomplete(`Study arm ${arm.id} is invalid: ${validation.error.issues.map((issue2) => issue2.message).join(" ")}`);
-      break;
-    }
-    for (const respondent of respondents) {
-      if (stopped) break;
-      const events = [];
-      const choices = [];
-      const graph = journeyTopology(arm);
-      const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
-      const activeNodes = /* @__PURE__ */ new Set();
-      const visitNode = (nodeId, decisionCount) => {
-        if (stopped) return;
-        if (activeNodes.has(nodeId)) {
-          markIncomplete(`Encountered a graph cycle at node ${nodeId} in ${respondent.id}/${arm.id}.`);
-          return;
-        }
-        const node2 = nodes.get(nodeId);
-        if (!node2) {
-          markIncomplete(`Graph references unknown node ${nodeId} in ${respondent.id}/${arm.id}.`);
-          return;
-        }
-        if (node2.kind === "terminal") {
-          terminalJourneyCount += 1;
-          return;
-        }
-        activeNodes.add(nodeId);
-        if (node2.kind === "expose") {
-          const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
-          if (!edge) {
-            markIncomplete(`Exposure node ${node2.id} has no transition in ${respondent.id}/${arm.id}.`);
-          } else {
-            events.push({ type: "exposure", sequence: events.length, nodeId, itemId: node2.itemId });
-            visitNode(edge.toNodeId, decisionCount);
-            events.pop();
-          }
-          activeNodes.delete(nodeId);
-          return;
-        }
-        if (decisionCount >= graph.maxDecisions) {
-          markIncomplete(`Decision bound reached before terminal at node ${nodeId} in ${respondent.id}/${arm.id}.`);
-          activeNodes.delete(nodeId);
-          return;
-        }
-        const task = arm.tasks.find((candidate) => candidate.id === node2.taskId);
-        if (!task) {
-          markIncomplete(`Ask node ${nodeId} references unknown task ${node2.taskId} in ${respondent.id}/${arm.id}.`);
-          activeNodes.delete(nodeId);
-          return;
-        }
-        emitPacket(arm, respondent, task.id, nodeId, decisionCount + 1, choices, events);
-        if (stopped) {
-          activeNodes.delete(nodeId);
-          return;
-        }
-        const branches = "options" in task ? Object.keys(task.options).map((choice) => ({ edge: graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choice), response: { type: "choice", choice } })) : graph.transitions.filter((candidate) => candidate.fromNodeId === nodeId && candidate.when !== void 0).map((edge) => ({ edge, response: representativeResponses(task, edge.when)[0] }));
-        for (const branch of branches) {
-          const response = branch.response;
-          const choiceId = response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`;
-          const edge = branch.edge;
-          if (!edge) {
-            markIncomplete(`Ask node ${nodeId} has no transition for response ${choiceId} in ${respondent.id}/${arm.id}.`);
-            break;
-          }
-          choices.push({ nodeId, choiceId });
-          events.push({ type: "response", sequence: events.length, nodeId, taskId: task.id, result: response });
-          visitNode(edge.toNodeId, decisionCount + 1);
-          events.pop();
-          choices.pop();
-          if (stopped) break;
-        }
-        activeNodes.delete(nodeId);
-      };
-      visitNode(graph.entryNodeId, 0);
-    }
-  }
-  return {
-    status: incompleteReason === void 0 ? "complete" : "incomplete",
-    packetCount,
-    terminalJourneyCount,
-    ...incompleteReason === void 0 ? {} : { incompleteReason },
-    ...unverifiedReason === void 0 ? {} : { unverifiedReason }
-  };
-}
-function representativeResponses(task, interval) {
-  if ("options" in task) return Object.keys(task.options).map((choice) => ({ type: "choice", choice }));
-  const values = [];
-  if (interval) {
-    values.push(interval.minimum === interval.maximum ? interval.minimum : (interval.minimum + interval.maximum) / 2);
-  } else if ("rubric" in task) {
-    const last = task.rubric.length - 1;
-    for (let level = 0; level <= last; level += 0.5) values.push(level);
-  } else values.push(0, 0.5, 1);
-  return values.map((value) => {
-    if ("rubric" in task) {
-      const probabilities2 = Object.fromEntries(task.rubric.map((_meaning, index2) => [String(index2), 0]));
-      const low = Math.floor(value);
-      const high = Math.ceil(value);
-      if (low === high) probabilities2[String(low)] = 1;
-      else {
-        probabilities2[String(low)] = high - value;
-        probabilities2[String(high)] = value - low;
-      }
-      return { type: "score", score: value, legend: Object.fromEntries(task.rubric.map((meaning, index2) => [String(index2), meaning])), probabilities: probabilities2 };
-    }
-    return { type: "noul", noul: value };
-  });
 }
 
 // src/domain/journey/route-bounds.ts
@@ -36069,7 +35898,7 @@ function materializeJourneyRun(admission) {
   const respondents = [];
   let ordinal = 0;
   for (const profile of request.respondents) {
-    const firstPacket = packets.find((packet) => packet.respondentId === profile.id && packet.decisionIndex === 1 && packet.pathId === "root");
+    const firstPacket = packets.find((packet) => packet.respondentId === profile.id);
     if (!firstPacket) throw new Error(`Journey has no initial ask packet for respondent ${profile.id}.`);
     const evaluationId = randomUUID();
     const contextId = randomUUID();
@@ -36088,7 +35917,7 @@ function materializeJourneyRun(admission) {
       ordinal: ordinal++
     };
     evaluations2.push(evaluation);
-    const events = initialJourneyEvents(request.journey);
+    const events = initialJourneyPath(request.journey).events;
     respondents.push({
       respondentId: profile.id,
       status: "active",
@@ -36102,7 +35931,7 @@ function materializeJourneyRun(admission) {
   }
   return { request, requestFingerprint, compilerFingerprint, evaluations: evaluations2, respondents };
 }
-function initialJourneyEvents(arm) {
+function initialJourneyPath(arm) {
   const events = [];
   const graph = journeyTopology(arm);
   const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
@@ -36110,7 +35939,7 @@ function initialJourneyEvents(arm) {
   while (true) {
     const node2 = nodes.get(current);
     if (!node2) throw new Error(`Journey points to unknown node ${current}.`);
-    if (node2.kind === "ask") return events;
+    if (node2.kind === "ask") return { events, nodeId: node2.id, taskId: node2.taskId };
     if (node2.kind === "terminal") throw new Error("Journey must reach an ask node before a terminal node.");
     events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
     const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
@@ -36314,46 +36143,66 @@ async function prepareJourneyAdmission(request, provider) {
   } else if (request.maxCalls < callBounds.maximumDecisionCalls) {
     warnings.push({ code: "call_limit_may_stop_journey", message: `maxCalls (${request.maxCalls}) is below the journey maximum (${callBounds.maximumDecisionCalls}); some respondents may not reach a terminal node.` });
   }
-  const traversal = walkStudyPackets([request.journey], request.respondents, (packet) => {
-    packets.push(packet);
-  });
-  if (traversal.status !== "complete") {
-    problems.push({ code: "journey_preflight_incomplete", message: traversal.incompleteReason ?? "Journey context traversal is incomplete." });
-  }
-  const respondentsWithoutInitialAsk = request.respondents.filter((respondent) => !packets.some((packet) => packet.respondentId === respondent.id && packet.decisionIndex === 1 && packet.pathId === "root"));
-  if (respondentsWithoutInitialAsk.length > 0) {
+  let initialPath;
+  try {
+    initialPath = initialJourneyPath(request.journey);
+  } catch (error62) {
     return { inspection: {
       valid: false,
       respondentCount: request.respondents.length,
       minimumCalls: callBounds.minimumDecisionCalls,
       maximumCalls: callBounds.maximumDecisionCalls,
-      problems: [...problems, ...respondentsWithoutInitialAsk.map((respondent) => ({
-        code: "invalid_journey",
-        respondentId: respondent.id,
-        message: `Journey has no initial ask packet for respondent ${respondent.id}.`
-      }))],
+      problems: [...problems, { code: "invalid_journey", message: error62 instanceof Error ? error62.message : "Journey has no initial ask packet." }],
       ...warnings.length === 0 ? {} : { warnings },
       fits: []
     } };
   }
-  if (traversal.unverifiedReason) {
-    warnings.push({ code: "context_fit_unverified", message: `${traversal.unverifiedReason} Each actual packet is checked by the selected provider before inference.` });
+  const task = request.journey.tasks.find(({ id }) => id === initialPath.taskId);
+  if (!task) return { inspection: {
+    valid: false,
+    respondentCount: request.respondents.length,
+    minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    problems: [...problems, { code: "invalid_journey", message: `Initial ask references unknown task ${initialPath.taskId}.` }],
+    ...warnings.length === 0 ? {} : { warnings },
+    fits: []
+  } };
+  for (const respondent of request.respondents) {
+    const packetRequest = compileDecisionPacket(request.journey, respondent, initialPath.taskId, initialPath.events);
+    const identity = JSON.stringify([respondent.id, request.journey.id, "root", 1, initialPath.nodeId]);
+    packets.push({
+      packetId: `packet-${createHash3("sha256").update(identity).digest("hex")}`,
+      respondentId: respondent.id,
+      armId: request.journey.id,
+      pathId: "root",
+      decisionIndex: 1,
+      nodeId: initialPath.nodeId,
+      request: packetRequest
+    });
   }
   const kind = request.provider.kind;
   const modelIdentity = kind === "jev" ? request.provider.model : request.provider.checkpoint;
+  const measuredByInput = /* @__PURE__ */ new Map();
   for (const packet of packets) {
-    let fit;
-    if (!provider.measure) fit = missingMeasureFit(provider, kind, modelIdentity);
-    else {
-      try {
-        fit = await provider.measure(packet.request);
-      } catch {
-        fit = { ...missingMeasureFit(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
+    const inputFingerprint = hashCanonical(packet.request);
+    let fit = measuredByInput.get(inputFingerprint);
+    if (!fit) {
+      if (!provider.measure) fit = missingMeasureFit(provider, kind, modelIdentity);
+      else {
+        try {
+          fit = await provider.measure(packet.request);
+        } catch {
+          fit = { ...missingMeasureFit(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
+        }
       }
+      measuredByInput.set(inputFingerprint, fit);
     }
     fits.push({ respondentId: packet.respondentId, nodeId: packet.nodeId, pathId: packet.pathId, packetId: packet.packetId, fit });
     const problem = problemForFit(packet.respondentId, fit);
     if (problem) problems.push({ ...problem, nodeId: packet.nodeId, pathId: packet.pathId });
+  }
+  if (callBounds.maximumDecisionCalls > request.respondents.length) {
+    warnings.push({ code: "reached_turn_fit_check", message: "Initial packets passed fit checks. Each later reached turn is checked by the provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial." });
   }
   const inspection = {
     valid: problems.length === 0,
@@ -42232,19 +42081,17 @@ function storedJourneyIdentity(row) {
 function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
   const rows = database.prepare(`WITH next_ordinal AS (
       SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
-    ), node_occurrences AS (
-      SELECT node_id, COUNT(*) AS count FROM evaluations WHERE run_id = ? AND respondent_id = ? GROUP BY node_id
     )
     SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
       jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
       jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
       jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
-      next_ordinal.value AS next_ordinal, node_occurrences.node_id AS occurrence_node_id, node_occurrences.count AS occurrence_count
+      next_ordinal.value AS next_ordinal
     FROM runs r JOIN evaluations e ON e.run_id = r.run_id
     JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-    CROSS JOIN next_ordinal LEFT JOIN node_occurrences ON 1 = 1
+    CROSS JOIN next_ordinal
     WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
-    ORDER BY node_occurrences.node_id`).all(runId, runId, respondentId, runId, evaluationId, respondentId);
+    `).all(runId, runId, evaluationId, respondentId);
   const first = rows[0];
   if (!first) throw new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
   const identity = storedJourneyIdentity(first);
@@ -42292,8 +42139,7 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
     evaluation,
     respondent,
     profile,
-    nextOrdinal: asNumber(first.next_ordinal, "next evaluation ordinal"),
-    nodeOccurrences: rows.flatMap((row) => row.occurrence_node_id === null ? [] : [{ nodeId: asText(row.occurrence_node_id, "occurrence node ID"), count: asNumber(row.occurrence_count, "node occurrence count") }])
+    nextOrdinal: asNumber(first.next_ordinal, "next evaluation ordinal")
   };
 }
 
@@ -45604,7 +45450,7 @@ var runListSchema = runListQuerySchema;
 function createPollingServer(service) {
   const runtime = createRunRuntime(void 0, service);
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
-  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
+  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Journey fit is measured for initial respondent inputs; each later reached turn is checked immediately before inference and may stop only that respondent if it does not fit. Independent questions in one group share one frozen state; fit entries identify measured inputs and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
   server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
   server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtime.service.queryEvidence(query)));

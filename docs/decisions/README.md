@@ -15,8 +15,8 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0007](0007-guide-archetypes-and-freeze-reader-cohorts.md) | Guide archetype authoring and freeze study-specific reader profiles | Superseded by 0008 |
 | [0008](0008-model-stimulus-task-respondent-and-matched-arms.md) | Model stimulus, task, respondent, and matched arms | Archetype taxonomy superseded by 0009 |
 | [0009](0009-generalize-and-group-respondent-archetypes.md) | Generalize and group respondent archetypes | Accepted |
-| [0010](0010-preflight-study-context-for-configured-providers.md) | Preflight study context for configured providers | Proposed |
-| [0011](0011-deterministic-study-preview-and-packet-sizing.md) | Share packet assembly and expose deterministic study preview and sizing | Partially superseded by 0016 |
+| [0010](0010-preflight-study-context-for-configured-providers.md) | Preflight study context for configured providers | Proposed; durable-run admission superseded by 0032 |
+| [0011](0011-deterministic-study-preview-and-packet-sizing.md) | Share packet assembly and expose deterministic study preview and sizing | Partially superseded by 0016 and 0032 |
 | [0012](0012-system-one-typed-responses-and-routing.md) | Preserve typed System One responses and route explicitly | Accepted |
 | [0013](0013-gitflow-and-tagged-plugin-releases.md) | Use Gitflow and tagged plugin releases | Accepted |
 | [0014](0014-route-jev-execution-explicitly.md) | Select Jev routes explicitly and include route identity | Accepted |
@@ -37,6 +37,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0029](0029-share-the-durable-run-system-across-entrypoints.md) | Share the durable run system across entrypoints | Accepted |
 | [0030](0030-use-drizzle-behind-typed-run-repositories.md) | Use Drizzle behind typed run repositories | Accepted |
 | [0031](0031-set-schema-nine-as-release-baseline.md) | Set schema 9 as the v0.3.0 release baseline | Accepted |
+| [0032](0032-admit-journey-turns-as-they-are-reached.md) | Admit journey turns as they are reached | Accepted |
 
 ## Writing and changing decisions
 

@@ -10,7 +10,7 @@ import type { DecisionBatchRequest, DecisionResult } from '../src/domain/decisio
 import { compileDecisionPacket, compileDecisionPacketForCompiler, promptContractHash, v6PromptContractHash, type PromptHistoryEvent, type PromptState } from '../src/domain/decision/prompt.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { runRequestSchema, type InlineRunRequest, type InlineJourneyRequest, type PreparedJourneyRun } from '../src/domain/run/request.js';
-import { prepareRun } from '../src/application/run-inspection.js';
+import { materializeJourneyRun, prepareRun } from '../src/application/run-inspection.js';
 import { executeQuestionRun as executeWorker } from '../src/application/question-worker.js';
 import type { RunStore } from '../src/application/run-store.js';
 
@@ -521,6 +521,44 @@ test('a journey worker advances from its checkpoint without reading earlier turn
   } finally { database.close(); await f.close(); }
 });
 
+test('repeated journey task nodes receive increasing task occurrences', async () => {
+  const base = authoredJourney(1, 2);
+  const input = {
+    ...base,
+    journey: {
+      ...base.journey,
+      tasks: [base.journey.tasks[0]!],
+      presentation: { kind: 'graph' as const, entryNodeId: 'ask-first', maxDecisions: 2, nodes: [
+        { id: 'ask-first', kind: 'ask' as const, taskId: 'interest' },
+        { id: 'ask-second', kind: 'ask' as const, taskId: 'interest' },
+        { id: 'done', kind: 'terminal' as const, outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'ask-first', optionId: 'continue', toNodeId: 'ask-second' },
+        { fromNodeId: 'ask-first', optionId: 'leave', toNodeId: 'done' },
+        { fromNodeId: 'ask-second', optionId: 'continue', toNodeId: 'done' },
+        { fromNodeId: 'ask-second', optionId: 'leave', toNodeId: 'done' },
+      ] },
+    },
+    maxCalls: 2,
+  };
+  const admission = await prepareRun(input, {
+    measure: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'mock', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }),
+    async decide() { throw new Error('Admission must not infer.'); },
+  });
+  assert.ok(admission.journey);
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-repeated-task-occurrence-'));
+  const store = openRunStore(root);
+  const accepted = store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
+  try {
+    await executeQuestionRun(store, accepted.run.runId, factory({ async decide() { return { ...answer(), choice: 'continue' }; } }));
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.deepEqual(run.evaluations.map(({ questionId, occurrence }) => [questionId, occurrence]), [['interest', 1], ['interest', 2]]);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('a respondent-local journey failure does not block another respondent', async () => {
   const f = await journeyFixture(2, 6);
   let calls = 0;
@@ -621,6 +659,53 @@ test('a partial journey failure retains the respondent-local checkpoint and prio
     const failedAttemptsAfter = f.store.attempts(f.runId).items.filter(({ evaluationIds }) => evaluationIds.includes(failedEvaluation.evaluationId));
     assert.deepEqual(failedAttemptsAfter.map(({ status }) => status), ['failed', 'answered']);
   } finally { await f.close(); }
+});
+
+test('a reached journey turn that overflows fit stops only that respondent without charging a provider call', async () => {
+  const input = authoredJourney(2, 8);
+  const initialFit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
+  const admission = await prepareRun(input, {
+    measure: () => initialFit,
+    async decide() { throw new Error('Admission must not infer.'); },
+  });
+  assert.equal(admission.inspection.valid, true);
+  assert.equal(admission.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
+  assert.ok(admission.journey);
+
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-late-journey-fit-'));
+  const store = openRunStore(root);
+  const accepted = store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
+  const overflow = { ...initialFit, status: 'overflow' as const, tokens: 1200, contextLimit: 1000, effectiveLimit: 900, reason: 'estimated-context-over-limit' };
+  let dispatches = 0;
+  try {
+    await executeQuestionRun(store, accepted.run.runId, factory({
+      async decide(packet) {
+        dispatches += 1;
+        const profile = (packet.state as PromptState).respondent.profile.context;
+        if (profile === 'Reader A' && packet.question.id === 'interest') return { ...answer(), choice: 'continue' };
+        if (profile === 'Reader B' && packet.question.id === 'interest') return { ...answer(), choice: 'leave' };
+        if (profile === 'Reader A' && packet.question.id === 'clarity') throw new JevCallError('Fit changed for reached input.', 0, overflow);
+        throw new Error(`Unexpected packet ${profile}/${packet.question.id}`);
+      },
+    }));
+
+    const run = store.getJourneyRun(accepted.run.runId);
+    const status = store.getStatus(accepted.run.runId);
+    const failedRespondent = run.respondents.find(({ respondentId }) => respondentId === 'reader-a');
+    const completedRespondent = run.respondents.find(({ respondentId }) => respondentId === 'reader-b');
+    const failedEvaluation = run.evaluations.find(({ respondentId, status: evaluationStatus }) => respondentId === 'reader-a' && evaluationStatus === 'failed');
+    assert.equal(status.status, 'partial');
+    assert.equal(status.usedCalls, 2);
+    assert.equal(dispatches, 3);
+    assert.equal(failedRespondent?.status, 'failed');
+    assert.equal(failedRespondent?.events.filter(({ type }) => type === 'response').length, 1);
+    assert.deepEqual(failedRespondent?.route.map(({ nodeId, toNodeId }) => [nodeId, toNodeId]), [['ask-interest', 'expose-section-three']]);
+    assert.equal(completedRespondent?.status, 'completed');
+    assert.equal(failedEvaluation?.failure?.code, 'provider_context_overflow');
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('a failed retry stays partial and preserves every attempt for the same reached turn', async () => {

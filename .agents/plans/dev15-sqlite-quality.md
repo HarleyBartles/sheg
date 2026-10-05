@@ -94,8 +94,8 @@
 
 **Files:** Read repository queries, `src/application/question-worker.ts`, existing worker/query tests, and justified SQLite indexes.
 
-- [ ] Run representative mock-provider journeys at 4x12, 8x24 and 12x36 respondent/turn scales, plus evidence pages over 640 and 10,000 evaluations. Compare database query count, rows decoded, checkpoint/payload materialization, and memory growth with the Task 1 baseline; keep results off-repo.
-- [ ] Fix any remaining per-turn full-run materialization, per-row follow-on/status/attempt lookups, or repeated coverage/page scans revealed by the comparison. Use the same materialized data twice when it serves both summary and page, and justify hot prepared statements/indexes from query plans.
+- [x] Run representative mock-provider journeys at 4x12, 8x24 and 12x36 respondent/turn scales, plus evidence pages over 640 and 10,000 evaluations. Compare database query count, rows decoded, checkpoint/payload materialization, and memory growth with the Task 1 baseline; keep results off-repo.
+- [x] Fix any remaining per-turn full-run materialization, per-row follow-on/status/attempt lookups, or repeated coverage/page scans revealed by the comparison. Use the same materialized data twice when it serves both summary and page, and justify hot prepared statements/indexes from query plans.
 - [x] Verify unrelated history is not decoded on each turn and that malformed current-turn evidence fails safely. Add behavior tests only for actual contract gaps; avoid timing thresholds and query-text snapshots. Run focused checks and commit.
 
 ## Task 7: Set a measured normal-open integrity policy
@@ -112,5 +112,5 @@
 
 - [x] Set only the root authored version to `0.3.0-dev.15`. Generate all identity-bearing manifests and bundles from it. Include runtime migration SQL/manifest and Drizzle license notices, while keeping Kit, source, test fixtures, plans, scripts and snapshots out of the installed plugin.
 - [x] Copy the generated plugin outside the checkout and without `node_modules`; prove fresh initialization, named reads/writes, mock worker execution and migration from a schema-9 fixture. Verify required assets and runtime identity match in Git marketplace and ZIP contents.
-- [ ] Review all changed documentation for current truth and concise guidance. Run `npm run contracts:build`, `npm run build`, and `npm run plugin:package`; use `npm run verify` for uncommitted diagnosis when needed, then stage through the tracked hook and confirm its staged-snapshot `npm run verify` passes. Review the entire branch against `develop`, fix actionable findings, and publish a draft PR targeting `develop`.
-- [ ] Verify the published PR head and hosted check, attach the PR to the task, and leave the worktree available for review. The release tag and merge to `main` are outside this slice.
+- [x] Review all changed documentation for current truth and concise guidance. Run `npm run contracts:build`, `npm run build`, and `npm run plugin:package`; use `npm run verify` for uncommitted diagnosis when needed, then stage through the tracked hook and confirm its staged-snapshot `npm run verify` passes. Review the entire branch against `develop`, fix actionable findings, and publish a draft PR targeting `develop`.
+- [x] Verify the published PR head and hosted check, attach the PR to the task, and leave the worktree available for review. The release tag and merge to `main` are outside this slice.

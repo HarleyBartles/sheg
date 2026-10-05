@@ -105,7 +105,6 @@ export type JourneyWorkerTurn = {
   respondent: JourneyRespondentState;
   profile: RespondentProfile;
   nextOrdinal: number;
-  nodeOccurrences: Array<{ nodeId: string; count: number }>;
 };
 
 export type Inspection = {

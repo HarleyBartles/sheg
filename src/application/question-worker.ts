@@ -103,7 +103,7 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
         evaluationId: randomUUID(), turnId: randomUUID(), contextId: randomUUID(),
         respondentId: respondentState.respondentId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,
         pathId: progress.next.pathId,
-        occurrence: (currentTurn.nodeOccurrences.find(({ nodeId }) => nodeId === progress.next!.nodeId)?.count ?? 0) + 1,
+        occurrence: progress.events.filter((event) => event.type === 'response' && event.taskId === progress.next!.taskId).length + 1,
         ordinal: currentTurn.nextOrdinal, packet: progress.next.packet,
         packetFingerprint: hashCanonical({ packet: progress.next.packet, compilerFingerprint: accepted.compilerFingerprint }),
       } : undefined;

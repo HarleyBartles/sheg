@@ -9,19 +9,17 @@ import { storedJourneyIdentity } from './journey-request.js';
 export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, evaluationId: string, respondentId: string): JourneyWorkerTurn {
   const rows = database.prepare(`WITH next_ordinal AS (
       SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
-    ), node_occurrences AS (
-      SELECT node_id, COUNT(*) AS count FROM evaluations WHERE run_id = ? AND respondent_id = ? GROUP BY node_id
     )
     SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
       jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
       jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
       jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
-      next_ordinal.value AS next_ordinal, node_occurrences.node_id AS occurrence_node_id, node_occurrences.count AS occurrence_count
+      next_ordinal.value AS next_ordinal
     FROM runs r JOIN evaluations e ON e.run_id = r.run_id
     JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-    CROSS JOIN next_ordinal LEFT JOIN node_occurrences ON 1 = 1
+    CROSS JOIN next_ordinal
     WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
-    ORDER BY node_occurrences.node_id`).all(runId, runId, respondentId, runId, evaluationId, respondentId) as DatabaseRow[];
+    `).all(runId, runId, evaluationId, respondentId) as DatabaseRow[];
   const first = rows[0];
   if (!first) throw new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.');
   const identity = storedJourneyIdentity(first);
@@ -74,6 +72,5 @@ export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, eva
     respondent,
     profile,
     nextOrdinal: asNumber(first.next_ordinal, 'next evaluation ordinal'),
-    nodeOccurrences: rows.flatMap((row) => row.occurrence_node_id === null ? [] : [{ nodeId: asText(row.occurrence_node_id, 'occurrence node ID'), count: asNumber(row.occurrence_count, 'node occurrence count') }]),
   };
 }
