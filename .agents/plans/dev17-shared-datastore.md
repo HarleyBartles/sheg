@@ -9,8 +9,8 @@ CLI and MCP must select the same default datastore for the same OS user without 
 - [x] Extend root-selection and packaged lifecycle tests to cover differing plugin environments and standalone CLI recall without a data-root flag; observe the behavioral failure first.
 - [x] Remove plugin-specific default selection at the shared infrastructure owner. Keep worker root propagation and persistence contracts unchanged.
 - [x] Record the changed operational choice in an ADR, document shared defaults and pre-release store access, and clarify CLI help.
-- [ ] Set root version to `0.3.0-dev.17`, regenerate distribution and metadata, and validate the complete repository gate and copied package behavior.
-- [ ] Review final owners, boundaries, and exceptions, commit, push, and open a draft PR into `develop`.
+- [x] Set root version to `0.3.0-dev.17`, regenerate distribution and metadata, and validate the complete repository gate and copied package behavior.
+- [x] Review final owners, boundaries, and exceptions, commit, push, and open a draft PR into `develop`.
 
 ## Validation
 
