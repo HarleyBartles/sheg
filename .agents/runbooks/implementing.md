@@ -42,6 +42,6 @@ Do not target `main` with ordinary feature work, bypass a failing gate, or edit 
 
 ## Playbook routing
 
-- [Source quality](../playbooks/source-quality.md) - for source, tests, generated runtime output, persisted contracts, providers, and entrypoints. Its Method explains Sheg's corrective guides for observed agent mistakes, where they live, and which to read before editing. Follow that selection guidance, assess whether the guides helped during review, and maintain a guide only when distinct evidence warrants it.
+- [Source quality](../playbooks/source-quality.md) - for source, tests, generated runtime output, persisted contracts, providers, and entrypoints. Complete its Method checks and state the owners, boundaries, and proposed corrections in the working chat before editing. Complete its Verification review before declaring readiness. The method defines and links the corrective guides used in those checks; maintain a guide only when distinct evidence warrants it.
 - [Gitflow branch and release routing](../playbooks/gitflow-branch-and-release.md) - whenever selecting a base branch or PR target, or preparing a release or hotfix.
 - [SemVer and version alignment](../playbooks/semver-version-alignment.md) - whenever a release version is proposed or changed.

@@ -10,7 +10,11 @@ Trace each changed behavior from its public entrypoint to its semantic owner and
 
 An Unslop profile is a repository-owned corrective guide for an observed pattern of agent mistakes. Sheg stores these guides and their supporting observations in `.agents/unslop/`. Each guide describes the mistake to recognize, the corrective action, where it applies, and the exceptions that prevent applying it too broadly.
 
-Before editing or reviewing, select and read the guides that apply to the change: [boundary drift](../unslop/boundary-drift.md) covers provider single/batch execution, validation, retries, and CLI/MCP dispatch; [single rule owner and operation-local reuse](../unslop/single-owner-and-reuse.md) covers domain schemas, storage codecs and repositories, workers, reports, and material or journey rules. Read both when the change crosses both concerns. Apply their recognition cues and corrective behavior to the concrete change. Reuse a value or operation result when it already proves the needed state. Share behavior only where the contracts are identical.
+Complete the following checks before editing. During review, repeat them against the final diff and its callers.
+
+1. For provider single/batch execution, validation, retries, or CLI/MCP dispatch, read [boundary drift](../unslop/boundary-drift.md). Trace each affected entry path to its validation and execution owner. Locate provider identity checks, attempt accounting, retry handling, and failure scope where affected. Identify what must stay shared and which wire decoders or public result contracts must stay separate.
+2. For domain schemas, storage codecs and repositories, workers, reports, or material and journey rules, read [single rule owner and operation-local reuse](../unslop/single-owner-and-reuse.md). Locate the authoritative owner of each affected rule and the boundary that decodes stored input. Inspect affected operations for repeated reads or computations, and identify values already available for reuse. Locate transaction boundaries and provider calls where affected; check snapshot and rollback requirements before changing them.
+3. Read both guides when both triggers apply. Before editing, state the concrete findings in the working chat, naming the source files or symbols, the correction needed, and any separation justified by a guide's exceptions. If neither trigger applies, state why. Resolve unknown ownership or failure scope by inspecting code and callers before making the dependent change.
 
 ## Constraints
 
@@ -18,7 +22,9 @@ Preserve transaction atomicity, physical-call accounting, respondent-local recov
 
 ## Verification
 
-Add or extend behavior tests only for a demonstrated coverage gap. Run focused tests, typecheck, and the full `npm run verify` gate before publication. Rebuild and check generated parity when source or shipped guidance changes. For package changes, exercise the copied runtime and required assets independently of the checkout. Review ownership and boundary semantics in the diff; passing tests prove only the covered behavior and do not prove profile discovery or effectiveness.
+Add or extend behavior tests only for a demonstrated coverage gap. Run focused tests, typecheck, and the full `npm run verify` gate before publication. Rebuild and check generated parity when source or shipped guidance changes. For package changes, exercise the copied runtime and required assets independently of the checkout.
+
+Before declaring the change ready, review the final diff against each triggered check above. In the review or PR handoff, identify the resulting owners and boundaries with source references, explain any retained duplication or separation, and report unresolved concerns. A statement that profiles were read or applied is insufficient. If these findings are missing, the reviewer must perform the checks before recommending readiness. Passing tests prove only the covered behavior and do not prove profile discovery or effectiveness. Keep these findings in the working chat or PR, not a repository receipt file.
 
 ## References and routing
 
