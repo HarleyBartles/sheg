@@ -621,6 +621,8 @@ test('journey admission rejects an unfit initial packet and a cap below every po
   const overflow = await prepareRun(journeyRequest(), overflowFixture.provider);
   assert.equal(overflow.inspection.valid, false);
   assert.equal(overflow.inspection.problems.some(({ code }) => code === 'context_overflow'), true);
+  assert.equal(overflow.inspection.warnings?.some(({ code, message }) => code === 'reached_turn_fit_check' && /initial packets passed/i.test(message)), false);
+  assert.equal(overflow.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
   assert.equal(overflowFixture.decisions, 0);
 
   const lowCap = await prepareRun(journeyRequest(1, 2), makeProvider().provider);

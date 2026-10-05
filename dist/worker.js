@@ -20291,6 +20291,18 @@ var DecisionError = class extends Error {
   }
 };
 var probabilitySumTolerance = 0.01;
+function validateProviderExecution(evidence, options2) {
+  const maxAttempts = options2.maxAttempts ?? 1;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || evidence.attempts > maxAttempts) {
+    throw new DecisionError(`Provider execution attempts exceed the configured limit of ${maxAttempts}.`);
+  }
+  for (const key of ["provider", "model", "checkpoint"]) {
+    if (options2[key] !== void 0 && evidence[key] !== options2[key]) {
+      throw new DecisionError(`Provider execution ${key} does not match the configured ${key}.`);
+    }
+  }
+  return evidence;
+}
 function validateDecision(request, result, options2 = {}) {
   const parsedRequest = decisionRequestSchema.safeParse(request);
   if (!parsedRequest.success) {
@@ -20302,6 +20314,7 @@ function validateDecision(request, result, options2 = {}) {
   }
   const decision = parsed.data;
   const normalizedRequest = parsedRequest.data;
+  validateProviderExecution(decision, options2);
   if (decision.type !== normalizedRequest.question.type) {
     throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`, { reason: "answer_type_mismatch" });
   }
@@ -20326,15 +20339,6 @@ function validateDecision(request, result, options2 = {}) {
       }
     }
   } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.", { reason: "answer_type_mismatch" });
-  const maxAttempts = options2.maxAttempts ?? 1;
-  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
-    throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
-  }
-  for (const key of ["provider", "model", "checkpoint"]) {
-    if (options2[key] !== void 0 && decision[key] !== options2[key]) {
-      throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
-    }
-  }
   return decision;
 }
 function validateDecisionBatch(request, result, options2 = {}) {
@@ -20346,7 +20350,7 @@ function validateDecisionBatch(request, result, options2 = {}) {
   if (!envelope.success) {
     throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: envelope.error });
   }
-  const execution = providerExecutionEvidenceSchema.parse(envelope.data.execution);
+  const execution = validateProviderExecution(envelope.data.execution, options2);
   for (const answer of envelope.data.answers) {
     if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
       throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);

@@ -37,10 +37,10 @@
 
 **Interface:** Introduce shared execution validation consuming `ProviderExecutionEvidence` and the configured validation options. Single and batch validation both invoke it; batch answer failures remain respondent/question-local when execution is valid.
 
-- [ ] Extend existing behavior cases to cover empty and explicit-failure batches with wrong provider/model or excessive attempts, plus valid execution with valid and invalid siblings. Run `node --import tsx --test test/decision.test.ts`; confirm the new invalid-execution cases expose the current gap.
-- [ ] Validate shared execution before mapping batch answers. Preserve bounded typed answer failures and valid sibling retention. Keep execution contract failures separate from per-answer failures.
-- [ ] Exercise a multi-turn journey whose initial fit fails and assert inspection never claims initial success. Correct the warning without suppressing useful later-turn fit information.
-- [ ] Run affected tests and typecheck, review error boundaries, and commit the coherent correction through the tracked hook.
+- [x] Extend existing behavior cases to cover empty and explicit-failure batches with wrong provider/model or excessive attempts, plus valid execution with valid and invalid siblings. Run `node --import tsx --test test/decision.test.ts`; confirm the new invalid-execution cases expose the current gap.
+- [x] Validate shared execution before mapping batch answers. Preserve bounded typed answer failures and valid sibling retention. Keep execution contract failures separate from per-answer failures.
+- [x] Exercise a multi-turn journey whose initial fit fails and assert inspection never claims initial success. Correct the warning without suppressing useful later-turn fit information.
+- [x] Run affected tests and typecheck, review error boundaries, and commit the coherent correction through the tracked hook.
 
 ## Task 2: Establish canonical contracts and trustworthy codecs
 

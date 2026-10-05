@@ -439,7 +439,10 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
     if (problem) problems.push({ ...problem, nodeId: packet.nodeId, pathId: packet.pathId });
   }
   if (callBounds.maximumDecisionCalls > request.respondents.length) {
-    warnings.push({ code: 'reached_turn_fit_check', message: 'Initial packets passed fit checks. Each later reached turn is checked by the provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.' });
+    const initialFitMessage = fits.every(({ fit }) => fit.status === 'fits')
+      ? 'Initial packets passed fit checks.'
+      : 'One or more initial packets failed fit checks.';
+    warnings.push({ code: 'reached_turn_fit_check', message: `${initialFitMessage} Each later reached turn is checked by the provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
   }
 
   const inspection: Inspection = {
