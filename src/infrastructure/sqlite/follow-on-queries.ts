@@ -5,6 +5,7 @@ import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type ParsedFollowOnRunRequest } from '../../domain/run/request.js';
 import { asNumber, asText, parseJson, parseJsonRecord, type DatabaseRow } from './rows.js';
 import { materialCatalogForRequest, resultFromStorage } from './evidence-records.js';
+import { evaluationCriteriaSql } from './evaluation-criteria.js';
 
 export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowOnRunRequest, notFound: () => Error): FollowOnSourceSet {
   const request = followOnRunRequestSchema.parse(input);
@@ -33,24 +34,9 @@ export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowO
     )`);
     parameters.push(JSON.stringify(request.selection.references));
   } else {
-    const criteria = request.selection.criteria;
-    if (criteria.respondentId !== undefined) { where.push('e.respondent_id = ?'); parameters.push(criteria.respondentId); }
-    if (criteria.status !== undefined) { where.push('e.status = ?'); parameters.push(criteria.status); }
-    if (criteria.questionId !== undefined) { where.push('e.question_id = ?'); parameters.push(criteria.questionId); }
-    if (criteria.materialId !== undefined) {
-      where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-      parameters.push(criteria.materialId);
-    }
-    if (criteria.answer?.type === 'choice') {
-      where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
-      parameters.push(criteria.answer.choiceId);
-    } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
-      const field = criteria.answer.type === 'score' ? 'score' : 'noul';
-      const operator = criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>=';
-      where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND json_extract(e.result_json, '$.value.${field}') ${operator} ?`);
-      parameters.push(criteria.answer.value);
-    }
-    if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
+    const filters = evaluationCriteriaSql(request.selection.criteria);
+    where.push(...filters.sql);
+    parameters.push(...filters.parameters);
   }
   const rows = database.prepare(`SELECT e.*,
     (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)

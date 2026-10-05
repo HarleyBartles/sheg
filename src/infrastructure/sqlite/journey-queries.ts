@@ -3,23 +3,29 @@ import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyWorkerTurn } from '../../domain/run/lifecycle.js';
 import { RunStoreError } from '../../application/run-store.js';
 import { hashCanonical } from '../identity.js';
-import { asNullableText, asNumber, asText, parseJson, parseStored, type DatabaseRow } from './rows.js';
+import { asNullableText, asNumber, asText, parseJson, parseStored } from './rows.js';
 import { storedJourneyIdentity } from './journey-request.js';
+import { createSqliteQuery } from './query-library.js';
+import { z } from 'zod';
+
+const sqliteInteger = z.union([z.number(), z.bigint()]);
+const journeyTurnRowSchema = z.object({
+  request_json: z.string(), request_fingerprint: z.string(), evaluation_id: z.string(), context_id: z.string(),
+  respondent_id: z.string(), question_id: z.string(), packet_json: z.string(), packet_fingerprint: z.string(),
+  turn_id: z.string(), node_id: z.string(), path_id: z.string(), occurrence: sqliteInteger, ordinal: sqliteInteger,
+  status: z.string(), respondent_status: z.string(), respondent_current_node_id: z.string().nullable(),
+  respondent_current_turn_id: z.string().nullable(), respondent_current_context_id: z.string().nullable(),
+  respondent_revision: sqliteInteger, respondent_events_json: z.string(), respondent_route_json: z.string(),
+  respondent_outcome: z.string().nullable(), next_ordinal: sqliteInteger,
+}).passthrough();
+const loadJourneyWorkerTurnQuery = createSqliteQuery(
+  'load-journey-worker-turn',
+  z.tuple([z.string(), z.string(), z.string(), z.string()]),
+  z.array(journeyTurnRowSchema),
+);
 
 export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, evaluationId: string, respondentId: string): JourneyWorkerTurn {
-  const rows = database.prepare(`WITH next_ordinal AS (
-      SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
-    )
-    SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
-      jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
-      jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
-      jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
-      next_ordinal.value AS next_ordinal
-    FROM runs r JOIN evaluations e ON e.run_id = r.run_id
-    JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-    CROSS JOIN next_ordinal
-    WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
-    `).all(runId, runId, evaluationId, respondentId) as DatabaseRow[];
+  const rows = loadJourneyWorkerTurnQuery.all(database, runId, runId, evaluationId, respondentId);
   const first = rows[0];
   if (!first) throw new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.');
   const identity = storedJourneyIdentity(first);

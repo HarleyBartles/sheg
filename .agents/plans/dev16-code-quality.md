@@ -60,11 +60,11 @@
 
 **Interfaces:** Each named query has declared bound parameters and a runtime result decoder. The asset resolver is module-relative in source and bundled runtime, never dependent on the caller's working directory. Repositories return application shapes, not statements or raw rows.
 
-- [ ] Inspect current bundling/copy rules and define one asset layout for `dist` and `plugins/sheg`. Use Git versions, not a separate query-version registry. Keep SQL assets grouped by repository concern.
-- [ ] Move complex literal queries into named assets. Keep simple typed Drizzle operations. Share evidence criterion translation between evidence and follow-on queries with bound values and an explicit operator vocabulary.
-- [ ] Verify behavioral equivalence using existing status, journey, criteria, selected-material/no-fit and pagination cases. Extend only missing cases; do not add source-string inventory tests.
-- [ ] Add an installed-runtime behavior check that exercises a named query from a copied package in another working directory with no source checkout or dependency installation. Include malformed raw projection rejection.
-- [ ] Run affected tests, build and generated parity; record the architectural choice in an ADR and update its index. Commit source and generated outputs together.
+- [x] Inspect current bundling/copy rules and define one asset layout for `dist` and `plugins/sheg`. Use Git versions, not a separate query-version registry. Keep SQL assets grouped by repository concern.
+- [x] Move complex literal queries into named assets. Keep simple typed Drizzle operations. Share evidence criterion translation between evidence and follow-on queries with bound values and an explicit operator vocabulary.
+- [x] Verify behavioral equivalence using existing status, journey, criteria, selected-material/no-fit and pagination cases. Extend only missing cases; do not add source-string inventory tests.
+- [x] Add an installed-runtime behavior check that exercises a named query from a copied package in another working directory with no source checkout or dependency installation. Include malformed raw projection rejection.
+- [x] Run affected tests, build and generated parity; record the architectural choice in an ADR and update its index. Commit source and generated outputs together.
 
 ## Task 4: Finish read repository extraction and remove redundant reads
 

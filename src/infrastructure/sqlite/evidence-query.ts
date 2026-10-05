@@ -12,6 +12,7 @@ import { followOnLineageSchema, runEvidenceQuerySchema, runLifecycleSchema, runR
 import { decisionValueSchema } from '../../domain/decision/decision.js';
 import { decodeStoredPayload } from './payload-codecs.js';
 import { z } from 'zod';
+import { evaluationCriteriaSql } from './evaluation-criteria.js';
 
 type EvidenceCursorPayload = {
   kind: 'evidence';
@@ -83,26 +84,9 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         throw new RunStoreError('stale_cursor', 'The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.');
       }
       const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
-      const where: string[] = ['e.run_id = ?', 'e.ordinal <= ?'];
-      const parameters: Array<string | number> = [query.sourceRunId, maxOrdinal];
-      const criteria = query.criteria;
-      if (criteria.respondentId !== undefined) { where.push('e.respondent_id = ?'); parameters.push(criteria.respondentId); }
-      if (criteria.status !== undefined) { where.push('e.status = ?'); parameters.push(criteria.status); }
-      if (criteria.questionId !== undefined) { where.push('e.question_id = ?'); parameters.push(criteria.questionId); }
-      if (criteria.materialId !== undefined) {
-        where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-        parameters.push(criteria.materialId);
-      }
-      if (criteria.answer?.type === 'choice') {
-        where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
-        parameters.push(criteria.answer.choiceId);
-      } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
-        const field = criteria.answer.type === 'score' ? 'score' : 'noul';
-        const valueExpression = criteria.answer.type === 'score' ? "json_extract(e.result_json, '$.value.score')" : "json_extract(e.result_json, '$.value.noul')";
-        where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>='} ?`);
-        parameters.push(criteria.answer.value);
-      }
-      if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
+      const filters = evaluationCriteriaSql(query.criteria);
+      const where = ['e.run_id = ?', 'e.ordinal <= ?', ...filters.sql];
+      const parameters: Array<string | number> = [query.sourceRunId, maxOrdinal, ...filters.parameters];
       const whereSql = where.join(' AND ');
       const join = 'LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id';
       const evaluationCoverage = {

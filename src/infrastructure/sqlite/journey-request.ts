@@ -1,7 +1,7 @@
 import { RunStoreError } from '../../application/run-store.js';
 import { hashCanonical } from '../identity.js';
 import { runRequestSchema, type ParsedInlineJourneyRequest } from '../../domain/run/request.js';
-import { asText, parseJsonRecord, type DatabaseRow } from './rows.js';
+import { asText, parseJsonRecord } from './rows.js';
 
 export type StoredJourneyIdentity = {
   request: ParsedInlineJourneyRequest;
@@ -9,7 +9,7 @@ export type StoredJourneyIdentity = {
   requestFingerprint: string;
 };
 
-export function storedJourneyIdentity(row: DatabaseRow): StoredJourneyIdentity {
+export function storedJourneyIdentity(row: Record<string, unknown>): StoredJourneyIdentity {
   const stored = parseJsonRecord(row.request_json, 'request');
   if (!('request' in stored) || !('requestFingerprint' in stored) || !('compilerFingerprint' in stored)) {
     throw new RunStoreError('data_integrity_error', 'Stored journey request has an invalid shape.');

@@ -6,7 +6,7 @@ var __export = (target, all) => {
 
 // src/entrypoints/cli.ts
 import { readFile as readFile5 } from "node:fs/promises";
-import path13 from "node:path";
+import path14 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // node_modules/zod/v4/classic/external.js
@@ -825,10 +825,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path14) {
-  if (!path14)
+function getElementAtPath(obj, path15) {
+  if (!path15)
     return obj;
-  return path14.reduce((acc, key) => acc?.[key], obj);
+  return path15.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1168,11 +1168,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path14, issues) {
+function prefixIssues(path15, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path14);
+    iss.path.unshift(path15);
     return iss;
   });
 }
@@ -1622,16 +1622,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path14 = []) => {
+  const processError = (error63, path15 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path14, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else {
-        const fullpath = [...path14, ...issue2.path];
+        const fullpath = [...path15, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1670,17 +1670,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path14 = []) => {
+  const processError = (error63, path15 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path14, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else {
-        const fullpath = [...path14, ...issue2.path];
+        const fullpath = [...path15, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1719,8 +1719,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path14 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path14) {
+  const path15 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path15) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18822,13 +18822,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path14 = ref.slice(1).split("/").filter(Boolean);
-  if (path14.length === 0) {
+  const path15 = ref.slice(1).split("/").filter(Boolean);
+  if (path15.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path14[0] === defsKey) {
-    const key = path14[1] === void 0 ? void 0 : decodeJSONPointerSegment(path14[1]);
+  if (path15[0] === defsKey) {
+    const key = path15[1] === void 0 ? void 0 : decodeJSONPointerSegment(path15[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -22053,10 +22053,10 @@ var WindowsCredentialStore = class {
   }
 };
 function locateHelper() {
-  const moduleDirectory = path4.dirname(fileURLToPath(import.meta.url));
+  const moduleDirectory2 = path4.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path4.join(moduleDirectory, "windows-credential.ps1"),
-    path4.join(moduleDirectory, "credentials", "windows-credential.ps1")
+    path4.join(moduleDirectory2, "windows-credential.ps1"),
+    path4.join(moduleDirectory2, "credentials", "windows-credential.ps1")
   ];
   const helper = candidates.find(existsSync);
   if (!helper) throw new Error("The Windows credential helper is unavailable.");
@@ -24141,7 +24141,7 @@ function processExists(pid) {
 // src/infrastructure/run-store.ts
 import { createHash as createHash11, randomUUID as randomUUID5 } from "node:crypto";
 import { mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
-import path11 from "node:path";
+import path12 from "node:path";
 
 // src/application/run-store.ts
 var RunStoreError = class extends Error {
@@ -25140,7 +25140,7 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
   const objectIds = {};
   const decodes = Array.from({ length: columns.length });
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { field, path: path14, codec: codec2, arrayDimensions } = columns[idx];
+    const { field, path: path15, codec: codec2, arrayDimensions } = columns[idx];
     let decoder;
     let decoderStr;
     let decoderFieldDestructure;
@@ -25168,26 +25168,26 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
     if (codec2) decodedValue = `codec${idx}(${decodedValue}, ${arrayDimensions})`;
     if (decoderStr) decodedValue = `${decoderStr}(${decodedValue})`;
     decodes[idx] = colStr === decodedValue ? `${colStr}` : `${colStr} === null ? ${colStr} : ${decodedValue}`;
-    if (path14.length !== 2 || !isColumn) continue;
-    if (objectIds[path14[0]] === void 0) objectIds[path14[0]] = [`c${idx}`];
-    else objectIds[path14[0]]?.push(`c${idx}`);
-    const [objectName] = path14;
+    if (path15.length !== 2 || !isColumn) continue;
+    if (objectIds[path15[0]] === void 0) objectIds[path15[0]] = [`c${idx}`];
+    else objectIds[path15[0]]?.push(`c${idx}`);
+    const [objectName] = path15;
     const tableName = getTableName(field.table);
     nullifyMap[objectName] = joinsNotNullableMap[tableName] ? false : typeof nullifyMap[objectName] === "string" ? nullifyMap[objectName] === tableName ? tableName : false : tableName;
   }
   fn.push(`mapped[i] = {`);
   let currentObjectPath = [];
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { path: path14 } = columns[idx];
-    const jsonPath = path14.map((e) => JSON.stringify(e));
+    const { path: path15 } = columns[idx];
+    const jsonPath = path15.map((e) => JSON.stringify(e));
     const decodedValue = decodes[idx];
-    const objectPath = path14.slice(0, -1);
+    const objectPath = path15.slice(0, -1);
     let commonLen = 0;
     while (commonLen < currentObjectPath.length && commonLen < objectPath.length && currentObjectPath[commonLen] === objectPath[commonLen]) commonLen++;
     for (let d = currentObjectPath.length - 1; d >= commonLen; --d) fn.push(`${"	".repeat(d + 1)}},`);
-    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path14[0]] === "string" ? `${objectIds[path14[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
+    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path15[0]] === "string" ? `${objectIds[path15[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
     currentObjectPath = objectPath;
-    fn.push(`${"	".repeat(path14.length)}${jsonPath[path14.length - 1]}: ${decodedValue},`);
+    fn.push(`${"	".repeat(path15.length)}${jsonPath[path15.length - 1]}: ${decodedValue},`);
   }
   for (let d = currentObjectPath.length - 1; d >= 0; --d) fn.push(`${"	".repeat(d + 1)}},`);
   fn.push(`};`);
@@ -25224,13 +25224,13 @@ function jitCompatCheck(isEnabled) {
   }
 }
 function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
-  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path14 }) => {
+  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path15 }) => {
     let processNullifyMap;
     let decoderSrc;
     if (is(field, Column)) {
       decoderSrc = field;
-      if (joinsNotNullableMap && path14.length === 2) {
-        const objectName = path14[0];
+      if (joinsNotNullableMap && path15.length === 2) {
+        const objectName = path15[0];
         processNullifyMap = (nullifyMap, value) => {
           if (!(objectName in nullifyMap)) nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
           else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) nullifyMap[objectName] = false;
@@ -25246,9 +25246,9 @@ function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
   });
   return ((rows) => rows.map((row) => {
     const nullifyMap = {};
-    const result = columns.reduce((result2, { path: path14 }, columnIndex) => {
+    const result = columns.reduce((result2, { path: path15 }, columnIndex) => {
       let node2 = result2;
-      for (const [pathChunkIndex, pathChunk] of path14.entries()) if (pathChunkIndex < path14.length - 1) {
+      for (const [pathChunkIndex, pathChunk] of path15.entries()) if (pathChunkIndex < path15.length - 1) {
         if (!(pathChunk in node2)) node2[pathChunk] = {};
         node2 = node2[pathChunk];
       } else {
@@ -29474,6 +29474,44 @@ function loadRunDeletionSnapshot(database, runIds, options2 = {}) {
 
 // src/infrastructure/sqlite/evidence-query.ts
 import { createHash as createHash8 } from "node:crypto";
+
+// src/infrastructure/sqlite/evaluation-criteria.ts
+var numericOperators = { eq: "=", lt: "<", lte: "<=", gt: ">", gte: ">=" };
+function evaluationCriteriaSql(criteria) {
+  const sql2 = [];
+  const parameters = [];
+  if (criteria.respondentId !== void 0) {
+    sql2.push("e.respondent_id = ?");
+    parameters.push(criteria.respondentId);
+  }
+  if (criteria.status !== void 0) {
+    sql2.push("e.status = ?");
+    parameters.push(criteria.status);
+  }
+  if (criteria.questionId !== void 0) {
+    sql2.push("e.question_id = ?");
+    parameters.push(criteria.questionId);
+  }
+  if (criteria.materialId !== void 0) {
+    sql2.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
+    parameters.push(criteria.materialId);
+  }
+  if (criteria.answer?.type === "choice") {
+    sql2.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
+    parameters.push(criteria.answer.choiceId);
+  } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
+    const field = criteria.answer.type;
+    sql2.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND json_extract(e.result_json, '$.value.${field}') ${numericOperators[criteria.answer.operator]} ?`);
+    parameters.push(criteria.answer.value);
+  }
+  if (criteria.outcome !== void 0) {
+    sql2.push("jr.outcome = ?");
+    parameters.push(criteria.outcome);
+  }
+  return { sql: sql2, parameters };
+}
+
+// src/infrastructure/sqlite/evidence-query.ts
 var evidenceCursorSchema = external_exports.object({ kind: external_exports.literal("evidence"), sourceRunId: external_exports.string(), criteriaFingerprint: external_exports.string(), maxOrdinal: external_exports.number().int().min(-1), lastOrdinal: external_exports.number().int().min(-1), sourceStatus: runStatusSchema, lifecycle: runLifecycleSchema, usedCalls: external_exports.number().int().nonnegative(), reservedCalls: external_exports.number().int().nonnegative() }).passthrough();
 function queryEvidencePage(context, input2) {
   context.ensureOpen();
@@ -29516,38 +29554,9 @@ function queryEvidencePage(context, input2) {
       throw new RunStoreError("stale_cursor", "The source run recovery state changed while paging this query. Start a fresh query to see its current evidence.");
     }
     const maxOrdinal = cursor?.maxOrdinal ?? maximumOrdinal;
-    const where = ["e.run_id = ?", "e.ordinal <= ?"];
-    const parameters = [query.sourceRunId, maxOrdinal];
-    const criteria = query.criteria;
-    if (criteria.respondentId !== void 0) {
-      where.push("e.respondent_id = ?");
-      parameters.push(criteria.respondentId);
-    }
-    if (criteria.status !== void 0) {
-      where.push("e.status = ?");
-      parameters.push(criteria.status);
-    }
-    if (criteria.questionId !== void 0) {
-      where.push("e.question_id = ?");
-      parameters.push(criteria.questionId);
-    }
-    if (criteria.materialId !== void 0) {
-      where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-      parameters.push(criteria.materialId);
-    }
-    if (criteria.answer?.type === "choice") {
-      where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
-      parameters.push(criteria.answer.choiceId);
-    } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
-      const field = criteria.answer.type === "score" ? "score" : "noul";
-      const valueExpression = criteria.answer.type === "score" ? "json_extract(e.result_json, '$.value.score')" : "json_extract(e.result_json, '$.value.noul')";
-      where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">="} ?`);
-      parameters.push(criteria.answer.value);
-    }
-    if (criteria.outcome !== void 0) {
-      where.push("jr.outcome = ?");
-      parameters.push(criteria.outcome);
-    }
+    const filters = evaluationCriteriaSql(query.criteria);
+    const where = ["e.run_id = ?", "e.ordinal <= ?", ...filters.sql];
+    const parameters = [query.sourceRunId, maxOrdinal, ...filters.parameters];
     const whereSql = where.join(" AND ");
     const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
     const evaluationCoverage = {
@@ -29758,21 +29767,65 @@ function storedJourneyIdentity(row) {
   return { request: parsedRequest.data, compilerFingerprint, requestFingerprint };
 }
 
+// src/infrastructure/sqlite/query-library.ts
+import { readFileSync } from "node:fs";
+import path9 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+var moduleDirectory = path9.dirname(fileURLToPath2(import.meta.url));
+function createSqliteQuery(name2, parametersSchema, rowsSchema) {
+  const assetPath = path9.join(moduleDirectory, "queries", `${name2}.sql`);
+  let sql2;
+  try {
+    sql2 = readFileSync(assetPath, "utf8");
+  } catch (error62) {
+    throw new RunStoreError("storage_query_unavailable", `The stored query asset ${name2} is unavailable.`, { cause: error62 });
+  }
+  return {
+    all(database, ...parameters) {
+      const boundParameters = parametersSchema.safeParse(parameters);
+      if (!boundParameters.success) throw new RunStoreError("invalid_query", `Parameters for stored query ${name2} are invalid.`, { cause: boundParameters.error });
+      const raw = database.prepare(sql2).all(...boundParameters.data);
+      const decoded = rowsSchema.safeParse(raw);
+      if (!decoded.success) throw new RunStoreError("data_integrity_error", `Rows returned by stored query ${name2} are invalid.`, { cause: decoded.error });
+      return decoded.data;
+    }
+  };
+}
+
 // src/infrastructure/sqlite/journey-queries.ts
+var sqliteInteger = external_exports.union([external_exports.number(), external_exports.bigint()]);
+var journeyTurnRowSchema = external_exports.object({
+  request_json: external_exports.string(),
+  request_fingerprint: external_exports.string(),
+  evaluation_id: external_exports.string(),
+  context_id: external_exports.string(),
+  respondent_id: external_exports.string(),
+  question_id: external_exports.string(),
+  packet_json: external_exports.string(),
+  packet_fingerprint: external_exports.string(),
+  turn_id: external_exports.string(),
+  node_id: external_exports.string(),
+  path_id: external_exports.string(),
+  occurrence: sqliteInteger,
+  ordinal: sqliteInteger,
+  status: external_exports.string(),
+  respondent_status: external_exports.string(),
+  respondent_current_node_id: external_exports.string().nullable(),
+  respondent_current_turn_id: external_exports.string().nullable(),
+  respondent_current_context_id: external_exports.string().nullable(),
+  respondent_revision: sqliteInteger,
+  respondent_events_json: external_exports.string(),
+  respondent_route_json: external_exports.string(),
+  respondent_outcome: external_exports.string().nullable(),
+  next_ordinal: sqliteInteger
+}).passthrough();
+var loadJourneyWorkerTurnQuery = createSqliteQuery(
+  "load-journey-worker-turn",
+  external_exports.tuple([external_exports.string(), external_exports.string(), external_exports.string(), external_exports.string()]),
+  external_exports.array(journeyTurnRowSchema)
+);
 function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
-  const rows = database.prepare(`WITH next_ordinal AS (
-      SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
-    )
-    SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
-      jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
-      jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
-      jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
-      next_ordinal.value AS next_ordinal
-    FROM runs r JOIN evaluations e ON e.run_id = r.run_id
-    JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-    CROSS JOIN next_ordinal
-    WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
-    `).all(runId, runId, evaluationId, respondentId);
+  const rows = loadJourneyWorkerTurnQuery.all(database, runId, runId, evaluationId, respondentId);
   const first = rows[0];
   if (!first) throw new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
   const identity = storedJourneyIdentity(first);
@@ -29850,36 +29903,9 @@ function loadFollowOnSources(database, input2, notFound) {
     )`);
     parameters.push(JSON.stringify(request.selection.references));
   } else {
-    const criteria = request.selection.criteria;
-    if (criteria.respondentId !== void 0) {
-      where.push("e.respondent_id = ?");
-      parameters.push(criteria.respondentId);
-    }
-    if (criteria.status !== void 0) {
-      where.push("e.status = ?");
-      parameters.push(criteria.status);
-    }
-    if (criteria.questionId !== void 0) {
-      where.push("e.question_id = ?");
-      parameters.push(criteria.questionId);
-    }
-    if (criteria.materialId !== void 0) {
-      where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-      parameters.push(criteria.materialId);
-    }
-    if (criteria.answer?.type === "choice") {
-      where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
-      parameters.push(criteria.answer.choiceId);
-    } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
-      const field = criteria.answer.type === "score" ? "score" : "noul";
-      const operator = criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">=";
-      where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND json_extract(e.result_json, '$.value.${field}') ${operator} ?`);
-      parameters.push(criteria.answer.value);
-    }
-    if (criteria.outcome !== void 0) {
-      where.push("jr.outcome = ?");
-      parameters.push(criteria.outcome);
-    }
+    const filters = evaluationCriteriaSql(request.selection.criteria);
+    where.push(...filters.sql);
+    parameters.push(...filters.parameters);
   }
   const rows = database.prepare(`SELECT e.*,
     (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
@@ -30326,8 +30352,8 @@ function drizzle(...params) {
   const { connection, client, ...config2 } = params[0];
   if (client) return construct(client, config2);
   if (typeof connection === "object") {
-    const { path: path14, ...options2 } = connection;
-    return construct(new DatabaseSync(path14 ?? ":memory:", options2), config2);
+    const { path: path15, ...options2 } = connection;
+    return construct(new DatabaseSync(path15 ?? ":memory:", options2), config2);
   }
   return construct(new DatabaseSync(connection ?? ":memory:"), config2);
 }
@@ -30340,9 +30366,9 @@ function drizzle(...params) {
 
 // src/infrastructure/sqlite/schema.ts
 import { createHash as createHash10, randomUUID as randomUUID3 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync, readFileSync, unlinkSync } from "node:fs";
-import path9 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, unlinkSync } from "node:fs";
+import path10 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
 var BASELINE_SCHEMA_VERSION = 9;
 var SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
@@ -30353,8 +30379,8 @@ var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
 function baselineSqlPath() {
   const candidates = [
-    fileURLToPath2(new URL("../../../migrations/0000_baseline_v9/migration.sql", import.meta.url)),
-    fileURLToPath2(new URL("./migrations/0000_baseline_v9/migration.sql", import.meta.url))
+    fileURLToPath3(new URL("../../../migrations/0000_baseline_v9/migration.sql", import.meta.url)),
+    fileURLToPath3(new URL("./migrations/0000_baseline_v9/migration.sql", import.meta.url))
   ];
   const match = candidates.find(existsSync2);
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 9 migration asset is missing from this Sheg installation.");
@@ -30365,7 +30391,7 @@ function baselineMigration() {
     id: BASELINE_MIGRATION_ID,
     fromVersion: 0,
     toVersion: BASELINE_SCHEMA_VERSION,
-    sql: readFileSync(baselineSqlPath(), "utf8")
+    sql: readFileSync2(baselineSqlPath(), "utf8")
   };
 }
 function registeredMigrations() {
@@ -30476,9 +30502,9 @@ function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   }
 }
 function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
-  const backupRoot = path9.join(dataRoot, "backups");
+  const backupRoot = path10.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path9.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
+  const backupPath = path10.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -30665,11 +30691,11 @@ function openSqliteConnection(databasePath, dataRoot) {
 // src/infrastructure/sqlite/recovery.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync, renameSync, statSync, unlinkSync as unlinkSync2 } from "node:fs";
-import path10 from "node:path";
+import path11 from "node:path";
 import { DatabaseSync as DatabaseSync3 } from "node:sqlite";
 function inspectRunStoreCompatibility(dataRoot) {
-  if (!path10.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
-  const databasePath = path10.join(dataRoot, "runs.sqlite");
+  if (!path11.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
+  const databasePath = path11.join(dataRoot, "runs.sqlite");
   if (!existsSync3(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
   let database;
   try {
@@ -30693,7 +30719,7 @@ function inspectRunStoreCompatibility(dataRoot) {
   }
 }
 function runStoreBackupAvailable(dataRoot) {
-  const backupRoot = path10.join(dataRoot, "backups");
+  const backupRoot = path11.join(dataRoot, "backups");
   if (!existsSync3(backupRoot)) return false;
   try {
     return readdirSync(backupRoot).some((name2) => name2.startsWith("runs-schema-") && name2.endsWith(".sqlite"));
@@ -30702,8 +30728,8 @@ function runStoreBackupAvailable(dataRoot) {
   }
 }
 function resetRunStore(dataRoot, openFreshStore) {
-  if (!path10.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
-  const databasePath = path10.join(dataRoot, "runs.sqlite");
+  if (!path11.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  const databasePath = path11.join(dataRoot, "runs.sqlite");
   let inspectionDatabase;
   let version2;
   try {
@@ -30725,14 +30751,14 @@ function resetRunStore(dataRoot, openFreshStore) {
     throw new RunStoreError("recovery_backup_failed", "Sheg could not verify a recoverable datastore backup; the original files were left untouched.", { cause: error62 });
   }
   database.close();
-  const recoveryRoot = path10.join(dataRoot, "recovery", randomUUID4());
+  const recoveryRoot = path11.join(dataRoot, "recovery", randomUUID4());
   mkdirSync2(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
   try {
     for (const original of files) {
       if (!existsSync3(original)) continue;
-      const archived = path10.join(recoveryRoot, path10.basename(original));
+      const archived = path11.join(recoveryRoot, path11.basename(original));
       renameSync(original, archived);
       moved.push({ original, archived });
     }
@@ -30757,7 +30783,7 @@ function resetRunStore(dataRoot, openFreshStore) {
 }
 function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
   if (!existsSync3(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
-  const recoveryRoot = path10.join(dataRoot, "recovery", randomUUID4());
+  const recoveryRoot = path11.join(dataRoot, "recovery", randomUUID4());
   mkdirSync2(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
@@ -30765,7 +30791,7 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
     for (const original of files) {
       if (!existsSync3(original)) continue;
       const size = statSync(original).size;
-      const archived = path10.join(recoveryRoot, path10.basename(original));
+      const archived = path11.join(recoveryRoot, path11.basename(original));
       renameSync(original, archived);
       if (statSync(archived).size !== size) throw new Error("Quarantined datastore file size changed.");
       moved.push({ original, archived, size });
@@ -30790,6 +30816,27 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
 }
 
 // src/infrastructure/run-store.ts
+var sqliteInteger2 = external_exports.union([external_exports.number(), external_exports.bigint()]);
+var sqliteFlag = external_exports.union([external_exports.number(), external_exports.bigint(), external_exports.boolean()]);
+var runStatusRowSchema = external_exports.object({
+  run_id: external_exports.string(),
+  status: external_exports.string(),
+  created_at: external_exports.string(),
+  request_json: external_exports.string(),
+  evaluation_count: sqliteInteger2,
+  used_calls: sqliteInteger2,
+  reserved_calls: sqliteInteger2,
+  cancel_requested: sqliteFlag,
+  failure_scope: external_exports.string().nullable(),
+  failure_code: external_exports.string().nullable(),
+  failure_message: external_exports.string().nullable(),
+  completed_evaluations: sqliteInteger2,
+  failed_evaluations: sqliteInteger2,
+  pending_evaluations: sqliteInteger2,
+  retryable_shared_failure: sqliteFlag,
+  retryable_journey_failure: sqliteFlag
+}).passthrough();
+var readRunStatusViewsQuery = createSqliteQuery("read-run-status-views", external_exports.tuple([external_exports.string()]), external_exports.array(runStatusRowSchema));
 var preparedRunRecordSchema = external_exports.object({
   request: external_exports.union([inlineRunRequestSchema, followOnRunRequestSchema]),
   requestFingerprint: external_exports.string().min(1),
@@ -30985,10 +31032,10 @@ function validatePreparedJourney(prepared) {
   return { ...prepared, request: parsedRequest.data };
 }
 function openRunStore(dataRoot, options2 = {}) {
-  if (!path11.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  if (!path12.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync3(dataRoot, { recursive: true });
-  const connection = openSqliteConnection(path11.join(dataRoot, "runs.sqlite"), dataRoot);
-  return new SQLiteRunStore(connection, path11.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+  const connection = openSqliteConnection(path12.join(dataRoot, "runs.sqlite"), dataRoot);
+  return new SQLiteRunStore(connection, path12.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 function openRunPersistence(dataRoot, options2 = {}) {
   return splitRunStore(openRunStore(dataRoot, options2));
@@ -31926,26 +31973,7 @@ var SQLiteRunStore = class {
   }
   statusesInside(runIds) {
     if (runIds.length === 0) return [];
-    const rows = this.database.prepare(`SELECT r.*,
-      (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'answered') AS completed_evaluations,
-      (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed') AS failed_evaluations,
-      (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'pending') AS pending_evaluations,
-      EXISTS (SELECT 1 FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
-        JOIN evaluations e ON e.run_id = a.run_id AND e.evaluation_id = ae.evaluation_id
-        WHERE a.run_id = r.run_id AND a.status = 'failed' AND a.failure_scope = 'run' AND e.status = 'failed'
-          AND a.attempt_sequence = (SELECT MAX(latest.attempt_sequence) FROM attempts latest WHERE latest.run_id = r.run_id AND latest.status = 'failed' AND latest.failure_scope = 'run')) AS retryable_shared_failure,
-      (EXISTS (SELECT 1 FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-          WHERE e.run_id = r.run_id AND e.status = 'failed' AND jr.status = 'failed') AND
-       NOT EXISTS (SELECT 1 FROM evaluations e LEFT JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-          WHERE e.run_id = r.run_id AND e.status = 'failed' AND (jr.respondent_id IS NULL OR jr.status <> 'failed' OR
-            e.turn_id IS NULL OR length(trim(e.turn_id)) = 0 OR e.node_id IS NULL OR length(trim(e.node_id)) = 0 OR
-            e.path_id IS NULL OR length(trim(e.path_id)) = 0 OR e.occurrence IS NULL OR e.occurrence < 1 OR
-            length(trim(e.packet_json)) = 0 OR length(trim(e.packet_fingerprint)) = 0)) AND
-       NOT EXISTS (SELECT e.respondent_id FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed'
-          GROUP BY e.respondent_id HAVING COUNT(*) <> 1) AND
-       NOT EXISTS (SELECT 1 FROM journey_respondents jr WHERE jr.run_id = r.run_id AND jr.status = 'failed' AND
-          (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = jr.run_id AND e.respondent_id = jr.respondent_id AND e.status = 'failed') <> 1)) AS retryable_journey_failure
-      FROM runs r WHERE r.run_id IN (${runIds.map(() => "?").join(", ")}) ORDER BY r.created_ms, r.run_id`).all(...runIds);
+    const rows = readRunStatusViewsQuery.all(this.database, JSON.stringify(runIds));
     return rows.map((row) => {
       const stored = parseJsonRecord(row.request_json, "run request");
       const request = runRequestSchema.safeParse(stored.request);
@@ -32056,9 +32084,9 @@ function resetRunStore2(dataRoot) {
 
 // src/infrastructure/worker-launcher.ts
 import { spawn } from "node:child_process";
-import path12 from "node:path";
+import path13 from "node:path";
 var DetachedWorkerLauncher = class {
-  constructor(workerPath = path12.join(path12.dirname(path12.resolve(process.argv[1] ?? process.execPath)), "worker.js")) {
+  constructor(workerPath = path13.join(path13.dirname(path13.resolve(process.argv[1] ?? process.execPath)), "worker.js")) {
     this.workerPath = workerPath;
   }
   workerPath;
@@ -32214,7 +32242,7 @@ async function runCli(args, io = outputIo, service) {
       const mode = options2.mode ?? "frozen-cohort";
       if (mode !== "frozen-cohort" && mode !== "maximum-profile") throw new CliInputError("Preflight mode must be frozen-cohort or maximum-profile.");
       const providers = await readJson(required2(options2, "providers"));
-      const result = await preflightStudy({ manifestPath: path13.resolve(required2(options2, "manifest")), ...options2.cohort === void 0 ? {} : { cohortPath: path13.resolve(options2.cohort) }, mode, providers });
+      const result = await preflightStudy({ manifestPath: path14.resolve(required2(options2, "manifest")), ...options2.cohort === void 0 ? {} : { cohortPath: path14.resolve(options2.cohort) }, mode, providers });
       io.out(JSON.stringify(result));
       return 0;
     }
@@ -32228,7 +32256,7 @@ async function runCli(args, io = outputIo, service) {
       io.out(JSON.stringify(result));
       return 0;
     }
-    const runtime = createRunRuntime(options2["data-root"] === void 0 ? void 0 : path13.resolve(options2["data-root"]), service);
+    const runtime = createRunRuntime(options2["data-root"] === void 0 ? void 0 : path14.resolve(options2["data-root"]), service);
     try {
       const result = await durableOperation(command ?? "", options2, runtime.service, runtime.storage);
       io.out(JSON.stringify(result));
@@ -32274,7 +32302,7 @@ async function readRequest(options2) {
 }
 async function readJson(file2) {
   try {
-    return JSON.parse(await readFile5(path13.resolve(file2), "utf8"));
+    return JSON.parse(await readFile5(path14.resolve(file2), "utf8"));
   } catch {
     throw new CliInputError("The specified JSON file is missing or invalid.");
   }
@@ -32284,8 +32312,8 @@ function uuid3(value) {
   return value;
 }
 async function trace(options2) {
-  const manifestPath = path13.resolve(required2(options2, "manifest"));
-  const cohortPath = path13.resolve(required2(options2, "cohort"));
+  const manifestPath = path14.resolve(required2(options2, "manifest"));
+  const cohortPath = path14.resolve(required2(options2, "cohort"));
   const study = await loadStudy(manifestPath, cohortPath);
   const respondentId = required2(options2, "respondent");
   const profile = study.respondents.find((respondent) => respondent.id === respondentId);
@@ -32374,7 +32402,7 @@ Commands:
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
   legacy-report --output <dir> --run-id <uuid>  Read a pre-release file-backed report without modifying it
   Use --data-root <dir> with durable commands to select the datastore.`;
-if (process.argv[1] && import.meta.url === pathToFileURL(path13.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));
+if (process.argv[1] && import.meta.url === pathToFileURL(path14.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));
 export {
   runCli
 };

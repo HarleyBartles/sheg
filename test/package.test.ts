@@ -42,6 +42,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   await assertSkillLinksResolve(path.join(plugin, 'skills/study-design'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
   assert.equal(await exists(path.join(plugin, 'dist/migrations/0000_baseline_v9/migration.sql')), true);
+  assert.equal(await exists(path.join(plugin, 'dist/queries/load-journey-worker-turn.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/drizzle-orm-Apache-2.0.txt')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/THIRD-PARTY-NOTICES.md')), true);
   const credentialHelper = path.join(plugin, 'dist/credentials/windows-credential.ps1');
