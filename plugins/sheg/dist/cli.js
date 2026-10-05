@@ -5,8 +5,8 @@ var __export = (target, all) => {
 };
 
 // src/entrypoints/cli.ts
-import { readFile as readFile5 } from "node:fs/promises";
-import path14 from "node:path";
+import { readFile as readFile4 } from "node:fs/promises";
+import path12 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // node_modules/zod/v4/classic/external.js
@@ -825,10 +825,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path15) {
-  if (!path15)
+function getElementAtPath(obj, path13) {
+  if (!path13)
     return obj;
-  return path15.reduce((acc, key) => acc?.[key], obj);
+  return path13.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1168,11 +1168,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path15, issues) {
+function prefixIssues(path13, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path15);
+    iss.path.unshift(path13);
     return iss;
   });
 }
@@ -1622,16 +1622,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path15 = []) => {
+  const processError = (error63, path13 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path13, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path13, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1670,17 +1670,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path15 = []) => {
+  const processError = (error63, path13 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path13, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path13, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1719,8 +1719,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path15 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path15) {
+  const path13 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path13) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18822,13 +18822,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path15 = ref.slice(1).split("/").filter(Boolean);
-  if (path15.length === 0) {
+  const path13 = ref.slice(1).split("/").filter(Boolean);
+  if (path13.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path15[0] === defsKey) {
-    const key = path15[1] === void 0 ? void 0 : decodeJSONPointerSegment(path15[1]);
+  if (path13[0] === defsKey) {
+    const key = path13[1] === void 0 ? void 0 : decodeJSONPointerSegment(path13[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -19911,7 +19911,6 @@ var promptContract = {
   otherArmsExcluded: true,
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
-var legacyPromptContractHash = "c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044";
 var v6PromptContractHash = "a39d72d1ba77b0560dac5b7ccedf07b72e80b9d7bc1330679acd9c209e831526";
 function finishTrajectory(body) {
   let payloadUtf8Bytes = 0;
@@ -20727,870 +20726,8 @@ async function loadStudy(manifestPath, cohortPath, options2 = {}) {
   };
 }
 
-// src/application/legacy/reports.ts
-import { createHash as createHash4 } from "node:crypto";
-import path3 from "node:path";
-
-// src/infrastructure/legacy/run-archive.ts
-import { readFile as readFile2, readdir } from "node:fs/promises";
-import path2 from "node:path";
-
-// src/providers/jev/config.ts
-var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
-var routeDefaults = {
-  openrouter: {
-    model: "typesafe/jev-1.13",
-    endpoint: "https://openrouter.ai/api/alpha/decisions"
-  },
-  typesafe: {
-    model: "jev-latest",
-    endpoint: "https://api.typesafe.ai/v1/systemone"
-  }
-};
-var jevConfigInputSchema = external_exports.object({
-  kind: external_exports.literal("jev"),
-  route: jevRouteSchema.optional(),
-  model: external_exports.string().min(1).optional(),
-  endpoint: external_exports.string().url().optional(),
-  timeoutMs: external_exports.number().int().positive().optional()
-}).strict().superRefine((input2, context) => {
-  if (input2.endpoint === void 0) return;
-  let endpoint;
-  try {
-    endpoint = new URL(input2.endpoint);
-  } catch {
-    return;
-  }
-  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
-  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
-    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
-  }
-});
-var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
-  const route = input2.route ?? "openrouter";
-  const defaults = routeDefaults[route];
-  return {
-    kind: "jev",
-    route,
-    model: input2.model ?? defaults.model,
-    endpoint: input2.endpoint ?? defaults.endpoint,
-    timeoutMs: input2.timeoutMs ?? 3e4
-  };
-});
-
-// src/providers/config.ts
-var layaConfigSchema = external_exports.object({
-  kind: external_exports.literal(providerKinds[1]),
-  baseUrl: external_exports.string().url(),
-  checkpoint: external_exports.string().min(1),
-  contextLimit: external_exports.number().int().positive(),
-  headLimit: external_exports.number().int().positive(),
-  tokenizerJsonPath: external_exports.string().min(1),
-  tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  precision: external_exports.string().min(1).optional(),
-  timeoutMs: external_exports.number().int().positive()
-}).strict();
-var providerConfigSchema = external_exports.union([
-  jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
-  layaConfigSchema
-]);
-
-// src/infrastructure/identity.ts
-import { createHash as createHash3 } from "node:crypto";
-function stimulusFingerprint(study, cohort, promptContractHash2) {
-  if (!promptContractHash2) throw new TypeError("Prompt contract hash is required.");
-  return hashCanonical({ version: 1, study, cohort, promptContractHash: promptContractHash2 });
-}
-function legacyChoiceStimulusFingerprint(study, cohort, promptHash) {
-  const legacyStudy = { ...study, arms: study.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task) => {
-    const legacyTask = { ...task };
-    delete legacyTask.type;
-    return legacyTask;
-  }) })) };
-  return hashCanonical({ version: 1, study: legacyStudy, cohort, promptContractHash: promptHash });
-}
-function executionFingerprint(stimulus, provider) {
-  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
-  let decisionSettings;
-  if (provider.kind === "jev") {
-    decisionSettings = {
-      kind: provider.kind,
-      route: provider.route ?? "openrouter",
-      model: requireText(provider.model, "Jev model"),
-      ...provider.endpoint === void 0 ? {} : { endpoint: provider.endpoint }
-    };
-  } else {
-    decisionSettings = {
-      kind: provider.kind,
-      checkpoint: requireText(provider.checkpoint, "Laya checkpoint"),
-      contextLimit: requirePositiveInteger(provider.contextLimit, "Laya context limit"),
-      headLimit: requirePositiveInteger(provider.headLimit, "Laya head limit"),
-      tokenizerSha256: requireText(provider.tokenizerSha256, "Laya tokenizer SHA-256"),
-      ...provider.precision === void 0 ? {} : { precision: provider.precision }
-    };
-  }
-  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
-}
-function legacyExecutionFingerprint(stimulus, provider) {
-  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
-  const decisionSettings = provider.kind === "jev" ? { kind: provider.kind, model: requireText(provider.model, "Jev model"), ...provider.endpoint === void 0 ? {} : { endpoint: provider.endpoint } } : { kind: provider.kind, checkpoint: requireText(provider.checkpoint, "Laya checkpoint"), contextLimit: requirePositiveInteger(provider.contextLimit, "Laya context limit"), headLimit: requirePositiveInteger(provider.headLimit, "Laya head limit"), tokenizerSha256: requireText(provider.tokenizerSha256, "Laya tokenizer SHA-256"), ...provider.precision === void 0 ? {} : { precision: provider.precision } };
-  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
-}
-function respondentCohortFingerprint(cohort) {
-  return hashCanonical({ version: 2, archetypes: cohort.archetypes, respondents: cohort.respondents });
-}
-function hashCanonical(value) {
-  return createHash3("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
-}
-function canonicalize(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("Fingerprint input contains a nonfinite number.");
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (typeof value === "object") {
-    const object2 = value;
-    return Object.fromEntries(Object.keys(object2).sort().map((key) => {
-      if (object2[key] === void 0) throw new TypeError(`Fingerprint input contains undefined at ${key}.`);
-      return [key, canonicalize(object2[key])];
-    }));
-  }
-  throw new TypeError("Fingerprint input must contain only JSON values.");
-}
-function requireText(value, label) {
-  if (!value.trim()) throw new TypeError(`${label} is required.`);
-  return value;
-}
-function requirePositiveInteger(value, label) {
-  if (!Number.isInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer.`);
-  return value;
-}
-
-// src/infrastructure/legacy/run-archive.ts
-var journeyResultSchema = external_exports.object({
-  events: external_exports.array(external_exports.discriminatedUnion("type", [
-    external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), itemId: external_exports.string() }).strict(),
-    external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), choice: external_exports.string() }).strict(),
-    external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string(), taskId: external_exports.string(), result: decisionValueSchema }).strict()
-  ])),
-  outcome: external_exports.string().nullable(),
-  status: external_exports.enum(["completed", "decision-limit"]),
-  decisionCount: external_exports.number().int().nonnegative()
-}).strict();
-var attemptSnapshotSchema = external_exports.object({
-  maxCalls: external_exports.number().int().positive(),
-  usedCalls: external_exports.number().int().nonnegative(),
-  reservedCalls: external_exports.number().int().nonnegative(),
-  remainingCalls: external_exports.number().int().nonnegative()
-}).strict().superRefine((snapshot, context) => {
-  if (snapshot.usedCalls + snapshot.reservedCalls > snapshot.maxCalls || snapshot.remainingCalls !== snapshot.maxCalls - snapshot.usedCalls - snapshot.reservedCalls) {
-    context.addIssue({ code: "custom", message: "Attempt allowance counters must exactly account for maxCalls." });
-  }
-});
-var contextFailureSchema = external_exports.object({
-  decisionId: external_exports.string().min(1),
-  nodeId: external_exports.string().min(1),
-  reason: external_exports.string().min(1),
-  tokens: external_exports.number().int().nonnegative(),
-  effectiveLimit: external_exports.number().int().nonnegative(),
-  measurementMethod: external_exports.string().min(1)
-}).strict();
-var interruptionEvidenceSchema = external_exports.object({
-  attempts: external_exports.number().int().positive(),
-  candidateCellIds: external_exports.array(external_exports.string().min(1)),
-  recoveredAt: external_exports.string().datetime()
-}).strict();
-var runCheckpointSchema = external_exports.object({
-  formatVersion: external_exports.literal(4),
-  migratedFromFormatVersion: external_exports.union([external_exports.literal(2), external_exports.literal(3)]).optional(),
-  runId: external_exports.string().uuid(),
-  status: external_exports.enum(["prepared", "running", "completed", "partial", "failed", "cancelled"]),
-  createdAt: external_exports.string().datetime(),
-  updatedAt: external_exports.string().datetime(),
-  manifestPath: external_exports.string().min(1),
-  cohortPath: external_exports.string().min(1),
-  outputDirectory: external_exports.string().min(1),
-  provider: providerConfigSchema,
-  maxCalls: external_exports.number().int().positive(),
-  concurrency: external_exports.number().int().positive(),
-  stimulusFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  executionFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  sourceHashes: external_exports.array(external_exports.string().regex(/^[a-f\d]{64}$/i)),
-  respondentIds: external_exports.array(external_exports.string().min(1)),
-  journeys: external_exports.array(external_exports.object({
-    armId: external_exports.string().min(1),
-    respondentId: external_exports.string().min(1),
-    status: external_exports.enum(["completed", "failed", "partial"]),
-    result: journeyResultSchema.optional(),
-    decisions: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
-    attemptHistory: external_exports.array(external_exports.object({ decisionId: external_exports.string().min(1), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), result: decisionResultSchema }).strict()),
-    presentedTaskIds: external_exports.array(external_exports.string().min(1)),
-    failureKind: external_exports.enum(["provider", "journey", "unsupported-input"]).optional(),
-    failedAttempts: external_exports.number().int().nonnegative().optional(),
-    failureEvidence: contextFailureSchema.optional()
-  }).strict()),
-  interruptions: external_exports.array(interruptionEvidenceSchema).optional(),
-  activeCellIds: external_exports.array(external_exports.string().min(1)),
-  cancellationRequested: external_exports.boolean(),
-  budget: attemptSnapshotSchema
-}).strict().superRefine((checkpoint, context) => {
-  if (checkpoint.sourceHashes.some((hash2) => hash2.length !== 64)) {
-    context.addIssue({ code: "custom", path: ["sourceHashes"], message: "Source hashes must be SHA-256 values." });
-  }
-  const cellIds = checkpoint.journeys.map((journey) => `${journey.armId}\0${journey.respondentId}`);
-  if (new Set(checkpoint.respondentIds).size !== checkpoint.respondentIds.length || new Set(cellIds).size !== cellIds.length) {
-    context.addIssue({ code: "custom", path: ["respondentIds"], message: "Checkpoint respondent IDs and arm/respondent cells must be unique." });
-  }
-});
-var legacyBudgetSchema = external_exports.object({
-  maxCalls: external_exports.number().int().positive(),
-  maxUsd: external_exports.number().finite().nonnegative().optional(),
-  usedCalls: external_exports.number().int().nonnegative(),
-  reservedCalls: external_exports.number().int().nonnegative(),
-  remainingCalls: external_exports.number().int().nonnegative(),
-  billedUsd: external_exports.number().finite().nonnegative(),
-  reservedUsd: external_exports.number().finite().nonnegative(),
-  unpricedReservations: external_exports.number().int().nonnegative(),
-  overspendUsd: external_exports.number().finite().nonnegative(),
-  blocked: external_exports.boolean()
-}).strict();
-function normalizeLegacyShape(value) {
-  if (!isRecord(value) || value.formatVersion !== 2 && value.formatVersion !== 3) return null;
-  const legacyVersion = value.formatVersion;
-  const budget = legacyBudgetSchema.parse(value.budget);
-  if (budget.maxCalls !== value.maxCalls || budget.usedCalls + budget.reservedCalls + budget.remainingCalls !== budget.maxCalls || budget.usedCalls + budget.reservedCalls > budget.maxCalls) throw new Error("Legacy call counters do not account for maxCalls.");
-  if (value.maxUsd !== void 0 && (!Number.isFinite(value.maxUsd) || Number(value.maxUsd) < 0)) throw new Error("Legacy run spend limit is invalid.");
-  if (value.maxPerCallUsd !== void 0 && (!Number.isFinite(value.maxPerCallUsd) || Number(value.maxPerCallUsd) <= 0)) throw new Error("Legacy per-call spend limit is invalid.");
-  const migrated = structuredClone(value);
-  migrated.formatVersion = 4;
-  migrated.migratedFromFormatVersion = legacyVersion;
-  delete migrated.maxUsd;
-  delete migrated.maxPerCallUsd;
-  migrated.provider = normalizeLegacyProvider(migrated.provider);
-  if (budget.reservedCalls > 0) migrated.interruptions = [{
-    attempts: budget.reservedCalls,
-    candidateCellIds: Array.isArray(migrated.activeCellIds) ? migrated.activeCellIds : [],
-    recoveredAt: (/* @__PURE__ */ new Date()).toISOString()
-  }];
-  migrated.budget = {
-    maxCalls: budget.maxCalls,
-    usedCalls: budget.usedCalls + budget.reservedCalls,
-    reservedCalls: 0,
-    remainingCalls: budget.maxCalls - budget.usedCalls - budget.reservedCalls
-  };
-  if (!Array.isArray(migrated.journeys)) throw new Error("Legacy checkpoint journeys are invalid.");
-  migrated.journeys = migrated.journeys.map((rawJourney) => {
-    if (!isRecord(rawJourney)) return rawJourney;
-    const journey = { ...rawJourney };
-    for (const key of ["decisions", "attemptHistory"]) {
-      if (!Array.isArray(journey[key])) continue;
-      journey[key] = journey[key].map((rawDecision) => {
-        if (!isRecord(rawDecision) || !isRecord(rawDecision.result)) return rawDecision;
-        return { ...rawDecision, result: normalizeLegacyDecision(rawDecision.result) };
-      });
-    }
-    if (legacyVersion === 2 && isRecord(journey.result) && Array.isArray(journey.result.events)) {
-      journey.result = { ...journey.result, events: journey.result.events.map((event) => isRecord(event) && event.type === "choice" ? { type: "response", sequence: event.sequence, nodeId: event.nodeId, taskId: event.taskId, result: { type: "choice", choice: event.choice } } : event) };
-    }
-    return journey;
-  });
-  return migrated;
-}
-function normalizeLegacyProvider(value) {
-  if (!isRecord(value) || value.kind !== "jev") return value;
-  if (value.keyEnv !== void 0 && typeof value.keyEnv !== "string") throw new Error("Legacy Jev credential metadata is invalid.");
-  const config2 = { ...value };
-  delete config2.keyEnv;
-  return jevConfigSchema.parse({ ...config2, route: config2.route ?? "openrouter" });
-}
-function normalizeLegacyDecision(value) {
-  const { chargeStatus, chargeUsd, ...result } = value;
-  if (chargeStatus !== void 0 && !["billed", "not_billed", "unknown"].includes(String(chargeStatus))) throw new Error("Legacy charge status is invalid.");
-  if (chargeUsd !== void 0 && (typeof chargeUsd !== "number" || !Number.isFinite(chargeUsd) || chargeUsd < 0)) throw new Error("Legacy charge amount is invalid.");
-  if (chargeStatus === "billed" && chargeUsd !== void 0) result.cost = { amountUsd: chargeUsd, basis: "provider-reported" };
-  return result;
-}
-async function migrateLegacyCheckpoint(checkpoint) {
-  const legacyVersion = checkpoint.migratedFromFormatVersion;
-  if (!legacyVersion) return checkpoint;
-  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  if (study.sources.length !== checkpoint.sourceHashes.length || study.sources.some((source, index2) => source.sha256 !== checkpoint.sourceHashes[index2])) {
-    throw new Error("Study source hashes changed since the legacy run was prepared.");
-  }
-  const oldStimulus = legacyVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  const providerIdentity = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
-  if (oldStimulus !== checkpoint.stimulusFingerprint || legacyExecutionFingerprint(oldStimulus, providerIdentity) !== checkpoint.executionFingerprint) {
-    throw new Error("Legacy study or provider identity changed since the run was prepared.");
-  }
-  const nextStimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  return runCheckpointSchema.parse({
-    ...checkpoint,
-    stimulusFingerprint: nextStimulus,
-    executionFingerprint: executionFingerprint(nextStimulus, providerIdentity),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  });
-}
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-var LegacyRunArchiveReader = class {
-  constructor(directory) {
-    this.directory = directory;
-  }
-  directory;
-  async read(runId) {
-    const initial = await this.readValue(runId);
-    const current = runCheckpointSchema.safeParse(initial);
-    if (current.success) return current.data;
-    return this.readCurrentOrMigrate(runId, initial);
-  }
-  async list() {
-    let names;
-    try {
-      names = await readdir(this.directory);
-    } catch (error62) {
-      if (error62.code === "ENOENT") return [];
-      throw error62;
-    }
-    const files = names.filter((name2) => /^run-[0-9a-f-]+\.json$/i.test(name2)).sort();
-    const checkpoints = [];
-    for (const filename of files) checkpoints.push(await this.read(filename.slice(4, -5)));
-    return checkpoints;
-  }
-  filePath(runId) {
-    if (!external_exports.string().uuid().safeParse(runId).success) throw new TypeError("Run ID must be a UUID.");
-    return path2.join(this.directory, `run-${runId}.json`);
-  }
-  async readCurrentOrMigrate(runId, value) {
-    const current = runCheckpointSchema.safeParse(value);
-    if (current.success) return current.data;
-    const legacyShape = normalizeLegacyShape(value);
-    if (!legacyShape) throw new Error(`Run checkpoint ${runId} failed validation.`, { cause: current.error });
-    let migrated;
-    try {
-      migrated = await migrateLegacyCheckpoint(runCheckpointSchema.parse(legacyShape));
-    } catch (error62) {
-      throw new Error(`Legacy run checkpoint ${runId} failed migration validation.`, { cause: error62 });
-    }
-    return migrated;
-  }
-  async readValue(runId) {
-    let raw;
-    try {
-      raw = await readFile2(this.filePath(runId), "utf8");
-    } catch (error62) {
-      try {
-        raw = await readFile2(`${this.filePath(runId)}.bak`, "utf8");
-      } catch {
-        throw new Error(`Run checkpoint ${runId} is unavailable.`, { cause: error62 });
-      }
-    }
-    try {
-      return JSON.parse(raw);
-    } catch (error62) {
-      throw new Error(`Run checkpoint ${runId} is not valid JSON.`, { cause: error62 });
-    }
-  }
-};
-
-// src/application/legacy/reports.ts
-var responseSchema = external_exports.object({ taskId: external_exports.string(), comparisonKey: external_exports.string().nullable(), occurrence: external_exports.number().int().positive(), presentationOccurrence: external_exports.number().int().positive(), requestFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i), answer: decisionValueSchema, optionIds: external_exports.array(external_exports.string()), choice: external_exports.string().optional(), correct: external_exports.boolean().nullable(), attempts: external_exports.number().int(), latencyMs: external_exports.number().nonnegative(), confidence: external_exports.number().nullable(), cost: external_exports.object({ amountUsd: external_exports.number().nonnegative(), basis: external_exports.enum(["provider-reported", "published-rate-estimate"]) }).strict().nullable() }).strict();
-var pollingReportSchema = external_exports.object({
-  formatVersion: external_exports.literal(4),
-  runId: external_exports.string().uuid(),
-  status: external_exports.string(),
-  stimulusFingerprint: external_exports.string(),
-  executionFingerprint: external_exports.string(),
-  cohortFingerprint: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  provider: external_exports.object({ kind: external_exports.enum(["jev", "laya"]), model: external_exports.string().nullable(), checkpoint: external_exports.string().nullable(), route: external_exports.enum(["openrouter", "typesafe"]).nullable(), endpoint: external_exports.string().url().nullable() }).strict(),
-  cohortSize: external_exports.number().int().nonnegative(),
-  arms: external_exports.array(external_exports.object({
-    id: external_exports.string(),
-    label: external_exports.string(),
-    denominator: external_exports.object({ intended: external_exports.number().int(), started: external_exports.number().int(), completed: external_exports.number().int(), excluded: external_exports.number().int(), excludedByStatus: external_exports.record(external_exports.string(), external_exports.number().int()) }).strict(),
-    fingerprint: external_exports.string(),
-    presentation: external_exports.unknown(),
-    sources: external_exports.array(external_exports.object({ path: external_exports.string(), sha256: external_exports.string() }).strict()),
-    stimulusItems: external_exports.array(external_exports.object({ id: external_exports.string(), text: external_exports.string() }).strict()),
-    tasks: external_exports.array(external_exports.object({ id: external_exports.string(), type: external_exports.enum(["choice", "score", "noul"]).optional(), comparisonKey: external_exports.string().nullable(), instructions: external_exports.string(), options: external_exports.record(external_exports.string(), external_exports.string()).optional(), rubric: external_exports.array(external_exports.string()).optional(), criteria: external_exports.object({ true: external_exports.string().optional(), false: external_exports.string().optional() }).nullable().optional(), responseHistory: external_exports.enum(["include", "omit"]).optional() }).strict()),
-    taskResponses: external_exports.record(external_exports.string(), external_exports.object({ occurrences: external_exports.array(external_exports.object({ occurrence: external_exports.number().int().positive(), type: external_exports.enum(["choice", "score", "noul"]).optional(), reached: external_exports.number().int(), completed: external_exports.number().int(), incomplete: external_exports.number().int(), notReached: external_exports.number().int(), correct: external_exports.number().int(), incorrect: external_exports.number().int(), unscored: external_exports.number().int(), options: external_exports.record(external_exports.string(), external_exports.object({ count: external_exports.number().int(), proportion: external_exports.number().min(0).max(1) }).strict()), meanScore: external_exports.number().finite().optional(), rubricProbabilities: external_exports.record(external_exports.string(), external_exports.number().min(0).max(1)).optional(), meanProbabilityTrue: external_exports.number().min(0).max(1).optional() }).strict()) }).strict()),
-    journeys: external_exports.array(external_exports.object({ respondentId: external_exports.string(), archetypeId: external_exports.string().nullable(), variation: external_exports.record(external_exports.string(), external_exports.string()).optional(), status: external_exports.string(), outcome: external_exports.string().nullable(), presentedTaskIds: external_exports.array(external_exports.string()), events: external_exports.array(external_exports.unknown()), responses: external_exports.array(responseSchema), failedAttempts: external_exports.number().int().nonnegative(), failureEvidence: contextFailureSchema.optional() }).strict())
-  }).strict()),
-  providerEvidence: external_exports.object({ interruptions: external_exports.array(interruptionEvidenceSchema), attempts: external_exports.number().int(), maxCalls: external_exports.number().int().positive(), reservedCalls: external_exports.number().int().nonnegative(), remainingCalls: external_exports.number().int().nonnegative(), failedCells: external_exports.number().int() }).strict()
-}).strict();
-function reconstructPartialEvents(arm, stored) {
-  const events = [];
-  const used = /* @__PURE__ */ new Set();
-  let sequence = 0;
-  const responseFor = (taskId, nodeId) => {
-    const decisionIndex = stored.decisions.findIndex((decision, index2) => !used.has(index2) && decision.decisionId === taskId);
-    if (decisionIndex < 0) {
-      events.push({ type: "pending-response", sequence: sequence++, nodeId, taskId });
-      return null;
-    }
-    used.add(decisionIndex);
-    const result = stored.decisions[decisionIndex].result;
-    const value = decisionValueFromResult(result);
-    events.push({ type: "response", sequence: sequence++, nodeId, taskId, result: value });
-    return stored.decisions[decisionIndex];
-  };
-  const expose = (itemId, nodeId) => {
-    events.push({ type: "exposure", sequence: sequence++, nodeId, itemId });
-  };
-  if (arm.presentation.kind === "sequence") {
-    for (const item of arm.items) expose(item.id, `sequence-expose-${item.id}`);
-    for (const taskId of stored.presentedTaskIds) {
-      if (!responseFor(taskId, `sequence-ask-${taskId}`)) break;
-    }
-    return events;
-  }
-  const graph = arm.presentation;
-  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
-  const presented = stored.presentedTaskIds;
-  let presentedIndex = 0;
-  let current = graph.entryNodeId;
-  for (let steps = 0; steps < graph.nodes.length * 2 && presentedIndex < presented.length; steps += 1) {
-    const node2 = nodes.get(current);
-    if (!node2 || node2.kind === "terminal") break;
-    if (node2.kind === "expose") {
-      expose(node2.itemId, node2.id);
-      current = graph.transitions.find((edge2) => edge2.fromNodeId === node2.id)?.toNodeId ?? "";
-      continue;
-    }
-    if (presented[presentedIndex] !== node2.taskId) break;
-    presentedIndex += 1;
-    const decision = responseFor(node2.taskId, node2.id);
-    if (!decision) {
-      const nextTaskId = presented[presentedIndex];
-      if (!nextTaskId) break;
-      const findPaths = (start, visited = /* @__PURE__ */ new Set()) => {
-        if (visited.has(start)) return [];
-        const candidate = nodes.get(start);
-        if (!candidate) return [];
-        if (candidate.kind === "ask") return candidate.taskId === nextTaskId ? [[start]] : [];
-        if (candidate.kind === "terminal") return [];
-        const nextVisited = new Set(visited).add(start);
-        const paths = [];
-        for (const edge2 of graph.transitions.filter((item) => item.fromNodeId === start)) {
-          for (const found of findPaths(edge2.toNodeId, nextVisited)) {
-            paths.push(candidate.kind === "expose" ? [start, ...found] : found);
-            if (paths.length > 1) return paths;
-          }
-        }
-        return paths;
-      };
-      const candidateEdges = graph.transitions.filter((edge2) => edge2.fromNodeId === node2.id && findPaths(edge2.toNodeId).length === 1);
-      if (candidateEdges.length !== 1) break;
-      current = candidateEdges[0].toNodeId;
-      continue;
-    }
-    const edge = journeyTransitionForResponse(graph, node2.id, decisionValueFromResult(decision.result));
-    if (!edge) break;
-    current = edge.toNodeId;
-  }
-  return events;
-}
-async function buildReport(checkpoint) {
-  checkpoint = runCheckpointSchema.parse(checkpoint);
-  const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
-  const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
-  if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint || study.sources.some((source, index2) => source.sha256 !== checkpoint.sourceHashes[index2]) || study.sources.length !== checkpoint.sourceHashes.length) {
-    throw new Error("Study inputs or provider settings changed since this run was prepared; the report cannot be reproduced.");
-  }
-  const { cohort, manifest } = study;
-  const profiles = new Map(cohort.respondents.map((respondent) => [respondent.id, respondent]));
-  const arms = manifest.arms.map((arm) => {
-    const taskMap = new Map(arm.tasks.map((task) => [task.id, task]));
-    const journeys = cohort.respondents.map((respondent) => {
-      const stored = checkpoint.journeys.find((journey) => journey.armId === arm.id && journey.respondentId === respondent.id);
-      const decisions = stored?.decisions ?? [];
-      const occurrenceByKey = /* @__PURE__ */ new Map();
-      const presentationOccurrenceByTask = /* @__PURE__ */ new Map();
-      const responses = decisions.map((checkpointDecision) => {
-        const { decisionId, result } = checkpointDecision;
-        const task = taskMap.get(decisionId);
-        const key = task?.comparisonKey ?? "";
-        const occurrence = (occurrenceByKey.get(key) ?? 0) + 1;
-        occurrenceByKey.set(key, occurrence);
-        const presentationOccurrence = (presentationOccurrenceByTask.get(decisionId) ?? 0) + 1;
-        presentationOccurrenceByTask.set(decisionId, presentationOccurrence);
-        const choiceTask = task && "options" in task ? task : void 0;
-        const answer = decisionValueFromResult(result);
-        return {
-          taskId: decisionId,
-          comparisonKey: task?.comparisonKey ?? null,
-          occurrence,
-          presentationOccurrence,
-          requestFingerprint: checkpointDecision.requestFingerprint,
-          answer,
-          optionIds: choiceTask ? Object.keys(choiceTask.options) : [],
-          ...result.type === "choice" ? { choice: result.choice } : {},
-          correct: result.type === "choice" && choiceTask?.answerKeyOptionId ? result.choice === choiceTask.answerKeyOptionId : null,
-          attempts: result.attempts,
-          latencyMs: result.latencyMs,
-          confidence: "confidence" in result ? result.confidence ?? null : null,
-          cost: result.cost ?? null
-        };
-      });
-      return {
-        respondentId: respondent.id,
-        failedAttempts: stored?.failedAttempts ?? 0,
-        archetypeId: respondent.archetypeId ?? null,
-        ...respondent.variation === void 0 ? {} : { variation: respondent.variation },
-        status: stored?.status ?? "not-started",
-        outcome: stored?.result?.outcome ?? null,
-        presentedTaskIds: stored?.presentedTaskIds ?? [],
-        events: stored?.result?.events ?? (stored ? reconstructPartialEvents(arm, stored) : []),
-        responses,
-        ...stored?.failureEvidence === void 0 ? {} : { failureEvidence: stored.failureEvidence }
-      };
-    });
-    const excludedByStatus = {};
-    for (const journey of journeys) if (journey.status !== "completed") excludedByStatus[journey.status] = (excludedByStatus[journey.status] ?? 0) + 1;
-    const taskResponses = {};
-    for (const task of arm.tasks) {
-      const occurrenceCount = Math.max(1, ...journeys.map((journey) => journey.responses.filter((response) => response.taskId === task.id).length), ...checkpoint.journeys.filter((journey) => journey.armId === arm.id).map((journey) => journey.presentedTaskIds.filter((taskId) => taskId === task.id).length));
-      const occurrences = Array.from({ length: occurrenceCount }, (_, index2) => {
-        const occurrence = index2 + 1;
-        const reachedJourneys = journeys.filter((journey) => journey.responses.some((response) => response.taskId === task.id && response.presentationOccurrence === occurrence) || (checkpoint.journeys.find((cell) => cell.armId === arm.id && cell.respondentId === journey.respondentId)?.presentedTaskIds.filter((taskId) => taskId === task.id).length ?? 0) >= occurrence);
-        const responses = reachedJourneys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id && response.presentationOccurrence === occurrence));
-        const choiceTask = "options" in task ? task : void 0;
-        const scoreTask = "rubric" in task ? task : void 0;
-        const taskType = choiceTask ? "choice" : scoreTask ? "score" : "noul";
-        const counts = {};
-        for (const response of responses) if (response.answer.type === "choice") counts[response.answer.choice] = (counts[response.answer.choice] ?? 0) + 1;
-        const options2 = Object.fromEntries(Object.keys(choiceTask?.options ?? {}).map((optionId) => {
-          const count2 = counts[optionId] ?? 0;
-          return [optionId, { count: count2, proportion: responses.length ? count2 / responses.length : 0 }];
-        }));
-        const scoreResponses = responses.filter((response) => response.answer.type === "score");
-        const noulResponses = responses.filter((response) => response.answer.type === "noul");
-        const rubricProbabilities = scoreTask ? Object.fromEntries(scoreTask.rubric.map((_meaning, index3) => {
-          const levelId = String(index3);
-          const average = scoreResponses.length ? scoreResponses.reduce((total, response) => total + (response.answer.type === "score" ? response.answer.probabilities[levelId] ?? 0 : 0), 0) / scoreResponses.length : 0;
-          return [levelId, average];
-        })) : void 0;
-        return {
-          occurrence,
-          type: taskType,
-          reached: reachedJourneys.length,
-          completed: responses.length,
-          incomplete: reachedJourneys.length - responses.length,
-          notReached: cohort.respondents.length - reachedJourneys.length,
-          correct: responses.filter((response) => response.correct === true).length,
-          incorrect: responses.filter((response) => response.correct === false).length,
-          unscored: responses.filter((response) => response.correct === null).length,
-          options: options2,
-          ...scoreResponses.length ? { meanScore: scoreResponses.reduce((total, response) => total + (response.answer.type === "score" ? response.answer.score : 0), 0) / scoreResponses.length, rubricProbabilities } : {},
-          ...noulResponses.length ? { meanProbabilityTrue: noulResponses.reduce((total, response) => total + (response.answer.type === "noul" ? response.answer.noul : 0), 0) / noulResponses.length } : {}
-        };
-      });
-      taskResponses[task.id] = { occurrences };
-    }
-    const completed = journeys.filter((journey) => journey.status === "completed").length;
-    const started = checkpoint.journeys.filter((journey) => journey.armId === arm.id).length;
-    const snapshot = { sources: arm.sources, items: arm.items, tasks: arm.tasks, presentation: arm.presentation };
-    const fingerprint = createHash4("sha256").update(JSON.stringify(snapshot)).digest("hex");
-    return { id: arm.id, label: arm.label, fingerprint, presentation: arm.presentation, sources: arm.sources, stimulusItems: arm.items, tasks: arm.tasks.map((task) => ({
-      id: task.id,
-      type: "options" in task ? "choice" : "rubric" in task ? "score" : "noul",
-      comparisonKey: task.comparisonKey ?? null,
-      instructions: task.instructions,
-      ..."options" in task ? { options: task.options } : {},
-      ..."rubric" in task ? { rubric: task.rubric } : {},
-      ..."criteria" in task ? { criteria: task.criteria ?? null } : {},
-      responseHistory: task.responseHistory === "omit" ? "omit" : "include"
-    })), denominator: { intended: cohort.respondents.length, started, completed, excluded: cohort.respondents.length - completed, excludedByStatus }, taskResponses, journeys };
-  });
-  const rawProvider = checkpoint.provider;
-  return pollingReportSchema.parse({
-    formatVersion: 4,
-    runId: checkpoint.runId,
-    status: checkpoint.status,
-    stimulusFingerprint: checkpoint.stimulusFingerprint,
-    executionFingerprint: checkpoint.executionFingerprint,
-    cohortFingerprint: respondentCohortFingerprint(cohort),
-    provider: { kind: rawProvider.kind, model: rawProvider.kind === "jev" ? rawProvider.model : null, checkpoint: rawProvider.kind === "laya" ? rawProvider.checkpoint : null, route: rawProvider.kind === "jev" ? rawProvider.route : null, endpoint: rawProvider.kind === "jev" ? rawProvider.endpoint : null },
-    cohortSize: profiles.size,
-    arms,
-    providerEvidence: {
-      interruptions: checkpoint.interruptions ?? [],
-      attempts: checkpoint.budget.usedCalls,
-      maxCalls: checkpoint.budget.maxCalls,
-      reservedCalls: checkpoint.budget.reservedCalls,
-      remainingCalls: checkpoint.budget.remainingCalls,
-      failedCells: checkpoint.journeys.filter((journey) => journey.status === "failed").length
-    }
-  });
-}
-async function getLegacyReport(outputDirectory, runId) {
-  return buildReport(await new LegacyRunArchiveReader(path3.resolve(outputDirectory)).read(runId));
-}
-function compareReports(report, leftArmId, rightArmId) {
-  if (leftArmId === rightArmId) throw new Error("Choose two distinct arms from the same run.");
-  const left = report.arms.find((arm) => arm.id === leftArmId);
-  const right = report.arms.find((arm) => arm.id === rightArmId);
-  if (!left || !right) throw new Error("Both arm IDs must exist in the same report.");
-  const rightByRespondent = new Map(right.journeys.map((journey) => [journey.respondentId, journey]));
-  const matched = left.journeys.flatMap((journey) => {
-    const other = rightByRespondent.get(journey.respondentId);
-    if (!other) return [];
-    const otherResponses = new Map(other.responses.filter((response) => response.comparisonKey).map((response) => [`${response.comparisonKey}:${response.occurrence}`, response]));
-    const taskComparisons = journey.responses.filter((response) => response.comparisonKey).flatMap((response) => {
-      const counterpart = otherResponses.get(`${response.comparisonKey}:${response.occurrence}`);
-      if (!counterpart) return [];
-      const comparable = equivalentTasks(left, right, response.comparisonKey) && response.answer.type === counterpart.answer.type;
-      const answersMatch = comparable && (response.answer.type === "choice" && counterpart.answer.type === "choice" ? response.answer.choice === counterpart.answer.choice : JSON.stringify(response.answer) === JSON.stringify(counterpart.answer));
-      return [{ comparisonKey: response.comparisonKey, occurrence: response.occurrence, leftAnswer: response.answer, rightAnswer: counterpart.answer, ...response.answer.type === "choice" && counterpart.answer.type === "choice" ? { leftChoice: response.answer.choice, rightChoice: counterpart.answer.choice, agreement: answersMatch } : {}, comparable }];
-    });
-    return [{ respondentId: journey.respondentId, taskComparisons }];
-  });
-  const comparisonKeys = /* @__PURE__ */ new Set([
-    ...[...left.journeys, ...right.journeys].flatMap((journey) => journey.responses.filter((response) => response.comparisonKey).map((response) => `${response.comparisonKey}:${response.occurrence}`)),
-    ...[left, right].flatMap((arm) => arm.tasks.flatMap((task) => task.comparisonKey ? (arm.taskResponses[task.id]?.occurrences ?? []).map((occurrence) => `${task.comparisonKey}:${occurrence.occurrence}`) : []))
-  ]);
-  const leftResponseByCell = indexResponses(left.journeys);
-  const rightResponseByCell = indexResponses(right.journeys);
-  const comparisonRespondentIds = new Set([...left.journeys, ...right.journeys].map((journey) => journey.respondentId));
-  const comparisonTasks = [...comparisonKeys].sort().map((key) => {
-    const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
-    const occurrence = Number(occurrenceText);
-    const optionTransitions = {};
-    const pairedScoreDifferences = [];
-    const pairedNoulDifferences = [];
-    let leftResponses = 0;
-    let rightResponses = 0;
-    let pairedResponses = 0;
-    let comparableResponses = 0;
-    for (const respondentId of comparisonRespondentIds) {
-      const cellKey = `${respondentId}\0${comparisonKey}\0${occurrence}`;
-      const leftResponse = leftResponseByCell.get(cellKey);
-      const rightResponse = rightResponseByCell.get(cellKey);
-      if (leftResponse) leftResponses += 1;
-      if (rightResponse) rightResponses += 1;
-      if (!leftResponse || !rightResponse) continue;
-      pairedResponses += 1;
-      if (!equivalentTasks(left, right, comparisonKey) || leftResponse.answer.type !== rightResponse.answer.type) continue;
-      comparableResponses += 1;
-      accumulateAnswerComparison({ choiceTransitions: optionTransitions, scoreDifferences: pairedScoreDifferences, noulDifferences: pairedNoulDifferences }, leftResponse.answer, rightResponse.answer);
-    }
-    return {
-      comparisonKey,
-      occurrence,
-      leftResponses,
-      rightResponses,
-      pairedResponses,
-      comparableResponses,
-      unpairedResponses: pairedResponses - comparableResponses,
-      leftOnlyResponses: Math.max(0, leftResponses - pairedResponses),
-      rightOnlyResponses: Math.max(0, rightResponses - pairedResponses),
-      optionTransitions,
-      ...pairedScoreDifferences.length ? { meanScoreDifference: pairedScoreDifferences.reduce((sum2, value) => sum2 + value, 0) / pairedScoreDifferences.length } : {},
-      ...pairedNoulDifferences.length ? { meanProbabilityTrueDifference: pairedNoulDifferences.reduce((sum2, value) => sum2 + value, 0) / pairedNoulDifferences.length } : {}
-    };
-  });
-  const leftByItem = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
-  const rightByItem = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
-  const itemChanges = [.../* @__PURE__ */ new Set([...leftByItem.keys(), ...rightByItem.keys()])].flatMap((id) => leftByItem.get(id) === rightByItem.get(id) ? [] : [{ id, leftText: leftByItem.get(id) ?? null, rightText: rightByItem.get(id) ?? null }]);
-  const leftSources = new Map(left.sources.map((source) => [source.path, source.sha256]));
-  const rightSources = new Map(right.sources.map((source) => [source.path, source.sha256]));
-  const sourceChanges = [.../* @__PURE__ */ new Set([...leftSources.keys(), ...rightSources.keys()])].flatMap((sourcePath) => leftSources.get(sourcePath) === rightSources.get(sourcePath) ? [] : [{ path: sourcePath, leftSha256: leftSources.get(sourcePath) ?? null, rightSha256: rightSources.get(sourcePath) ?? null }]);
-  const taskChanges = taskChangesBetween(left, right);
-  return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, comparisonTasks, matched };
-}
-function indexResponses(journeys) {
-  const indexed = /* @__PURE__ */ new Map();
-  for (const journey of journeys) {
-    for (const response of journey.responses) {
-      if (!response.comparisonKey) continue;
-      indexed.set(`${journey.respondentId}\0${response.comparisonKey}\0${response.occurrence}`, response);
-    }
-  }
-  return indexed;
-}
-function compareRunReports(leftReport, leftArmId, rightReport, rightArmId) {
-  if (leftReport.runId === rightReport.runId) throw new Error("Cross-run comparison requires two distinct run IDs.");
-  if (leftReport.cohortFingerprint !== rightReport.cohortFingerprint) throw new Error("Cross-run comparison requires the exact same frozen respondent cohort.");
-  const left = leftReport.arms.find((arm) => arm.id === leftArmId);
-  const right = rightReport.arms.find((arm) => arm.id === rightArmId);
-  if (!left || !right) throw new Error("Both arm IDs must exist in their respective reports.");
-  const leftCells = indexResponses(left.journeys);
-  const rightCells = indexResponses(right.journeys);
-  const respondentIds = [...new Set([...left.journeys, ...right.journeys].map((journey) => journey.respondentId))].sort();
-  const groups = /* @__PURE__ */ new Map([["all", new Set(respondentIds)]]);
-  for (const journey of left.journeys) {
-    if (journey.archetypeId) addGroupMember(groups, `archetype:${journey.archetypeId}`, journey.respondentId);
-    for (const [axis, value] of Object.entries(journey.variation ?? {})) {
-      const key = `variation:${axis}=${value}`;
-      addGroupMember(groups, key, journey.respondentId);
-    }
-  }
-  const keys = /* @__PURE__ */ new Set([
-    ...[...left.journeys, ...right.journeys].flatMap((journey) => journey.responses.flatMap((response) => response.comparisonKey ? [`${response.comparisonKey}:${response.occurrence}`] : [])),
-    ...[left, right].flatMap((arm) => arm.tasks.flatMap((task) => task.comparisonKey ? (arm.taskResponses[task.id]?.occurrences ?? []).map((entry) => `${task.comparisonKey}:${entry.occurrence}`) : []))
-  ]);
-  const comparisonTasks = [...keys].sort().map((key) => {
-    const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
-    const occurrence = Number(occurrenceText);
-    const choiceTransitions = {};
-    const scoreDifferences = [];
-    const noulDifferences = [];
-    let leftResponses = 0;
-    let rightResponses = 0;
-    let pairedResponses = 0;
-    let comparableResponses = 0;
-    for (const respondentId of respondentIds) {
-      const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
-      const a = leftCells.get(cell);
-      const b = rightCells.get(cell);
-      if (a) leftResponses += 1;
-      if (b) rightResponses += 1;
-      if (!a || !b) continue;
-      pairedResponses += 1;
-      if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
-      comparableResponses += 1;
-      accumulateAnswerComparison({ choiceTransitions, scoreDifferences, noulDifferences }, a.answer, b.answer);
-    }
-    const profileGroups = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([group, members2]) => {
-      const transitions = {};
-      const scores = [];
-      const nouls = [];
-      let groupLeft = 0;
-      let groupRight = 0;
-      let groupPaired = 0;
-      let groupComparable = 0;
-      for (const respondentId of members2) {
-        const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
-        const a = leftCells.get(cell);
-        const b = rightCells.get(cell);
-        if (a) groupLeft += 1;
-        if (b) groupRight += 1;
-        if (!a || !b) continue;
-        groupPaired += 1;
-        if (!equivalentTasks(left, right, comparisonKey) || a.answer.type !== b.answer.type) continue;
-        groupComparable += 1;
-        accumulateAnswerComparison({ choiceTransitions: transitions, scoreDifferences: scores, noulDifferences: nouls }, a.answer, b.answer);
-      }
-      return {
-        group,
-        denominator: members2.size,
-        leftResponses: groupLeft,
-        rightResponses: groupRight,
-        pairedResponses: groupPaired,
-        comparableResponses: groupComparable,
-        nonComparableResponses: groupPaired - groupComparable,
-        choiceTransitions: transitions,
-        ...scores.length ? { meanScoreDifference: scores.reduce((sum2, value) => sum2 + value, 0) / scores.length } : {},
-        ...nouls.length ? { meanProbabilityTrueDifference: nouls.reduce((sum2, value) => sum2 + value, 0) / nouls.length } : {}
-      };
-    });
-    return {
-      comparisonKey,
-      occurrence,
-      leftResponses,
-      rightResponses,
-      pairedResponses,
-      comparableResponses,
-      nonComparableResponses: pairedResponses - comparableResponses,
-      leftOnlyResponses: Math.max(0, leftResponses - pairedResponses),
-      rightOnlyResponses: Math.max(0, rightResponses - pairedResponses),
-      choiceTransitions,
-      ...scoreDifferences.length ? { meanScoreDifference: scoreDifferences.reduce((sum2, value) => sum2 + value, 0) / scoreDifferences.length } : {},
-      ...noulDifferences.length ? { meanProbabilityTrueDifference: noulDifferences.reduce((sum2, value) => sum2 + value, 0) / noulDifferences.length } : {},
-      profileGroups
-    };
-  });
-  const matched = respondentIds.map((respondentId) => ({
-    respondentId,
-    leftJourneyPath: { presentedTaskIds: left.journeys.find((journey) => journey.respondentId === respondentId)?.presentedTaskIds ?? [], events: left.journeys.find((journey) => journey.respondentId === respondentId)?.events ?? [] },
-    rightJourneyPath: { presentedTaskIds: right.journeys.find((journey) => journey.respondentId === respondentId)?.presentedTaskIds ?? [], events: right.journeys.find((journey) => journey.respondentId === respondentId)?.events ?? [] },
-    taskComparisons: [...keys].sort().map((key) => {
-      const [comparisonKey = "", occurrenceText = "1"] = key.split(":");
-      const occurrence = Number(occurrenceText);
-      const cell = `${respondentId}\0${comparisonKey}\0${occurrence}`;
-      const a = leftCells.get(cell);
-      const b = rightCells.get(cell);
-      const leftJourney = left.journeys.find((journey) => journey.respondentId === respondentId);
-      const rightJourney = right.journeys.find((journey) => journey.respondentId === respondentId);
-      const taskIds = (arm) => arm.tasks.filter((task) => task.comparisonKey === comparisonKey).map((task) => task.id);
-      const reached = (arm, journey) => !!journey && taskIds(arm).some((taskId) => journey.presentedTaskIds.filter((id) => id === taskId).length >= occurrence);
-      const outcome = (response, wasReached) => response ? "completed" : wasReached ? "incomplete" : "not-reached";
-      const leftReached = reached(left, leftJourney);
-      const rightReached = reached(right, rightJourney);
-      return { comparisonKey, occurrence, leftAnswer: a?.answer ?? null, rightAnswer: b?.answer ?? null, leftOutcome: outcome(a, leftReached), rightOutcome: outcome(b, rightReached), comparable: !!a && !!b && equivalentTasks(left, right, comparisonKey) && a.answer.type === b.answer.type };
-    })
-  }));
-  const leftSources = new Map(left.sources.map((source) => [source.path, source.sha256]));
-  const rightSources = new Map(right.sources.map((source) => [source.path, source.sha256]));
-  const sourceChanges = [.../* @__PURE__ */ new Set([...leftSources.keys(), ...rightSources.keys()])].flatMap((sourcePath) => leftSources.get(sourcePath) === rightSources.get(sourcePath) ? [] : [{ path: sourcePath, leftSha256: leftSources.get(sourcePath) ?? null, rightSha256: rightSources.get(sourcePath) ?? null }]);
-  const leftItems = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
-  const rightItems = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
-  const stimulusChanges = [.../* @__PURE__ */ new Set([...leftItems.keys(), ...rightItems.keys()])].flatMap((id) => leftItems.get(id) === rightItems.get(id) ? [] : [{ id, leftText: leftItems.get(id) ?? null, rightText: rightItems.get(id) ?? null }]);
-  const taskChanges = taskChangesBetween(left, right);
-  const providerChanges = JSON.stringify(leftReport.provider) === JSON.stringify(rightReport.provider) ? null : { left: leftReport.provider, right: rightReport.provider };
-  const presentationChanges = JSON.stringify(left.presentation) === JSON.stringify(right.presentation) ? null : { left: left.presentation, right: right.presentation };
-  return {
-    leftRunId: leftReport.runId,
-    rightRunId: rightReport.runId,
-    leftArmId,
-    rightArmId,
-    cohortFingerprint: leftReport.cohortFingerprint,
-    leftFingerprint: left.fingerprint,
-    rightFingerprint: right.fingerprint,
-    matchedRespondents: respondentIds.length,
-    comparisonTasks,
-    matched,
-    differences: {
-      sources: sourceChanges,
-      stimulusItems: stimulusChanges,
-      tasks: taskChanges,
-      presentation: presentationChanges,
-      provider: providerChanges,
-      runStatus: leftReport.status === rightReport.status ? null : { left: leftReport.status, right: rightReport.status },
-      completion: { left: left.denominator, right: right.denominator }
-    }
-  };
-}
-function addGroupMember(groups, key, respondentId) {
-  let members2 = groups.get(key);
-  if (!members2) {
-    members2 = /* @__PURE__ */ new Set();
-    groups.set(key, members2);
-  }
-  members2.add(respondentId);
-}
-function taskChangesBetween(left, right) {
-  const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
-  const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
-  return [.../* @__PURE__ */ new Set([...leftTasks.keys(), ...rightTasks.keys()])].flatMap((comparisonKey) => {
-    const a = leftTasks.get(comparisonKey);
-    const b = rightTasks.get(comparisonKey);
-    if (!a || !b) return [{ comparisonKey, fields: ["task-presence"] }];
-    const fields = ["type", "instructions", "options", "rubric", "criteria", "responseHistory"].filter((field) => JSON.stringify(a[field] ?? null) !== JSON.stringify(b[field] ?? null));
-    return fields.length ? [{ comparisonKey, fields }] : [];
-  });
-}
-function equivalentTasks(left, right, comparisonKey) {
-  const leftTask = left.tasks.find((task) => task.comparisonKey === comparisonKey);
-  const rightTask = right.tasks.find((task) => task.comparisonKey === comparisonKey);
-  if (!leftTask || !rightTask || leftTask.type !== rightTask.type) return false;
-  if (leftTask.instructions !== rightTask.instructions) return false;
-  if (leftTask.type === "choice") return JSON.stringify(leftTask.options) === JSON.stringify(rightTask.options);
-  if (leftTask.type === "score") return JSON.stringify(leftTask.rubric) === JSON.stringify(rightTask.rubric);
-  return JSON.stringify(leftTask.criteria ?? null) === JSON.stringify(rightTask.criteria ?? null);
-}
-function accumulateAnswerComparison(totals, left, right) {
-  if (left.type === "choice" && right.type === "choice") {
-    const row = totals.choiceTransitions[left.choice] ??= {};
-    row[right.choice] = (row[right.choice] ?? 0) + 1;
-  } else if (left.type === "score" && right.type === "score") totals.scoreDifferences.push(right.score - left.score);
-  else if (left.type === "noul" && right.type === "noul") totals.noulDifferences.push(right.noul - left.noul);
-}
-
 // src/domain/journey/packet-walker.ts
-import { createHash as createHash5 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 var DEFAULT_MAX_PREFLIGHT_PACKETS = 1e5;
 var DEFAULT_MAX_PREFLIGHT_PACKET_BYTES = 16 * 1024 * 1024;
 function pathIdentity(choices) {
@@ -21635,7 +20772,7 @@ function walkStudyPackets(arms, respondents, visitPacket, options2 = {}) {
       unverifiedReason ??= "Prior response history can include provider probabilities or confidence with variable serialized size; future packet fit is not conservatively bounded.";
     }
     const identity = JSON.stringify([respondent.id, arm.id, pathId, decisionIndex, nodeId]);
-    const packetId = `packet-${createHash5("sha256").update(identity).digest("hex")}`;
+    const packetId = `packet-${createHash3("sha256").update(identity).digest("hex")}`;
     const packet = { packetId, respondentId: respondent.id, armId: arm.id, pathId, decisionIndex, nodeId, request };
     const size = Buffer.byteLength(JSON.stringify(packet), "utf8");
     if (packetBytes + size > maxPacketBytes) {
@@ -21950,6 +21087,49 @@ function validateDistribution(distribution, expectedIds, label) {
   }
 }
 
+// src/providers/jev/config.ts
+var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
+var routeDefaults = {
+  openrouter: {
+    model: "typesafe/jev-1.13",
+    endpoint: "https://openrouter.ai/api/alpha/decisions"
+  },
+  typesafe: {
+    model: "jev-latest",
+    endpoint: "https://api.typesafe.ai/v1/systemone"
+  }
+};
+var jevConfigInputSchema = external_exports.object({
+  kind: external_exports.literal("jev"),
+  route: jevRouteSchema.optional(),
+  model: external_exports.string().min(1).optional(),
+  endpoint: external_exports.string().url().optional(),
+  timeoutMs: external_exports.number().int().positive().optional()
+}).strict().superRefine((input2, context) => {
+  if (input2.endpoint === void 0) return;
+  let endpoint;
+  try {
+    endpoint = new URL(input2.endpoint);
+  } catch {
+    return;
+  }
+  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
+  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
+    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
+  }
+});
+var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
+  const route = input2.route ?? "openrouter";
+  const defaults = routeDefaults[route];
+  return {
+    kind: "jev",
+    route,
+    model: input2.model ?? defaults.model,
+    endpoint: input2.endpoint ?? defaults.endpoint,
+    timeoutMs: input2.timeoutMs ?? 3e4
+  };
+});
+
 // src/providers/jev/model-metadata.ts
 var jevModelMetadata = {
   openrouter: {
@@ -21990,7 +21170,7 @@ function jevMetadata(route, model) {
 // src/infrastructure/credentials/windows.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import path4 from "node:path";
+import path2 from "node:path";
 import { fileURLToPath } from "node:url";
 var CredentialStoreError = class extends Error {
   constructor(code, route) {
@@ -22052,10 +21232,10 @@ var WindowsCredentialStore = class {
   }
 };
 function locateHelper() {
-  const moduleDirectory2 = path4.dirname(fileURLToPath(import.meta.url));
+  const moduleDirectory2 = path2.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path4.join(moduleDirectory2, "windows-credential.ps1"),
-    path4.join(moduleDirectory2, "credentials", "windows-credential.ps1")
+    path2.join(moduleDirectory2, "windows-credential.ps1"),
+    path2.join(moduleDirectory2, "credentials", "windows-credential.ps1")
   ];
   const helper = candidates.find(existsSync);
   if (!helper) throw new Error("The Windows credential helper is unavailable.");
@@ -22350,9 +21530,9 @@ function missingMeasureFit(config2, reason) {
 }
 
 // src/providers/laya/context-fit.ts
-import { createHash as createHash6 } from "node:crypto";
-import { readFile as readFile3, stat } from "node:fs/promises";
-import path5 from "node:path";
+import { createHash as createHash4 } from "node:crypto";
+import { readFile as readFile2, stat } from "node:fs/promises";
+import path3 from "node:path";
 
 // src/providers/laya/vendor/sequence.ts
 function pyJson(v) {
@@ -22581,15 +21761,15 @@ var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
 var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
 var tokenizerCache = /* @__PURE__ */ new Map();
 async function tokenizerPromise(config2) {
-  const absolutePath = path5.resolve(config2.tokenizerJsonPath);
+  const absolutePath = path3.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
   const metadata2 = await stat(absolutePath, { bigint: true });
   const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
   const existing = tokenizerCache.get(key);
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
-    const bytes = await readFile3(absolutePath);
-    const sha256 = createHash6("sha256").update(bytes).digest("hex");
+    const bytes = await readFile2(absolutePath);
+    const sha256 = createHash4("sha256").update(bytes).digest("hex");
     if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
     let raw;
     try {
@@ -22688,7 +21868,7 @@ var LayaCallError = class extends ProviderCallError {
   }
   decisionId;
 };
-var responseSchema2 = external_exports.object({
+var responseSchema = external_exports.object({
   model: external_exports.string().min(1),
   answers: external_exports.record(external_exports.string(), external_exports.unknown()),
   usage: external_exports.object({
@@ -22764,7 +21944,7 @@ var LayaProvider = class {
     } catch {
       throw new LayaCallError("Laya local service returned unreadable JSON.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
-    const parsedResponse = responseSchema2.safeParse(payload);
+    const parsedResponse = responseSchema.safeParse(payload);
     if (!parsedResponse.success) {
       throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
@@ -22797,6 +21977,79 @@ var LayaProvider = class {
 };
 function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
+}
+
+// src/providers/config.ts
+var layaConfigSchema = external_exports.object({
+  kind: external_exports.literal(providerKinds[1]),
+  baseUrl: external_exports.string().url(),
+  checkpoint: external_exports.string().min(1),
+  contextLimit: external_exports.number().int().positive(),
+  headLimit: external_exports.number().int().positive(),
+  tokenizerJsonPath: external_exports.string().min(1),
+  tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  precision: external_exports.string().min(1).optional(),
+  timeoutMs: external_exports.number().int().positive()
+}).strict();
+var providerConfigSchema = external_exports.union([
+  jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
+  layaConfigSchema
+]);
+
+// src/infrastructure/identity.ts
+import { createHash as createHash5 } from "node:crypto";
+function stimulusFingerprint(study, cohort, promptContractHash2) {
+  if (!promptContractHash2) throw new TypeError("Prompt contract hash is required.");
+  return hashCanonical({ version: 1, study, cohort, promptContractHash: promptContractHash2 });
+}
+function executionFingerprint(stimulus, provider) {
+  if (!/^[a-f\d]{64}$/i.test(stimulus)) throw new TypeError("Stimulus fingerprint must be a SHA-256 hex digest.");
+  let decisionSettings;
+  if (provider.kind === "jev") {
+    decisionSettings = {
+      kind: provider.kind,
+      route: provider.route ?? "openrouter",
+      model: requireText(provider.model, "Jev model"),
+      ...provider.endpoint === void 0 ? {} : { endpoint: provider.endpoint }
+    };
+  } else {
+    decisionSettings = {
+      kind: provider.kind,
+      checkpoint: requireText(provider.checkpoint, "Laya checkpoint"),
+      contextLimit: requirePositiveInteger(provider.contextLimit, "Laya context limit"),
+      headLimit: requirePositiveInteger(provider.headLimit, "Laya head limit"),
+      tokenizerSha256: requireText(provider.tokenizerSha256, "Laya tokenizer SHA-256"),
+      ...provider.precision === void 0 ? {} : { precision: provider.precision }
+    };
+  }
+  return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
+}
+function hashCanonical(value) {
+  return createHash5("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+}
+function canonicalize(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Fingerprint input contains a nonfinite number.");
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (typeof value === "object") {
+    const object2 = value;
+    return Object.fromEntries(Object.keys(object2).sort().map((key) => {
+      if (object2[key] === void 0) throw new TypeError(`Fingerprint input contains undefined at ${key}.`);
+      return [key, canonicalize(object2[key])];
+    }));
+  }
+  throw new TypeError("Fingerprint input must contain only JSON values.");
+}
+function requireText(value, label) {
+  if (!value.trim()) throw new TypeError(`${label} is required.`);
+  return value;
+}
+function requirePositiveInteger(value, label) {
+  if (!Number.isInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer.`);
+  return value;
 }
 
 // src/application/preflight.ts
@@ -23243,10 +22496,10 @@ function assertNever2(value) {
 import os from "node:os";
 
 // src/application/run-service.ts
-import path6 from "node:path";
+import path4 from "node:path";
 
 // src/application/run-inspection.ts
-import { createHash as createHash7, randomUUID } from "node:crypto";
+import { createHash as createHash6, randomUUID } from "node:crypto";
 
 // src/domain/journey/route-bounds.ts
 function estimateRunDecisionCalls(arms, respondents) {
@@ -23757,7 +23010,7 @@ async function prepareJourneyAdmission(request, provider) {
     const packetRequest = compileDecisionPacket(request.journey, respondent, initialPath.taskId, initialPath.events);
     const identity = JSON.stringify([respondent.id, request.journey.id, "root", 1, initialPath.nodeId]);
     packets.push({
-      packetId: `packet-${createHash7("sha256").update(identity).digest("hex")}`,
+      packetId: `packet-${createHash6("sha256").update(identity).digest("hex")}`,
       respondentId: respondent.id,
       armId: request.journey.id,
       pathId: "root",
@@ -23827,7 +23080,7 @@ function normalizeRequest(input2) {
   const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) throw new RunServiceError("invalid_request", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
   if (parsed.data.provider.kind === "laya") {
-    return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path6.resolve(parsed.data.provider.tokenizerJsonPath) } };
+    return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path4.resolve(parsed.data.provider.tokenizerJsonPath) } };
   }
   return parsed.data;
 }
@@ -23967,9 +23220,9 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
 }
 
 // src/infrastructure/data-root.ts
-import path7 from "node:path";
+import path5 from "node:path";
 function pathsFor(platform) {
-  return platform === "win32" ? path7.win32 : path7.posix;
+  return platform === "win32" ? path5.win32 : path5.posix;
 }
 function requiredAbsolute(value, name2, paths, allowMissing = false) {
   if (value === void 0 && allowMissing) return void 0;
@@ -23997,8 +23250,8 @@ function resolveDataRoot(env, platform, home) {
 
 // src/infrastructure/process-lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { link, mkdir, open as open2, readFile as readFile4, readdir as readdir2, rename, rm } from "node:fs/promises";
-import path8 from "node:path";
+import { link, mkdir, open as open2, readFile as readFile3, readdir, rename, rm } from "node:fs/promises";
+import path6 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 var ProcessLockError = class extends Error {
   constructor(message) {
@@ -24015,7 +23268,7 @@ var ProcessLock = class _ProcessLock {
   record;
   static async acquire(directory, name2, operations = {}) {
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(name2)) throw new TypeError("Lock name contains unsupported characters.");
-    const lockPath = path8.join(directory, `${name2}.lock`);
+    const lockPath = path6.join(directory, `${name2}.lock`);
     const record2 = { pid: process.pid, token: randomUUID2() };
     const content = `${JSON.stringify(record2)}
 `;
@@ -24086,11 +23339,11 @@ var ProcessLock = class _ProcessLock {
   }
 };
 async function staleClaims(lockPath) {
-  const directory = path8.dirname(lockPath);
-  const prefix = `${path8.basename(lockPath)}.`;
+  const directory = path6.dirname(lockPath);
+  const prefix = `${path6.basename(lockPath)}.`;
   try {
-    const entries = await readdir2(directory);
-    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path8.join(directory, entry));
+    const entries = await readdir(directory);
+    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path6.join(directory, entry));
   } catch (error62) {
     if (error62.code === "ENOENT") return [];
     throw error62;
@@ -24121,7 +23374,7 @@ async function restoreClaim(lockPath, claimPath, record2) {
 }
 async function readLock(filePath) {
   try {
-    const value = JSON.parse(await readFile4(filePath, "utf8"));
+    const value = JSON.parse(await readFile3(filePath, "utf8"));
     return Number.isSafeInteger(value.pid) && value.pid > 0 && typeof value.token === "string" && value.token.length > 0 ? { pid: value.pid, token: value.token } : null;
   } catch {
     return null;
@@ -24138,7 +23391,7 @@ function processExists(pid) {
 
 // src/infrastructure/run-store.ts
 import { mkdirSync as mkdirSync3 } from "node:fs";
-import path12 from "node:path";
+import path10 from "node:path";
 
 // src/application/run-store.ts
 var RunStoreError = class extends Error {
@@ -24870,7 +24123,7 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
   const objectIds = {};
   const decodes = Array.from({ length: columns.length });
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { field, path: path15, codec: codec2, arrayDimensions } = columns[idx];
+    const { field, path: path13, codec: codec2, arrayDimensions } = columns[idx];
     let decoder;
     let decoderStr;
     let decoderFieldDestructure;
@@ -24898,26 +24151,26 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
     if (codec2) decodedValue = `codec${idx}(${decodedValue}, ${arrayDimensions})`;
     if (decoderStr) decodedValue = `${decoderStr}(${decodedValue})`;
     decodes[idx] = colStr === decodedValue ? `${colStr}` : `${colStr} === null ? ${colStr} : ${decodedValue}`;
-    if (path15.length !== 2 || !isColumn) continue;
-    if (objectIds[path15[0]] === void 0) objectIds[path15[0]] = [`c${idx}`];
-    else objectIds[path15[0]]?.push(`c${idx}`);
-    const [objectName] = path15;
+    if (path13.length !== 2 || !isColumn) continue;
+    if (objectIds[path13[0]] === void 0) objectIds[path13[0]] = [`c${idx}`];
+    else objectIds[path13[0]]?.push(`c${idx}`);
+    const [objectName] = path13;
     const tableName = getTableName(field.table);
     nullifyMap[objectName] = joinsNotNullableMap[tableName] ? false : typeof nullifyMap[objectName] === "string" ? nullifyMap[objectName] === tableName ? tableName : false : tableName;
   }
   fn.push(`mapped[i] = {`);
   let currentObjectPath = [];
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { path: path15 } = columns[idx];
-    const jsonPath = path15.map((e) => JSON.stringify(e));
+    const { path: path13 } = columns[idx];
+    const jsonPath = path13.map((e) => JSON.stringify(e));
     const decodedValue = decodes[idx];
-    const objectPath = path15.slice(0, -1);
+    const objectPath = path13.slice(0, -1);
     let commonLen = 0;
     while (commonLen < currentObjectPath.length && commonLen < objectPath.length && currentObjectPath[commonLen] === objectPath[commonLen]) commonLen++;
     for (let d = currentObjectPath.length - 1; d >= commonLen; --d) fn.push(`${"	".repeat(d + 1)}},`);
-    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path15[0]] === "string" ? `${objectIds[path15[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
+    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path13[0]] === "string" ? `${objectIds[path13[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
     currentObjectPath = objectPath;
-    fn.push(`${"	".repeat(path15.length)}${jsonPath[path15.length - 1]}: ${decodedValue},`);
+    fn.push(`${"	".repeat(path13.length)}${jsonPath[path13.length - 1]}: ${decodedValue},`);
   }
   for (let d = currentObjectPath.length - 1; d >= 0; --d) fn.push(`${"	".repeat(d + 1)}},`);
   fn.push(`};`);
@@ -24954,13 +24207,13 @@ function jitCompatCheck(isEnabled) {
   }
 }
 function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
-  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path15 }) => {
+  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path13 }) => {
     let processNullifyMap;
     let decoderSrc;
     if (is(field, Column)) {
       decoderSrc = field;
-      if (joinsNotNullableMap && path15.length === 2) {
-        const objectName = path15[0];
+      if (joinsNotNullableMap && path13.length === 2) {
+        const objectName = path13[0];
         processNullifyMap = (nullifyMap, value) => {
           if (!(objectName in nullifyMap)) nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
           else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) nullifyMap[objectName] = false;
@@ -24976,9 +24229,9 @@ function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
   });
   return ((rows) => rows.map((row) => {
     const nullifyMap = {};
-    const result = columns.reduce((result2, { path: path15 }, columnIndex) => {
+    const result = columns.reduce((result2, { path: path13 }, columnIndex) => {
       let node2 = result2;
-      for (const [pathChunkIndex, pathChunk] of path15.entries()) if (pathChunkIndex < path15.length - 1) {
+      for (const [pathChunkIndex, pathChunk] of path13.entries()) if (pathChunkIndex < path13.length - 1) {
         if (!(pathChunk in node2)) node2[pathChunk] = {};
         node2 = node2[pathChunk];
       } else {
@@ -29120,8 +28373,8 @@ function drizzle(...params) {
   const { connection, client, ...config2 } = params[0];
   if (client) return construct(client, config2);
   if (typeof connection === "object") {
-    const { path: path15, ...options2 } = connection;
-    return construct(new DatabaseSync(path15 ?? ":memory:", options2), config2);
+    const { path: path13, ...options2 } = connection;
+    return construct(new DatabaseSync(path13 ?? ":memory:", options2), config2);
   }
   return construct(new DatabaseSync(connection ?? ":memory:"), config2);
 }
@@ -29133,9 +28386,9 @@ function drizzle(...params) {
 })(drizzle || (drizzle = {}));
 
 // src/infrastructure/sqlite/schema.ts
-import { createHash as createHash8, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash7, randomUUID as randomUUID3 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync, readFileSync, unlinkSync } from "node:fs";
-import path9 from "node:path";
+import path7 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
 
@@ -29373,7 +28626,7 @@ function registeredMigrations() {
   return [baselineMigration()];
 }
 function migrationChecksum(migration) {
-  return createHash8("sha256").update(migration.sql).digest("hex");
+  return createHash7("sha256").update(migration.sql).digest("hex");
 }
 function isTransientSqliteLock(error62) {
   return typeof error62 === "object" && error62 !== null && "errcode" in error62 && typeof error62.errcode === "number" && SQLITE_TRANSIENT_LOCK_CODES.has(error62.errcode);
@@ -29419,7 +28672,7 @@ function migrationHistoryThrough(migrations, targetVersion) {
 function schemaFingerprint(database) {
   const objects = database.prepare(`SELECT type, name, tbl_name AS tableName, sql FROM sqlite_schema
     WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name, tbl_name`).all();
-  return createHash8("sha256").update(JSON.stringify(objects)).digest("hex");
+  return createHash7("sha256").update(JSON.stringify(objects)).digest("hex");
 }
 function validateMigrationSource(database, migrations, version2) {
   if (pragmaNumber(database, "user_version") !== version2) {
@@ -29477,9 +28730,9 @@ function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   }
 }
 function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
-  const backupRoot = path9.join(dataRoot, "backups");
+  const backupRoot = path7.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path9.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
+  const backupPath = path7.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -30253,7 +29506,7 @@ function loadQuestionGroups(database, runId) {
 }
 
 // src/infrastructure/sqlite/commands/prepared-validation.ts
-import { createHash as createHash9 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 function isJourneyAskNode(journey, nodeId, questionId) {
   const node2 = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
   return node2?.kind === "ask" && node2.taskId === questionId;
@@ -30317,7 +29570,7 @@ function validatePrepared(prepared) {
         const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text: text2 }) => id === selected.materialId && text2 === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash9("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash8("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
         }
       }
@@ -31079,7 +30332,7 @@ function loadAttempts(database, runId, cursorText, requestedLimit, ensureRun) {
 }
 
 // src/infrastructure/sqlite/evidence-query.ts
-import { createHash as createHash10 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 
 // src/infrastructure/sqlite/evaluation-criteria.ts
 var numericOperators = { eq: "=", lt: "<", lte: "<=", gt: ">", gte: ">=" };
@@ -31259,7 +30512,7 @@ function queryEvidencePage(context, input2) {
             text: candidate.text,
             sourceId: candidate.sourceId,
             sourceSha256: candidate.sourceSha256,
-            textSha256: createHash10("sha256").update(candidate.text, "utf8").digest("hex")
+            textSha256: createHash9("sha256").update(candidate.text, "utf8").digest("hex")
           };
         }
       }
@@ -31331,11 +30584,11 @@ function storedJourneyIdentity(row) {
 
 // src/infrastructure/sqlite/query-library.ts
 import { readFileSync as readFileSync2 } from "node:fs";
-import path10 from "node:path";
+import path8 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-var moduleDirectory = path10.dirname(fileURLToPath3(import.meta.url));
+var moduleDirectory = path8.dirname(fileURLToPath3(import.meta.url));
 function createSqliteQuery(name2, parametersSchema, rowsSchema) {
-  const assetPath = path10.join(moduleDirectory, "queries", `${name2}.sql`);
+  const assetPath = path8.join(moduleDirectory, "queries", `${name2}.sql`);
   let sql2;
   try {
     sql2 = readFileSync2(assetPath, "utf8");
@@ -31437,7 +30690,7 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
 }
 
 // src/infrastructure/sqlite/follow-on-queries.ts
-import { createHash as createHash11 } from "node:crypto";
+import { createHash as createHash10 } from "node:crypto";
 function loadFollowOnSources(database, input2, notFound) {
   const request = followOnRunRequestSchema.parse(input2);
   const run = database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
@@ -31492,7 +30745,7 @@ function loadFollowOnSources(database, input2, notFound) {
       text: selectedMaterial.text,
       sourceId: selectedMaterial.sourceId,
       sourceSha256: selectedMaterial.sourceSha256,
-      textSha256: createHash11("sha256").update(selectedMaterial.text, "utf8").digest("hex")
+      textSha256: createHash10("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
     if (selectedMaterialId && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
@@ -32010,11 +31263,11 @@ function createSqliteRepositoryContext(connection, databasePath, now) {
 // src/infrastructure/sqlite/recovery.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync, renameSync, statSync as statSync2, unlinkSync as unlinkSync2 } from "node:fs";
-import path11 from "node:path";
+import path9 from "node:path";
 import { DatabaseSync as DatabaseSync3 } from "node:sqlite";
 function inspectRunStoreCompatibility(dataRoot) {
-  if (!path11.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
-  const databasePath = path11.join(dataRoot, "runs.sqlite");
+  if (!path9.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
+  const databasePath = path9.join(dataRoot, "runs.sqlite");
   if (!existsSync3(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
   let database;
   try {
@@ -32038,7 +31291,7 @@ function inspectRunStoreCompatibility(dataRoot) {
   }
 }
 function runStoreBackupAvailable(dataRoot) {
-  const backupRoot = path11.join(dataRoot, "backups");
+  const backupRoot = path9.join(dataRoot, "backups");
   if (!existsSync3(backupRoot)) return false;
   try {
     return readdirSync(backupRoot).some((name2) => name2.startsWith("runs-schema-") && name2.endsWith(".sqlite"));
@@ -32047,8 +31300,8 @@ function runStoreBackupAvailable(dataRoot) {
   }
 }
 function resetRunStore(dataRoot, openFreshStore, operations = {}) {
-  if (!path11.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
-  const databasePath = path11.join(dataRoot, "runs.sqlite");
+  if (!path9.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  const databasePath = path9.join(dataRoot, "runs.sqlite");
   let inspectionDatabase;
   let version2;
   try {
@@ -32070,14 +31323,14 @@ function resetRunStore(dataRoot, openFreshStore, operations = {}) {
     throw new RunStoreError("recovery_backup_failed", "Sheg could not verify a recoverable datastore backup; the original files were left untouched.", { cause: error62 });
   }
   database.close();
-  const recoveryRoot = path11.join(dataRoot, "recovery", randomUUID6());
+  const recoveryRoot = path9.join(dataRoot, "recovery", randomUUID6());
   mkdirSync2(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
   try {
     for (const original of files) {
       if (!existsSync3(original)) continue;
-      const archived = path11.join(recoveryRoot, path11.basename(original));
+      const archived = path9.join(recoveryRoot, path9.basename(original));
       (operations.rename ?? renameSync)(original, archived);
       moved.push({ original, archived });
     }
@@ -32098,7 +31351,7 @@ function resetRunStore(dataRoot, openFreshStore, operations = {}) {
 }
 function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operations) {
   if (!existsSync3(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
-  const recoveryRoot = path11.join(dataRoot, "recovery", randomUUID6());
+  const recoveryRoot = path9.join(dataRoot, "recovery", randomUUID6());
   mkdirSync2(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
@@ -32106,7 +31359,7 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operati
     for (const original of files) {
       if (!existsSync3(original)) continue;
       const size = statSync2(original).size;
-      const archived = path11.join(recoveryRoot, path11.basename(original));
+      const archived = path9.join(recoveryRoot, path9.basename(original));
       (operations.rename ?? renameSync)(original, archived);
       moved.push({ original, archived, size });
       if (statSync2(archived).size !== size) throw new Error("Quarantined datastore file size changed.");
@@ -32131,7 +31384,7 @@ function restoreMovedFiles(moved, rename2) {
     try {
       rename2(item.archived, item.original);
     } catch {
-      retained.push(path11.basename(item.archived));
+      retained.push(path9.basename(item.archived));
     }
   }
   return retained;
@@ -32143,9 +31396,9 @@ function openRunStore(dataRoot, options2 = {}) {
   return { ...persistence.reads, ...persistence.commands, close: persistence.close };
 }
 function openRunPersistence(dataRoot, options2 = {}) {
-  if (!path12.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  if (!path10.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync3(dataRoot, { recursive: true });
-  const databasePath = path12.join(dataRoot, "runs.sqlite");
+  const databasePath = path10.join(dataRoot, "runs.sqlite");
   const connection = openSqliteConnection(databasePath, dataRoot);
   const context = createSqliteRepositoryContext(connection, databasePath, options2.now ?? Date.now);
   const reads = createSqliteReadRepository(context);
@@ -32161,9 +31414,9 @@ function resetRunStore2(dataRoot) {
 
 // src/infrastructure/worker-launcher.ts
 import { spawn } from "node:child_process";
-import path13 from "node:path";
+import path11 from "node:path";
 var DetachedWorkerLauncher = class {
-  constructor(workerPath = path13.join(path13.dirname(path13.resolve(process.argv[1] ?? process.execPath)), "worker.js")) {
+  constructor(workerPath = path11.join(path11.dirname(path11.resolve(process.argv[1] ?? process.execPath)), "worker.js")) {
     this.workerPath = workerPath;
   }
   workerPath;
@@ -32335,7 +31588,7 @@ async function runCli(args, io = outputIo, service) {
       const mode = options2.mode ?? "frozen-cohort";
       if (mode !== "frozen-cohort" && mode !== "maximum-profile") throw new CliInputError("Preflight mode must be frozen-cohort or maximum-profile.");
       const providers = await readJson(required2(options2, "providers"));
-      const result = await preflightStudy({ manifestPath: path14.resolve(required2(options2, "manifest")), ...options2.cohort === void 0 ? {} : { cohortPath: path14.resolve(options2.cohort) }, mode, providers }, { credentialStore: new WindowsCredentialStore() });
+      const result = await preflightStudy({ manifestPath: path12.resolve(required2(options2, "manifest")), ...options2.cohort === void 0 ? {} : { cohortPath: path12.resolve(options2.cohort) }, mode, providers }, { credentialStore: new WindowsCredentialStore() });
       io.out(JSON.stringify(result));
       return 0;
     }
@@ -32344,12 +31597,7 @@ async function runCli(args, io = outputIo, service) {
       io.out(JSON.stringify(result));
       return 0;
     }
-    if (command?.startsWith("legacy-")) {
-      const result = await legacyReport(command, options2);
-      io.out(JSON.stringify(result));
-      return 0;
-    }
-    const runtime = createRunRuntime(options2["data-root"] === void 0 ? void 0 : path14.resolve(options2["data-root"]), service);
+    const runtime = createRunRuntime(options2["data-root"] === void 0 ? void 0 : path12.resolve(options2["data-root"]), service);
     try {
       const result = await durableOperation(command ?? "", options2, runtime.service, runtime.storage);
       io.out(JSON.stringify(result));
@@ -32390,7 +31638,7 @@ async function readRequest(options2) {
 }
 async function readJson(file2) {
   try {
-    return JSON.parse(await readFile5(path14.resolve(file2), "utf8"));
+    return JSON.parse(await readFile4(path12.resolve(file2), "utf8"));
   } catch {
     throw new CliInputError("The specified JSON file is missing or invalid.");
   }
@@ -32400,8 +31648,8 @@ function uuid3(value) {
   return value;
 }
 async function trace(options2) {
-  const manifestPath = path14.resolve(required2(options2, "manifest"));
-  const cohortPath = path14.resolve(required2(options2, "cohort"));
+  const manifestPath = path12.resolve(required2(options2, "manifest"));
+  const cohortPath = path12.resolve(required2(options2, "cohort"));
   const study = await loadStudy(manifestPath, cohortPath);
   const respondentId = required2(options2, "respondent");
   const profile = study.respondents.find((respondent) => respondent.id === respondentId);
@@ -32411,16 +31659,6 @@ async function trace(options2) {
   const arm = study.manifest.arms.find((candidate) => candidate.id === required2(options2, "arm"));
   if (!arm) throw new CliInputError("Arm ID is not in the study.");
   return traceStudy(arm, profile, scripted);
-}
-async function legacyReport(command, options2) {
-  if (command === "legacy-report") return getLegacyReport(required2(options2, "output"), uuid3(required2(options2, "run-id")));
-  if (command === "legacy-compare") return compareReports(await getLegacyReport(required2(options2, "output"), uuid3(required2(options2, "run-id"))), required2(options2, "left-arm"), required2(options2, "right-arm"));
-  if (command === "legacy-compare-runs") {
-    const left = await getLegacyReport(required2(options2, "left-output"), uuid3(required2(options2, "left-run-id")));
-    const right = await getLegacyReport(required2(options2, "right-output"), uuid3(required2(options2, "right-run-id")));
-    return compareRunReports(left, required2(options2, "left-arm"), right, required2(options2, "right-arm"));
-  }
-  throw new CliInputError(`Unknown historical read-only command: ${command}`);
 }
 function parseArgs(args) {
   const options2 = {};
@@ -32447,10 +31685,7 @@ function validateOptions(command, options2) {
     cancel: ["run-id", "data-root"],
     resume: ["run-id", "data-root"],
     delete: ["request", "data-root"],
-    storage: ["request", "data-root"],
-    "legacy-report": ["output", "run-id"],
-    "legacy-compare": ["output", "run-id", "left-arm", "right-arm"],
-    "legacy-compare-runs": ["left-output", "left-run-id", "left-arm", "right-output", "right-run-id", "right-arm"]
+    storage: ["request", "data-root"]
   };
   const allowed = commands[command ?? ""];
   if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ""}`);
@@ -32488,9 +31723,8 @@ Commands:
   storage --request <json-file>                 Inspect, optimize or explicitly reset the datastore
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
-  legacy-report --output <dir> --run-id <uuid>  Read a pre-release file-backed report without modifying it
   Use --data-root <dir> with durable commands to select the datastore.`;
-if (process.argv[1] && import.meta.url === pathToFileURL(path14.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));
+if (process.argv[1] && import.meta.url === pathToFileURL(path12.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));
 export {
   runCli
 };

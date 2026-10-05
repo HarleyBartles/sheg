@@ -72,7 +72,6 @@ const promptContract = {
   decisionSemantics: 'Choose exactly one offered stable option ID according to its description.',
 } as const;
 
-export const legacyPromptContractHash = 'c84188c79201c09c741af627cf9bcc426c8ba5b69284045334467d17e0adc044';
 export const v6PromptContractHash = 'a39d72d1ba77b0560dac5b7ccedf07b72e80b9d7bc1330679acd9c209e831526';
 
 function finishTrajectory(body: Omit<TrajectorySummary, 'payloadUtf8Bytes'>): TrajectorySummary {

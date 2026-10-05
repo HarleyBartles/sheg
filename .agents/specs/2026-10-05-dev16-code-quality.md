@@ -6,6 +6,8 @@ Prepare Sheg's source for the v0.3.0 release by completing the persistence decom
 
 This spec covers the agreed source audit, SQL library, README redesign, and adoption of `unslop`, `playbook-composition`, and `runbook-composition`. It is a design for implementation, not an audit receipt. The execution plan will identify concrete edits and verification. Tests change where these changes require meaningful behavioral proof; a separate exhaustive test-suite cleanup is outside this slice.
 
+Sheg's first compatibility promise begins with v0.3.0. Pre-release file-backed CLI checkpoints and their read-only report and comparison commands are not part of that promise and are removed. The files themselves are not modified or deleted. Keep manifest-based `trace` and `preflight` diagnostics and the separately governed SQLite schema and payload compatibility policies.
+
 ## Persistence architecture
 
 Retain Drizzle and the application-facing read and command repository separation. Complete the implementation behind those interfaces. `src/infrastructure/run-store.ts` becomes a composition boundary that opens the connection and constructs repositories, rather than owning validation, reconstruction, lifecycle calculation, routing, settlement, recovery, and deletion in one class. Extract by responsibility and transaction ownership, with no arbitrary file-size target or generic repository framework.
@@ -42,7 +44,7 @@ Inspection messages must reflect the actual measured result. In particular, init
 
 Settlement returns affected evaluation outcomes so the worker need not reload every evaluation status after each physical call. Narrow identity/existence reads do not compute full lifecycle aggregates. Reuse status and decoded data already obtained within an operation. Discover and reconcile eligible expired work in bounded queries rather than repeatedly projecting every active run. Preserve snapshot-consistent coverage, pagination, and source-version checks.
 
-Consolidate duplicated material merging, routing, evidence filtering, execution extraction, and legacy comparison accumulation at their proper owner. Avoid repeated archive reads when the parsed value is already available. Remove obsolete executable accounting and production fixture helpers after checking callers; retain types and compatibility functionality that remain required. Simplify dead parameters, unnecessary assertions, dense multi-statement code, and misleading abstractions encountered in the audited scope. Preserve vendored provenance and avoid cosmetic rewrites of upstream code.
+Consolidate duplicated material merging, routing, evidence filtering, and execution extraction at their proper owner. Remove obsolete executable accounting, unsupported pre-release file-backed report reading and comparison code, and production fixture helpers after checking callers. Retain only types and compatibility functionality required by the v0.3.0 release policy. Simplify dead parameters, unnecessary assertions, dense multi-statement code, and misleading abstractions encountered in the audited scope. Preserve vendored provenance and avoid cosmetic rewrites of upstream code.
 
 Choose changes for correctness, clarity, or demonstrated redundant work. Do not claim performance improvements from unmeasured elapsed time or introduce fragile timing assertions. Existing synchronous SQLite use is intentional; this slice does not introduce an asynchronous persistence model.
 
@@ -70,6 +72,7 @@ Record only concise distinct occurrence evidence needed to assess recurrence, di
 - Behavioral coverage proves execution rejection for wrong identity or excessive attempts even when all batch answers are missing or failed, accurate admission messages, and preservation of valid sibling answers under valid execution.
 - Persistence coverage exercises affected settlement, recovery, read snapshots, evidence pagination, and historical recall. Query-count or workload probes demonstrate removal of identified redundant reads without elapsed-time gates.
 - CLI and MCP continue using the same system; the copied generated package starts and resolves required assets independently of the repository.
+- The CLI exposes no reader or comparison commands for pre-release file-backed run archives; SQLite schema and payload compatibility remain governed by their release decisions.
 - README gives a human a truthful, concise route from discovery to first use. Standards subscriptions, certification, playbooks, runbooks, and unslop routes resolve and describe implemented behavior.
 - Run the repository's `npm run verify` gate and generated-package parity checks before publishing. Skill behavior campaigns remain outside CI and pre-commit. Ship meaningful tests, not stored results or source-text change detectors.
 - Update consequential architecture decisions with appropriate ADRs and index links. Keep this spec and its execution plan on `develop` under planning residency, and retire completed planning artifacts through the repository closeout policy after merge.

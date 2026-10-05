@@ -5,8 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { type TestContext } from 'node:test';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
-import { executionFingerprint, legacyChoiceStimulusFingerprint, respondentCohortFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
-import { legacyPromptContractHash } from '../src/domain/decision/prompt.js';
+import { executionFingerprint, respondentCohortFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
 
 const fixtureDirectory = fileURLToPath(new URL('./fixtures/', import.meta.url));
 
@@ -44,13 +43,6 @@ test('cohort identity includes frozen archetype snapshots as well as respondent 
   const baseline = respondentCohortFingerprint(cohort);
   assert.notEqual(respondentCohortFingerprint({ ...cohort, archetypes: cohort.archetypes.map((item, index) => index === 0 ? { ...item, invariants: ['Changed snapshot', ...item.invariants.slice(1)] } : item) }), baseline);
   assert.notEqual(respondentCohortFingerprint({ ...cohort, respondents: [...cohort.respondents].reverse() }), baseline);
-});
-
-test('legacy Choice identity ignores only the new discriminator and detects changed history semantics', async (t) => {
-  const study = await studyFixture(t);
-  const legacy = legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash);
-  const changed = { ...study.manifest, arms: study.manifest.arms.map((arm) => ({ ...arm, tasks: arm.tasks.map((task, index) => index ? task : { ...task, responseHistory: 'omit' as const }) })) };
-  assert.notEqual(legacyChoiceStimulusFingerprint(changed, study.cohort, legacyPromptContractHash), legacy);
 });
 
 test('execution fingerprint includes route and endpoint while excluding credential material', async (t) => {

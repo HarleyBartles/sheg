@@ -107,11 +107,11 @@
 
 **Files:** `src/domain/attempt-ledger.ts`, `src/infrastructure/legacy/run-archive.ts`, `src/application/legacy/reports.ts`, `src/infrastructure/{data-root,process-lock,run-runtime}.ts`, `src/infrastructure/sqlite/recovery.ts`, relevant domain/material helpers, existing tests and fixtures importing moved helpers.
 
-- [x] Recheck all callers before removing obsolete executable accounting. Move fixture-only construction into `test/helpers`; retain historical types and supported compatibility paths. Never delete vendored upstream APIs solely because current callers do not use them.
-- [x] Pass already parsed archive content into migration rather than rereading it. Extract shared comparison accumulation without merging genuinely different report contracts. Name complex intermediate shapes and expand dense multi-statement control flow.
+- [x] Recheck callers and remove pre-release file-backed report reading, checkpoint upcasting, comparison commands, and fingerprint compatibility code. Sheg makes its first compatibility promise with v0.3.0; these private development archives are outside it. Leave any external archive files untouched, and retain supported SQLite schema/payload compatibility.
+- [x] Remove the report aggregation and fixture helpers that exist only for the unsupported archive path. Keep manifest-based `trace` and `preflight`; do not alter their current contracts.
 - [x] Remove dead parameters and unnecessary casts found in the audit. Validate lock PIDs as positive safe integers and preserve lock ownership semantics. Replace runtime proxies that falsely claim full service interfaces with an explicit unavailable-service boundary where warranted.
 - [x] Make recovery diagnostics truthful when restoration itself fails: distinguish retained recovery files from restored active files. Exercise the corresponding failure path with fault injection if existing coverage does not establish it.
-- [x] Run affected legacy, identity, runtime, recovery and domain tests. Re-read changed files for responsibility ownership and accidental behavior changes, then commit.
+- [x] Run affected identity, runtime, recovery, CLI and domain tests. Verify no archive-report route remains, re-read changed files for responsibility ownership and accidental behavior changes, then commit.
 
 ## Task 8: Adopt routed standards and redesign human orientation
 
@@ -135,7 +135,7 @@
 
 ## Task 10: Review and publish the slice
 
-- [x] Critically re-read every touched source and guidance file. Verify the approved spec's acceptance criteria, transaction ownership, codec guarantees, query resolution and unslop routes against implementation. Resolve findings and rerun relevant checks.
-- [x] Promote consequential decisions into ADRs with index updates, retire eligible completed base planning artifacts under the applicable custody policy, and retain this governing spec/plan through the PR. Do not write completion receipts.
-- [x] Refresh `develop`, integrate any new changes, regenerate and validate if necessary. Push `codex/dev16-code-quality` and use `gh` to open one reviewable PR targeting `develop`, describing final behavior and relevant validation. Attach the created PR to this chat.
-- [x] Report the PR link, meaningful changes, verified checks and any material limitations. Leave human review and merge outside the checklist. Clean the worktree/branch only after verifying merge and preserving any needed untracked work.
+- [x] Critically re-read every touched source and guidance file. Verify the approved spec's acceptance criteria, transaction ownership, codec guarantees, query resolution, unslop routes, and revised compatibility boundary against implementation. Resolve findings and rerun relevant checks.
+- [x] Record the pre-release report retirement decision in a superseding ADR and update the index. Keep this governing spec/plan through the PR and retain eligible completed-artifact custody rules. Do not write completion receipts.
+- [ ] Refresh `develop`, integrate any new changes, regenerate and validate if necessary. Push `codex/dev16-code-quality` and update the existing reviewable PR targeting `develop`, describing final behavior and relevant validation. Keep it draft and attached to this chat.
+- [ ] Report the PR link, meaningful changes, verified checks and any material limitations. Leave human review and merge outside the checklist. Clean the worktree/branch only after verifying merge and preserving any needed untracked work.

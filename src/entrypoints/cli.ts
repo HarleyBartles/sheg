@@ -3,7 +3,6 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { traceStudy } from '../domain/journey/trace.js';
 import { loadStudy } from '../infrastructure/study-loader.js';
-import { compareReports, compareRunReports, getLegacyReport } from '../application/legacy/reports.js';
 import { preflightStudy, type PreflightProviderConfig } from '../application/preflight.js';
 import { decisionValueSchema, type DecisionValue } from '../domain/decision/decision.js';
 import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
@@ -33,11 +32,6 @@ export async function runCli(args: readonly string[], io: CliIo = outputIo, serv
     }
     if (command === 'trace') {
       const result = await trace(options);
-      io.out(JSON.stringify(result));
-      return 0;
-    }
-    if (command?.startsWith('legacy-')) {
-      const result = await legacyReport(command, options);
       io.out(JSON.stringify(result));
       return 0;
     }
@@ -107,17 +101,6 @@ async function trace(options: Record<string, string>) {
   return traceStudy(arm, profile, scripted);
 }
 
-async function legacyReport(command: string, options: Record<string, string>) {
-  if (command === 'legacy-report') return getLegacyReport(required(options, 'output'), uuid(required(options, 'run-id')));
-  if (command === 'legacy-compare') return compareReports(await getLegacyReport(required(options, 'output'), uuid(required(options, 'run-id'))), required(options, 'left-arm'), required(options, 'right-arm'));
-  if (command === 'legacy-compare-runs') {
-    const left = await getLegacyReport(required(options, 'left-output'), uuid(required(options, 'left-run-id')));
-    const right = await getLegacyReport(required(options, 'right-output'), uuid(required(options, 'right-run-id')));
-    return compareRunReports(left, required(options, 'left-arm'), right, required(options, 'right-arm'));
-  }
-  throw new CliInputError(`Unknown historical read-only command: ${command}`);
-}
-
 function parseArgs(args: readonly string[]): Record<string, string> {
   const options: Record<string, string> = {};
   for (let index = 0; index < args.length; index += 1) {
@@ -139,8 +122,6 @@ function validateOptions(command: string | undefined, options: Record<string, st
     inspect: ['request', 'data-root'], start: ['request', 'submission-id', 'data-root'],
     list: ['query', 'data-root'], query: ['query', 'data-root'], get: ['request', 'data-root'],
     cancel: ['run-id', 'data-root'], resume: ['run-id', 'data-root'], delete: ['request', 'data-root'], storage: ['request', 'data-root'],
-    'legacy-report': ['output', 'run-id'], 'legacy-compare': ['output', 'run-id', 'left-arm', 'right-arm'],
-    'legacy-compare-runs': ['left-output', 'left-run-id', 'left-arm', 'right-output', 'right-run-id', 'right-arm'],
   };
   const allowed = commands[command ?? ''];
   if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ''}`);
@@ -177,7 +158,6 @@ Commands:
   storage --request <json-file>                 Inspect, optimize or explicitly reset the datastore
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
-  legacy-report --output <dir> --run-id <uuid>  Read a pre-release file-backed report without modifying it
   Use --data-root <dir> with durable commands to select the datastore.`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));

@@ -1,6 +1,6 @@
 # Historical study manifest and diagnostics
 
-This manifest format remains supported for keyless CLI `trace` and `preflight` diagnostics, and for reading pre-release file-backed reports. Current CLI and MCP runs both use the same durable direct-request service; see the [study-design skill](../../skills/study-design/SKILL.md) for request shapes and tools.
+This manifest format remains supported for keyless CLI `trace` and `preflight` diagnostics. Current CLI and MCP runs both use the same durable direct-request service; see the [study-design skill](../../skills/study-design/SKILL.md) for request shapes and tools.
 
 The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms under a title and purpose. Each arm is a stimulus variant and has its own sources, ordered stimulus items, typed tasks, and presentation mode. See the [article fixture](../../test/fixtures/article.json), [chapter fixture](../../test/fixtures/chapter.json), and [respondent cohort](../../test/fixtures/cohort.json).
 
@@ -15,7 +15,7 @@ The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms 
 
 For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse Choice option IDs only when they retain the same meaning. Each frozen respondent is run once through every arm in the same run. Reports align task occurrence order within each respondent and compare typed values only when their task meanings align.
 
-Pre-release file-backed reports can be compared with the read-only `legacy-compare` and `legacy-compare-runs` commands. Independent durable runs are queried through their stored evidence and can be continued with a follow-on request. Reports are descriptive evidence from simulated respondents, not a causal estimate.
+Independent durable runs are queried through their stored evidence and can be continued with a follow-on request. Simulated respondents provide descriptive evidence, not a causal estimate.
 
 ## Example study design
 

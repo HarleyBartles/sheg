@@ -1,6 +1,6 @@
 # Trace and preflight historical manifests
 
-Current CLI and MCP runs use the same durable direct-request service. The versioned study manifest remains available for deterministic route tracing, provider preflight, and read-only access to pre-release file-backed reports.
+Current CLI and MCP runs use the same durable direct-request service. The versioned study manifest remains available for deterministic route tracing and provider preflight.
 
 Use `trace` to inspect a particular path without inference. Provide a manifest, frozen cohort, arm, respondent, and either stable Choice IDs or typed responses:
 

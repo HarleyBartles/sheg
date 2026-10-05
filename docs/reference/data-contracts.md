@@ -19,8 +19,4 @@ CLI and MCP use one SQLite datastore. Schema 9 is the first supported release ba
 
 Jev configuration selects `provider.route` and contains no key material or credential-source override. Authentication uses the selected Windows Credential Manager entry. Results may contain optional cost evidence with a `provider-reported` or `published-rate-estimate` basis. Cost is not aggregated into a run bill; published-rate estimates require metadata for the served model, not merely the requested alias.
 
-## Historical file-backed runs
-
-Pre-release CLI checkpoints use format 4 and retain maximum, used, reserved, and remaining physical calls. The CLI can read and report these records without modifying them; they cannot be started, resumed, or cancelled through the durable run service.
-
 CLI preflight reports credential availability independently of inference reachability. It performs no network probe, so endpoint `availability` remains unverified. Interruption records preserve consumed attempts, recovery time, and `candidateCellIds`; candidate cells do not prove which cell owned an in-flight request when the process stopped.
