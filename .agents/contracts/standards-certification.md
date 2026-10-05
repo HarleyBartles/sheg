@@ -2,6 +2,8 @@
 
 Sheg subscribes to the immutable `unslop`, `playbook-composition`, and `runbook-composition` definitions listed in [operating-standards.json](operating-standards.json). The pinned source is the Agent Asset Marketplace repository at commit `88c02ec6804fd695e43bf6a632c61014a21738f4`; each entry records its definition path.
 
+The repository's adoption and routing decision is recorded in [ADR-0034](../../docs/decisions/0034-adopt-routed-agent-operating-standards.md).
+
 The implementation lives in `.agents/unslop/`, `.agents/playbooks/`, and `.agents/runbooks/`. Root [AGENTS.md](../../AGENTS.md) routes agents to this subscription and certification; the [runbook and playbook policy](../doctrine/repo-runbook-policy.md) describes the lifecycle and concern routes.
 
 Agents consult the source-quality playbook and its applicable profiles when implementing or reviewing source changes. They preserve one owner for each domain rule, validate untrusted data at boundaries, share genuinely common behavior while retaining distinct public contracts, and avoid repeated work when the same operation already provides the required evidence.

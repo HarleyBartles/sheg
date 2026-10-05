@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir, rm, mkdtemp, writeFile } from 'node:fs/promises';
-import { renameSync } from 'node:fs';
+import { appendFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -159,6 +159,29 @@ test('failed recovery restoration reports original files retained in recovery st
     const recoveryDirectories = await readdir(path.join(root, 'recovery'));
     assert.equal(recoveryDirectories.length, 1);
     assert.deepEqual(await readFile(path.join(root, 'recovery', recoveryDirectories[0]!, 'runs.sqlite')), original);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('failed quarantine verification restores the moved original instead of losing track of it', async () => {
+  const root = await temporaryRoot();
+  const databasePath = path.join(root, 'runs.sqlite');
+  const original = Buffer.from('Not a valid SQLite database.');
+  const changedDuringQuarantine = Buffer.from(' altered');
+  await writeFile(databasePath, original);
+  const rename = (from: Parameters<typeof renameSync>[0], to: Parameters<typeof renameSync>[1]): void => {
+    renameSync(from, to);
+    if (from.toString() === databasePath && to.toString().includes(`${path.sep}recovery${path.sep}`)) {
+      appendFileSync(to, changedDuringQuarantine);
+    }
+  };
+
+  try {
+    assert.throws(() => resetRunStore(root, () => { throw new Error('Fresh-store creation must not run.'); }, { rename }), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Unreadable files moved before the failure were returned to their active paths/);
+      return true;
+    });
+    assert.deepEqual(await readFile(databasePath), Buffer.concat([original, changedDuringQuarantine]));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

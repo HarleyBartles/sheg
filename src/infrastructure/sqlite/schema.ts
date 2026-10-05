@@ -253,7 +253,6 @@ export function applySchemaMigrations(database: DatabaseSync, dataRoot: string, 
       throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema ${currentVersion} has no supported sequential migration path to ${targetVersion}. Preserve it and use run_storage to inspect recovery options.`);
     }
     if (currentVersion === 0) {
-      if (applicationTableCount(database) !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.');
       database.exec('BEGIN IMMEDIATE');
       try {
         const lockedVersion = pragmaNumber(database, 'user_version');
@@ -297,9 +296,19 @@ export function hasMigrationPath(fromVersion: number, targetVersion = SCHEMA_VER
 }
 
 export function initialize(database: DatabaseSync, dataRoot: string): void {
-  const version = pragmaNumber(database, 'user_version');
+  database.exec('BEGIN IMMEDIATE');
+  let version: number;
+  let tableCount: number;
+  try {
+    version = pragmaNumber(database, 'user_version');
+    tableCount = applicationTableCount(database);
+    database.exec('COMMIT');
+  } catch (error) {
+    try { database.exec('ROLLBACK'); } catch { /* Preserve the inspection error. */ }
+    throw error;
+  }
   if (version > SCHEMA_VERSION) throw new RunStoreError('unsupported_schema_version', `The Sheg database schema version ${version} is newer than this build. Preserve it and use run_storage to inspect recovery options.`);
-  if (version === 0 && applicationTableCount(database) !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.');
+  if (version === 0 && tableCount !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.');
   if (version !== 0 && version !== SCHEMA_VERSION && !hasMigrationPath(version, SCHEMA_VERSION)) {
     throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema version ${version} predates the v0.3.0 release baseline or has no supported migration path to ${SCHEMA_VERSION}. Preserve it and use run_storage to inspect options.`);
   }

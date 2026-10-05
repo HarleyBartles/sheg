@@ -142,4 +142,3 @@ export class JevProvider implements DecisionProvider {
 function missingMeasureFit(config: JevConfig, reason: string): ProviderContextFit {
   return { provider: 'jev', status: 'unavailable', method: 'unavailable', modelIdentity: config.model, tokenCount: 'estimated', tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
 }
-

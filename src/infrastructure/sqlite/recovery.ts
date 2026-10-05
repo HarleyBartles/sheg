@@ -90,8 +90,8 @@ export function resetRunStore(dataRoot: string, openFreshStore: () => void, oper
     }
     const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
     const restoration = retainedRecoveryFiles.length === 0
-      ? 'Original files were restored to their active paths.'
-      : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(', ')}.`;
+      ? 'Files moved before the failure were returned to their active paths.'
+      : `Files not returned to active paths remain in recovery storage: ${retainedRecoveryFiles.join(', ')}.`;
     if (error instanceof RunStoreError) throw new RunStoreError(error.code, `${error.message} ${restoration}`, { cause: error });
     throw new RunStoreError('recovery_reset_failed', `Sheg could not complete the explicit datastore reset; the verified backup remains available. ${restoration}`, { cause: error });
   }
@@ -109,8 +109,8 @@ function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFre
       const size = statSync(original).size;
       const archived = path.join(recoveryRoot, path.basename(original));
       (operations.rename ?? renameSync)(original, archived);
-      if (statSync(archived).size !== size) throw new Error('Quarantined datastore file size changed.');
       moved.push({ original, archived, size });
+      if (statSync(archived).size !== size) throw new Error('Quarantined datastore file size changed.');
     }
     openFreshStore();
     return { reset: true, backupRetained: false, preservation: 'quarantined-original-files', schemaVersion: SCHEMA_VERSION };
@@ -120,8 +120,8 @@ function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFre
     }
     const retainedRecoveryFiles = restoreMovedFiles(moved, operations.rename ?? renameSync);
     const restoration = retainedRecoveryFiles.length === 0
-      ? 'Original unreadable files were restored to their active paths.'
-      : `Original files not restored to active paths remain in recovery storage: ${retainedRecoveryFiles.join(', ')}.`;
+      ? 'Unreadable files moved before the failure were returned to their active paths.'
+      : `Files not returned to active paths remain in recovery storage: ${retainedRecoveryFiles.join(', ')}.`;
     throw new RunStoreError('recovery_reset_failed', `Sheg could not complete the explicit reset. ${restoration}`, { cause: error });
   }
 }

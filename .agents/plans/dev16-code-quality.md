@@ -135,7 +135,7 @@
 
 ## Task 10: Review and publish the slice
 
-- [ ] Critically re-read every touched source and guidance file. Verify the approved spec's acceptance criteria, transaction ownership, codec guarantees, query resolution and unslop routes against implementation. Resolve findings and rerun relevant checks.
-- [ ] Promote consequential decisions into ADRs with index updates, retire eligible completed base planning artifacts under the applicable custody policy, and retain this governing spec/plan through the PR. Do not write completion receipts.
+- [x] Critically re-read every touched source and guidance file. Verify the approved spec's acceptance criteria, transaction ownership, codec guarantees, query resolution and unslop routes against implementation. Resolve findings and rerun relevant checks.
+- [x] Promote consequential decisions into ADRs with index updates, retire eligible completed base planning artifacts under the applicable custody policy, and retain this governing spec/plan through the PR. Do not write completion receipts.
 - [ ] Refresh `develop`, integrate any new changes, regenerate and validate if necessary. Push `codex/dev16-code-quality` and use `gh` to open one reviewable PR targeting `develop`, describing final behavior and relevant validation. Attach the created PR to this chat.
 - [ ] Report the PR link, meaningful changes, verified checks and any material limitations. Leave human review and merge outside the checklist. Clean the worktree/branch only after verifying merge and preserving any needed untracked work.
