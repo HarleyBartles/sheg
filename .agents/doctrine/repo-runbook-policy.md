@@ -42,6 +42,12 @@ Describe capabilities by the work they perform. Agents inspect their harness and
 
 Keep shared topical knowledge at one owner and link it from consumers. The pinned subscriptions are in [operating-standards.json](../contracts/operating-standards.json). The [source-quality method](../playbooks/source-quality.md#method) defines Unslop profiles, identifies their canonical location, and links each guide beside its applicability. Introduce concern-specific terms before requiring an agent to act on them; a reference list alone does not explain how to select a guide.
 
+## Documentation audiences and ownership
+
+Choose documentation by its intended reader and task. Root `docs/` serves humans using, developing, installing, or trying to understand Sheg; technical depth does not make a document agent-facing. `.agents/` owns instructions for agents working in this repository. Agents using Sheg receive instructions through canonical `skills/`, usually skill references, which the build ships in the plugin. Root README provides human-facing repository orientation and links to the appropriate human documentation.
+
+Live guides and instructions state current behavior and obligations. Do not add change narratives such as "before dev.N", "dev.N now", completion announcements, test results, or implementation receipts. Git history and PRs retain development history. ADRs retain consequential decision context; Unslop observations retain the distinct mistake evidence needed to assess guards. Those purpose-specific records do not justify duplicating history in live guidance.
+
 ## Adding or changing a workflow
 
 Add a runbook only for a lifecycle stage and a playbook only for a reusable concern. Update this policy's inventory, link each concern from its applicable stage runbooks, and add the corresponding stage links in the playbook. Follow the local layout, validate references and routes with `npm run guidance:check`, and maintain the certification's structural and substantive assessment. Put consequential project decisions in the [decision records index](../../docs/decisions/README.md).

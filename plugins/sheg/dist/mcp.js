@@ -44523,8 +44523,6 @@ function resolveDataRoot(env, platform, home) {
   const paths = pathsFor(platform);
   const explicit = env.SHEG_DATA_DIR;
   if (explicit !== void 0) return requiredAbsolute(explicit, "SHEG_DATA_DIR", paths);
-  const pluginData = env.PLUGIN_DATA;
-  if (pluginData !== void 0) return requiredAbsolute(pluginData, "PLUGIN_DATA", paths);
   const absoluteHome = requiredAbsolute(home, "Home directory", paths);
   if (platform === "win32") {
     const local = env.LOCALAPPDATA;
@@ -45727,7 +45725,7 @@ function assertNever2(value) {
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.16",
+  version: "0.3.0-dev.17",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',

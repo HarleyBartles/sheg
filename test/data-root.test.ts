@@ -7,9 +7,10 @@ test('an explicit Sheg data directory takes precedence over plugin and OS storag
   assert.equal(resolveDataRoot({ SHEG_DATA_DIR: '/data/sheg', PLUGIN_DATA: '/data/plugin' }, 'linux', '/home/reader'), '/data/sheg');
 });
 
-test('plugin data is used directly when no explicit Sheg directory is set', () => {
-  assert.equal(resolveDataRoot({ PLUGIN_DATA: 'D:\\Plugin' }, 'win32', 'C:\\Users\\reader'), 'D:\\Plugin');
-  assert.equal(resolveDataRoot({ PLUGIN_DATA: '/plugin' }, 'darwin', '/Users/reader'), '/plugin');
+test('plugin hosts use the same platform data directory as standalone callers', () => {
+  assert.equal(resolveDataRoot({ PLUGIN_DATA: 'D:\\Plugin' }, 'win32', 'C:\\Users\\reader'), 'C:\\Users\\reader\\AppData\\Local\\Sheg');
+  assert.equal(resolveDataRoot({ PLUGIN_DATA: '/plugin' }, 'darwin', '/Users/reader'), '/Users/reader/Library/Application Support/Sheg');
+  assert.equal(resolveDataRoot({ PLUGIN_DATA: '/plugin', XDG_DATA_HOME: '/var/data' }, 'linux', '/home/reader'), '/var/data/sheg');
 });
 
 test('standalone installations resolve to each platform application data directory', () => {
@@ -23,6 +24,6 @@ test('standalone installations resolve to each platform application data directo
 test('explicit relative or empty data directory overrides fail instead of using the working directory', () => {
   assert.throws(() => resolveDataRoot({ SHEG_DATA_DIR: 'runs' }, 'win32', 'C:\\Users\\reader'), /absolute/i);
   assert.throws(() => resolveDataRoot({ SHEG_DATA_DIR: '' }, 'linux', '/home/reader'), /empty/i);
-  assert.throws(() => resolveDataRoot({ PLUGIN_DATA: 'relative' }, 'linux', '/home/reader'), /absolute/i);
-  assert.throws(() => resolveDataRoot({ PLUGIN_DATA: '' }, 'linux', '/home/reader'), /empty/i);
+  assert.throws(() => resolveDataRoot({ LOCALAPPDATA: 'relative' }, 'win32', 'C:\\Users\\reader'), /absolute/i);
+  assert.throws(() => resolveDataRoot({ XDG_DATA_HOME: '' }, 'linux', '/home/reader'), /empty/i);
 });

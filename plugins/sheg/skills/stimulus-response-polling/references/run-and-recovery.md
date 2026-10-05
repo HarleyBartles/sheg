@@ -1,5 +1,9 @@
 # Run and recover a poll
 
+## Shared datastore
+
+MCP and the standalone CLI share the platform's Sheg application data directory for the same OS user by default. When switching entrypoints, use CLI durable commands without a data-root flag. `SHEG_DATA_DIR` and CLI `--data-root` are intentional overrides; the host's `PLUGIN_DATA` variable does not select the store. If a known run is absent, check for a deliberate datastore override before considering recovery or reset.
+
 ## Connect a Jev key or defer
 
 When installing Sheg or choosing Jev without a saved key, offer **Connect TypeSafe**, **Connect OpenRouter**, or **Skip for now**. The user may connect both by repeating setup. Skipping permits keyless request design and local Laya; it cannot authenticate a Jev run.

@@ -23234,8 +23234,6 @@ function resolveDataRoot(env, platform, home) {
   const paths = pathsFor(platform);
   const explicit = env.SHEG_DATA_DIR;
   if (explicit !== void 0) return requiredAbsolute(explicit, "SHEG_DATA_DIR", paths);
-  const pluginData = env.PLUGIN_DATA;
-  if (pluginData !== void 0) return requiredAbsolute(pluginData, "PLUGIN_DATA", paths);
   const absoluteHome = requiredAbsolute(home, "Home directory", paths);
   if (platform === "win32") {
     const local = env.LOCALAPPDATA;
@@ -31723,7 +31721,8 @@ Commands:
   storage --request <json-file>                 Inspect, optimize or explicitly reset the datastore
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
-  Use --data-root <dir> with durable commands to select the datastore.`;
+  CLI and MCP share the platform's Sheg data directory by default.
+  Set SHEG_DATA_DIR or use --data-root <dir> to select another datastore.`;
 if (process.argv[1] && import.meta.url === pathToFileURL(path12.resolve(process.argv[1])).href) process.exitCode = await runCli(process.argv.slice(2));
 export {
   runCli

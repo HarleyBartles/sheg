@@ -35,6 +35,8 @@ npm run build
 
 Commit canonical source and the generated `dist/` and `plugins/sheg/` outputs together. Refresh the local marketplace plugin and restart Codex to load the updated package. The server launches as `node ${PLUGIN_ROOT}/dist/mcp.js` from the installed package root.
 
+See the [datastore guide](datastore.md) for storage defaults and intentional overrides.
+
 ## Provider configuration
 
 Configure each provider using its dedicated reference: [Jev](../providers/jev.md) or [local Laya](../providers/laya.md).
