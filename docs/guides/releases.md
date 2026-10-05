@@ -12,7 +12,7 @@ Before `1.0.0`, increment the patch for compatible fixes and the minor version f
 
 ## Datastore compatibility
 
-Schema 8 is the first supported released datastore baseline, in v0.3.0. Earlier development databases have no compatibility promise. Later schema-changing releases must include sequential, tested forward migrations from every supported released schema, preserving frozen inputs, answers, lineage, and physical-attempt accounting. Payload contract changes must introduce explicit versions and upcasters independently of the SQLite schema version. See [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md) for migration, backup, and recovery guarantees.
+Schema 9 is the first supported released datastore baseline, in v0.3.0. Earlier development databases have no compatibility promise. Later schema-changing releases must include sequential, tested forward migrations from every supported released schema, preserving frozen inputs, answers, lineage, and physical-attempt accounting. Payload contract changes must introduce explicit versions and upcasters independently of the SQLite schema version. See [ADR-0031](../decisions/0031-set-schema-nine-as-release-baseline.md) for the baseline and [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md) for migration, backup, and recovery guarantees.
 
 If startup cannot open or migrate a database, MCP recovery inspection remains available while study operations are blocked. Reset requires explicit confirmation and preserves a verified SQLite backup or, for unreadable databases, quarantined original files. Upgrades never reset data automatically.
 
