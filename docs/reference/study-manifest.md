@@ -13,13 +13,13 @@ The strict JSON manifest uses `version: "2.0"`. A study groups one or more arms 
 - `tasks[].responseHistory`: optional per-task `include` or `omit` policy. Omitted means `include`. `omit` removes earlier response events from this task's packet while retaining stimulus exposures and the same respondent journey.
 - `presentation`: `sequence` exposes every item in order and then asks each task; `graph` uses `expose`, `ask`, and `terminal` nodes with bounded decisions. Choice transitions match one option ID. Score/Noul transitions use explicit typed intervals that must cover the full response domain exactly once.
 
-For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse Choice option IDs only when they retain the same meaning. Each frozen respondent is run once through every arm in the same run. Reports align task occurrence order within each respondent and compare typed values only when their task meanings align.
+For matched arms, add a shared `comparisonKey` to semantically corresponding tasks and reuse Choice option IDs only when they retain the same meaning. Trace each arm with the same frozen respondent to inspect corresponding routes, and use preflight to measure its packets.
 
 Independent durable runs are queried through their stored evidence and can be continued with a follow-on request. Simulated respondents provide descriptive evidence, not a causal estimate.
 
 ## Example study design
 
-To compare two explanations of the same passage, create `original` and `revised` arms with their own source hash and item text. Give both arms a comprehension task with the same `comparisonKey` and the same stable options such as `supported`, `contradicted`, and `unanswerable`. Reuse one frozen respondent cohort for both. The report then shows each arm's option counts and proportions, the source and stimulus changes, and each respondent's paired answer when both answers use shared option IDs.
+To inspect two explanations of the same passage, create `original` and `revised` arms with their own source hash and item text. Give both arms a comprehension task with the same `comparisonKey` and the same stable options such as `supported`, `contradicted`, and `unanswerable`. Reuse one frozen respondent cohort for tracing and preflight. To run a study, submit a current durable request rather than the diagnostic manifest.
 
 The [study manifest schema](../../skills/stimulus-response-polling/assets/study-manifest.schema.json), [respondent cohort schema](../../skills/stimulus-response-polling/assets/respondent-cohort.schema.json), and [respondent profile schema](../../skills/stimulus-response-polling/assets/respondent-profile.schema.json) are the consumer contracts. The cohort uses `version: "3.0"` and an ordered `respondents` list. Its full snapshot and all arm contents contribute to the stimulus fingerprint. The [archetype and cohort guide](../../skills/stimulus-response-polling/references/archetypes-and-cohorts.md) explains authoring and expansion.
 

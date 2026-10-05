@@ -117,6 +117,8 @@
 
 **Files:** `README.md`, `AGENTS.md`, `.agents/doctrine/repo-runbook-policy.md`, `.agents/runbooks/{implementing,pr}.md`, existing/new concern playbooks; create `.agents/contracts/{operating-standards.json,standards-certification.md}` and `.agents/unslop/` profiles. Use repository-owned compliance commands if needed; no placeholder inventory.
 
+- [x] Define Sheg's playbook layout and substantive review obligations in repository policy. Apply it to every concern guide, preserve applicable stage navigation, certify the local implementation, and verify structural enforcement rejects malformed layouts, placeholders, missing routes, and unregistered guides.
+
 - [x] Resolve immutable upstream definition revisions for `unslop`, `playbook-composition`, and `runbook-composition`; read those definitions and register source repository, commit, path and certification reference. Do not treat installed plugin version alone as a source pin.
 - [x] Assess existing guides against the selected definitions. Keep lifecycle stages in runbooks and cross-stage concerns in playbooks. Correct redundant routing and capability availability claims. Root AGENTS links to subscriptions/certification and stage routing.
 - [x] Author concise guards against the actual corrected patterns with applicability and false-positive boundaries. Link distinct incident references only where useful; do not claim unobserved recurrence, readership or effectiveness.
