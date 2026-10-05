@@ -1,5 +1,6 @@
 import { asc, eq } from 'drizzle-orm';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { evaluations, questionGroups, runs } from './tables.js';
 
 export function findRunBySubmission(database: NodeSQLiteDatabase, submissionId: string) {
@@ -14,6 +15,17 @@ export function loadEvaluationStatuses(database: NodeSQLiteDatabase, runId: stri
 
 export function runExists(database: NodeSQLiteDatabase, runId: string): boolean {
   return database.select({ runId: runs.runId }).from(runs).where(eq(runs.runId, runId)).limit(1).all().length > 0;
+}
+
+export function hasAllFollowOnSelections(database: DatabaseSync, runId: string, selections: readonly { sourceEvaluationId: string; sourceContextId: string }[]): boolean {
+  const missing = database.prepare(`SELECT 1 AS missing
+    FROM json_each(?) AS selected
+    LEFT JOIN evaluations AS e ON e.run_id = ?
+      AND e.evaluation_id = json_extract(selected.value, '$.sourceEvaluationId')
+      AND e.context_id = json_extract(selected.value, '$.sourceContextId')
+    WHERE e.evaluation_id IS NULL
+    LIMIT 1`).get(JSON.stringify(selections), runId);
+  return missing === undefined;
 }
 
 export function loadAcceptedRequest(database: NodeSQLiteDatabase, runId: string) {

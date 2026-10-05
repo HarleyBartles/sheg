@@ -29482,6 +29482,16 @@ function loadEvaluationStatuses(database, runId) {
 function runExists(database, runId) {
   return database.select({ runId: runs.runId }).from(runs).where(eq(runs.runId, runId)).limit(1).all().length > 0;
 }
+function hasAllFollowOnSelections(database, runId, selections) {
+  const missing = database.prepare(`SELECT 1 AS missing
+    FROM json_each(?) AS selected
+    LEFT JOIN evaluations AS e ON e.run_id = ?
+      AND e.evaluation_id = json_extract(selected.value, '$.sourceEvaluationId')
+      AND e.context_id = json_extract(selected.value, '$.sourceContextId')
+    WHERE e.evaluation_id IS NULL
+    LIMIT 1`).get(JSON.stringify(selections), runId);
+  return missing === void 0;
+}
 function loadAcceptedRequest(database, runId) {
   return database.select({ requestJson: runs.requestJson, requestFingerprint: runs.requestFingerprint }).from(runs).where(eq(runs.runId, runId)).limit(1).all()[0];
 }
@@ -29519,6 +29529,75 @@ function storedJourneyIdentity(row) {
     throw new RunStoreError("data_integrity_error", "Stored journey request or fingerprint is invalid.");
   }
   return { request: parsedRequest.data, compilerFingerprint, requestFingerprint };
+}
+
+// src/infrastructure/sqlite/journey-queries.ts
+function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
+  const rows = database.prepare(`WITH next_ordinal AS (
+      SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
+    ), node_occurrences AS (
+      SELECT node_id, COUNT(*) AS count FROM evaluations WHERE run_id = ? AND respondent_id = ? GROUP BY node_id
+    )
+    SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
+      jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
+      jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
+      jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
+      next_ordinal.value AS next_ordinal, node_occurrences.node_id AS occurrence_node_id, node_occurrences.count AS occurrence_count
+    FROM runs r JOIN evaluations e ON e.run_id = r.run_id
+    JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+    CROSS JOIN next_ordinal LEFT JOIN node_occurrences ON 1 = 1
+    WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
+    ORDER BY node_occurrences.node_id`).all(runId, runId, respondentId, runId, evaluationId, respondentId);
+  const first = rows[0];
+  if (!first) throw new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
+  const identity = storedJourneyIdentity(first);
+  const profile = identity.request.respondents.find(({ id }) => id === respondentId);
+  if (!profile) throw new RunStoreError("data_integrity_error", "The journey turn references a respondent outside its frozen cohort.");
+  const packet = decisionRequestSchema.parse(parseJson(first.packet_json, "frozen packet"));
+  const evaluation = {
+    evaluationId: asText(first.evaluation_id, "evaluation ID"),
+    contextId: asText(first.context_id, "context ID"),
+    respondentId: asText(first.respondent_id, "respondent ID"),
+    questionId: asText(first.question_id, "question ID"),
+    packet,
+    packetFingerprint: asText(first.packet_fingerprint, "packet fingerprint"),
+    turnId: asText(first.turn_id, "turn ID"),
+    nodeId: asText(first.node_id, "node ID"),
+    pathId: asText(first.path_id, "path ID"),
+    occurrence: asNumber(first.occurrence, "turn occurrence"),
+    ordinal: asNumber(first.ordinal, "evaluation ordinal"),
+    status: asText(first.status, "evaluation status")
+  };
+  if (evaluation.status !== "pending" || evaluation.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {
+    throw new RunStoreError("data_integrity_error", "The reserved journey packet does not match its pending turn identity.");
+  }
+  const respondentStatus = asText(first.respondent_status, "journey respondent status");
+  const events = parseJson(first.respondent_events_json, "journey history");
+  const route = parseJson(first.respondent_route_json, "journey route");
+  if (!["active", "completed", "failed", "unreached"].includes(respondentStatus) || !Array.isArray(events) || !Array.isArray(route)) {
+    throw new RunStoreError("data_integrity_error", "Stored journey respondent state has an invalid shape.");
+  }
+  const respondent = {
+    respondentId: asText(first.respondent_id, "respondent ID"),
+    status: respondentStatus,
+    currentNodeId: asNullableText(first.respondent_current_node_id, "current node ID"),
+    currentTurnId: asNullableText(first.respondent_current_turn_id, "current turn ID"),
+    currentContextId: asNullableText(first.respondent_current_context_id, "current context ID"),
+    revision: asNumber(first.respondent_revision, "journey state revision"),
+    events,
+    route,
+    ...first.respondent_outcome === null ? {} : { outcome: asText(first.respondent_outcome, "journey outcome") }
+  };
+  if (respondent.status !== "active" || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
+    throw new RunStoreError("data_integrity_error", "The reserved journey turn does not match the active respondent checkpoint.");
+  }
+  return {
+    evaluation,
+    respondent,
+    profile,
+    nextOrdinal: asNumber(first.next_ordinal, "next evaluation ordinal"),
+    nodeOccurrences: rows.flatMap((row) => row.occurrence_node_id === null ? [] : [{ nodeId: asText(row.occurrence_node_id, "occurrence node ID"), count: asNumber(row.occurrence_count, "node occurrence count") }])
+  };
 }
 
 // src/infrastructure/sqlite/commands/acceptance.ts
@@ -30413,9 +30492,8 @@ var SQLiteRunStore = class {
         if (asText(source.status, "source run status") !== version2.status || asNumber(source.used_calls, "source used calls") !== version2.usedCalls || asNumber(source.reserved_calls, "source reserved calls") !== version2.reservedCalls || maxOrdinal !== version2.maxOrdinal) {
           throw new RunStoreError("source_changed_during_acceptance", "The source run changed after follow-on inspection. Inspect the request again to use its current evidence.");
         }
-        for (const selection of prepared.lineage.selections) {
-          const sourceEvaluation = this.database.prepare("SELECT 1 AS found FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND context_id = ?").get(prepared.lineage.sourceRunId, selection.sourceEvaluationId, selection.sourceContextId);
-          if (!sourceEvaluation) throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
+        if (!hasAllFollowOnSelections(this.database, prepared.lineage.sourceRunId, prepared.lineage.selections)) {
+          throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
         }
       }
       const runId = randomUUID5();
@@ -30516,73 +30594,7 @@ var SQLiteRunStore = class {
   }
   getJourneyWorkerTurn(runId, evaluationId, respondentId) {
     this.ensureOpen();
-    return this.readTransaction(() => {
-      const rows = this.database.prepare(`WITH next_ordinal AS (
-          SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
-        ), node_occurrences AS (
-          SELECT node_id, COUNT(*) AS count FROM evaluations WHERE run_id = ? AND respondent_id = ? GROUP BY node_id
-        )
-        SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
-          jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
-          jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
-          jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
-          next_ordinal.value AS next_ordinal, node_occurrences.node_id AS occurrence_node_id, node_occurrences.count AS occurrence_count
-        FROM runs r JOIN evaluations e ON e.run_id = r.run_id
-        JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
-        CROSS JOIN next_ordinal LEFT JOIN node_occurrences ON 1 = 1
-        WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
-        ORDER BY node_occurrences.node_id`).all(runId, runId, respondentId, runId, evaluationId, respondentId);
-      const first = rows[0];
-      if (!first) throw this.notFound();
-      const identity = storedJourneyIdentity(first);
-      const profile = identity.request.respondents.find(({ id }) => id === respondentId);
-      if (!profile) throw new RunStoreError("data_integrity_error", "The journey turn references a respondent outside its frozen cohort.");
-      const packet = decisionRequestSchema.parse(parseJson(first.packet_json, "frozen packet"));
-      const evaluation = {
-        evaluationId: asText(first.evaluation_id, "evaluation ID"),
-        contextId: asText(first.context_id, "context ID"),
-        respondentId: asText(first.respondent_id, "respondent ID"),
-        questionId: asText(first.question_id, "question ID"),
-        packet,
-        packetFingerprint: asText(first.packet_fingerprint, "packet fingerprint"),
-        turnId: asText(first.turn_id, "turn ID"),
-        nodeId: asText(first.node_id, "node ID"),
-        pathId: asText(first.path_id, "path ID"),
-        occurrence: asNumber(first.occurrence, "turn occurrence"),
-        ordinal: asNumber(first.ordinal, "evaluation ordinal"),
-        status: asText(first.status, "evaluation status")
-      };
-      if (evaluation.status !== "pending" || evaluation.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {
-        throw new RunStoreError("data_integrity_error", "The reserved journey packet does not match its pending turn identity.");
-      }
-      const respondentStatus = asText(first.respondent_status, "journey respondent status");
-      const events = parseJson(first.respondent_events_json, "journey history");
-      const route = parseJson(first.respondent_route_json, "journey route");
-      if (!["active", "completed", "failed", "unreached"].includes(respondentStatus) || !Array.isArray(events) || !Array.isArray(route)) {
-        throw new RunStoreError("data_integrity_error", "Stored journey respondent state has an invalid shape.");
-      }
-      const respondent = {
-        respondentId: asText(first.respondent_id, "respondent ID"),
-        status: respondentStatus,
-        currentNodeId: asNullableText(first.respondent_current_node_id, "current node ID"),
-        currentTurnId: asNullableText(first.respondent_current_turn_id, "current turn ID"),
-        currentContextId: asNullableText(first.respondent_current_context_id, "current context ID"),
-        revision: asNumber(first.respondent_revision, "journey state revision"),
-        events,
-        route,
-        ...first.respondent_outcome === null ? {} : { outcome: asText(first.respondent_outcome, "journey outcome") }
-      };
-      if (respondent.status !== "active" || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
-        throw new RunStoreError("data_integrity_error", "The reserved journey turn does not match the active respondent checkpoint.");
-      }
-      return {
-        evaluation,
-        respondent,
-        profile,
-        nextOrdinal: asNumber(first.next_ordinal, "next evaluation ordinal"),
-        nodeOccurrences: rows.flatMap((row) => row.occurrence_node_id === null ? [] : [{ nodeId: asText(row.occurrence_node_id, "occurrence node ID"), count: asNumber(row.occurrence_count, "node occurrence count") }])
-      };
-    });
+    return this.readTransaction(() => loadJourneyWorkerTurn(this.database, runId, evaluationId, respondentId));
   }
   getJourneyRun(runId) {
     this.ensureOpen();
@@ -30790,6 +30802,19 @@ var SQLiteRunStore = class {
         const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "source answer"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "source execution"));
         const contextId = asText(row.context_id, "context ID");
         const respondentId = asText(row.respondent_id, "respondent ID");
+        const materials = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems);
+        const selectedMaterialId = result?.type === "choice" && packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
+        const selectedMaterial = selectedMaterialId ? materials.find(({ id }) => id === selectedMaterialId) : void 0;
+        const selectedSource = selectedMaterial?.sourceId && selectedMaterial.sourceSha256 ? {
+          materialId: selectedMaterial.id,
+          text: selectedMaterial.text,
+          sourceId: selectedMaterial.sourceId,
+          sourceSha256: selectedMaterial.sourceSha256,
+          textSha256: createHash9("sha256").update(selectedMaterial.text, "utf8").digest("hex")
+        } : void 0;
+        if (selectedMaterialId && !selectedSource) {
+          throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
+        }
         return {
           evaluationId: asText(row.evaluation_id, "evaluation ID"),
           contextId,
@@ -30797,13 +30822,8 @@ var SQLiteRunStore = class {
           status: asText(row.status, "evaluation status"),
           packet,
           ...result ? { result } : {},
-          materials: materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems),
-          ...result?.type === "choice" && packet.question.type === "choice" && packet.question.materialOptions?.[result.choice] ? (() => {
-            const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
-            const candidate = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems).find(({ id }) => id === materialId);
-            if (!candidate?.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash9("sha256").update(candidate.text, "utf8").digest("hex") } };
-          })() : {}
+          materials,
+          ...selectedSource ? { selectedMaterial: selectedSource } : {}
         };
       });
       return {

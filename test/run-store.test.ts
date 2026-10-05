@@ -1296,6 +1296,11 @@ test('follow-on resolves the full supported explicit-reference selection', async
     });
     const sources = store.resolveFollowOnSources(request);
     assert.equal(sources.turns.length, 1001);
+    const followOn = await prepareFollowOnRun(request, sources, provider);
+    assert.ok(followOn.prepared);
+    const accepted = store.accept(randomUUID(), followOn.prepared);
+    assert.equal(accepted.created, true);
+    assert.equal(store.getRequest(accepted.run.runId).evaluations.length, 1001);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
