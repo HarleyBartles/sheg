@@ -40,7 +40,7 @@ Runbooks link to applicable playbooks at the relevant contribution stages. Playb
 
 Describe capabilities by the work they perform. Agents inspect their harness and select a suitable provider. Identify environment-provided capabilities as such; do not imply that a personal ambient plugin is available to every clone. Reference repository-owned skills by link and declared plugin skills by plugin-qualified name when a workflow actually needs them. Stop the dependent step if a required capability is unavailable; continue without optional capabilities and report any resulting limitation.
 
-Keep shared topical knowledge at one owner and link it from consumers. The pinned subscriptions are in [operating-standards.json](../contracts/operating-standards.json). Source-quality profiles are reached through the source-quality playbook and maintained from distinct evidence.
+Keep shared topical knowledge at one owner and link it from consumers. The pinned subscriptions are in [operating-standards.json](../contracts/operating-standards.json). The [source-quality method](../playbooks/source-quality.md#method) defines Unslop profiles, identifies their canonical location, and links each guide beside its applicability. Introduce concern-specific terms before requiring an agent to act on them; a reference list alone does not explain how to select a guide.
 
 ## Adding or changing a workflow
 

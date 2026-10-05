@@ -8,7 +8,9 @@ Use when implementing or reviewing changes to Sheg source, tests, generated runt
 
 Trace each changed behavior from its public entrypoint to its semantic owner and behavior coverage. Keep domain rules in `src/domain/`, orchestration in `src/application/`, provider wire behavior in `src/providers/`, and persistence mechanics in `src/infrastructure/`. Inspect callers and existing tests before changing an interface or removing code. Validate external and persisted input at the boundary that owns its interpretation.
 
-Read the relevant profiles before editing or reviewing: boundary drift applies to provider execution and entrypoint boundaries; single ownership and operation-local reuse applies to domain, storage, worker, and evidence changes. Apply their recognition cues and corrective behavior to the concrete change. Reuse a value or operation result when it already proves the needed state. Share behavior only where the contracts are identical.
+An Unslop profile is a repository-owned corrective guide for an observed pattern of agent mistakes. Sheg stores these guides and their supporting observations in `.agents/unslop/`. Each guide describes the mistake to recognize, the corrective action, where it applies, and the exceptions that prevent applying it too broadly.
+
+Before editing or reviewing, select and read the guides that apply to the change: [boundary drift](../unslop/boundary-drift.md) covers provider single/batch execution, validation, retries, and CLI/MCP dispatch; [single rule owner and operation-local reuse](../unslop/single-owner-and-reuse.md) covers domain schemas, storage codecs and repositories, workers, reports, and material or journey rules. Read both when the change crosses both concerns. Apply their recognition cues and corrective behavior to the concrete change. Reuse a value or operation result when it already proves the needed state. Share behavior only where the contracts are identical.
 
 ## Constraints
 
