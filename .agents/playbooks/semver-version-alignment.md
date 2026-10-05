@@ -41,8 +41,3 @@ Report the selected SemVer version, why patch or minor applies, compatibility im
 ## Prohibited combinations
 
 Do not infer a version bump from arbitrary commits, publish from an unverified tag, or publish to npm.
-
-## Runbook routing
-
-- [Implementing](../runbooks/implementing.md)
-- [Pull request](../runbooks/pr.md)

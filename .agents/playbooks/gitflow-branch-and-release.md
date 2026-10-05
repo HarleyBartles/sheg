@@ -41,8 +41,3 @@ Before handoff, report source branch, target branch, base SHA, final head SHA, a
 ## Prohibited combinations
 
 Do not target `main` from an ordinary feature branch, add unrelated features to a release branch, or leave release fixes only on `main`.
-
-## Runbook routing
-
-- [Implementing](../runbooks/implementing.md)
-- [Pull request](../runbooks/pr.md)

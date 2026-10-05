@@ -26,7 +26,7 @@ Start feature work from the latest `develop`. Keep changes within the approved i
 
 ## Doctrine and contracts
 
-Follow `AGENTS.md`, `docs/decisions/README.md`, and the approved work plan. Generated `dist/` output is derived from source and build scripts.
+Follow `AGENTS.md`, the [operating standards certification](../contracts/standards-certification.md), `docs/decisions/README.md`, and the approved work plan. Generated `dist/` output is derived from source and build scripts.
 
 ## Local commands and paths
 
@@ -42,5 +42,6 @@ Do not target `main` with ordinary feature work, bypass a failing gate, or edit 
 
 ## Playbook routing
 
+- [Source quality](../playbooks/source-quality.md) - for source, tests, generated runtime output, persisted contracts, providers, and entrypoints. Read applicable Unslop profiles before editing and assess whether they helped during review; maintain a profile only when distinct evidence warrants it.
 - [Gitflow branch and release routing](../playbooks/gitflow-branch-and-release.md) - whenever selecting a base branch or PR target, or preparing a release or hotfix.
 - [SemVer and version alignment](../playbooks/semver-version-alignment.md) - whenever a release version is proposed or changed.

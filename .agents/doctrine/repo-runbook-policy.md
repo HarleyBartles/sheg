@@ -19,10 +19,11 @@ compose; each document remains useful on its own.
 | --- | --- | --- |
 | Gitflow branches and releases | `.agents/playbooks/gitflow-branch-and-release.md` | Implementing and pull request |
 | SemVer and version alignment | `.agents/playbooks/semver-version-alignment.md` | Implementing and pull request |
+| Source quality | `.agents/playbooks/source-quality.md` | Implementing and pull request |
 
 ## Composition and capability selection
 
-The implementing and pull request runbooks link to both topical playbooks. A
+The implementing and pull request runbooks link to applicable concern playbooks. A
 runbook or playbook may name required and optional capabilities in terms of
 what they do, not a vendor, plugin, or skill identifier. Agents inspect the
 capabilities available in their current harness and select a suitable provider.
@@ -33,6 +34,11 @@ that limitation where it affects the result.
 Capability notes describe behavior the workflow needs; they do not assert that
 a particular tool or ambient extension is installed. Repository documents and
 Git evidence remain the authority for Sheg-specific process and state.
+
+The pinned standards and their repository-owned certification are listed in
+`.agents/contracts/operating-standards.json` and
+`.agents/contracts/standards-certification.md`. Applicable source-quality guards
+are routed from the source-quality playbook and maintained from distinct evidence.
 
 ## Adding a workflow
 

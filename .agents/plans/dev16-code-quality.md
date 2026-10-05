@@ -117,12 +117,12 @@
 
 **Files:** `README.md`, `AGENTS.md`, `.agents/doctrine/repo-runbook-policy.md`, `.agents/runbooks/{implementing,pr}.md`, existing/new concern playbooks; create `.agents/contracts/{operating-standards.json,standards-certification.md}` and `.agents/unslop/` profiles. Use repository-owned compliance commands if needed; no placeholder inventory.
 
-- [ ] Resolve immutable upstream definition revisions for `unslop`, `playbook-composition`, and `runbook-composition`; read those definitions and register source repository, commit, path and certification reference. Do not treat installed plugin version alone as a source pin.
-- [ ] Assess existing guides against the selected definitions. Keep lifecycle stages in runbooks and cross-stage concerns in playbooks. Correct redundant routing and capability availability claims. Root AGENTS links to subscriptions/certification and stage routing.
-- [ ] Author concise guards against the actual corrected patterns with applicability and false-positive boundaries. Link distinct incident references only where useful; do not claim unobserved recurrence, readership or effectiveness.
-- [ ] Route implementation and PR stages through applicable concern guides to profiles. Make reading, applying and maintaining profiles explicit at those decision points. Check every route manually and mechanically; verify that routing exists without presenting link checks as proof of behavioral effectiveness.
-- [ ] Rewrite README around human purpose, the pull-quote study/follow-up example, supported installation, first-use prompt and useful documentation links. Explain simulation limits and input variation concisely. Keep contribution instructions in their owned documents.
-- [ ] Review each changed document for truth, useful specificity, repeated emphasis and stale-receipt risk. Run link/reference integrity checks; use substantive review for semantic compliance. Commit.
+- [x] Resolve immutable upstream definition revisions for `unslop`, `playbook-composition`, and `runbook-composition`; read those definitions and register source repository, commit, path and certification reference. Do not treat installed plugin version alone as a source pin.
+- [x] Assess existing guides against the selected definitions. Keep lifecycle stages in runbooks and cross-stage concerns in playbooks. Correct redundant routing and capability availability claims. Root AGENTS links to subscriptions/certification and stage routing.
+- [x] Author concise guards against the actual corrected patterns with applicability and false-positive boundaries. Link distinct incident references only where useful; do not claim unobserved recurrence, readership or effectiveness.
+- [x] Route implementation and PR stages through applicable concern guides to profiles. Make reading, applying and maintaining profiles explicit at those decision points. Check every route manually and mechanically; verify that routing exists without presenting link checks as proof of behavioral effectiveness.
+- [x] Rewrite README around human purpose, the pull-quote study/follow-up example, supported installation, first-use prompt and useful documentation links. Explain simulation limits and input variation concisely. Keep contribution instructions in their owned documents.
+- [x] Review each changed document for truth, useful specificity, repeated emphasis and stale-receipt risk. Run link/reference integrity checks; use substantive review for semantic compliance. Commit.
 
 ## Task 9: Generate dev.16 and verify the integrated package
 
