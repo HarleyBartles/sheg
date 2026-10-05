@@ -255,4 +255,3 @@ function deletePreviewStatus(run: ReturnType<typeof loadRunDeletionSnapshot>['ru
     status === 'running' && run.leaseExpiresMs !== null && leaseExpires <= nowMs;
   return expired ? 'interrupted' : status;
 }
-
