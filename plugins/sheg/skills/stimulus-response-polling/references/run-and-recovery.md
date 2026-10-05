@@ -2,7 +2,7 @@
 
 ## Shared datastore
 
-MCP and the standalone CLI share the platform's Sheg application data directory for the same OS user by default. When switching entrypoints, use CLI durable commands without a data-root flag. `SHEG_DATA_DIR` and CLI `--data-root` are intentional overrides; the host's `PLUGIN_DATA` variable does not select the store. Earlier development plugin stores remain untouched and are not merged into the default. If a known older run is absent, establish which store recorded it and select that store explicitly before considering recovery or reset.
+MCP and the standalone CLI share the platform's Sheg application data directory for the same OS user by default. When switching entrypoints, use CLI durable commands without a data-root flag. `SHEG_DATA_DIR` and CLI `--data-root` are intentional overrides; the host's `PLUGIN_DATA` variable does not select the store. If a known run is absent, check for a deliberate datastore override before considering recovery or reset.
 
 ## Connect a Jev key or defer
 
