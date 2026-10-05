@@ -22,9 +22,8 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0014](0014-route-jev-execution-explicitly.md) | Select Jev routes explicitly and include route identity | Accepted |
 | [0015](0015-store-jev-credentials-in-windows-vault.md) | Store Jev credentials in Windows Credential Manager | Accepted |
 | [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
-
 | [0017](0017-limit-jev-credential-destinations.md) | Limit Jev credential destinations to the selected provider | Accepted |
-| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | Superseded by 0027 |
+| [0018](0018-store-durable-runs-in-sqlite.md) | Store durable runs in local SQLite | CLI persistence boundary superseded by 0029; schema policy by 0027 |
 | [0019](0019-own-execution-in-detached-workers.md) | Own accepted run execution in detached workers | Accepted |
 | [0020](0020-snapshot-follow-on-contexts.md) | Snapshot follow-on contexts with separate lineage | Accepted |
 | [0021](0021-independent-question-groups-and-batched-attempts.md) | Independent question groups share context and separate evidence | Accepted |
@@ -34,9 +33,11 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0025](0025-bound-native-typesafe-context-admission.md) | Bound native TypeSafe context admission with published evidence | Accepted |
 | [0026](0026-resume-failed-journey-turns.md) | Resume respondent-local failures in partial journeys | Accepted |
 | [0027](0027-migrate-supported-datastore-schemas.md) | Migrate supported datastore schemas forward | Accepted |
+| [0028](0028-keep-planning-artifacts-off-main.md) | Keep planning artifacts off the stable release tree | Accepted |
+| [0029](0029-share-the-durable-run-system-across-entrypoints.md) | Share the durable run system across entrypoints | Accepted |
 
 ## Writing and changing decisions
 
-Create one numbered record for each consequential decision. Include its status, context, considered options, decision, and consequences. Keep implementation plans as temporary working files; this directory records why the durable choices were made. Completed plans remain in Git history. When a decision changes, add a new record that supersedes the old one instead of rewriting history. Update this index in the same change.
+Create one numbered record for each consequential decision. Include its status, context, considered options, decision, and consequences. When a decision changes, add a new record that supersedes the old one instead of rewriting history. Update this index in the same change. The [release guide](../guides/releases.md#branches-and-promotion) governs planning artifact residency.
 
 Use [the template](template.md) for new records. Not every implementation choice needs an ADR; record choices that constrain future architecture, interfaces, distribution, or operations.

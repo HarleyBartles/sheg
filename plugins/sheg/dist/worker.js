@@ -19795,15 +19795,7 @@ var decisionValueSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string().regex(/^\d+$/), prose), probabilities: external_exports.record(external_exports.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
   external_exports.object({ type: external_exports.literal("noul"), noul: probability }).strict()
 ]);
-var providerExecutionEvidenceSchema = external_exports.object({
-  attempts: external_exports.number().int().positive(),
-  provider: external_exports.enum(["jev", "laya"]),
-  model: external_exports.string().min(1),
-  checkpoint: external_exports.string().min(1).optional(),
-  latencyMs: external_exports.number().finite().nonnegative(),
-  usage: external_exports.object({ inputTokens: external_exports.number().int().nonnegative().optional(), outputTokens: external_exports.number().int().nonnegative().optional() }).strict(),
-  cost: costEvidenceSchema.optional()
-}).strict();
+var providerExecutionEvidenceSchema = metadata;
 var decisionFailureDetailSchema = external_exports.object({
   reason: external_exports.enum(["malformed_answer", "answer_type_mismatch", "unknown_option", "probability_keys", "probability_sum", "score_out_of_range", "score_legend_mismatch", "invalid_answer"]),
   field: external_exports.enum(["answer", "type", "choice", "probabilities", "score", "legend"]),
@@ -19833,6 +19825,16 @@ var decisionBatchResultSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["answers"], message: "Batch result question IDs must be unique." });
   }
 });
+function decisionValueFromResult(result) {
+  switch (result.type) {
+    case "choice":
+      return { type: "choice", choice: result.choice, ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+    case "score":
+      return { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+    case "noul":
+      return { type: "noul", noul: result.noul };
+  }
+}
 
 // src/domain/decision/prompt.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -19997,6 +19999,16 @@ function journeyTopology(arm) {
   nodes.push({ id: terminal, kind: "terminal", outcome: "complete" });
   return { kind: "graph", nodes, transitions, entryNodeId: exposes[0], maxDecisions: arm.tasks.length };
 }
+function journeyTransitionForResponse(graph, nodeId, response) {
+  return graph.transitions.find((transition) => {
+    if (transition.fromNodeId !== nodeId) return false;
+    if (response.type === "choice") return transition.optionId === response.choice;
+    const interval = transition.when;
+    if (interval?.type !== response.type) return false;
+    const value = response.type === "score" ? response.score : response.noul;
+    return (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
+  });
+}
 
 // src/domain/journey/run.ts
 var JourneyExecutionError = class extends Error {
@@ -20019,13 +20031,7 @@ function advanceJourney(arm, profile, state, rawResult, compilerFingerprint) {
     taskId = askNode.taskId;
     const task = arm.tasks.find((candidate) => candidate.id === taskId);
     if (!task) throw new JourneyExecutionError(`Ask node ${nodeId} references unknown task ${taskId}.`);
-    const edge = graph.transitions.find((candidate) => {
-      if (candidate.fromNodeId !== nodeId) return false;
-      if (result.type === "choice") return candidate.optionId === result.choice;
-      const interval = candidate.when;
-      const value = result.type === "score" ? result.score : result.noul;
-      return interval?.type === result.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
-    });
+    const edge = journeyTransitionForResponse(graph, nodeId, result);
     if (!edge) throw new JourneyExecutionError(`Task node ${nodeId} has no transition for ${result.type} response.`);
     routeTarget = edge.toNodeId;
   }
@@ -20061,1126 +20067,51 @@ function normalizeResponse(answer, expectedType) {
   return parsed.data;
 }
 
-// src/providers/jev.ts
-import { setTimeout as wait } from "node:timers/promises";
-
-// src/domain/decision/validate.ts
-var DecisionError = class extends Error {
-  constructor(message, options2) {
-    super(message, options2);
-    this.name = "DecisionError";
-  }
-};
-var probabilitySumTolerance = 0.01;
-function validateDecision(request, result, options2 = {}) {
-  const parsedRequest = decisionRequestSchema.safeParse(request);
-  if (!parsedRequest.success) {
-    throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
-  }
-  const parsed = decisionResultSchema.safeParse(result);
-  if (!parsed.success) {
-    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error });
-  }
-  const decision = parsed.data;
-  const normalizedRequest = parsedRequest.data;
-  if (decision.type !== normalizedRequest.question.type) {
-    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`);
-  }
-  if (decision.type === "choice") {
-    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.");
-    const optionIds = Object.keys(normalizedRequest.question.options);
-    if (!optionIds.includes(decision.choice)) {
-      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
-    }
-    validateDistribution(decision.probabilities, optionIds, "Choice");
-  } else if (decision.type === "score") {
-    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.");
-    const rubric = normalizedRequest.question.rubric;
-    const levelIds = rubric.map((_level, index) => String(index));
-    if (decision.score < 0 || decision.score > rubric.length - 1) {
-      throw new DecisionError("Score result is outside the declared rubric range.");
-    }
-    validateDistribution(decision.probabilities, levelIds, "Score");
-    for (const [index, meaning] of rubric.entries()) {
-      if (decision.legend[String(index)] !== meaning) {
-        throw new DecisionError(`Score legend does not match rubric level ${index}.`);
-      }
-    }
-  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.");
-  const maxAttempts = options2.maxAttempts ?? 1;
-  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
-    throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
-  }
-  for (const key of ["provider", "model", "checkpoint"]) {
-    if (options2[key] !== void 0 && decision[key] !== options2[key]) {
-      throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
-    }
-  }
-  return decision;
-}
-function validateDecisionBatch(request, result, options2 = {}) {
-  const parsedRequest = decisionBatchRequestSchema.safeParse(request);
-  if (!parsedRequest.success) {
-    throw new DecisionError(`Decision batch request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
-  }
-  const envelope = batchEnvelopeSchema.safeParse(result);
-  if (!envelope.success) {
-    throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: envelope.error });
-  }
-  const execution = providerExecutionEvidenceSchema.parse(envelope.data.execution);
-  for (const answer of envelope.data.answers) {
-    if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
-      throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);
-    }
-  }
-  const answers = parsedRequest.data.questions.map((question) => {
-    const matches = envelope.data.answers.filter(({ questionId }) => questionId === question.id);
-    if (matches.length > 1) return { questionId: question.id, failure: { code: "duplicate_answer", message: "The provider returned this question more than once." } };
-    const answer = matches[0];
-    if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
-    if (answer.failure) return { questionId: question.id, failure: answer.failure };
-    const value = decisionValueSchema.safeParse(answer.value);
-    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The answer does not match a supported typed-answer shape.", detail: decisionFailureDetailForReason("malformed_answer") } };
-    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The answer type does not match the question type.", detail: decisionFailureDetailForReason("answer_type_mismatch") } };
-    if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
-      return { questionId: question.id, failure: { code: "invalid_answer", message: "The selected option was not offered by this question.", detail: decisionFailureDetailForReason("unknown_option") } };
-    }
-    try {
-      const enriched = { ...value.data, ...execution };
-      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
-      return { questionId: question.id, value: toDecisionValue(checked) };
-    } catch (error62) {
-      if (!(error62 instanceof DecisionError)) throw error62;
-      return { questionId: question.id, failure: decisionValidationFailure(error62) };
-    }
-  });
-  return decisionBatchResultSchema.parse({ answers, execution });
-}
-function decisionFailureReason(error62) {
-  const message = error62.message;
-  const reason = message.includes("does not match task type") ? "answer_type_mismatch" : message.includes("was not offered") ? "unknown_option" : message.includes("probabilities must contain exactly") ? "probability_keys" : message.includes("probabilities must sum") ? "probability_sum" : message.includes("outside the declared rubric range") ? "score_out_of_range" : message.includes("Score legend does not match") ? "score_legend_mismatch" : message.startsWith("Decision result is invalid:") ? "malformed_answer" : "invalid_answer";
-  return reason;
-}
-function decisionValidationFailure(error62) {
-  return decisionValidationFailureForReason(decisionFailureReason(error62));
-}
-function decisionValidationFailureForReason(reason) {
-  const detail = decisionFailureDetailForReason(reason);
-  return { code: detail.reason === "answer_type_mismatch" ? "answer_type_mismatch" : "invalid_answer", message: decisionFailureMessage(detail), detail };
-}
-function decisionFailureMessage(detail) {
-  switch (detail.reason) {
-    case "malformed_answer":
-      return "The answer does not match a supported typed-answer shape.";
-    case "answer_type_mismatch":
-      return "The answer type does not match the question type.";
-    case "unknown_option":
-      return "The selected option was not offered by this question.";
-    case "probability_keys":
-      return "The probability distribution must contain exactly the declared outcomes.";
-    case "probability_sum":
-      return "The probability distribution must sum to 1 within the accepted tolerance.";
-    case "score_out_of_range":
-      return "The score falls outside the declared rubric range.";
-    case "score_legend_mismatch":
-      return "The score legend does not match the declared rubric.";
-    case "invalid_answer":
-      return "The answer failed a typed-answer validation rule.";
-  }
-}
-function toDecisionValue(result) {
-  if (result.type === "choice") return {
-    type: "choice",
-    choice: result.choice,
-    probabilities: result.probabilities,
-    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
-  };
-  if (result.type === "score") return {
-    type: "score",
-    score: result.score,
-    legend: result.legend,
-    probabilities: result.probabilities,
-    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
-  };
-  return { type: "noul", noul: result.noul };
-}
-var batchEnvelopeSchema = external_exports.object({
-  answers: external_exports.array(external_exports.object({
-    questionId: external_exports.string().min(1),
-    value: external_exports.unknown().optional(),
-    failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional()
-  }).strict().superRefine((answer, context) => {
-    if ("value" in answer === Boolean(answer.failure)) context.addIssue({ code: "custom", message: "Each batch answer must contain exactly one value or failure." });
-  })),
-  execution: providerExecutionEvidenceSchema
+// src/domain/decision/provider-failure.ts
+var providerContextFitSchema = external_exports.object({
+  provider: external_exports.enum(["jev", "laya"]),
+  status: external_exports.enum(["fits", "overflow", "unavailable"]),
+  method: external_exports.string().min(1),
+  modelIdentity: external_exports.string().min(1),
+  tokenCount: external_exports.enum(["measured", "estimated"]),
+  tokens: external_exports.number().finite().nonnegative(),
+  contextLimit: external_exports.number().finite().nonnegative().nullable(),
+  headroomTokens: external_exports.number().finite().nullable(),
+  effectiveLimit: external_exports.number().finite().nonnegative().nullable(),
+  details: external_exports.record(external_exports.string(), external_exports.union([external_exports.number().finite(), external_exports.string()])),
+  reason: external_exports.string().optional()
 }).strict();
-function validateDistribution(distribution, expectedIds, label) {
-  const ids = Object.keys(distribution);
-  if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
-    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`);
-  }
-  const total = Object.values(distribution).reduce((sum, value) => sum + value, 0);
-  if (Math.abs(total - 1) > probabilitySumTolerance) {
-    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`);
-  }
-}
-
-// src/providers/jev/config.ts
-var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
-var routeDefaults = {
-  openrouter: {
-    model: "typesafe/jev-1.13",
-    endpoint: "https://openrouter.ai/api/alpha/decisions"
-  },
-  typesafe: {
-    model: "jev-latest",
-    endpoint: "https://api.typesafe.ai/v1/systemone"
-  }
-};
-var jevConfigInputSchema = external_exports.object({
-  kind: external_exports.literal("jev"),
-  route: jevRouteSchema.optional(),
-  model: external_exports.string().min(1).optional(),
-  endpoint: external_exports.string().url().optional(),
-  timeoutMs: external_exports.number().int().positive().optional()
-}).strict().superRefine((input2, context) => {
-  if (input2.endpoint === void 0) return;
-  let endpoint;
-  try {
-    endpoint = new URL(input2.endpoint);
-  } catch {
-    return;
-  }
-  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
-  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
-    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
-  }
-});
-var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
-  const route = input2.route ?? "openrouter";
-  const defaults = routeDefaults[route];
-  return {
-    kind: "jev",
-    route,
-    model: input2.model ?? defaults.model,
-    endpoint: input2.endpoint ?? defaults.endpoint,
-    timeoutMs: input2.timeoutMs ?? 3e4
-  };
-});
-
-// src/providers/jev/model-metadata.ts
-var jevModelMetadata = {
-  openrouter: {
-    "typesafe/jev-1.13": {
-      contextLimit: 32768,
-      contextEvidence: {
-        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
-        checkedOn: "2026-09-30"
-      },
-      inputUsdPerMillion: 0.042,
-      outputUsdPerMillion: 0,
-      priceEvidence: {
-        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
-        checkedOn: "2026-09-30"
-      }
-    }
-  },
-  typesafe: {
-    "jev-latest": {
-      contextLimit: 32e3,
-      contextEvidence: {
-        sourceUrl: "https://docs.typesafe.ai/models",
-        checkedOn: "2026-10-04"
-      },
-      inputUsdPerMillion: 0.042,
-      outputUsdPerMillion: 0,
-      priceEvidence: {
-        sourceUrl: "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
-        checkedOn: "2026-09-30"
-      }
-    }
-  }
-};
-function jevMetadata(route, model) {
-  return jevModelMetadata[route][model];
-}
-
-// src/infrastructure/credentials/windows.ts
-import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-var CredentialStoreError = class extends Error {
-  constructor(code, route) {
-    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
-    super(message);
-    this.code = code;
-    this.route = route;
-    this.name = "CredentialStoreError";
-  }
-  code;
-  route;
-};
-var defaultTargets = {
-  typesafe: "Sheg/Jev/TypeSafe",
-  openrouter: "Sheg/Jev/OpenRouter"
-};
-var WindowsCredentialStore = class {
-  targets;
-  helperPath;
-  run;
-  constructor(options2 = {}) {
-    this.targets = { ...defaultTargets, ...options2.credentialTargets };
-    this.helperPath = options2.helperPath ?? locateHelper();
-    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
-  }
-  async availability(route) {
-    try {
-      const result = await this.run(this.arguments("Status", route));
-      if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
-      if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
-      if (result.code === 4 && result.stdout.trim() === "MALFORMED") return "malformed";
-      return "unavailable";
-    } catch {
-      return "unavailable";
-    }
-  }
-  async readForAuthentication(route) {
-    let result;
-    try {
-      result = await this.run(this.arguments("Read", route));
-    } catch {
-      throw new CredentialStoreError("credential_unavailable", route);
-    }
-    const key = result.stdout.replace(/\r?\n$/, "");
-    if (result.code === 4 && result.stdout.trim() === "MALFORMED") throw new CredentialStoreError("credential_malformed", route);
-    if (result.code !== 0 || !key) throw new CredentialStoreError("credential_unavailable", route);
-    return key;
-  }
-  async setup(route) {
-    const result = await this.run(this.arguments("Setup", route), true);
-    if (result.code !== 0) throw new Error(`The ${route} secure credential could not be saved.`);
-  }
-  async remove(route) {
-    const result = await this.run(this.arguments("Remove", route));
-    if (result.code !== 0 && result.code !== 3) throw new Error(`The ${route} secure credential could not be removed.`);
-  }
-  arguments(operation, route) {
-    return ["-Operation", operation, "-TargetName", this.targets[route]];
-  }
-};
-function locateHelper() {
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.join(moduleDirectory, "windows-credential.ps1"),
-    path.join(moduleDirectory, "credentials", "windows-credential.ps1")
-  ];
-  const helper = candidates.find(existsSync);
-  if (!helper) throw new Error("The Windows credential helper is unavailable.");
-  return helper;
-}
-async function runPowerShell(helperPath, args, interactive = false) {
-  if (process.platform !== "win32") throw new Error("Windows secure credentials are unavailable on this platform.");
-  const childArgs = [
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File"
-  ];
-  if (interactive) childArgs.splice(2, 1);
-  childArgs.push(helperPath, ...args);
-  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name) => process.env[name] === void 0 ? [] : [[name, process.env[name]]]));
-  return new Promise((resolve, reject) => {
-    const child = nodeSpawn("powershell.exe", childArgs, {
-      windowsHide: !interactive,
-      shell: false,
-      stdio: interactive ? ["inherit", "inherit", "ignore"] : ["ignore", "pipe", "ignore"],
-      env
-    });
-    let stdout = "";
-    let settled = false;
-    const finish = (error62, code = 1) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error62) reject(error62);
-      else resolve({ code, stdout, stderr: "" });
-    };
-    const timer = setTimeout(() => {
-      child.kill();
-      finish(new Error("Credential helper timed out."));
-    }, interactive ? 3e5 : 1e4);
-    if (!interactive) child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-      if (stdout.length > 16384) {
-        child.kill();
-        finish(new Error("Credential helper output exceeded its limit."));
-      }
-    });
-    child.once("error", () => finish(new Error("Credential helper could not start.")));
-    child.once("close", (code) => finish(void 0, code ?? 1));
-  });
-}
-
-// src/providers/jev.ts
-var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable", validationFailure) {
-    super(message);
-    this.attempts = attempts;
-    this.contextFit = contextFit;
-    this.decisionId = decisionId;
-    this.failureScope = failureScope2;
-    this.failureCode = failureCode;
-    this.validationFailure = validationFailure;
-    this.name = "JevCallError";
-  }
+var providerFailureEvidenceSchema = external_exports.object({
+  category: external_exports.enum(["admission", "credential", "transport", "http", "envelope", "answer", "execution"]),
+  attempts: external_exports.number().int().nonnegative(),
+  scope: external_exports.enum(["evaluation", "run"]),
+  httpStatus: external_exports.number().int().min(100).max(599).optional(),
+  contextFit: providerContextFitSchema.optional()
+}).strict();
+var ProviderCallError = class extends Error {
   attempts;
-  contextFit;
-  decisionId;
   failureScope;
   failureCode;
-  validationFailure;
-};
-var choiceAnswerSchema = external_exports.object({
-  type: external_exports.literal("choice"),
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional()
-}).passthrough();
-var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
-var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
-var wireUsageSchema = external_exports.object({
-  input_tokens: external_exports.number().int().nonnegative().optional(),
-  output_tokens: external_exports.number().int().nonnegative().optional(),
-  cost: external_exports.number().finite().nonnegative().optional()
-}).passthrough();
-var nativeWireUsageSchema = wireUsageSchema.extend({
-  input_tokens: external_exports.number().int().nonnegative(),
-  output_tokens: external_exports.number().int().nonnegative()
-});
-var wireResponseSchema = external_exports.object({
-  model: external_exports.string().min(1),
-  answers: external_exports.record(external_exports.string(), external_exports.unknown()),
-  usage: wireUsageSchema
-}).passthrough();
-var nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
-function parseWireResponse(payload, route) {
-  return (route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
-}
-var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
-var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
-var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
-function wireQuestion(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
-function requestBody(request, model) {
-  return { model, state: request.state, questions: { [request.question.id]: wireQuestion(request.question) } };
-}
-function batchRequestBody(request, model) {
-  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, wireQuestion(question)])) };
-}
-function measureRequestBody(serialized, model, route) {
-  const bytes = Buffer.byteLength(serialized, "utf8");
-  const tokens = Math.ceil(bytes / 3);
-  const contextLimit = jevMetadata(route, model)?.contextLimit ?? null;
-  const headroomTokens = contextLimit === null ? null : Math.ceil(contextLimit * 0.2);
-  const effectiveLimit = contextLimit === null ? null : contextLimit - Math.ceil(contextLimit * 0.2);
-  const status = effectiveLimit === null ? "unavailable" : tokens > effectiveLimit ? "overflow" : "fits";
-  return {
-    provider: "jev",
-    status,
-    method: JEV_MEASUREMENT_METHOD,
-    modelIdentity: model,
-    tokenCount: "estimated",
-    tokens,
-    contextLimit,
-    headroomTokens,
-    effectiveLimit,
-    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20, ...contextLimit === null ? {} : { contextEvidenceDate: jevMetadata(route, model)?.contextEvidence?.checkedOn ?? "unrecorded" } },
-    ...status === "unavailable" ? { reason: route === "typesafe" ? TYPESAFE_CONTEXT_UNVERIFIED : "model-context-unknown" } : status === "overflow" ? { reason: "estimated-context-over-limit" } : {}
-  };
-}
-function measureJevContext(request, model, route = "openrouter") {
-  return measureRequestBody(JSON.stringify(requestBody(request, model)), model, route);
-}
-function measureJevBatchContext(request, model, route = "openrouter") {
-  return measureRequestBody(JSON.stringify(batchRequestBody(request, model)), model, route);
-}
-var JevProvider = class {
-  constructor(config2, fetchRequest = fetch, options2 = {}) {
-    this.fetchRequest = fetchRequest;
-    this.config = jevConfigSchema.parse(config2);
-    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
-    this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
-    this.measureBatchContext = options2.measureBatchContext;
-  }
-  fetchRequest;
-  config;
-  credentialStore;
-  measureContext;
-  measureBatchContext;
-  async decide(request, maxAttempts) {
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new JevCallError("Jev call limit must be a positive integer.", 0);
-    }
-    const parsedRequest = decisionRequestSchema.safeParse(request);
-    if (!parsedRequest.success) {
-      throw new JevCallError("Jev decision request is invalid.", 0);
-    }
-    const fit = this.measure(parsedRequest.data);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
-    let apiKey;
-    try {
-      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
-    } catch (error62) {
-      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
-    }
-    const { question } = parsedRequest.data;
-    const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
-    const startedAt = performance.now();
-    let attempts = 0;
-    while (attempts < maxAttempts) {
-      attempts += 1;
-      let response;
-      try {
-        response = await this.fetchRequest(this.config.endpoint, {
-          method: "POST",
-          redirect: "error",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body,
-          signal: AbortSignal.timeout(this.config.timeoutMs)
-        });
-      } catch {
-        if (attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
-          continue;
-        }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
-      }
-      if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
-          continue;
-        }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
-      }
-      let payload;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts);
-      }
-      const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
-      }
-      const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
-      if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
-      }
-      const cost = parsedResponse.data.usage.cost;
-      const inputTokens = parsedResponse.data.usage.input_tokens;
-      const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
-      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
-      const result = {
-        ...answer.data,
-        attempts,
-        provider: "jev",
-        model: parsedResponse.data.model,
-        latencyMs: performance.now() - startedAt,
-        usage: {
-          ...inputTokens === void 0 ? {} : { inputTokens },
-          ...outputTokens === void 0 ? {} : { outputTokens }
-        },
-        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
-      };
-      try {
-        return validateDecision(request, result, { maxAttempts, provider: "jev" });
-      } catch (error62) {
-        if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation.", attempts, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
-        }
-        throw error62;
-      }
-    }
-    throw new JevCallError("Jev call limit reached without a response.", attempts);
-  }
-  measureBatch(request) {
-    const parsed = decisionBatchRequestSchema.safeParse(request);
-    if (!parsed.success) return { ...missingMeasureFit(this.config, "invalid-batch-request"), reason: "invalid-batch-request" };
-    return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
-  }
-  async decideBatch(request, maxAttempts) {
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", 0);
-    const parsedRequest = decisionBatchRequestSchema.safeParse(request);
-    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", 0);
-    const normalizedRequest = parsedRequest.data;
-    const fit = this.measureBatch(normalizedRequest);
-    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit);
-    let apiKey;
-    try {
-      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
-    } catch (error62) {
-      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
-    }
-    const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
-    const startedAt = performance.now();
-    let attempts = 0;
-    while (attempts < maxAttempts) {
-      attempts += 1;
-      let response;
-      try {
-        response = await this.fetchRequest(this.config.endpoint, {
-          method: "POST",
-          redirect: "error",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body,
-          signal: AbortSignal.timeout(this.config.timeoutMs)
-        });
-      } catch {
-        if (attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
-          continue;
-        }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
-      }
-      if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
-          continue;
-        }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
-      }
-      let payload;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts);
-      }
-      const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
-      const cost = parsedResponse.data.usage.cost;
-      const inputTokens = parsedResponse.data.usage.input_tokens;
-      const outputTokens = parsedResponse.data.usage.output_tokens;
-      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
-      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
-      const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
-        const answer = answerSchema.safeParse(rawValue);
-        return { questionId, value: answer.success ? toDecisionValue2(answer.data) : rawValue };
-      });
-      const execution = {
-        attempts,
-        provider: "jev",
-        model: parsedResponse.data.model,
-        latencyMs: performance.now() - startedAt,
-        usage: { ...inputTokens === void 0 ? {} : { inputTokens }, ...outputTokens === void 0 ? {} : { outputTokens } },
-        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
-      };
-      try {
-        return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
-      } catch (error62) {
-        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts);
-        throw error62;
-      }
-    }
-    throw new JevCallError("Jev call limit reached without a response.", attempts);
-  }
-  measure(request) {
-    return this.measureContext(request, this.config);
-  }
-};
-function toDecisionValue2(answer) {
-  if (answer.type === "choice") return { type: "choice", choice: answer.choice, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
-  if (answer.type === "score") return { type: "score", score: answer.score, legend: answer.legend, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
-  return { type: "noul", noul: answer.noul };
-}
-function missingMeasureFit(config2, reason) {
-  return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
-}
-function retryDelayMs(attempt) {
-  return Math.min(50 * 2 ** (attempt - 1), 1e3);
-}
-
-// src/providers/laya/context-fit.ts
-import { createHash as createHash3 } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import path2 from "node:path";
-
-// src/providers/laya/vendor/sequence.ts
-function pyJson(v) {
-  if (v === null) return "null";
-  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return JSON.stringify(v);
-  if (Array.isArray(v)) return `[${v.map((x) => pyJson(x) ?? "null").join(", ")}]`;
-  if (typeof v === "object") {
-    const proto = Object.getPrototypeOf(v);
-    if (proto !== Object.prototype && proto !== null) return void 0;
-    const parts = [];
-    for (const [k, x] of Object.entries(v)) {
-      const s = pyJson(x);
-      if (s !== void 0) parts.push(`${JSON.stringify(k)}: ${s}`);
-    }
-    return `{${parts.join(", ")}}`;
-  }
-  return void 0;
-}
-function serializeState(state) {
-  if (typeof state === "string") return state;
-  return pyJson(state) ?? String(state);
-}
-function renderCriterion(v) {
-  return typeof v === "string" ? v : pyJson(v) ?? String(v);
-}
-function renderOptions(q) {
-  if (q.t === "choice") {
-    const crit2 = q.crit;
-    return Object.entries(crit2).map(([k, v]) => v === null || v === void 0 || v === "" ? k : `${k}: ${renderCriterion(v)}`);
-  }
-  if (q.t === "score") {
-    return q.crit.map((c, i) => `level ${i}: ${renderCriterion(c)}`);
-  }
-  const crit = q.crit ?? {};
-  const f = crit["false"], t = crit["true"];
-  return [
-    "false: " + (f !== null && f !== void 0 && f !== "" ? renderCriterion(f) : "no, the statement does not hold"),
-    "true: " + (t !== null && t !== void 0 && t !== "" ? renderCriterion(t) : "yes, the statement holds")
-  ];
-}
-function buildSequence(tok, state, q, maxLen = 512, headMaxLen = 192, optionOrder, truncateLeft = false) {
-  const maskTok = tok.maskToken;
-  const opts = renderOptions(q);
-  const order = optionOrder ?? opts.map((_, i) => i);
-  const ins = String(q.ins).split(maskTok).join(" ");
-  let headIds = tok.encode(`${q.t} question: ${ins}`);
-  let optIds = order.map((i) => [tok.maskId, ...tok.encode(" " + opts[i].split(maskTok).join(" ")).slice(0, 48)]);
-  let budget = headMaxLen - optIds.reduce((a, o) => a + o.length, 0);
-  if (budget < 16) {
-    const per = Math.max(4, Math.floor((headMaxLen - 16) / Math.max(1, optIds.length)));
-    optIds = optIds.map((o) => o.slice(0, per));
-    budget = headMaxLen - optIds.reduce((a, o) => a + o.length, 0);
-  }
-  headIds = headIds.slice(0, Math.max(8, budget));
-  let ids = [tok.clsId, ...headIds, tok.sepId];
-  const markers = [];
-  for (const o of optIds) {
-    markers.push(ids.length);
-    ids.push(...o);
-  }
-  ids.push(tok.sepId);
-  const room = Math.max(0, maxLen - ids.length - 1);
-  const stAll = tok.encode(serializeState(state).split(maskTok).join(" "));
-  const st = truncateLeft ? stAll.slice(-room) : stAll.slice(0, room);
-  ids = [...ids, ...st, tok.sepId].slice(0, maxLen);
-  return { ids, markers: markers.filter((m) => m < maxLen) };
-}
-
-// src/providers/laya/vendor/tokenizer.ts
-var CHECKPOINT_IDS = { cls: 50281, sep: 50282, mask: 50284, pad: 50283, unk: 50280 };
-var SPECIAL_ALIASES = {
-  cls: ["[CLS]", "<bos>", "<s>"],
-  sep: ["[SEP]", "<eos>", "</s>"],
-  pad: ["[PAD]", "<pad>"],
-  mask: ["[MASK]", "<mask>"],
-  unk: ["[UNK]", "<unk>"]
-};
-var METASPACE_REPLACEMENT = "\u2581";
-function byteUnicodeMaps() {
-  const b2u = /* @__PURE__ */ new Map();
-  const u2b = /* @__PURE__ */ new Map();
-  const extra = (n) => n < 256 ? n + 256 : n;
-  const ranges = [[33, 126], [161, 172], [174, 255]];
-  let k = 0;
-  const inRange = (b) => ranges.some(([lo, hi]) => b >= lo && b <= hi);
-  for (let b = 0; b < 256; b++) {
-    const cp = inRange(b) ? b : extra(k++);
-    b2u.set(b, String.fromCodePoint(cp));
-    u2b.set(String.fromCodePoint(cp), b);
-  }
-  return { b2u, u2b };
-}
-var cached2 = null;
-function maps() {
-  if (!cached2) cached2 = byteUnicodeMaps();
-  return cached2;
-}
-var GPT2_SPLIT = new RegExp("'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+", "gu");
-function bpeWord(chars, rank) {
-  let word = chars.slice();
-  if (word.length <= 1) return word;
-  for (; ; ) {
-    let best = Infinity, idx = -1;
-    for (let i = 0; i < word.length - 1; i++) {
-      const r = rank.get(word[i] + " " + word[i + 1]);
-      if (r !== void 0 && r < best) {
-        best = r;
-        idx = i;
-      }
-    }
-    if (idx < 0) return word;
-    word = [...word.slice(0, idx), word[idx] + word[idx + 1], ...word.slice(idx + 2)];
-  }
-}
-function bpeEncode(vocab, merges, text) {
-  const { b2u } = maps();
-  const unkId = vocab.get("[UNK]") ?? CHECKPOINT_IDS.unk;
-  const out = [];
-  const enc = new TextEncoder();
-  const parts = text.normalize("NFC").match(GPT2_SPLIT);
-  if (!parts) return out;
-  for (const piece of parts) {
-    const chars = [];
-    for (const b of enc.encode(piece)) chars.push(b2u.get(b) ?? "");
-    for (const tok of bpeWord(chars, merges)) out.push(vocab.get(tok) ?? unkId);
-  }
-  return out;
-}
-function metaspaceEncode(vocab, merges, text, unkId, replaces = [[" ", METASPACE_REPLACEMENT]]) {
-  const unk = unkId ?? vocab.get("<unk>") ?? vocab.get("[UNK]") ?? CHECKPOINT_IDS.unk;
-  if (!text) return [];
-  let t = text;
-  for (const [from, to] of replaces) t = t.split(from).join(to);
-  const out = [];
-  const push = (piece) => {
-    for (const tok of bpeWord(Array.from(piece), merges)) out.push(vocab.get(tok) ?? unk);
-  };
-  for (const seg of t.split(/(\n+)/)) {
-    if (!seg) continue;
-    if (seg[0] === "\n") {
-      push(seg);
-    } else {
-      const w = seg.startsWith(METASPACE_REPLACEMENT) ? seg : METASPACE_REPLACEMENT + seg;
-      for (const chunk of w.split(METASPACE_REPLACEMENT).slice(1)) {
-        push(chunk ? METASPACE_REPLACEMENT + chunk : METASPACE_REPLACEMENT);
-      }
-    }
-  }
-  return out;
-}
-function encodeWithData(data, text) {
-  return data.kind === "metaspace" ? metaspaceEncode(data.vocab, data.merges, text, data.ids.unk, data.replaces) : bpeEncode(data.vocab, data.merges, text);
-}
-function childNodes(node2) {
-  if (!node2 || typeof node2 !== "object") return [];
-  const o = node2;
-  const out = [];
-  for (const k of ["normalizers", "pre_tokenizers", "decoders"]) {
-    const v = o[k];
-    if (Array.isArray(v)) out.push(...v);
-  }
-  return out;
-}
-function hasNodeType(node2, want) {
-  if (!node2 || typeof node2 !== "object") return false;
-  if (node2["type"] === want) return true;
-  return childNodes(node2).some((c) => hasNodeType(c, want));
-}
-function collectReplaces(node2, out) {
-  if (!node2 || typeof node2 !== "object") return;
-  const o = node2;
-  if (o["type"] === "Replace") {
-    const pat = o["pattern"];
-    const from = pat?.["String"];
-    const to = o["content"];
-    if (typeof from === "string" && typeof to === "string") out.push([from, to]);
-  }
-  for (const c of childNodes(node2)) collectReplaces(c, out);
-}
-function parseTokenizerJson(raw) {
-  try {
-    const r = raw;
-    const vocabObj = r?.model?.vocab;
-    if (!vocabObj || typeof vocabObj !== "object") return null;
-    const vocab = new Map(Object.entries(vocabObj));
-    const merges = /* @__PURE__ */ new Map();
-    for (const [i, m] of (r.model?.merges ?? []).entries()) {
-      const pair = typeof m === "string" ? m.split(" ") : m;
-      if (pair.length >= 2) merges.set(pair[0] + " " + pair[1], i);
-    }
-    const added = /* @__PURE__ */ new Map();
-    for (const t of r.added_tokens ?? []) {
-      if (typeof t?.content === "string" && typeof t?.id === "number") added.set(t.content, t.id);
-    }
-    const pick2 = (aliases, fb) => {
-      for (const a of aliases) {
-        const v = added.get(a) ?? vocab.get(a);
-        if (v !== void 0) return { id: v, token: a };
-      }
-      return { id: fb, token: aliases[0] };
-    };
-    const cls = pick2(SPECIAL_ALIASES.cls, CHECKPOINT_IDS.cls);
-    const sep = pick2(SPECIAL_ALIASES.sep, CHECKPOINT_IDS.sep);
-    const mask = pick2(SPECIAL_ALIASES.mask, CHECKPOINT_IDS.mask);
-    const pad = pick2(SPECIAL_ALIASES.pad, CHECKPOINT_IDS.pad);
-    const unk = pick2(SPECIAL_ALIASES.unk, CHECKPOINT_IDS.unk);
-    const kind = hasNodeType(r?.pre_tokenizer, "Metaspace") ? "metaspace" : "bytelevel";
-    const replaces = [];
-    collectReplaces(r?.normalizer, replaces);
-    if (kind === "metaspace" && replaces.length === 0) replaces.push([" ", METASPACE_REPLACEMENT]);
-    return {
-      vocab,
-      merges,
-      ids: { cls: cls.id, sep: sep.id, mask: mask.id, pad: pad.id, unk: unk.id },
-      kind,
-      maskToken: mask.token,
-      replaces
-    };
-  } catch {
-    return null;
-  }
-}
-
-// src/providers/laya/context-fit.ts
-var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
-var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
-var tokenizerCache = /* @__PURE__ */ new Map();
-async function tokenizerPromise(config2) {
-  const absolutePath = path2.resolve(config2.tokenizerJsonPath);
-  const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
-  const metadata2 = await stat(absolutePath, { bigint: true });
-  const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
-  const existing = tokenizerCache.get(key);
-  if (existing?.signature === signature) return existing.loaded;
-  const loaded = (async () => {
-    const bytes = await readFile(absolutePath);
-    const sha256 = createHash3("sha256").update(bytes).digest("hex");
-    if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
-    let raw;
-    try {
-      raw = JSON.parse(bytes.toString("utf8"));
-    } catch {
-      throw new Error("tokenizer-json-invalid");
-    }
-    const data = parseTokenizerJson(raw);
-    if (!data) throw new Error("tokenizer-json-unsupported");
-    return { data, sha256 };
-  })();
-  tokenizerCache.set(key, { signature, loaded });
-  return loaded;
-}
-function unavailable(config2, reason, details = {}) {
-  return {
-    provider: "laya",
-    status: "unavailable",
-    method: LAYA_MEASUREMENT_METHOD,
-    modelIdentity: config2.checkpoint,
-    tokenCount: "measured",
-    tokens: 0,
-    contextLimit: config2.contextLimit,
-    headroomTokens: 0,
-    effectiveLimit: config2.contextLimit,
-    details,
-    reason
-  };
-}
-function tokenizerLike(data) {
-  return {
-    clsId: data.ids.cls,
-    sepId: data.ids.sep,
-    maskId: data.ids.mask,
-    padId: data.ids.pad,
-    maskToken: data.maskToken,
-    encode: (text) => encodeWithData(data, text)
-  };
-}
-async function measureLayaContext(request, config2) {
-  if (!/^[a-f\d]{64}$/i.test(config2.tokenizerSha256)) return unavailable(config2, "tokenizer-checksum-invalid");
-  let loaded;
-  try {
-    loaded = await tokenizerPromise(config2);
-  } catch (error62) {
-    return unavailable(config2, error62 instanceof Error ? error62.message : "tokenizer-load-failed");
-  }
-  const tokenizer = tokenizerLike(loaded.data);
-  const question = {
-    t: request.question.type,
-    ins: request.question.instructions,
-    crit: request.question.type === "choice" ? request.question.options : request.question.type === "score" ? request.question.rubric : request.question.criteria
-  };
-  const fullHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
-  const configuredHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, config2.headLimit);
-  const options2 = renderOptions(question);
-  const optionTokenLengths = options2.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
-  const fullState = tokenizer.encode(serializeState(request.state).split(tokenizer.maskToken).join(" "));
-  const stateBudget = config2.contextLimit - fullHead.ids.length;
-  const tokens = fullHead.ids.length + fullState.length;
-  const details = {
-    tokenizerSha256: loaded.sha256,
-    headTokens: fullHead.ids.length,
-    headLimit: config2.headLimit,
-    stateTokens: fullState.length,
-    stateBudget: Math.max(0, stateBudget),
-    optionTokenLengths: optionTokenLengths.join(",")
-  };
-  let reason;
-  if (optionTokenLengths.some((length) => length > 48)) reason = "option-would-be-truncated";
-  else if (JSON.stringify(fullHead.ids) !== JSON.stringify(configuredHead.ids)) reason = "instructions-or-options-would-be-truncated";
-  else if (fullHead.ids.length > config2.contextLimit) reason = "question-head-exceeds-context";
-  else if (fullState.length > stateBudget) reason = "state-would-be-truncated";
-  return {
-    provider: "laya",
-    status: reason === void 0 ? "fits" : "overflow",
-    method: LAYA_MEASUREMENT_METHOD,
-    modelIdentity: config2.checkpoint,
-    tokenCount: "measured",
-    tokens,
-    contextLimit: config2.contextLimit,
-    headroomTokens: 0,
-    effectiveLimit: config2.contextLimit,
-    details,
-    ...reason === void 0 ? {} : { reason }
-  };
-}
-
-// src/providers/laya.ts
-var MAX_LAYA_SCORE_LEVELS = 32;
-var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", validationFailure) {
-    super(message);
-    this.attempts = attempts;
-    this.contextFit = contextFit;
-    this.decisionId = decisionId;
-    this.failureScope = failureScope2;
-    this.validationFailure = validationFailure;
-    this.name = "LayaCallError";
-  }
-  attempts;
   contextFit;
-  decisionId;
-  failureScope;
   validationFailure;
-};
-var choiceAnswerSchema2 = external_exports.object({
-  type: external_exports.literal("choice"),
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional()
-}).passthrough();
-var scoreAnswerSchema2 = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
-var noulAnswerSchema2 = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema2 = external_exports.discriminatedUnion("type", [choiceAnswerSchema2, scoreAnswerSchema2, noulAnswerSchema2]);
-function wireQuestion2(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
-var responseSchema = external_exports.object({
-  model: external_exports.string().min(1),
-  answers: external_exports.record(external_exports.string(), external_exports.unknown()),
-  usage: external_exports.object({
-    input_tokens: external_exports.number().int().nonnegative().optional(),
-    output_tokens: external_exports.number().int().nonnegative().optional()
-  }).passthrough(),
-  routing: external_exports.object({ model: external_exports.string().min(1) }).passthrough()
-}).passthrough();
-async function checkLayaFit(request, config2, measureFit) {
-  if (request.question.type === "score" && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
-    return { provider: "laya", status: "overflow", method: "laya-score-rubric-limit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: request.question.rubric.length, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
-  }
-  let measurement;
-  try {
-    measurement = await (measureFit ?? measureLayaContext)(request, config2);
-  } catch {
-    return { provider: "laya", status: "unavailable", method: "laya-context-fit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: 0, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: config2.contextLimit, details: {}, reason: "context-unmeasurable" };
-  }
-  if (measurement.provider !== "laya" || measurement.modelIdentity !== config2.checkpoint || measurement.contextLimit !== config2.contextLimit || measurement.details.tokenizerSha256 !== config2.tokenizerSha256.toLowerCase()) {
-    return { ...measurement, status: "unavailable", reason: "checkpoint-or-tokenizer-mismatch" };
-  }
-  return measurement;
-}
-var LayaProvider = class {
-  constructor(config2, options2 = {}) {
-    this.config = config2;
-    this.options = options2;
-    if (config2.kind !== "laya" || !config2.baseUrl || !config2.checkpoint || !config2.tokenizerJsonPath || !/^[a-f\d]{64}$/i.test(config2.tokenizerSha256) || !Number.isInteger(config2.contextLimit) || config2.contextLimit < 1 || !Number.isInteger(config2.headLimit) || config2.headLimit < 1 || !Number.isInteger(config2.timeoutMs) || config2.timeoutMs < 1 || config2.precision !== void 0 && !config2.precision) {
-      throw new TypeError("Laya configuration requires a base URL, checkpoint, positive context limit, and positive timeout.");
-    }
-    this.fetchRequest = options2.fetchRequest ?? fetch;
-  }
-  config;
-  options;
-  fetchRequest;
-  async measure(request) {
-    return checkLayaFit(request, this.config, this.options.measureFit);
-  }
-  async decide(request, maxAttempts) {
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new LayaCallError("Laya call limit must be a positive integer.", 0);
-    }
-    const parsedRequest = decisionRequestSchema.safeParse(request);
-    if (!parsedRequest.success) throw new LayaCallError("Laya decision request is invalid.", 0);
-    const fit = await this.measure(parsedRequest.data);
-    if (fit.status !== "fits") {
-      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
-    }
-    const { question } = parsedRequest.data;
-    const endpoint = new URL("/v1/systemone", ensureTrailingSlash(this.config.baseUrl)).toString();
-    const startedAt = performance.now();
-    let response;
-    try {
-      response = await this.fetchRequest(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.config.checkpoint,
-          state: parsedRequest.data.state,
-          questions: {
-            [question.id]: wireQuestion2(question)
-          }
-        }),
-        signal: AbortSignal.timeout(this.config.timeoutMs)
-      });
-    } catch {
-      throw new LayaCallError("Laya local service request failed.", 1);
-    }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
-    let payload;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new LayaCallError("Laya local service returned unreadable JSON.", 1);
-    }
-    const parsedResponse = responseSchema.safeParse(payload);
-    if (!parsedResponse.success) {
-      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1);
-    }
-    if (parsedResponse.data.routing.model !== this.config.checkpoint) {
-      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
-    }
-    const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
-    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
-    const result = {
-      ...answer.data,
-      attempts: 1,
-      provider: "laya",
-      model: parsedResponse.data.model,
-      checkpoint: parsedResponse.data.routing.model,
-      latencyMs: performance.now() - startedAt,
-      usage: {
-        ...parsedResponse.data.usage.input_tokens === void 0 ? {} : { inputTokens: parsedResponse.data.usage.input_tokens },
-        ...parsedResponse.data.usage.output_tokens === void 0 ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }
-      }
-    };
-    try {
-      return validateDecision(request, result, { maxAttempts, provider: "laya", checkpoint: this.config.checkpoint });
-    } catch (error62) {
-      if (error62 instanceof DecisionError) {
-        throw new LayaCallError("Laya response failed decision validation.", 1, void 0, void 0, "evaluation", decisionValidationFailure(error62));
-      }
-      throw error62;
-    }
+  evidence;
+  constructor(message, options2) {
+    super(message);
+    this.name = "ProviderCallError";
+    this.attempts = options2.attempts;
+    this.failureScope = options2.scope ?? "evaluation";
+    this.failureCode = options2.code ?? "provider_unavailable";
+    this.contextFit = options2.contextFit;
+    this.validationFailure = options2.validationFailure;
+    this.evidence = providerFailureEvidenceSchema.parse({
+      category: options2.category ?? (options2.contextFit ? "admission" : options2.validationFailure ? "answer" : options2.code?.startsWith("credential_") ? "credential" : "execution"),
+      attempts: options2.attempts,
+      scope: this.failureScope,
+      ...options2.contextFit ? { contextFit: options2.contextFit } : {},
+      ...options2.httpStatus === void 0 ? {} : { httpStatus: options2.httpStatus }
+    });
   }
 };
-function ensureTrailingSlash(value) {
-  return value.endsWith("/") ? value : `${value}/`;
-}
 
 // src/application/question-worker.ts
 var HEARTBEAT_MS = 2e3;
@@ -21244,7 +20175,7 @@ async function executePoll(store2, runId2, claim2, providerFactory) {
         if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
         else {
           const single = await provider.decide(reservation.evaluations[0].packet, 1);
-          result = { answers: [{ questionId: reservation.evaluations[0].questionId, value: valueOnly(single) }], execution: {
+          result = { answers: [{ questionId: reservation.evaluations[0].questionId, value: decisionValueFromResult(single) }], execution: {
             attempts: single.attempts,
             provider: single.provider,
             model: single.model,
@@ -21265,11 +20196,6 @@ async function executePoll(store2, runId2, claim2, providerFactory) {
       for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId));
     }
   }
-}
-function valueOnly(result) {
-  if (result.type === "choice") return { type: "choice", choice: result.choice, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
-  if (result.type === "score") return { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
-  return { type: "noul", noul: result.noul };
 }
 async function executeJourney(store2, runId2, claim2, providerFactory) {
   const accepted = store2.getJourneyRun(runId2);
@@ -21343,22 +20269,164 @@ async function executeJourney(store2, runId2, claim2, providerFactory) {
   }
 }
 function failureScope(error62) {
-  return error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.failureScope : "evaluation";
+  return error62 instanceof ProviderCallError ? error62.failureScope : "evaluation";
 }
 function failureDetails(error62, scope) {
-  const validationFailure = error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.validationFailure : void 0;
-  if (validationFailure) return { ...validationFailure, ...error62 instanceof JevCallError || error62 instanceof LayaCallError ? { providerAttempts: error62.attempts } : {} };
-  const code = scope === "run" && error62 instanceof JevCallError ? error62.failureCode : scope === "run" ? "provider_unavailable" : "decision_failed";
-  const message = scope === "run" && error62 instanceof JevCallError && error62.failureCode.startsWith("credential_") ? error62.message : scope === "run" ? "Provider authentication or service access failed." : "The respondent evaluation did not produce a valid answer.";
-  const providerAttempts = error62 instanceof JevCallError || error62 instanceof LayaCallError ? error62.attempts : void 0;
-  return { code, message, ...providerAttempts === void 0 ? {} : { providerAttempts } };
+  if (!(error62 instanceof ProviderCallError)) return { code: scope === "run" ? "provider_unavailable" : "decision_failed", message: "The respondent evaluation did not produce a valid answer." };
+  const evidence = { providerAttempts: error62.attempts, providerFailure: error62.evidence };
+  if (error62.validationFailure) return { ...error62.validationFailure, ...evidence };
+  if (error62.contextFit) return { code: error62.contextFit.status === "overflow" ? "provider_context_overflow" : "provider_context_unavailable", message: error62.contextFit.status === "overflow" ? "The decision packet exceeds the provider context allowance." : "Provider context fit could not be verified.", ...evidence };
+  const code = scope === "run" ? error62.failureCode : `provider_${error62.evidence.category}_failed`;
+  return { code, message: scope === "run" ? "Provider authentication or service access failed." : "The provider could not complete this evaluation.", ...evidence };
 }
 
 // src/infrastructure/run-store.ts
-import { createHash as createHash4, randomUUID as randomUUID2 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
-import path3 from "node:path";
+import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
+// src/domain/decision/validate.ts
+var DecisionError = class extends Error {
+  reason;
+  constructor(message, options2) {
+    super(message, options2);
+    this.name = "DecisionError";
+    this.reason = options2?.reason ?? "invalid_answer";
+  }
+};
+var probabilitySumTolerance = 0.01;
+function validateDecision(request, result, options2 = {}) {
+  const parsedRequest = decisionRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
+  }
+  const parsed = decisionResultSchema.safeParse(result);
+  if (!parsed.success) {
+    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error, reason: "malformed_answer" });
+  }
+  const decision = parsed.data;
+  const normalizedRequest = parsedRequest.data;
+  if (decision.type !== normalizedRequest.question.type) {
+    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`, { reason: "answer_type_mismatch" });
+  }
+  if (decision.type === "choice") {
+    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.", { reason: "answer_type_mismatch" });
+    const optionIds = Object.keys(normalizedRequest.question.options);
+    if (!optionIds.includes(decision.choice)) {
+      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`, { reason: "unknown_option" });
+    }
+    validateDistribution(decision.probabilities, optionIds, "Choice");
+  } else if (decision.type === "score") {
+    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.", { reason: "answer_type_mismatch" });
+    const rubric = normalizedRequest.question.rubric;
+    const levelIds = rubric.map((_level, index) => String(index));
+    if (decision.score < 0 || decision.score > rubric.length - 1) {
+      throw new DecisionError("Score result is outside the declared rubric range.", { reason: "score_out_of_range" });
+    }
+    validateDistribution(decision.probabilities, levelIds, "Score");
+    for (const [index, meaning] of rubric.entries()) {
+      if (decision.legend[String(index)] !== meaning) {
+        throw new DecisionError(`Score legend does not match rubric level ${index}.`, { reason: "score_legend_mismatch" });
+      }
+    }
+  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.", { reason: "answer_type_mismatch" });
+  const maxAttempts = options2.maxAttempts ?? 1;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
+    throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
+  }
+  for (const key of ["provider", "model", "checkpoint"]) {
+    if (options2[key] !== void 0 && decision[key] !== options2[key]) {
+      throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
+    }
+  }
+  return decision;
+}
+function validateDecisionBatch(request, result, options2 = {}) {
+  const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision batch request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
+  }
+  const envelope = batchEnvelopeSchema.safeParse(result);
+  if (!envelope.success) {
+    throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: envelope.error });
+  }
+  const execution = providerExecutionEvidenceSchema.parse(envelope.data.execution);
+  for (const answer of envelope.data.answers) {
+    if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
+      throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);
+    }
+  }
+  const answers = parsedRequest.data.questions.map((question) => {
+    const matches = envelope.data.answers.filter(({ questionId }) => questionId === question.id);
+    if (matches.length > 1) return { questionId: question.id, failure: { code: "duplicate_answer", message: "The provider returned this question more than once." } };
+    const answer = matches[0];
+    if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
+    if (answer.failure) return { questionId: question.id, failure: answer.failure };
+    const value = decisionValueSchema.safeParse(answer.value);
+    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The answer does not match a supported typed-answer shape.", detail: decisionFailureDetailForReason("malformed_answer") } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The answer type does not match the question type.", detail: decisionFailureDetailForReason("answer_type_mismatch") } };
+    if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
+      return { questionId: question.id, failure: { code: "invalid_answer", message: "The selected option was not offered by this question.", detail: decisionFailureDetailForReason("unknown_option") } };
+    }
+    try {
+      const enriched = { ...value.data, ...execution };
+      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
+      return { questionId: question.id, value: decisionValueFromResult(checked) };
+    } catch (error62) {
+      if (!(error62 instanceof DecisionError)) throw error62;
+      return { questionId: question.id, failure: decisionValidationFailure(error62) };
+    }
+  });
+  return decisionBatchResultSchema.parse({ answers, execution });
+}
+function decisionValidationFailure(error62) {
+  return decisionValidationFailureForReason(error62.reason);
+}
+function decisionValidationFailureForReason(reason) {
+  const detail = decisionFailureDetailForReason(reason);
+  return { code: detail.reason === "answer_type_mismatch" ? "answer_type_mismatch" : "invalid_answer", message: decisionFailureMessage(detail), detail };
+}
+function decisionFailureMessage(detail) {
+  switch (detail.reason) {
+    case "malformed_answer":
+      return "The answer does not match a supported typed-answer shape.";
+    case "answer_type_mismatch":
+      return "The answer type does not match the question type.";
+    case "unknown_option":
+      return "The selected option was not offered by this question.";
+    case "probability_keys":
+      return "The probability distribution must contain exactly the declared outcomes.";
+    case "probability_sum":
+      return "The probability distribution must sum to 1 within the accepted tolerance.";
+    case "score_out_of_range":
+      return "The score falls outside the declared rubric range.";
+    case "score_legend_mismatch":
+      return "The score legend does not match the declared rubric.";
+    case "invalid_answer":
+      return "The answer failed a typed-answer validation rule.";
+  }
+}
+var batchEnvelopeSchema = external_exports.object({
+  answers: external_exports.array(external_exports.object({
+    questionId: external_exports.string().min(1),
+    value: external_exports.unknown().optional(),
+    failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional()
+  }).strict().superRefine((answer, context) => {
+    if ("value" in answer === Boolean(answer.failure)) context.addIssue({ code: "custom", message: "Each batch answer must contain exactly one value or failure." });
+  })),
+  execution: providerExecutionEvidenceSchema
+}).strict();
+function validateDistribution(distribution, expectedIds, label) {
+  const ids = Object.keys(distribution);
+  if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
+    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`, { reason: "probability_keys" });
+  }
+  const total = Object.values(distribution).reduce((sum, value) => sum + value, 0);
+  if (Math.abs(total - 1) > probabilitySumTolerance) {
+    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`, { reason: "probability_sum" });
+  }
+}
 
 // src/domain/run/lifecycle.ts
 function deriveRunLifecycle(facts) {
@@ -21426,6 +20494,49 @@ var respondentProfileSchema = external_exports.object({
   ...perspectiveFields
 }).strict().superRefine(enforceAggregateProfileProse);
 
+// src/providers/jev/config.ts
+var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
+var routeDefaults = {
+  openrouter: {
+    model: "typesafe/jev-1.13",
+    endpoint: "https://openrouter.ai/api/alpha/decisions"
+  },
+  typesafe: {
+    model: "jev-latest",
+    endpoint: "https://api.typesafe.ai/v1/systemone"
+  }
+};
+var jevConfigInputSchema = external_exports.object({
+  kind: external_exports.literal("jev"),
+  route: jevRouteSchema.optional(),
+  model: external_exports.string().min(1).optional(),
+  endpoint: external_exports.string().url().optional(),
+  timeoutMs: external_exports.number().int().positive().optional()
+}).strict().superRefine((input2, context) => {
+  if (input2.endpoint === void 0) return;
+  let endpoint;
+  try {
+    endpoint = new URL(input2.endpoint);
+  } catch {
+    return;
+  }
+  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
+  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
+    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
+  }
+});
+var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
+  const route = input2.route ?? "openrouter";
+  const defaults = routeDefaults[route];
+  return {
+    kind: "jev",
+    route,
+    model: input2.model ?? defaults.model,
+    endpoint: input2.endpoint ?? defaults.endpoint,
+    timeoutMs: input2.timeoutMs ?? 3e4
+  };
+});
+
 // src/providers/config.ts
 var layaConfigSchema = external_exports.object({
   kind: external_exports.literal("laya"),
@@ -21435,7 +20546,7 @@ var layaConfigSchema = external_exports.object({
   headLimit: external_exports.number().int().positive(),
   tokenizerJsonPath: external_exports.string().min(1),
   tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  precision: external_exports.string().optional(),
+  precision: external_exports.string().min(1).optional(),
   timeoutMs: external_exports.number().int().positive()
 }).strict();
 var providerConfigSchema = external_exports.union([
@@ -21515,7 +20626,7 @@ function validateChoiceTask(task, context) {
   const choiceOptions = optionsValue;
   if ("answerKeyOptionId" in task) {
     const answerKeyOptionId = task.answerKeyOptionId;
-    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in choiceOptions)) {
+    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !Object.hasOwn(choiceOptions, answerKeyOptionId)) {
       context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
     }
   }
@@ -21969,7 +21080,7 @@ var runEvidenceItemSchema = external_exports.object({
   questionId: external_exports.string().min(1),
   status: external_exports.enum(["pending", "answered", "failed", "unreached"]),
   result: decisionResultSchema.optional(),
-  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional() }).strict().optional(),
+  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
   selectedMaterial: selectedMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
   turnId: external_exports.string().min(1).optional(),
@@ -22098,17 +21209,23 @@ function parseJson(value, label) {
     throw new RunStoreError("data_integrity_error", `Stored ${label} is not valid JSON.`, { cause: error62 });
   }
 }
-function failureDetailFromStorage(value) {
-  if (value === null || value === void 0) return void 0;
-  return decisionFailureDetailSchema.parse(parseJson(value, "typed-answer failure detail"));
+function failureEvidenceFromStorage(value) {
+  if (value === null || value === void 0) return {};
+  const parsed = parseJson(value, "evaluation failure evidence");
+  if ("reason" in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
+  return { ...parsed.detail === void 0 ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
+}
+function failureEvidenceJson(failure2) {
+  if (failure2.providerFailure) return JSON.stringify({ ...failure2.detail ? { detail: failure2.detail } : {}, providerFailure: providerFailureEvidenceSchema.parse(failure2.providerFailure) });
+  return failure2.detail ? JSON.stringify(failure2.detail) : null;
 }
 function storedEvaluationFailure(row) {
   if (row.failure_code === null) return void 0;
-  const detail = failureDetailFromStorage(row.failure_detail_json);
+  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
   return {
     code: asText(row.failure_code, "failure code"),
     message: asText(row.failure_message, "failure message"),
-    ...detail ? { detail } : {}
+    ...evidence
   };
 }
 function evaluationFailureJson(failure2) {
@@ -22119,7 +21236,7 @@ function evaluationFailureFromJson(value) {
   const parsed = parseJson(value, "attempt evaluation failure");
   if (typeof parsed.code !== "string" || typeof parsed.message !== "string") throw new RunStoreError("data_integrity_error", "Stored attempt evaluation failure is invalid.");
   const detail = parsed.detail === void 0 ? void 0 : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {} };
+  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {}, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
 }
 function encodeCursor(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -22205,9 +21322,9 @@ function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   }
 }
 function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
-  const backupRoot = path3.join(dataRoot, "backups");
+  const backupRoot = path.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path3.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID2()}.sqlite`);
+  const backupPath = path.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID2()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -22497,7 +21614,7 @@ function validatePrepared(prepared) {
         const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text }) => id === selected.materialId && text === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash4("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash3("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
         }
       }
@@ -22596,16 +21713,16 @@ function validatePreparedJourney(prepared) {
   return { ...prepared, request: parsedRequest.data };
 }
 function openRunStore(dataRoot, options2 = {}) {
-  if (!path3.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  if (!path.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync(dataRoot, { recursive: true });
-  const database = new DatabaseSync(path3.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
+  const database = new DatabaseSync(path.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
   try {
     initialize(database, dataRoot);
   } catch (error62) {
     database.close();
     throw error62;
   }
-  return new SQLiteRunStore(database, path3.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+  return new SQLiteRunStore(database, path.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 var SQLiteRunStore = class {
   constructor(database, databasePath, now) {
@@ -23039,7 +22156,7 @@ var SQLiteRunStore = class {
             const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
             const candidate = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems).find(({ id }) => id === materialId);
             if (!candidate?.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash4("sha256").update(candidate.text, "utf8").digest("hex") } };
+            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash3("sha256").update(candidate.text, "utf8").digest("hex") } };
           })() : {}
         };
       });
@@ -23082,13 +22199,7 @@ var SQLiteRunStore = class {
       let cursor;
       if (query.cursor) {
         cursor = decodeCursor(query.cursor, "evidence");
-        const coverage2 = cursor.coverage;
-        const respondents = coverage2?.respondents;
-        const matched = cursor.matchedCoverage;
-        const matchedEvaluations = matched?.evaluations;
-        const selectedMaterials = matched?.selectedMaterials;
-        const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
-        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.totalMatches) || cursor.totalMatches < 0 || !Number.isSafeInteger(cursor.usedCalls) || !Number.isSafeInteger(cursor.reservedCalls) || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || typeof cursor.sourceComplete !== "boolean" || !runLifecycleSchema.safeParse(cursor.lifecycle).success || !validCount(coverage2?.totalEvaluations) || !validCount(coverage2?.completedEvaluations) || !validCount(coverage2?.failedEvaluations) || !validCount(respondents?.total) || !validCount(respondents?.active) || !validCount(respondents?.completed) || !validCount(respondents?.failed) || !validCount(respondents?.unreached) || !validCount(matched?.representedRespondents) || !validCount(matchedEvaluations?.total) || !validCount(matchedEvaluations?.pending) || !validCount(matchedEvaluations?.answered) || !validCount(matchedEvaluations?.failed) || !validCount(matchedEvaluations?.unreached) || !validCount(selectedMaterials?.evaluations) || !validCount(selectedMaterials?.respondents) || !validCount(selectedMaterials?.distinctMaterials)) {
+        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
           throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
         }
       }
@@ -23135,14 +22246,14 @@ var SQLiteRunStore = class {
       }
       const whereSql = where.join(" AND ");
       const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
-      const snapshotCount = cursor?.totalMatches ?? asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
-      const evaluationCoverage = cursor?.coverage ?? {
+      const snapshotCount = asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
+      const evaluationCoverage = {
         totalEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
         completedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
         failedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal).count, "failed evaluation denominator")
       };
-      let respondentCoverage = cursor?.coverage.respondents;
-      if (!respondentCoverage) {
+      let respondentCoverage;
+      {
         const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
         const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
@@ -23159,8 +22270,8 @@ var SQLiteRunStore = class {
         respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-      const lifecycle = cursor?.lifecycle ?? currentLifecycle;
-      const matchedCoverage = cursor?.matchedCoverage ?? (() => {
+      const lifecycle = currentLifecycle;
+      const matchedCoverage = (() => {
         const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
           (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
             WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
@@ -23220,7 +22331,7 @@ var SQLiteRunStore = class {
               text: candidate.text,
               sourceId: candidate.sourceId,
               sourceSha256: candidate.sourceSha256,
-              textSha256: createHash4("sha256").update(candidate.text, "utf8").digest("hex")
+              textSha256: createHash3("sha256").update(candidate.text, "utf8").digest("hex")
             };
           }
         }
@@ -23249,12 +22360,12 @@ var SQLiteRunStore = class {
         };
       });
       const last = pageRows.at(-1);
-      const sourceComplete = cursor?.sourceComplete ?? sourceStatus === "completed";
+      const sourceComplete = sourceStatus === "completed";
       return {
         items,
         totalMatches: snapshotCount,
         sourceRunId: query.sourceRunId,
-        sourceStatus: cursor?.sourceStatus ?? sourceStatus,
+        sourceStatus,
         sourceComplete,
         lifecycle,
         coverage,
@@ -23265,12 +22376,8 @@ var SQLiteRunStore = class {
           criteriaFingerprint,
           maxOrdinal,
           lastOrdinal: asNumber(last.ordinal, "evaluation ordinal"),
-          sourceStatus: cursor?.sourceStatus ?? sourceStatus,
-          sourceComplete,
-          totalMatches: snapshotCount,
+          sourceStatus,
           lifecycle,
-          coverage,
-          matchedCoverage,
           usedCalls,
           reservedCalls
         }) } : {}
@@ -23621,8 +22728,8 @@ var SQLiteRunStore = class {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, "evaluation ID");
-          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-          if (outcome.detail) this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: outcome.code, message: outcome.message, detail: outcome.detail }), attemptId, evaluationId);
+          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+          if (outcome.detail || outcome.providerFailure) this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} }), attemptId, evaluationId);
         }
         if (outcome.scope === "run") this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
       } else {
@@ -23680,8 +22787,8 @@ var SQLiteRunStore = class {
         this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
@@ -23751,8 +22858,8 @@ var SQLiteRunStore = class {
           throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
         }
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
@@ -23993,6 +23100,889 @@ var SQLiteRunStore = class {
     }
   }
 };
+
+// src/infrastructure/credentials/windows.ts
+import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync as existsSync2 } from "node:fs";
+import path2 from "node:path";
+import { fileURLToPath } from "node:url";
+var CredentialStoreError = class extends Error {
+  constructor(code, route) {
+    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
+    super(message);
+    this.code = code;
+    this.route = route;
+    this.name = "CredentialStoreError";
+  }
+  code;
+  route;
+};
+var defaultTargets = {
+  typesafe: "Sheg/Jev/TypeSafe",
+  openrouter: "Sheg/Jev/OpenRouter"
+};
+var WindowsCredentialStore = class {
+  targets;
+  helperPath;
+  run;
+  constructor(options2 = {}) {
+    this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    this.helperPath = options2.helperPath ?? locateHelper();
+    this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
+  }
+  async availability(route) {
+    try {
+      const result = await this.run(this.arguments("Status", route));
+      if (result.code === 0 && result.stdout.trim() === "AVAILABLE") return "available";
+      if (result.code === 3 && result.stdout.trim() === "MISSING") return "missing";
+      if (result.code === 4 && result.stdout.trim() === "MALFORMED") return "malformed";
+      return "unavailable";
+    } catch {
+      return "unavailable";
+    }
+  }
+  async readForAuthentication(route) {
+    let result;
+    try {
+      result = await this.run(this.arguments("Read", route));
+    } catch {
+      throw new CredentialStoreError("credential_unavailable", route);
+    }
+    const key = result.stdout.replace(/\r?\n$/, "");
+    if (result.code === 4 && result.stdout.trim() === "MALFORMED") throw new CredentialStoreError("credential_malformed", route);
+    if (result.code !== 0 || !key) throw new CredentialStoreError("credential_unavailable", route);
+    return key;
+  }
+  async setup(route) {
+    const result = await this.run(this.arguments("Setup", route), true);
+    if (result.code !== 0) throw new Error(`The ${route} secure credential could not be saved.`);
+  }
+  async remove(route) {
+    const result = await this.run(this.arguments("Remove", route));
+    if (result.code !== 0 && result.code !== 3) throw new Error(`The ${route} secure credential could not be removed.`);
+  }
+  arguments(operation, route) {
+    return ["-Operation", operation, "-TargetName", this.targets[route]];
+  }
+};
+function locateHelper() {
+  const moduleDirectory = path2.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path2.join(moduleDirectory, "windows-credential.ps1"),
+    path2.join(moduleDirectory, "credentials", "windows-credential.ps1")
+  ];
+  const helper = candidates.find(existsSync2);
+  if (!helper) throw new Error("The Windows credential helper is unavailable.");
+  return helper;
+}
+async function runPowerShell(helperPath, args, interactive = false) {
+  if (process.platform !== "win32") throw new Error("Windows secure credentials are unavailable on this platform.");
+  const childArgs = [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File"
+  ];
+  if (interactive) childArgs.splice(2, 1);
+  childArgs.push(helperPath, ...args);
+  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name) => process.env[name] === void 0 ? [] : [[name, process.env[name]]]));
+  return new Promise((resolve, reject) => {
+    const child = nodeSpawn("powershell.exe", childArgs, {
+      windowsHide: !interactive,
+      shell: false,
+      stdio: interactive ? ["inherit", "inherit", "ignore"] : ["ignore", "pipe", "ignore"],
+      env
+    });
+    let stdout = "";
+    let settled = false;
+    const finish = (error62, code = 1) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error62) reject(error62);
+      else resolve({ code, stdout, stderr: "" });
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(new Error("Credential helper timed out."));
+    }, interactive ? 3e5 : 1e4);
+    if (!interactive) child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > 16384) {
+        child.kill();
+        finish(new Error("Credential helper output exceeded its limit."));
+      }
+    });
+    child.once("error", () => finish(new Error("Credential helper could not start.")));
+    child.once("close", (code) => finish(void 0, code ?? 1));
+  });
+}
+
+// src/providers/jev.ts
+import { setTimeout as wait } from "node:timers/promises";
+
+// src/providers/jev/model-metadata.ts
+var jevModelMetadata = {
+  openrouter: {
+    "typesafe/jev-1.13": {
+      contextLimit: 32768,
+      contextEvidence: {
+        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
+        checkedOn: "2026-09-30"
+      },
+      inputUsdPerMillion: 0.042,
+      outputUsdPerMillion: 0,
+      priceEvidence: {
+        sourceUrl: "https://openrouter.ai/typesafe/jev-1.13/",
+        checkedOn: "2026-09-30"
+      }
+    }
+  },
+  typesafe: {
+    "jev-latest": {
+      contextLimit: 32e3,
+      contextEvidence: {
+        sourceUrl: "https://docs.typesafe.ai/models",
+        checkedOn: "2026-10-04"
+      },
+      inputUsdPerMillion: 0.042,
+      outputUsdPerMillion: 0,
+      priceEvidence: {
+        sourceUrl: "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
+        checkedOn: "2026-09-30"
+      }
+    }
+  }
+};
+function jevMetadata(route, model) {
+  return jevModelMetadata[route][model];
+}
+
+// src/providers/system-one-contract.ts
+var choiceAnswerSchema = external_exports.object({
+  type: external_exports.literal("choice"),
+  choice: external_exports.string().min(1),
+  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
+  confidence: external_exports.number().finite().min(0).max(1).optional()
+}).passthrough();
+var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
+var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
+var systemOneAnswerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
+function systemOneQuestion(question) {
+  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
+  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
+}
+
+// src/providers/jev.ts
+var JevCallError = class extends ProviderCallError {
+  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
+    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope2, code: failureCode, ...validationFailure ? { validationFailure } : {}, ...evidence });
+    this.decisionId = decisionId;
+    this.name = "JevCallError";
+  }
+  decisionId;
+};
+var wireUsageSchema = external_exports.object({
+  input_tokens: external_exports.number().int().nonnegative().optional(),
+  output_tokens: external_exports.number().int().nonnegative().optional(),
+  cost: external_exports.number().finite().nonnegative().optional()
+}).passthrough();
+var nativeWireUsageSchema = wireUsageSchema.extend({
+  input_tokens: external_exports.number().int().nonnegative(),
+  output_tokens: external_exports.number().int().nonnegative()
+});
+var wireResponseSchema = external_exports.object({
+  model: external_exports.string().min(1),
+  answers: external_exports.record(external_exports.string(), external_exports.unknown()),
+  usage: wireUsageSchema
+}).passthrough();
+var nativeWireResponseSchema = wireResponseSchema.extend({ usage: nativeWireUsageSchema });
+function parseWireResponse(payload, route) {
+  return (route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
+}
+var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
+var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
+var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
+function requestBody(request, model) {
+  return { model, state: request.state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
+}
+function batchRequestBody(request, model) {
+  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
+}
+function measureRequestBody(serialized, model, route) {
+  const bytes = Buffer.byteLength(serialized, "utf8");
+  const tokens = Math.ceil(bytes / 3);
+  const contextLimit = jevMetadata(route, model)?.contextLimit ?? null;
+  const headroomTokens = contextLimit === null ? null : Math.ceil(contextLimit * 0.2);
+  const effectiveLimit = contextLimit === null ? null : contextLimit - Math.ceil(contextLimit * 0.2);
+  const status = effectiveLimit === null ? "unavailable" : tokens > effectiveLimit ? "overflow" : "fits";
+  return {
+    provider: "jev",
+    status,
+    method: JEV_MEASUREMENT_METHOD,
+    modelIdentity: model,
+    tokenCount: "estimated",
+    tokens,
+    contextLimit,
+    headroomTokens,
+    effectiveLimit,
+    details: { serializedUtf8Bytes: bytes, bytesPerEstimatedToken: 3, reservePercent: 20, ...contextLimit === null ? {} : { contextEvidenceDate: jevMetadata(route, model)?.contextEvidence?.checkedOn ?? "unrecorded" } },
+    ...status === "unavailable" ? { reason: route === "typesafe" ? TYPESAFE_CONTEXT_UNVERIFIED : "model-context-unknown" } : status === "overflow" ? { reason: "estimated-context-over-limit" } : {}
+  };
+}
+function measureJevContext(request, model, route = "openrouter") {
+  return measureRequestBody(JSON.stringify(requestBody(request, model)), model, route);
+}
+function measureJevBatchContext(request, model, route = "openrouter") {
+  return measureRequestBody(JSON.stringify(batchRequestBody(request, model)), model, route);
+}
+var JevProvider = class {
+  constructor(config2, fetchRequest = fetch, options2 = {}) {
+    this.fetchRequest = fetchRequest;
+    this.config = jevConfigSchema.parse(config2);
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
+    this.measureContext = options2.measureContext ?? ((request, normalized) => measureJevContext(request, normalized.model, normalized.route));
+    this.measureBatchContext = options2.measureBatchContext;
+  }
+  fetchRequest;
+  config;
+  credentialStore;
+  measureContext;
+  measureBatchContext;
+  async decide(request, maxAttempts) {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      throw new JevCallError("Jev call limit must be a positive integer.", 0);
+    }
+    const parsedRequest = decisionRequestSchema.safeParse(request);
+    if (!parsedRequest.success) {
+      throw new JevCallError("Jev decision request is invalid.", 0);
+    }
+    const fit = this.measure(parsedRequest.data);
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
+    let apiKey;
+    try {
+      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+    } catch (error62) {
+      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
+    }
+    const { question } = parsedRequest.data;
+    const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
+    const startedAt = performance.now();
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      attempts += 1;
+      let response;
+      try {
+        response = await this.fetchRequest(this.config.endpoint, {
+          method: "POST",
+          redirect: "error",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body,
+          signal: AbortSignal.timeout(this.config.timeoutMs)
+        });
+      } catch {
+        if (attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
+      }
+      if (!response.ok) {
+        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
+      }
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+      }
+      const parsedResponse = parseWireResponse(payload, this.config.route);
+      if (!parsedResponse.success) {
+        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+      }
+      const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
+      if (!answer.success) {
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
+      }
+      const cost = parsedResponse.data.usage.cost;
+      const inputTokens = parsedResponse.data.usage.input_tokens;
+      const outputTokens = parsedResponse.data.usage.output_tokens;
+      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
+      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
+      const result = {
+        ...answer.data,
+        attempts,
+        provider: "jev",
+        model: parsedResponse.data.model,
+        latencyMs: performance.now() - startedAt,
+        usage: {
+          ...inputTokens === void 0 ? {} : { inputTokens },
+          ...outputTokens === void 0 ? {} : { outputTokens }
+        },
+        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
+      };
+      try {
+        return validateDecision(request, result, { maxAttempts, provider: "jev" });
+      } catch (error62) {
+        if (error62 instanceof DecisionError) {
+          throw new JevCallError("Jev response failed decision validation.", attempts, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
+        }
+        throw error62;
+      }
+    }
+    throw new JevCallError("Jev call limit reached without a response.", attempts);
+  }
+  measureBatch(request) {
+    const parsed = decisionBatchRequestSchema.safeParse(request);
+    if (!parsed.success) return { ...missingMeasureFit(this.config, "invalid-batch-request"), reason: "invalid-batch-request" };
+    return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
+  }
+  async decideBatch(request, maxAttempts) {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new JevCallError("Jev call limit must be a positive integer.", 0);
+    const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+    if (!parsedRequest.success) throw new JevCallError("Jev decision batch request is invalid.", 0);
+    const normalizedRequest = parsedRequest.data;
+    const fit = this.measureBatch(normalizedRequest);
+    if (fit.status !== "fits") throw new JevCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit);
+    let apiKey;
+    try {
+      apiKey = await this.credentialStore.readForAuthentication(this.config.route);
+    } catch (error62) {
+      if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
+    }
+    const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
+    const startedAt = performance.now();
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      attempts += 1;
+      let response;
+      try {
+        response = await this.fetchRequest(this.config.endpoint, {
+          method: "POST",
+          redirect: "error",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body,
+          signal: AbortSignal.timeout(this.config.timeoutMs)
+        });
+      } catch {
+        if (attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
+      }
+      if (!response.ok) {
+        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
+          await wait(retryDelayMs(attempts));
+          continue;
+        }
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
+      }
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+      }
+      const parsedResponse = parseWireResponse(payload, this.config.route);
+      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+      const cost = parsedResponse.data.usage.cost;
+      const inputTokens = parsedResponse.data.usage.input_tokens;
+      const outputTokens = parsedResponse.data.usage.output_tokens;
+      const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
+      const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
+      const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
+        const answer = systemOneAnswerSchema.safeParse(rawValue);
+        return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
+      });
+      const execution = {
+        attempts,
+        provider: "jev",
+        model: parsedResponse.data.model,
+        latencyMs: performance.now() - startedAt,
+        usage: { ...inputTokens === void 0 ? {} : { inputTokens }, ...outputTokens === void 0 ? {} : { outputTokens } },
+        ...cost !== void 0 ? { cost: { amountUsd: cost, basis: "provider-reported" } } : estimatedAmount === void 0 ? {} : { cost: { amountUsd: estimatedAmount, basis: "published-rate-estimate" } }
+      };
+      try {
+        return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
+      } catch (error62) {
+        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts);
+        throw error62;
+      }
+    }
+    throw new JevCallError("Jev call limit reached without a response.", attempts);
+  }
+  measure(request) {
+    return this.measureContext(request, this.config);
+  }
+};
+function missingMeasureFit(config2, reason) {
+  return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
+}
+function retryDelayMs(attempt) {
+  return Math.min(50 * 2 ** (attempt - 1), 1e3);
+}
+
+// src/providers/laya/context-fit.ts
+import { createHash as createHash4 } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import path3 from "node:path";
+
+// src/providers/laya/vendor/sequence.ts
+function pyJson(v) {
+  if (v === null) return "null";
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map((x) => pyJson(x) ?? "null").join(", ")}]`;
+  if (typeof v === "object") {
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) return void 0;
+    const parts = [];
+    for (const [k, x] of Object.entries(v)) {
+      const s = pyJson(x);
+      if (s !== void 0) parts.push(`${JSON.stringify(k)}: ${s}`);
+    }
+    return `{${parts.join(", ")}}`;
+  }
+  return void 0;
+}
+function serializeState(state) {
+  if (typeof state === "string") return state;
+  return pyJson(state) ?? String(state);
+}
+function renderCriterion(v) {
+  return typeof v === "string" ? v : pyJson(v) ?? String(v);
+}
+function renderOptions(q) {
+  if (q.t === "choice") {
+    const crit2 = q.crit;
+    return Object.entries(crit2).map(([k, v]) => v === null || v === void 0 || v === "" ? k : `${k}: ${renderCriterion(v)}`);
+  }
+  if (q.t === "score") {
+    return q.crit.map((c, i) => `level ${i}: ${renderCriterion(c)}`);
+  }
+  const crit = q.crit ?? {};
+  const f = crit["false"], t = crit["true"];
+  return [
+    "false: " + (f !== null && f !== void 0 && f !== "" ? renderCriterion(f) : "no, the statement does not hold"),
+    "true: " + (t !== null && t !== void 0 && t !== "" ? renderCriterion(t) : "yes, the statement holds")
+  ];
+}
+function buildSequence(tok, state, q, maxLen = 512, headMaxLen = 192, optionOrder, truncateLeft = false) {
+  const maskTok = tok.maskToken;
+  const opts = renderOptions(q);
+  const order = optionOrder ?? opts.map((_, i) => i);
+  const ins = String(q.ins).split(maskTok).join(" ");
+  let headIds = tok.encode(`${q.t} question: ${ins}`);
+  let optIds = order.map((i) => [tok.maskId, ...tok.encode(" " + opts[i].split(maskTok).join(" ")).slice(0, 48)]);
+  let budget = headMaxLen - optIds.reduce((a, o) => a + o.length, 0);
+  if (budget < 16) {
+    const per = Math.max(4, Math.floor((headMaxLen - 16) / Math.max(1, optIds.length)));
+    optIds = optIds.map((o) => o.slice(0, per));
+    budget = headMaxLen - optIds.reduce((a, o) => a + o.length, 0);
+  }
+  headIds = headIds.slice(0, Math.max(8, budget));
+  let ids = [tok.clsId, ...headIds, tok.sepId];
+  const markers = [];
+  for (const o of optIds) {
+    markers.push(ids.length);
+    ids.push(...o);
+  }
+  ids.push(tok.sepId);
+  const room = Math.max(0, maxLen - ids.length - 1);
+  const stAll = tok.encode(serializeState(state).split(maskTok).join(" "));
+  const st = truncateLeft ? stAll.slice(-room) : stAll.slice(0, room);
+  ids = [...ids, ...st, tok.sepId].slice(0, maxLen);
+  return { ids, markers: markers.filter((m) => m < maxLen) };
+}
+
+// src/providers/laya/vendor/tokenizer.ts
+var CHECKPOINT_IDS = { cls: 50281, sep: 50282, mask: 50284, pad: 50283, unk: 50280 };
+var SPECIAL_ALIASES = {
+  cls: ["[CLS]", "<bos>", "<s>"],
+  sep: ["[SEP]", "<eos>", "</s>"],
+  pad: ["[PAD]", "<pad>"],
+  mask: ["[MASK]", "<mask>"],
+  unk: ["[UNK]", "<unk>"]
+};
+var METASPACE_REPLACEMENT = "\u2581";
+function byteUnicodeMaps() {
+  const b2u = /* @__PURE__ */ new Map();
+  const u2b = /* @__PURE__ */ new Map();
+  const extra = (n) => n < 256 ? n + 256 : n;
+  const ranges = [[33, 126], [161, 172], [174, 255]];
+  let k = 0;
+  const inRange = (b) => ranges.some(([lo, hi]) => b >= lo && b <= hi);
+  for (let b = 0; b < 256; b++) {
+    const cp = inRange(b) ? b : extra(k++);
+    b2u.set(b, String.fromCodePoint(cp));
+    u2b.set(String.fromCodePoint(cp), b);
+  }
+  return { b2u, u2b };
+}
+var cached2 = null;
+function maps() {
+  if (!cached2) cached2 = byteUnicodeMaps();
+  return cached2;
+}
+var GPT2_SPLIT = new RegExp("'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+", "gu");
+function bpeWord(chars, rank) {
+  let word = chars.slice();
+  if (word.length <= 1) return word;
+  for (; ; ) {
+    let best = Infinity, idx = -1;
+    for (let i = 0; i < word.length - 1; i++) {
+      const r = rank.get(word[i] + " " + word[i + 1]);
+      if (r !== void 0 && r < best) {
+        best = r;
+        idx = i;
+      }
+    }
+    if (idx < 0) return word;
+    word = [...word.slice(0, idx), word[idx] + word[idx + 1], ...word.slice(idx + 2)];
+  }
+}
+function bpeEncode(vocab, merges, text) {
+  const { b2u } = maps();
+  const unkId = vocab.get("[UNK]") ?? CHECKPOINT_IDS.unk;
+  const out = [];
+  const enc = new TextEncoder();
+  const parts = text.normalize("NFC").match(GPT2_SPLIT);
+  if (!parts) return out;
+  for (const piece of parts) {
+    const chars = [];
+    for (const b of enc.encode(piece)) chars.push(b2u.get(b) ?? "");
+    for (const tok of bpeWord(chars, merges)) out.push(vocab.get(tok) ?? unkId);
+  }
+  return out;
+}
+function metaspaceEncode(vocab, merges, text, unkId, replaces = [[" ", METASPACE_REPLACEMENT]]) {
+  const unk = unkId ?? vocab.get("<unk>") ?? vocab.get("[UNK]") ?? CHECKPOINT_IDS.unk;
+  if (!text) return [];
+  let t = text;
+  for (const [from, to] of replaces) t = t.split(from).join(to);
+  const out = [];
+  const push = (piece) => {
+    for (const tok of bpeWord(Array.from(piece), merges)) out.push(vocab.get(tok) ?? unk);
+  };
+  for (const seg of t.split(/(\n+)/)) {
+    if (!seg) continue;
+    if (seg[0] === "\n") {
+      push(seg);
+    } else {
+      const w = seg.startsWith(METASPACE_REPLACEMENT) ? seg : METASPACE_REPLACEMENT + seg;
+      for (const chunk of w.split(METASPACE_REPLACEMENT).slice(1)) {
+        push(chunk ? METASPACE_REPLACEMENT + chunk : METASPACE_REPLACEMENT);
+      }
+    }
+  }
+  return out;
+}
+function encodeWithData(data, text) {
+  return data.kind === "metaspace" ? metaspaceEncode(data.vocab, data.merges, text, data.ids.unk, data.replaces) : bpeEncode(data.vocab, data.merges, text);
+}
+function childNodes(node2) {
+  if (!node2 || typeof node2 !== "object") return [];
+  const o = node2;
+  const out = [];
+  for (const k of ["normalizers", "pre_tokenizers", "decoders"]) {
+    const v = o[k];
+    if (Array.isArray(v)) out.push(...v);
+  }
+  return out;
+}
+function hasNodeType(node2, want) {
+  if (!node2 || typeof node2 !== "object") return false;
+  if (node2["type"] === want) return true;
+  return childNodes(node2).some((c) => hasNodeType(c, want));
+}
+function collectReplaces(node2, out) {
+  if (!node2 || typeof node2 !== "object") return;
+  const o = node2;
+  if (o["type"] === "Replace") {
+    const pat = o["pattern"];
+    const from = pat?.["String"];
+    const to = o["content"];
+    if (typeof from === "string" && typeof to === "string") out.push([from, to]);
+  }
+  for (const c of childNodes(node2)) collectReplaces(c, out);
+}
+function parseTokenizerJson(raw) {
+  try {
+    const r = raw;
+    const vocabObj = r?.model?.vocab;
+    if (!vocabObj || typeof vocabObj !== "object") return null;
+    const vocab = new Map(Object.entries(vocabObj));
+    const merges = /* @__PURE__ */ new Map();
+    for (const [i, m] of (r.model?.merges ?? []).entries()) {
+      const pair = typeof m === "string" ? m.split(" ") : m;
+      if (pair.length >= 2) merges.set(pair[0] + " " + pair[1], i);
+    }
+    const added = /* @__PURE__ */ new Map();
+    for (const t of r.added_tokens ?? []) {
+      if (typeof t?.content === "string" && typeof t?.id === "number") added.set(t.content, t.id);
+    }
+    const pick2 = (aliases, fb) => {
+      for (const a of aliases) {
+        const v = added.get(a) ?? vocab.get(a);
+        if (v !== void 0) return { id: v, token: a };
+      }
+      return { id: fb, token: aliases[0] };
+    };
+    const cls = pick2(SPECIAL_ALIASES.cls, CHECKPOINT_IDS.cls);
+    const sep = pick2(SPECIAL_ALIASES.sep, CHECKPOINT_IDS.sep);
+    const mask = pick2(SPECIAL_ALIASES.mask, CHECKPOINT_IDS.mask);
+    const pad = pick2(SPECIAL_ALIASES.pad, CHECKPOINT_IDS.pad);
+    const unk = pick2(SPECIAL_ALIASES.unk, CHECKPOINT_IDS.unk);
+    const kind = hasNodeType(r?.pre_tokenizer, "Metaspace") ? "metaspace" : "bytelevel";
+    const replaces = [];
+    collectReplaces(r?.normalizer, replaces);
+    if (kind === "metaspace" && replaces.length === 0) replaces.push([" ", METASPACE_REPLACEMENT]);
+    return {
+      vocab,
+      merges,
+      ids: { cls: cls.id, sep: sep.id, mask: mask.id, pad: pad.id, unk: unk.id },
+      kind,
+      maskToken: mask.token,
+      replaces
+    };
+  } catch {
+    return null;
+  }
+}
+
+// src/providers/laya/context-fit.ts
+var LAYA_TS_SOURCE_REVISION = "ec8409e542941bb4bb649d5fec00d4cec96ae024";
+var LAYA_MEASUREMENT_METHOD = `laya-ts@${LAYA_TS_SOURCE_REVISION}`;
+var tokenizerCache = /* @__PURE__ */ new Map();
+async function tokenizerPromise(config2) {
+  const absolutePath = path3.resolve(config2.tokenizerJsonPath);
+  const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
+  const metadata2 = await stat(absolutePath, { bigint: true });
+  const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
+  const existing = tokenizerCache.get(key);
+  if (existing?.signature === signature) return existing.loaded;
+  const loaded = (async () => {
+    const bytes = await readFile(absolutePath);
+    const sha256 = createHash4("sha256").update(bytes).digest("hex");
+    if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
+    let raw;
+    try {
+      raw = JSON.parse(bytes.toString("utf8"));
+    } catch {
+      throw new Error("tokenizer-json-invalid");
+    }
+    const data = parseTokenizerJson(raw);
+    if (!data) throw new Error("tokenizer-json-unsupported");
+    return { data, sha256 };
+  })();
+  tokenizerCache.set(key, { signature, loaded });
+  return loaded;
+}
+function unavailable(config2, reason, details = {}) {
+  return {
+    provider: "laya",
+    status: "unavailable",
+    method: LAYA_MEASUREMENT_METHOD,
+    modelIdentity: config2.checkpoint,
+    tokenCount: "measured",
+    tokens: 0,
+    contextLimit: config2.contextLimit,
+    headroomTokens: 0,
+    effectiveLimit: config2.contextLimit,
+    details,
+    reason
+  };
+}
+function tokenizerLike(data) {
+  return {
+    clsId: data.ids.cls,
+    sepId: data.ids.sep,
+    maskId: data.ids.mask,
+    padId: data.ids.pad,
+    maskToken: data.maskToken,
+    encode: (text) => encodeWithData(data, text)
+  };
+}
+async function measureLayaContext(request, config2) {
+  if (!/^[a-f\d]{64}$/i.test(config2.tokenizerSha256)) return unavailable(config2, "tokenizer-checksum-invalid");
+  let loaded;
+  try {
+    loaded = await tokenizerPromise(config2);
+  } catch (error62) {
+    return unavailable(config2, error62 instanceof Error ? error62.message : "tokenizer-load-failed");
+  }
+  const tokenizer = tokenizerLike(loaded.data);
+  const question = {
+    t: request.question.type,
+    ins: request.question.instructions,
+    crit: request.question.type === "choice" ? request.question.options : request.question.type === "score" ? request.question.rubric : request.question.criteria
+  };
+  const fullHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  const configuredHead = buildSequence(tokenizer, "", question, Number.MAX_SAFE_INTEGER, config2.headLimit);
+  const options2 = renderOptions(question);
+  const optionTokenLengths = options2.map((option) => tokenizer.encode(` ${option.split(tokenizer.maskToken).join(" ")}`).length);
+  const fullState = tokenizer.encode(serializeState(request.state).split(tokenizer.maskToken).join(" "));
+  const stateBudget = config2.contextLimit - fullHead.ids.length;
+  const tokens = fullHead.ids.length + fullState.length;
+  const details = {
+    tokenizerSha256: loaded.sha256,
+    headTokens: fullHead.ids.length,
+    headLimit: config2.headLimit,
+    stateTokens: fullState.length,
+    stateBudget: Math.max(0, stateBudget),
+    optionTokenLengths: optionTokenLengths.join(",")
+  };
+  let reason;
+  if (optionTokenLengths.some((length) => length > 48)) reason = "option-would-be-truncated";
+  else if (JSON.stringify(fullHead.ids) !== JSON.stringify(configuredHead.ids)) reason = "instructions-or-options-would-be-truncated";
+  else if (fullHead.ids.length > config2.contextLimit) reason = "question-head-exceeds-context";
+  else if (fullState.length > stateBudget) reason = "state-would-be-truncated";
+  return {
+    provider: "laya",
+    status: reason === void 0 ? "fits" : "overflow",
+    method: LAYA_MEASUREMENT_METHOD,
+    modelIdentity: config2.checkpoint,
+    tokenCount: "measured",
+    tokens,
+    contextLimit: config2.contextLimit,
+    headroomTokens: 0,
+    effectiveLimit: config2.contextLimit,
+    details,
+    ...reason === void 0 ? {} : { reason }
+  };
+}
+
+// src/providers/laya.ts
+var MAX_LAYA_SCORE_LEVELS = 32;
+var LayaCallError = class extends ProviderCallError {
+  constructor(message, attempts, contextFit, decisionId, failureScope2 = "evaluation", validationFailure, evidence) {
+    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope2, ...validationFailure ? { validationFailure } : {}, ...evidence });
+    this.decisionId = decisionId;
+    this.name = "LayaCallError";
+  }
+  decisionId;
+};
+var responseSchema = external_exports.object({
+  model: external_exports.string().min(1),
+  answers: external_exports.record(external_exports.string(), external_exports.unknown()),
+  usage: external_exports.object({
+    input_tokens: external_exports.number().int().nonnegative().optional(),
+    output_tokens: external_exports.number().int().nonnegative().optional()
+  }).passthrough(),
+  routing: external_exports.object({ model: external_exports.string().min(1) }).passthrough()
+}).passthrough();
+async function checkLayaFit(request, config2, measureFit) {
+  if (request.question.type === "score" && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
+    return { provider: "laya", status: "overflow", method: "laya-score-rubric-limit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: request.question.rubric.length, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
+  }
+  let measurement;
+  try {
+    measurement = await (measureFit ?? measureLayaContext)(request, config2);
+  } catch {
+    return { provider: "laya", status: "unavailable", method: "laya-context-fit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: 0, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: config2.contextLimit, details: {}, reason: "context-unmeasurable" };
+  }
+  if (measurement.provider !== "laya" || measurement.modelIdentity !== config2.checkpoint || measurement.contextLimit !== config2.contextLimit || measurement.details.tokenizerSha256 !== config2.tokenizerSha256.toLowerCase()) {
+    return { ...measurement, status: "unavailable", reason: "checkpoint-or-tokenizer-mismatch" };
+  }
+  return measurement;
+}
+var LayaProvider = class {
+  constructor(config2, options2 = {}) {
+    this.config = config2;
+    this.options = options2;
+    if (config2.kind !== "laya" || !config2.baseUrl || !config2.checkpoint || !config2.tokenizerJsonPath || !/^[a-f\d]{64}$/i.test(config2.tokenizerSha256) || !Number.isInteger(config2.contextLimit) || config2.contextLimit < 1 || !Number.isInteger(config2.headLimit) || config2.headLimit < 1 || !Number.isInteger(config2.timeoutMs) || config2.timeoutMs < 1 || config2.precision !== void 0 && !config2.precision) {
+      throw new TypeError("Laya configuration requires a base URL, checkpoint, positive context limit, and positive timeout.");
+    }
+    this.fetchRequest = options2.fetchRequest ?? fetch;
+  }
+  config;
+  options;
+  fetchRequest;
+  async measure(request) {
+    return checkLayaFit(request, this.config, this.options.measureFit);
+  }
+  async decide(request, maxAttempts) {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      throw new LayaCallError("Laya call limit must be a positive integer.", 0);
+    }
+    const parsedRequest = decisionRequestSchema.safeParse(request);
+    if (!parsedRequest.success) throw new LayaCallError("Laya decision request is invalid.", 0);
+    const fit = await this.measure(parsedRequest.data);
+    if (fit.status !== "fits") {
+      throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
+    }
+    const { question } = parsedRequest.data;
+    const endpoint = new URL("/v1/systemone", ensureTrailingSlash(this.config.baseUrl)).toString();
+    const startedAt = performance.now();
+    let response;
+    try {
+      response = await this.fetchRequest(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: this.config.checkpoint,
+          state: parsedRequest.data.state,
+          questions: {
+            [question.id]: systemOneQuestion(question)
+          }
+        }),
+        signal: AbortSignal.timeout(this.config.timeoutMs)
+      });
+    } catch {
+      throw new LayaCallError("Laya local service request failed.", 1, void 0, void 0, "evaluation", void 0, { category: "transport" });
+    }
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", void 0, { category: "http", httpStatus: response.status });
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new LayaCallError("Laya local service returned unreadable JSON.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
+    }
+    const parsedResponse = responseSchema.safeParse(payload);
+    if (!parsedResponse.success) {
+      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
+    }
+    if (parsedResponse.data.routing.model !== this.config.checkpoint) {
+      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
+    }
+    const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
+    if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
+    const result = {
+      ...answer.data,
+      attempts: 1,
+      provider: "laya",
+      model: parsedResponse.data.model,
+      checkpoint: parsedResponse.data.routing.model,
+      latencyMs: performance.now() - startedAt,
+      usage: {
+        ...parsedResponse.data.usage.input_tokens === void 0 ? {} : { inputTokens: parsedResponse.data.usage.input_tokens },
+        ...parsedResponse.data.usage.output_tokens === void 0 ? {} : { outputTokens: parsedResponse.data.usage.output_tokens }
+      }
+    };
+    try {
+      return validateDecision(request, result, { maxAttempts, provider: "laya", checkpoint: this.config.checkpoint });
+    } catch (error62) {
+      if (error62 instanceof DecisionError) {
+        throw new LayaCallError("Laya response failed decision validation.", 1, void 0, void 0, "evaluation", decisionValidationFailure(error62));
+      }
+      throw error62;
+    }
+  }
+};
+function ensureTrailingSlash(value) {
+  return value.endsWith("/") ? value : `${value}/`;
+}
 
 // src/providers/factory.ts
 function createProvider(config2) {

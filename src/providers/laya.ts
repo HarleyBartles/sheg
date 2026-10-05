@@ -1,8 +1,10 @@
+import { ProviderCallError, type ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import { z } from 'zod';
 import { decisionRequestSchema, type DecisionFailureDetail, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision } from '../domain/decision/validate.js';
 import { measureLayaContext } from './laya/context-fit.js';
+import { systemOneAnswerSchema, systemOneQuestion } from './system-one-contract.js';
 export { measureLayaContext } from './laya/context-fit.js';
 
 export type LayaConfig = {
@@ -13,7 +15,7 @@ export type LayaConfig = {
   headLimit: number;
   tokenizerJsonPath: string;
   tokenizerSha256: string;
-  precision?: string;
+  precision?: string | undefined;
   timeoutMs: number;
 };
 
@@ -21,26 +23,11 @@ export type FitMeasurer = (request: DecisionRequest, config: LayaConfig) => Prom
 export type FitResult = ProviderContextFit;
 const MAX_LAYA_SCORE_LEVELS = 32;
 
-export class LayaCallError extends Error {
-  constructor(message: string, readonly attempts: number, readonly contextFit?: ProviderContextFit, readonly decisionId?: string, readonly failureScope: 'evaluation' | 'run' = 'evaluation', readonly validationFailure?: { code: string; message: string; detail: DecisionFailureDetail }) {
-    super(message);
+export class LayaCallError extends ProviderCallError {
+  constructor(message: string, attempts: number, contextFit?: ProviderContextFit, readonly decisionId?: string, failureScope: 'evaluation' | 'run' = 'evaluation', validationFailure?: { code: string; message: string; detail: DecisionFailureDetail }, evidence?: { category: ProviderFailureEvidence['category']; httpStatus?: number }) {
+    super(message, { attempts, ...(contextFit ? { contextFit } : {}), scope: failureScope, ...(validationFailure ? { validationFailure } : {}), ...evidence });
     this.name = 'LayaCallError';
   }
-}
-
-const choiceAnswerSchema = z.object({
-  type: z.literal('choice'),
-  choice: z.string().min(1),
-  probabilities: z.record(z.string(), z.number().finite().min(0).max(1)),
-  confidence: z.number().finite().min(0).max(1).optional(),
-}).passthrough();
-const scoreAnswerSchema = z.object({ type: z.literal('score'), score: z.number().finite(), legend: z.record(z.string(), z.string()), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), confidence: z.number().finite().min(0).max(1).optional() }).passthrough();
-const noulAnswerSchema = z.object({ type: z.literal('noul'), noul: z.number().finite().min(0).max(1) }).passthrough();
-const answerSchema = z.discriminatedUnion('type', [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
-
-function wireQuestion(question: DecisionRequest['question']): Record<string, unknown> {
-  const criteria = question.type === 'choice' ? question.options : question.type === 'score' ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...(criteria === undefined ? {} : { criteria }) };
 }
 
 const responseSchema = z.object({
@@ -120,30 +107,30 @@ export class LayaProvider implements DecisionProvider {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: wireQuestion(question),
+            [question.id]: systemOneQuestion(question),
           },
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });
     } catch {
-      throw new LayaCallError('Laya local service request failed.', 1);
+      throw new LayaCallError('Laya local service request failed.', 1, undefined, undefined, 'evaluation', undefined, { category: 'transport' });
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation');
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, undefined, undefined, response.status === 401 || response.status === 403 ? 'run' : 'evaluation', undefined, { category: 'http', httpStatus: response.status });
 
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
-      throw new LayaCallError('Laya local service returned unreadable JSON.', 1);
+      throw new LayaCallError('Laya local service returned unreadable JSON.', 1, undefined, undefined, 'evaluation', undefined, { category: 'envelope' });
     }
     const parsedResponse = responseSchema.safeParse(payload);
     if (!parsedResponse.success) {
-      throw new LayaCallError('Laya response is missing model, answer, usage, or checkpoint routing metadata.', 1);
+      throw new LayaCallError('Laya response is missing model, answer, usage, or checkpoint routing metadata.', 1, undefined, undefined, 'evaluation', undefined, { category: 'envelope' });
     }
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
-      throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1);
+      throw new LayaCallError('Laya routed the request to a checkpoint other than the configured checkpoint.', 1, undefined, undefined, 'evaluation', undefined, { category: 'envelope' });
     }
-    const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
+    const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
     if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, undefined, question.id, 'evaluation', decisionValidationFailureForReason('malformed_answer'));
 
     const result: DecisionResult = {

@@ -1,3 +1,4 @@
+import { providerFailureEvidenceSchema, type ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
@@ -13,7 +14,7 @@ import { hashCanonical } from './identity.js';
 import { journeyTopology } from '../domain/journey/topology.js';
 import { hasSequentialMigrationPath } from './schema-migration-path.js';
 
-const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 8;
 const LEASE_MS = 30_000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -48,7 +49,7 @@ function encounteredMaterialsFromState(state: Record<string, unknown>): Array<{ 
 
 export type AttemptOutcome =
   | { kind: 'answered'; result: import('../domain/decision/decision.js').DecisionResult }
-  | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run'; detail?: DecisionFailureDetail; providerAttempts?: number };
+  | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run'; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence; providerAttempts?: number };
 
 export type RunListQuery = RunListQueryInput;
 export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean; retainedFollowOnRunIds: string[] }>; blockedByActiveWork: boolean };
@@ -143,8 +144,7 @@ type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
 type AttemptCursorPayload = { kind: 'attempts'; runId: string; sequence: number };
 type EvidenceCursorPayload = {
   kind: 'evidence'; sourceRunId: string; criteriaFingerprint: string; maxOrdinal: number; lastOrdinal: number;
-  sourceStatus: RunStatus; sourceComplete: boolean; totalMatches: number;
-  lifecycle: RunEvidencePage['lifecycle']; coverage: RunEvidencePage['coverage']; matchedCoverage: RunEvidencePage['matchedCoverage']; usedCalls: number; reservedCalls: number;
+  sourceStatus: RunStatus; lifecycle: RunEvidencePage['lifecycle']; usedCalls: number; reservedCalls: number;
 };
 
 function asText(value: SQLOutputValue | undefined, label: string): string {
@@ -180,18 +180,26 @@ function parseJson<T>(value: SQLOutputValue | undefined, label: string): T {
   }
 }
 
-function failureDetailFromStorage(value: SQLOutputValue | undefined): DecisionFailureDetail | undefined {
-  if (value === null || value === undefined) return undefined;
-  return decisionFailureDetailSchema.parse(parseJson(value, 'typed-answer failure detail'));
+function failureEvidenceFromStorage(value: SQLOutputValue | undefined): Pick<import('../domain/run/lifecycle.js').EvaluationFailure, 'detail' | 'providerFailure'> {
+  if (value === null || value === undefined) return {};
+  const parsed = parseJson<Record<string, unknown>>(value, 'evaluation failure evidence');
+  // Original schema-8 records contain a bare typed-answer detail. Preserve their bytes and meaning.
+  if ('reason' in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
+  return { ...(parsed.detail === undefined ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
+}
+
+function failureEvidenceJson(failure: import('../domain/run/lifecycle.js').EvaluationFailure): string | null {
+  if (failure.providerFailure) return JSON.stringify({ ...(failure.detail ? { detail: failure.detail } : {}), providerFailure: providerFailureEvidenceSchema.parse(failure.providerFailure) });
+  return failure.detail ? JSON.stringify(failure.detail) : null;
 }
 
 function storedEvaluationFailure(row: DatabaseRow): import('../domain/run/lifecycle.js').EvaluationFailure | undefined {
   if (row.failure_code === null) return undefined;
-  const detail = failureDetailFromStorage(row.failure_detail_json);
+  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
   return {
     code: asText(row.failure_code, 'failure code'),
     message: asText(row.failure_message, 'failure message'),
-    ...(detail ? { detail } : {}),
+    ...evidence,
   };
 }
 
@@ -204,7 +212,7 @@ function evaluationFailureFromJson(value: SQLOutputValue | undefined): import('.
   const parsed = parseJson<Record<string, unknown>>(value, 'attempt evaluation failure');
   if (typeof parsed.code !== 'string' || typeof parsed.message !== 'string') throw new RunStoreError('data_integrity_error', 'Stored attempt evaluation failure is invalid.');
   const detail = parsed.detail === undefined ? undefined : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...(detail ? { detail } : {}) };
+  return { code: parsed.code, message: parsed.message, ...(detail ? { detail } : {}), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
 }
 
 function encodeCursor(value: object): string {
@@ -1248,24 +1256,12 @@ class SQLiteRunStore implements RunStore {
       let cursor: EvidenceCursorPayload | undefined;
       if (query.cursor) {
         cursor = decodeCursor<EvidenceCursorPayload>(query.cursor, 'evidence');
-        const coverage = cursor.coverage as unknown as Record<string, unknown> | undefined;
-        const respondents = coverage?.respondents as Record<string, unknown> | undefined;
-        const matched = cursor.matchedCoverage as unknown as Record<string, unknown> | undefined;
-        const matchedEvaluations = matched?.evaluations as Record<string, unknown> | undefined;
-        const selectedMaterials = matched?.selectedMaterials as Record<string, unknown> | undefined;
-        const validCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
         if (cursor.kind !== 'evidence' || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint ||
             !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) ||
-            cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.totalMatches) || cursor.totalMatches < 0 ||
-            !Number.isSafeInteger(cursor.usedCalls) || !Number.isSafeInteger(cursor.reservedCalls) ||
+            cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal ||
+            !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 ||
             !['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'].includes(cursor.sourceStatus) ||
-            typeof cursor.sourceComplete !== 'boolean' || !runLifecycleSchema.safeParse(cursor.lifecycle).success ||
-            !validCount(coverage?.totalEvaluations) || !validCount(coverage?.completedEvaluations) ||
-            !validCount(coverage?.failedEvaluations) || !validCount(respondents?.total) || !validCount(respondents?.active) ||
-            !validCount(respondents?.completed) || !validCount(respondents?.failed) || !validCount(respondents?.unreached) ||
-            !validCount(matched?.representedRespondents) || !validCount(matchedEvaluations?.total) || !validCount(matchedEvaluations?.pending) ||
-            !validCount(matchedEvaluations?.answered) || !validCount(matchedEvaluations?.failed) || !validCount(matchedEvaluations?.unreached) ||
-            !validCount(selectedMaterials?.evaluations) || !validCount(selectedMaterials?.respondents) || !validCount(selectedMaterials?.distinctMaterials)) {
+            !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
           throw new RunStoreError('invalid_cursor', 'The evidence cursor does not match this source run and criteria.');
         }
       }
@@ -1301,14 +1297,14 @@ class SQLiteRunStore implements RunStore {
       if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
       const whereSql = where.join(' AND ');
       const join = 'LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id';
-      const snapshotCount = cursor?.totalMatches ?? asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters) as DatabaseRow).count, 'query match count');
-      const evaluationCoverage = cursor?.coverage ?? {
+      const snapshotCount = asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters) as DatabaseRow).count, 'query match count');
+      const evaluationCoverage = {
         totalEvaluations: asNumber((this.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'evaluation denominator'),
         completedEvaluations: asNumber((this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'completed evaluation denominator'),
         failedEvaluations: asNumber((this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'failed evaluation denominator'),
       };
-      let respondentCoverage = cursor?.coverage.respondents;
-      if (!respondentCoverage) {
+      let respondentCoverage: RunEvidencePage['coverage']['respondents'];
+      {
         const total = parsedRequest.data.kind === 'journey' ? parsedRequest.data.respondents.length
           : parsedRequest.data.kind === 'poll' ? parsedRequest.data.respondents.length
             : asNumber((this.database.prepare('SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'respondent denominator');
@@ -1331,8 +1327,8 @@ class SQLiteRunStore implements RunStore {
         respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-      const lifecycle = cursor?.lifecycle ?? currentLifecycle;
-      const matchedCoverage = cursor?.matchedCoverage ?? (() => {
+      const lifecycle = currentLifecycle;
+      const matchedCoverage = (() => {
         const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
           (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
             WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
@@ -1418,20 +1414,20 @@ class SQLiteRunStore implements RunStore {
         };
       });
       const last = pageRows.at(-1);
-      const sourceComplete = cursor?.sourceComplete ?? sourceStatus === 'completed';
+      const sourceComplete = sourceStatus === 'completed';
       return {
         items,
         totalMatches: snapshotCount,
         sourceRunId: query.sourceRunId,
-        sourceStatus: cursor?.sourceStatus ?? sourceStatus,
+        sourceStatus,
         sourceComplete,
         lifecycle,
         coverage,
         matchedCoverage,
         ...(hasMore && last ? { nextCursor: encodeCursor({
           kind: 'evidence', sourceRunId: query.sourceRunId, criteriaFingerprint, maxOrdinal,
-          lastOrdinal: asNumber(last.ordinal, 'evaluation ordinal'), sourceStatus: cursor?.sourceStatus ?? sourceStatus,
-          sourceComplete, totalMatches: snapshotCount, lifecycle, coverage, matchedCoverage, usedCalls, reservedCalls,
+          lastOrdinal: asNumber(last.ordinal, 'evaluation ordinal'), sourceStatus,
+          lifecycle, usedCalls, reservedCalls,
         } satisfies EvidenceCursorPayload) } : {}),
       };
     });
@@ -1803,9 +1799,9 @@ class SQLiteRunStore implements RunStore {
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, 'evaluation ID');
           this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-            .run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-          if (outcome.detail) this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
-            .run(evaluationFailureJson({ code: outcome.code, message: outcome.message, detail: outcome.detail }), attemptId, evaluationId);
+            .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+          if (outcome.detail || outcome.providerFailure) this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
+            .run(evaluationFailureJson({ code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) }), attemptId, evaluationId);
         }
         if (outcome.scope === 'run') this.database.prepare('UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?').run(outcome.scope, outcome.code, outcome.message, claim.runId);
       } else {
@@ -1877,8 +1873,8 @@ class SQLiteRunStore implements RunStore {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
           .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-          .run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) };
+          .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
         this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
           .run(evaluationFailureJson(failure), attemptId, evaluationId);
         if (outcome.scope === 'run') {
@@ -1969,8 +1965,8 @@ class SQLiteRunStore implements RunStore {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
           .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-          .run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) };
+          .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
         this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
           .run(evaluationFailureJson(failure), attemptId, evaluationId);
         if (outcome.scope === 'run') {

@@ -108,15 +108,7 @@ export const decisionValueSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('noul'), noul: probability }).strict(),
 ]);
 
-export const providerExecutionEvidenceSchema = z.object({
-  attempts: z.number().int().positive(),
-  provider: z.enum(['jev', 'laya']),
-  model: z.string().min(1),
-  checkpoint: z.string().min(1).optional(),
-  latencyMs: z.number().finite().nonnegative(),
-  usage: z.object({ inputTokens: z.number().int().nonnegative().optional(), outputTokens: z.number().int().nonnegative().optional() }).strict(),
-  cost: costEvidenceSchema.optional(),
-}).strict();
+export const providerExecutionEvidenceSchema = metadata;
 
 export const decisionFailureDetailSchema = z.object({
   reason: z.enum(['malformed_answer', 'answer_type_mismatch', 'unknown_option', 'probability_keys', 'probability_sum', 'score_out_of_range', 'score_legend_mismatch', 'invalid_answer']),
@@ -158,3 +150,12 @@ export type DecisionBatchResult = z.infer<typeof decisionBatchResultSchema>;
 export type DecisionFailureDetail = z.infer<typeof decisionFailureDetailSchema>;
 export type DecisionRequest = z.infer<typeof decisionRequestSchema>;
 export type DecisionResult = z.infer<typeof decisionResultSchema>;
+
+// Execution metadata is recorded separately from the respondent-visible typed answer.
+export function decisionValueFromResult(result: DecisionResult | DecisionValue): DecisionValue {
+  switch (result.type) {
+    case 'choice': return { type: 'choice', choice: result.choice, ...(result.probabilities === undefined ? {} : { probabilities: result.probabilities }), ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+    case 'score': return { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+    case 'noul': return { type: 'noul', noul: result.noul };
+  }
+}

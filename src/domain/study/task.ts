@@ -19,7 +19,7 @@ function validateChoiceTask(task: unknown, context: z.RefinementCtx): void {
   const choiceOptions = optionsValue as Record<string, string>;
   if ('answerKeyOptionId' in task) {
     const answerKeyOptionId = task.answerKeyOptionId;
-    if (typeof answerKeyOptionId === 'string' && answerKeyOptionId && !(answerKeyOptionId in choiceOptions)) {
+    if (typeof answerKeyOptionId === 'string' && answerKeyOptionId && !Object.hasOwn(choiceOptions, answerKeyOptionId)) {
       context.addIssue({ code: 'custom', path: ['answerKeyOptionId'], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
     }
   }

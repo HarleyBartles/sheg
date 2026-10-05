@@ -34392,7 +34392,6 @@ function toError(value) {
 }
 
 // src/entrypoints/mcp.ts
-import os from "node:os";
 import path8 from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -34437,6 +34436,52 @@ function resumeRefusalMessage(reason) {
       return "This run has no resumable unfinished work.";
   }
 }
+
+// src/domain/decision/provider-failure.ts
+var providerContextFitSchema = external_exports.object({
+  provider: external_exports.enum(["jev", "laya"]),
+  status: external_exports.enum(["fits", "overflow", "unavailable"]),
+  method: external_exports.string().min(1),
+  modelIdentity: external_exports.string().min(1),
+  tokenCount: external_exports.enum(["measured", "estimated"]),
+  tokens: external_exports.number().finite().nonnegative(),
+  contextLimit: external_exports.number().finite().nonnegative().nullable(),
+  headroomTokens: external_exports.number().finite().nullable(),
+  effectiveLimit: external_exports.number().finite().nonnegative().nullable(),
+  details: external_exports.record(external_exports.string(), external_exports.union([external_exports.number().finite(), external_exports.string()])),
+  reason: external_exports.string().optional()
+}).strict();
+var providerFailureEvidenceSchema = external_exports.object({
+  category: external_exports.enum(["admission", "credential", "transport", "http", "envelope", "answer", "execution"]),
+  attempts: external_exports.number().int().nonnegative(),
+  scope: external_exports.enum(["evaluation", "run"]),
+  httpStatus: external_exports.number().int().min(100).max(599).optional(),
+  contextFit: providerContextFitSchema.optional()
+}).strict();
+var ProviderCallError = class extends Error {
+  attempts;
+  failureScope;
+  failureCode;
+  contextFit;
+  validationFailure;
+  evidence;
+  constructor(message, options2) {
+    super(message);
+    this.name = "ProviderCallError";
+    this.attempts = options2.attempts;
+    this.failureScope = options2.scope ?? "evaluation";
+    this.failureCode = options2.code ?? "provider_unavailable";
+    this.contextFit = options2.contextFit;
+    this.validationFailure = options2.validationFailure;
+    this.evidence = providerFailureEvidenceSchema.parse({
+      category: options2.category ?? (options2.contextFit ? "admission" : options2.validationFailure ? "answer" : options2.code?.startsWith("credential_") ? "credential" : "execution"),
+      attempts: options2.attempts,
+      scope: this.failureScope,
+      ...options2.contextFit ? { contextFit: options2.contextFit } : {},
+      ...options2.httpStatus === void 0 ? {} : { httpStatus: options2.httpStatus }
+    });
+  }
+};
 
 // src/domain/decision/decision.ts
 var identifier = external_exports.string().min(1);
@@ -34535,15 +34580,7 @@ var decisionValueSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string().regex(/^\d+$/), prose), probabilities: external_exports.record(external_exports.string().regex(/^\d+$/), probability), confidence: probability.optional() }).strict(),
   external_exports.object({ type: external_exports.literal("noul"), noul: probability }).strict()
 ]);
-var providerExecutionEvidenceSchema = external_exports.object({
-  attempts: external_exports.number().int().positive(),
-  provider: external_exports.enum(["jev", "laya"]),
-  model: external_exports.string().min(1),
-  checkpoint: external_exports.string().min(1).optional(),
-  latencyMs: external_exports.number().finite().nonnegative(),
-  usage: external_exports.object({ inputTokens: external_exports.number().int().nonnegative().optional(), outputTokens: external_exports.number().int().nonnegative().optional() }).strict(),
-  cost: costEvidenceSchema.optional()
-}).strict();
+var providerExecutionEvidenceSchema = metadata;
 var decisionFailureDetailSchema = external_exports.object({
   reason: external_exports.enum(["malformed_answer", "answer_type_mismatch", "unknown_option", "probability_keys", "probability_sum", "score_out_of_range", "score_legend_mismatch", "invalid_answer"]),
   field: external_exports.enum(["answer", "type", "choice", "probabilities", "score", "legend"]),
@@ -34573,6 +34610,16 @@ var decisionBatchResultSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["answers"], message: "Batch result question IDs must be unique." });
   }
 });
+function decisionValueFromResult(result) {
+  switch (result.type) {
+    case "choice":
+      return { type: "choice", choice: result.choice, ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+    case "score":
+      return { type: "score", score: result.score, legend: result.legend, probabilities: result.probabilities, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+    case "noul":
+      return { type: "noul", noul: result.noul };
+  }
+}
 
 // src/domain/respondents/profile.ts
 var idSchema = external_exports.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
@@ -34653,7 +34700,7 @@ var layaConfigSchema = external_exports.object({
   headLimit: external_exports.number().int().positive(),
   tokenizerJsonPath: external_exports.string().min(1),
   tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  precision: external_exports.string().optional(),
+  precision: external_exports.string().min(1).optional(),
   timeoutMs: external_exports.number().int().positive()
 }).strict();
 var providerConfigSchema = external_exports.union([
@@ -34733,7 +34780,7 @@ function validateChoiceTask(task, context) {
   const choiceOptions = optionsValue;
   if ("answerKeyOptionId" in task) {
     const answerKeyOptionId = task.answerKeyOptionId;
-    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !(answerKeyOptionId in choiceOptions)) {
+    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !Object.hasOwn(choiceOptions, answerKeyOptionId)) {
       context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
     }
   }
@@ -35187,7 +35234,7 @@ var runEvidenceItemSchema = external_exports.object({
   questionId: external_exports.string().min(1),
   status: external_exports.enum(["pending", "answered", "failed", "unreached"]),
   result: decisionResultSchema.optional(),
-  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional() }).strict().optional(),
+  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
   selectedMaterial: selectedMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
   turnId: external_exports.string().min(1).optional(),
@@ -35914,7 +35961,7 @@ async function prepareFollowOnRun(request, source, provider) {
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
-    const rawResult = turn.result ? decisionValueSchema.parse(turn.result.type === "choice" ? { type: turn.result.type, choice: turn.result.choice, probabilities: turn.result.probabilities, confidence: turn.result.confidence } : turn.result.type === "score" ? { type: turn.result.type, score: turn.result.score, probabilities: turn.result.probabilities, legend: turn.result.legend, confidence: turn.result.confidence } : { type: turn.result.type, noul: turn.result.noul }) : void 0;
+    const rawResult = turn.result ? decisionValueFromResult(turn.result) : void 0;
     const packets = [];
     try {
       for (const question of request.questions) {
@@ -36459,181 +36506,19 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
   };
 }
 
-// src/infrastructure/data-root.ts
-import path3 from "node:path";
-function pathsFor(platform) {
-  return platform === "win32" ? path3.win32 : path3.posix;
-}
-function requiredAbsolute(value, name, paths, allowMissing = false) {
-  if (value === void 0 && allowMissing) return void 0;
-  if (value === void 0 || value.length === 0) throw new TypeError(`${name} must not be empty.`);
-  if (!paths.isAbsolute(value)) throw new TypeError(`${name} must be an absolute path.`);
-  return paths.normalize(value);
-}
-function resolveDataRoot(env, platform, home) {
-  const paths = pathsFor(platform);
-  const explicit = env.SHEG_DATA_DIR;
-  if (explicit !== void 0) return requiredAbsolute(explicit, "SHEG_DATA_DIR", paths);
-  const pluginData = env.PLUGIN_DATA;
-  if (pluginData !== void 0) return requiredAbsolute(pluginData, "PLUGIN_DATA", paths);
-  const absoluteHome = requiredAbsolute(home, "Home directory", paths);
-  if (platform === "win32") {
-    const local = env.LOCALAPPDATA;
-    const base2 = local === void 0 ? paths.join(absoluteHome, "AppData", "Local") : requiredAbsolute(local, "LOCALAPPDATA", paths);
-    return paths.join(base2, "Sheg");
-  }
-  if (platform === "darwin") return paths.join(absoluteHome, "Library", "Application Support", "Sheg");
-  const xdg = env.XDG_DATA_HOME;
-  const base = xdg === void 0 ? paths.join(absoluteHome, ".local", "share") : requiredAbsolute(xdg, "XDG_DATA_HOME", paths);
-  return paths.join(base, "sheg");
-}
-
-// src/infrastructure/process-lock.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { link, mkdir, open as open2, readFile, readdir, rename, rm } from "node:fs/promises";
-import path4 from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
-var ProcessLockError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ProcessLockError";
-  }
-};
-var ProcessLock = class _ProcessLock {
-  constructor(lockPath, record2) {
-    this.lockPath = lockPath;
-    this.record = record2;
-  }
-  lockPath;
-  record;
-  static async acquire(directory, name, operations = {}) {
-    if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
-    const lockPath = path4.join(directory, `${name}.lock`);
-    const record2 = { pid: process.pid, token: randomUUID2() };
-    const content = `${JSON.stringify(record2)}
-`;
-    await mkdir(directory, { recursive: true });
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      try {
-        const handle = await open2(lockPath, "wx", 384);
-        try {
-          await handle.writeFile(content, "utf8");
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        const claims = await staleClaims(lockPath);
-        const activeClaims = [];
-        for (const file2 of claims) {
-          const claimed = await readLock(file2);
-          if (!claimed) continue;
-          if (processExists(claimed.pid)) activeClaims.push({ file: file2, record: claimed });
-          else await rm(file2, { force: true });
-        }
-        if (activeClaims.length > 0) {
-          await removeIfOwned(lockPath, record2);
-          for (const claim2 of activeClaims) await restoreClaim(lockPath, claim2.file, claim2.record);
-          throw new ProcessLockError(`Run is already owned by process ${activeClaims[0].record.pid}.`);
-        }
-        return new _ProcessLock(lockPath, record2);
-      } catch (error62) {
-        const code = error62.code;
-        if (code !== "EEXIST" && code !== "EPERM") throw error62;
-      }
-      const existing = await readLock(lockPath);
-      if (!existing) {
-        await delay(Math.min(2 + attempt, 20));
-        continue;
-      }
-      if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
-      const stalePath = `${lockPath}.${process.pid}.${randomUUID2()}.stale`;
-      try {
-        await (operations.rename ?? rename)(lockPath, stalePath);
-        await operations.afterStaleRename?.();
-        const claimed = await readLock(stalePath);
-        if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
-          if (claimed && processExists(claimed.pid)) await restoreClaim(lockPath, stalePath, claimed);
-          throw new ProcessLockError("Lock ownership changed during stale recovery.");
-        }
-        await rm(stalePath, { force: true });
-      } catch (error62) {
-        if (error62 instanceof ProcessLockError) throw error62;
-        if (error62.code === "ENOENT") continue;
-        throw error62;
-      }
-    }
-    throw new ProcessLockError("Could not acquire process lock after retrying incomplete or stale ownership.");
-  }
-  async release() {
-    await removeIfOwned(this.lockPath, this.record);
-    for (const file2 of await staleClaims(this.lockPath)) {
-      const current = await readLock(file2);
-      if (current?.token === this.record.token) await rm(file2, { force: true });
-    }
-  }
-};
-async function staleClaims(lockPath) {
-  const directory = path4.dirname(lockPath);
-  const prefix = `${path4.basename(lockPath)}.`;
-  try {
-    const entries = await readdir(directory);
-    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path4.join(directory, entry));
-  } catch (error62) {
-    if (error62.code === "ENOENT") return [];
-    throw error62;
-  }
-}
-async function removeIfOwned(lockPath, record2) {
-  const current = await readLock(lockPath);
-  if (current?.token === record2.token) await rm(lockPath, { force: true });
-}
-async function restoreClaim(lockPath, claimPath, record2) {
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    const claimed = await readLock(claimPath);
-    if (claimed?.token !== record2.token || !processExists(record2.pid)) return;
-    try {
-      await link(claimPath, lockPath);
-      await rm(claimPath, { force: true });
-      return;
-    } catch (error62) {
-      if (error62.code !== "EEXIST") throw error62;
-      const current = await readLock(lockPath);
-      if (current?.token === record2.token) {
-        await rm(claimPath, { force: true });
-        return;
-      }
-      await delay(Math.min(2 + attempt, 20));
-    }
-  }
-}
-async function readLock(filePath) {
-  try {
-    const value = JSON.parse(await readFile(filePath, "utf8"));
-    return Number.isInteger(value.pid) && typeof value.token === "string" ? { pid: value.pid, token: value.token } : null;
-  } catch {
-    return null;
-  }
-}
-function processExists(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error62) {
-    return error62.code === "EPERM";
-  }
-}
-
 // src/infrastructure/run-store.ts
-import { createHash as createHash4, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash4, randomUUID as randomUUID2 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
-import path5 from "node:path";
+import path3 from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 // src/domain/decision/validate.ts
 var DecisionError = class extends Error {
+  reason;
   constructor(message, options2) {
     super(message, options2);
     this.name = "DecisionError";
+    this.reason = options2?.reason ?? "invalid_answer";
   }
 };
 var probabilitySumTolerance = 0.01;
@@ -36644,34 +36529,34 @@ function validateDecision(request, result, options2 = {}) {
   }
   const parsed = decisionResultSchema.safeParse(result);
   if (!parsed.success) {
-    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error });
+    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error, reason: "malformed_answer" });
   }
   const decision = parsed.data;
   const normalizedRequest = parsedRequest.data;
   if (decision.type !== normalizedRequest.question.type) {
-    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`);
+    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`, { reason: "answer_type_mismatch" });
   }
   if (decision.type === "choice") {
-    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.");
+    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.", { reason: "answer_type_mismatch" });
     const optionIds = Object.keys(normalizedRequest.question.options);
     if (!optionIds.includes(decision.choice)) {
-      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`);
+      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`, { reason: "unknown_option" });
     }
     validateDistribution(decision.probabilities, optionIds, "Choice");
   } else if (decision.type === "score") {
-    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.");
+    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.", { reason: "answer_type_mismatch" });
     const rubric = normalizedRequest.question.rubric;
     const levelIds = rubric.map((_level, index) => String(index));
     if (decision.score < 0 || decision.score > rubric.length - 1) {
-      throw new DecisionError("Score result is outside the declared rubric range.");
+      throw new DecisionError("Score result is outside the declared rubric range.", { reason: "score_out_of_range" });
     }
     validateDistribution(decision.probabilities, levelIds, "Score");
     for (const [index, meaning] of rubric.entries()) {
       if (decision.legend[String(index)] !== meaning) {
-        throw new DecisionError(`Score legend does not match rubric level ${index}.`);
+        throw new DecisionError(`Score legend does not match rubric level ${index}.`, { reason: "score_legend_mismatch" });
       }
     }
-  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.");
+  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.", { reason: "answer_type_mismatch" });
   const maxAttempts = options2.maxAttempts ?? 1;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
     throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
@@ -36713,7 +36598,7 @@ function validateDecisionBatch(request, result, options2 = {}) {
     try {
       const enriched = { ...value.data, ...execution };
       const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
-      return { questionId: question.id, value: toDecisionValue(checked) };
+      return { questionId: question.id, value: decisionValueFromResult(checked) };
     } catch (error62) {
       if (!(error62 instanceof DecisionError)) throw error62;
       return { questionId: question.id, failure: decisionValidationFailure(error62) };
@@ -36721,13 +36606,8 @@ function validateDecisionBatch(request, result, options2 = {}) {
   });
   return decisionBatchResultSchema.parse({ answers, execution });
 }
-function decisionFailureReason(error62) {
-  const message = error62.message;
-  const reason = message.includes("does not match task type") ? "answer_type_mismatch" : message.includes("was not offered") ? "unknown_option" : message.includes("probabilities must contain exactly") ? "probability_keys" : message.includes("probabilities must sum") ? "probability_sum" : message.includes("outside the declared rubric range") ? "score_out_of_range" : message.includes("Score legend does not match") ? "score_legend_mismatch" : message.startsWith("Decision result is invalid:") ? "malformed_answer" : "invalid_answer";
-  return reason;
-}
 function decisionValidationFailure(error62) {
-  return decisionValidationFailureForReason(decisionFailureReason(error62));
+  return decisionValidationFailureForReason(error62.reason);
 }
 function decisionValidationFailureForReason(reason) {
   const detail = decisionFailureDetailForReason(reason);
@@ -36753,22 +36633,6 @@ function decisionFailureMessage(detail) {
       return "The answer failed a typed-answer validation rule.";
   }
 }
-function toDecisionValue(result) {
-  if (result.type === "choice") return {
-    type: "choice",
-    choice: result.choice,
-    probabilities: result.probabilities,
-    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
-  };
-  if (result.type === "score") return {
-    type: "score",
-    score: result.score,
-    legend: result.legend,
-    probabilities: result.probabilities,
-    ...result.confidence === void 0 ? {} : { confidence: result.confidence }
-  };
-  return { type: "noul", noul: result.noul };
-}
 var batchEnvelopeSchema = external_exports.object({
   answers: external_exports.array(external_exports.object({
     questionId: external_exports.string().min(1),
@@ -36782,11 +36646,11 @@ var batchEnvelopeSchema = external_exports.object({
 function validateDistribution(distribution, expectedIds, label) {
   const ids = Object.keys(distribution);
   if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
-    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`);
+    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`, { reason: "probability_keys" });
   }
   const total = Object.values(distribution).reduce((sum, value) => sum + value, 0);
   if (Math.abs(total - 1) > probabilitySumTolerance) {
-    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`);
+    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`, { reason: "probability_sum" });
   }
 }
 
@@ -36892,17 +36756,23 @@ function parseJson(value, label) {
     throw new RunStoreError("data_integrity_error", `Stored ${label} is not valid JSON.`, { cause: error62 });
   }
 }
-function failureDetailFromStorage(value) {
-  if (value === null || value === void 0) return void 0;
-  return decisionFailureDetailSchema.parse(parseJson(value, "typed-answer failure detail"));
+function failureEvidenceFromStorage(value) {
+  if (value === null || value === void 0) return {};
+  const parsed = parseJson(value, "evaluation failure evidence");
+  if ("reason" in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
+  return { ...parsed.detail === void 0 ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
+}
+function failureEvidenceJson(failure2) {
+  if (failure2.providerFailure) return JSON.stringify({ ...failure2.detail ? { detail: failure2.detail } : {}, providerFailure: providerFailureEvidenceSchema.parse(failure2.providerFailure) });
+  return failure2.detail ? JSON.stringify(failure2.detail) : null;
 }
 function storedEvaluationFailure(row) {
   if (row.failure_code === null) return void 0;
-  const detail = failureDetailFromStorage(row.failure_detail_json);
+  const evidence = failureEvidenceFromStorage(row.failure_detail_json);
   return {
     code: asText(row.failure_code, "failure code"),
     message: asText(row.failure_message, "failure message"),
-    ...detail ? { detail } : {}
+    ...evidence
   };
 }
 function evaluationFailureJson(failure2) {
@@ -36913,7 +36783,7 @@ function evaluationFailureFromJson(value) {
   const parsed = parseJson(value, "attempt evaluation failure");
   if (typeof parsed.code !== "string" || typeof parsed.message !== "string") throw new RunStoreError("data_integrity_error", "Stored attempt evaluation failure is invalid.");
   const detail = parsed.detail === void 0 ? void 0 : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {} };
+  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {}, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
 }
 function encodeCursor(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -37002,9 +36872,9 @@ function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   }
 }
 function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
-  const backupRoot = path5.join(dataRoot, "backups");
+  const backupRoot = path3.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path5.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
+  const backupPath = path3.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID2()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -37236,8 +37106,8 @@ function initialize(database, dataRoot) {
   }
 }
 function inspectRunStoreCompatibility(dataRoot) {
-  if (!path5.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
-  const databasePath = path5.join(dataRoot, "runs.sqlite");
+  if (!path3.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
+  const databasePath = path3.join(dataRoot, "runs.sqlite");
   if (!existsSync2(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
   let database;
   try {
@@ -37261,7 +37131,7 @@ function inspectRunStoreCompatibility(dataRoot) {
   }
 }
 function runStoreBackupAvailable(dataRoot) {
-  const backupRoot = path5.join(dataRoot, "backups");
+  const backupRoot = path3.join(dataRoot, "backups");
   if (!existsSync2(backupRoot)) return false;
   try {
     return readdirSync(backupRoot).some((name) => name.startsWith("runs-schema-") && name.endsWith(".sqlite"));
@@ -37270,8 +37140,8 @@ function runStoreBackupAvailable(dataRoot) {
   }
 }
 function resetRunStore(dataRoot) {
-  if (!path5.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
-  const databasePath = path5.join(dataRoot, "runs.sqlite");
+  if (!path3.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  const databasePath = path3.join(dataRoot, "runs.sqlite");
   let inspectionDatabase;
   let version2;
   try {
@@ -37293,14 +37163,14 @@ function resetRunStore(dataRoot) {
     throw new RunStoreError("recovery_backup_failed", "Sheg could not verify a recoverable datastore backup; the original files were left untouched.", { cause: error62 });
   }
   database.close();
-  const recoveryRoot = path5.join(dataRoot, "recovery", randomUUID3());
+  const recoveryRoot = path3.join(dataRoot, "recovery", randomUUID2());
   mkdirSync(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
   try {
     for (const original of files) {
       if (!existsSync2(original)) continue;
-      const archived = path5.join(recoveryRoot, path5.basename(original));
+      const archived = path3.join(recoveryRoot, path3.basename(original));
       renameSync(original, archived);
       moved.push({ original, archived });
     }
@@ -37326,7 +37196,7 @@ function resetRunStore(dataRoot) {
 }
 function resetUnreadableRunStore(dataRoot, databasePath) {
   if (!existsSync2(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
-  const recoveryRoot = path5.join(dataRoot, "recovery", randomUUID3());
+  const recoveryRoot = path3.join(dataRoot, "recovery", randomUUID2());
   mkdirSync(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
@@ -37334,7 +37204,7 @@ function resetUnreadableRunStore(dataRoot, databasePath) {
     for (const original of files) {
       if (!existsSync2(original)) continue;
       const size = statSync(original).size;
-      const archived = path5.join(recoveryRoot, path5.basename(original));
+      const archived = path3.join(recoveryRoot, path3.basename(original));
       renameSync(original, archived);
       if (statSync(archived).size !== size) throw new Error("Quarantined datastore file size changed.");
       moved.push({ original, archived, size });
@@ -37516,16 +37386,16 @@ function validatePreparedJourney(prepared) {
   return { ...prepared, request: parsedRequest.data };
 }
 function openRunStore(dataRoot, options2 = {}) {
-  if (!path5.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
+  if (!path3.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync(dataRoot, { recursive: true });
-  const database = new DatabaseSync(path5.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
+  const database = new DatabaseSync(path3.join(dataRoot, "runs.sqlite"), { timeout: 5e3, enableForeignKeyConstraints: true });
   try {
     initialize(database, dataRoot);
   } catch (error62) {
     database.close();
     throw error62;
   }
-  return new SQLiteRunStore(database, path5.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+  return new SQLiteRunStore(database, path3.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
 }
 var SQLiteRunStore = class {
   constructor(database, databasePath, now) {
@@ -37572,7 +37442,7 @@ var SQLiteRunStore = class {
           if (!sourceEvaluation) throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
         }
       }
-      const runId = randomUUID3();
+      const runId = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -37623,7 +37493,7 @@ var SQLiteRunStore = class {
         this.reconcileInside(runId2, this.now());
         return { created: false, run: this.statusInside(runId2) };
       }
-      const runId = randomUUID3();
+      const runId = randomUUID2();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
       this.database.prepare(`INSERT INTO runs
@@ -38002,13 +37872,7 @@ var SQLiteRunStore = class {
       let cursor;
       if (query.cursor) {
         cursor = decodeCursor(query.cursor, "evidence");
-        const coverage2 = cursor.coverage;
-        const respondents = coverage2?.respondents;
-        const matched = cursor.matchedCoverage;
-        const matchedEvaluations = matched?.evaluations;
-        const selectedMaterials = matched?.selectedMaterials;
-        const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
-        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.totalMatches) || cursor.totalMatches < 0 || !Number.isSafeInteger(cursor.usedCalls) || !Number.isSafeInteger(cursor.reservedCalls) || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || typeof cursor.sourceComplete !== "boolean" || !runLifecycleSchema.safeParse(cursor.lifecycle).success || !validCount(coverage2?.totalEvaluations) || !validCount(coverage2?.completedEvaluations) || !validCount(coverage2?.failedEvaluations) || !validCount(respondents?.total) || !validCount(respondents?.active) || !validCount(respondents?.completed) || !validCount(respondents?.failed) || !validCount(respondents?.unreached) || !validCount(matched?.representedRespondents) || !validCount(matchedEvaluations?.total) || !validCount(matchedEvaluations?.pending) || !validCount(matchedEvaluations?.answered) || !validCount(matchedEvaluations?.failed) || !validCount(matchedEvaluations?.unreached) || !validCount(selectedMaterials?.evaluations) || !validCount(selectedMaterials?.respondents) || !validCount(selectedMaterials?.distinctMaterials)) {
+        if (cursor.kind !== "evidence" || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint || !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) || cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal || !Number.isSafeInteger(cursor.usedCalls) || cursor.usedCalls < 0 || !Number.isSafeInteger(cursor.reservedCalls) || cursor.reservedCalls < 0 || !["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"].includes(cursor.sourceStatus) || !runLifecycleSchema.safeParse(cursor.lifecycle).success) {
           throw new RunStoreError("invalid_cursor", "The evidence cursor does not match this source run and criteria.");
         }
       }
@@ -38055,14 +37919,14 @@ var SQLiteRunStore = class {
       }
       const whereSql = where.join(" AND ");
       const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
-      const snapshotCount = cursor?.totalMatches ?? asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
-      const evaluationCoverage = cursor?.coverage ?? {
+      const snapshotCount = asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
+      const evaluationCoverage = {
         totalEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
         completedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
         failedEvaluations: asNumber(this.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'failed'").get(query.sourceRunId, maxOrdinal).count, "failed evaluation denominator")
       };
-      let respondentCoverage = cursor?.coverage.respondents;
-      if (!respondentCoverage) {
+      let respondentCoverage;
+      {
         const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(this.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
         const statusCounts = parsedRequest.data.kind === "journey" ? this.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? this.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
@@ -38079,8 +37943,8 @@ var SQLiteRunStore = class {
         respondentCoverage = { total, completed, failed, unreached, active: Math.max(0, total - completed - failed - unreached) };
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
-      const lifecycle = cursor?.lifecycle ?? currentLifecycle;
-      const matchedCoverage = cursor?.matchedCoverage ?? (() => {
+      const lifecycle = currentLifecycle;
+      const matchedCoverage = (() => {
         const matchedRows = this.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
           (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
             WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
@@ -38169,12 +38033,12 @@ var SQLiteRunStore = class {
         };
       });
       const last = pageRows.at(-1);
-      const sourceComplete = cursor?.sourceComplete ?? sourceStatus === "completed";
+      const sourceComplete = sourceStatus === "completed";
       return {
         items,
         totalMatches: snapshotCount,
         sourceRunId: query.sourceRunId,
-        sourceStatus: cursor?.sourceStatus ?? sourceStatus,
+        sourceStatus,
         sourceComplete,
         lifecycle,
         coverage,
@@ -38185,12 +38049,8 @@ var SQLiteRunStore = class {
           criteriaFingerprint,
           maxOrdinal,
           lastOrdinal: asNumber(last.ordinal, "evaluation ordinal"),
-          sourceStatus: cursor?.sourceStatus ?? sourceStatus,
-          sourceComplete,
-          totalMatches: snapshotCount,
+          sourceStatus,
           lifecycle,
-          coverage,
-          matchedCoverage,
           usedCalls,
           reservedCalls
         }) } : {}
@@ -38471,7 +38331,7 @@ var SQLiteRunStore = class {
       if (!row) throw this.notFound();
       const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, "created time") + LEASE_MS : asNumber(row.lease_expires_ms, "launch deadline");
       if (asText(row.status, "run status") !== "prepared" || asNumber(row.cancel_requested, "cancel flag") === 1 || nowMs >= launchDeadline) return null;
-      const ownerToken = randomUUID3();
+      const ownerToken = randomUUID2();
       this.database.prepare("UPDATE runs SET status = 'running', owner_token = ?, owner_pid = ?, lease_expires_ms = ? WHERE run_id = ? AND status = 'prepared'").run(ownerToken, workerPid, nowMs + LEASE_MS, runId);
       return { runId, ownerToken };
     });
@@ -38493,7 +38353,7 @@ var SQLiteRunStore = class {
       if (asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
       const row = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
       if (!row) return null;
-      const attemptId = randomUUID3();
+      const attemptId = randomUUID2();
       const evaluationId = asText(row.evaluation_id, "evaluation ID");
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)").run(attemptId, claim2.runId, asText(row.group_id, "group ID"), evaluationId, asText(row.packet_fingerprint, "packet fingerprint"), claim2.ownerToken, nowMs);
       this.database.prepare("INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)").run(attemptId, evaluationId);
@@ -38516,7 +38376,7 @@ var SQLiteRunStore = class {
         throw new RunStoreError("invalid_batch_reservation", "A batch may reserve only pending evaluations from the requested group.");
       }
       const sorted = [...selected].sort((left, right) => orderedIds.indexOf(asText(left.question_id, "question ID")) - orderedIds.indexOf(asText(right.question_id, "question ID")));
-      const attemptId = randomUUID3();
+      const attemptId = randomUUID2();
       const anchorId = asText(sorted[0].evaluation_id, "evaluation ID");
       const state = parseJson(group.state_json, "group state");
       const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")).question);
@@ -38541,8 +38401,8 @@ var SQLiteRunStore = class {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, "evaluation ID");
-          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-          if (outcome.detail) this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: outcome.code, message: outcome.message, detail: outcome.detail }), attemptId, evaluationId);
+          this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+          if (outcome.detail || outcome.providerFailure) this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} }), attemptId, evaluationId);
         }
         if (outcome.scope === "run") this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
       } else {
@@ -38600,8 +38460,8 @@ var SQLiteRunStore = class {
         this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
       } else {
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
@@ -38671,8 +38531,8 @@ var SQLiteRunStore = class {
           throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
         }
         this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, outcome.detail ? JSON.stringify(outcome.detail) : null, evaluationId);
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {} };
+        this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
+        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
         if (outcome.scope === "run") {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
@@ -38914,6 +38774,179 @@ var SQLiteRunStore = class {
   }
 };
 
+// src/infrastructure/run-runtime.ts
+import os from "node:os";
+
+// src/infrastructure/data-root.ts
+import path4 from "node:path";
+function pathsFor(platform) {
+  return platform === "win32" ? path4.win32 : path4.posix;
+}
+function requiredAbsolute(value, name, paths, allowMissing = false) {
+  if (value === void 0 && allowMissing) return void 0;
+  if (value === void 0 || value.length === 0) throw new TypeError(`${name} must not be empty.`);
+  if (!paths.isAbsolute(value)) throw new TypeError(`${name} must be an absolute path.`);
+  return paths.normalize(value);
+}
+function resolveDataRoot(env, platform, home) {
+  const paths = pathsFor(platform);
+  const explicit = env.SHEG_DATA_DIR;
+  if (explicit !== void 0) return requiredAbsolute(explicit, "SHEG_DATA_DIR", paths);
+  const pluginData = env.PLUGIN_DATA;
+  if (pluginData !== void 0) return requiredAbsolute(pluginData, "PLUGIN_DATA", paths);
+  const absoluteHome = requiredAbsolute(home, "Home directory", paths);
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA;
+    const base2 = local === void 0 ? paths.join(absoluteHome, "AppData", "Local") : requiredAbsolute(local, "LOCALAPPDATA", paths);
+    return paths.join(base2, "Sheg");
+  }
+  if (platform === "darwin") return paths.join(absoluteHome, "Library", "Application Support", "Sheg");
+  const xdg = env.XDG_DATA_HOME;
+  const base = xdg === void 0 ? paths.join(absoluteHome, ".local", "share") : requiredAbsolute(xdg, "XDG_DATA_HOME", paths);
+  return paths.join(base, "sheg");
+}
+
+// src/infrastructure/process-lock.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { link, mkdir, open as open2, readFile, readdir, rename, rm } from "node:fs/promises";
+import path5 from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+var ProcessLockError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ProcessLockError";
+  }
+};
+var ProcessLock = class _ProcessLock {
+  constructor(lockPath, record2) {
+    this.lockPath = lockPath;
+    this.record = record2;
+  }
+  lockPath;
+  record;
+  static async acquire(directory, name, operations = {}) {
+    if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
+    const lockPath = path5.join(directory, `${name}.lock`);
+    const record2 = { pid: process.pid, token: randomUUID3() };
+    const content = `${JSON.stringify(record2)}
+`;
+    const temporaryPath = `${lockPath}.${process.pid}.${record2.token}.tmp`;
+    await mkdir(directory, { recursive: true });
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      try {
+        const handle = await open2(temporaryPath, "wx", 384);
+        try {
+          await handle.writeFile(content, "utf8");
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        try {
+          await link(temporaryPath, lockPath);
+        } finally {
+          await rm(temporaryPath, { force: true });
+        }
+        const claims = await staleClaims(lockPath);
+        const activeClaims = [];
+        for (const file2 of claims) {
+          const claimed = await readLock(file2);
+          if (!claimed) continue;
+          if (processExists(claimed.pid)) activeClaims.push({ file: file2, record: claimed });
+          else await rm(file2, { force: true });
+        }
+        if (activeClaims.length > 0) {
+          await removeIfOwned(lockPath, record2);
+          for (const claim2 of activeClaims) await restoreClaim(lockPath, claim2.file, claim2.record);
+          throw new ProcessLockError(`Run is already owned by process ${activeClaims[0].record.pid}.`);
+        }
+        return new _ProcessLock(lockPath, record2);
+      } catch (error62) {
+        const code = error62.code;
+        if (code !== "EEXIST" && code !== "EPERM") throw error62;
+      }
+      const existing = await readLock(lockPath);
+      if (!existing) {
+        await delay(Math.min(2 + attempt, 20));
+        continue;
+      }
+      if (existing && processExists(existing.pid)) throw new ProcessLockError(`Run is already owned by process ${existing.pid}.`);
+      const stalePath = `${lockPath}.${process.pid}.${randomUUID3()}.stale`;
+      try {
+        await (operations.rename ?? rename)(lockPath, stalePath);
+        await operations.afterStaleRename?.();
+        const claimed = await readLock(stalePath);
+        if (claimed?.pid !== existing.pid || claimed.token !== existing.token || processExists(claimed.pid)) {
+          if (claimed && processExists(claimed.pid)) await restoreClaim(lockPath, stalePath, claimed);
+          throw new ProcessLockError("Lock ownership changed during stale recovery.");
+        }
+        await rm(stalePath, { force: true });
+      } catch (error62) {
+        if (error62 instanceof ProcessLockError) throw error62;
+        if (error62.code === "ENOENT") continue;
+        throw error62;
+      }
+    }
+    throw new ProcessLockError("Could not acquire process lock after retrying incomplete or stale ownership.");
+  }
+  async release() {
+    await removeIfOwned(this.lockPath, this.record);
+    for (const file2 of await staleClaims(this.lockPath)) {
+      const current = await readLock(file2);
+      if (current?.token === this.record.token) await rm(file2, { force: true });
+    }
+  }
+};
+async function staleClaims(lockPath) {
+  const directory = path5.dirname(lockPath);
+  const prefix = `${path5.basename(lockPath)}.`;
+  try {
+    const entries = await readdir(directory);
+    return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith(".stale")).map((entry) => path5.join(directory, entry));
+  } catch (error62) {
+    if (error62.code === "ENOENT") return [];
+    throw error62;
+  }
+}
+async function removeIfOwned(lockPath, record2) {
+  const current = await readLock(lockPath);
+  if (current?.token === record2.token) await rm(lockPath, { force: true });
+}
+async function restoreClaim(lockPath, claimPath, record2) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const claimed = await readLock(claimPath);
+    if (claimed?.token !== record2.token || !processExists(record2.pid)) return;
+    try {
+      await link(claimPath, lockPath);
+      await rm(claimPath, { force: true });
+      return;
+    } catch (error62) {
+      if (error62.code !== "EEXIST") throw error62;
+      const current = await readLock(lockPath);
+      if (current?.token === record2.token) {
+        await rm(claimPath, { force: true });
+        return;
+      }
+      await delay(Math.min(2 + attempt, 20));
+    }
+  }
+}
+async function readLock(filePath) {
+  try {
+    const value = JSON.parse(await readFile(filePath, "utf8"));
+    return Number.isInteger(value.pid) && typeof value.token === "string" ? { pid: value.pid, token: value.token } : null;
+  } catch {
+    return null;
+  }
+}
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error62) {
+    return error62.code === "EPERM";
+  }
+}
+
 // src/infrastructure/worker-launcher.ts
 import { spawn } from "node:child_process";
 import path6 from "node:path";
@@ -38979,25 +39012,7 @@ function jevMetadata(route, model) {
   return jevModelMetadata[route][model];
 }
 
-// src/providers/jev.ts
-var JevCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure) {
-    super(message);
-    this.attempts = attempts;
-    this.contextFit = contextFit;
-    this.decisionId = decisionId;
-    this.failureScope = failureScope;
-    this.failureCode = failureCode;
-    this.validationFailure = validationFailure;
-    this.name = "JevCallError";
-  }
-  attempts;
-  contextFit;
-  decisionId;
-  failureScope;
-  failureCode;
-  validationFailure;
-};
+// src/providers/system-one-contract.ts
 var choiceAnswerSchema = external_exports.object({
   type: external_exports.literal("choice"),
   choice: external_exports.string().min(1),
@@ -39006,7 +39021,21 @@ var choiceAnswerSchema = external_exports.object({
 }).passthrough();
 var scoreAnswerSchema = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
 var noulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
+var systemOneAnswerSchema = external_exports.discriminatedUnion("type", [choiceAnswerSchema, scoreAnswerSchema, noulAnswerSchema]);
+function systemOneQuestion(question) {
+  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
+  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
+}
+
+// src/providers/jev.ts
+var JevCallError = class extends ProviderCallError {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
+    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope, code: failureCode, ...validationFailure ? { validationFailure } : {}, ...evidence });
+    this.decisionId = decisionId;
+    this.name = "JevCallError";
+  }
+  decisionId;
+};
 var wireUsageSchema = external_exports.object({
   input_tokens: external_exports.number().int().nonnegative().optional(),
   output_tokens: external_exports.number().int().nonnegative().optional(),
@@ -39028,15 +39057,11 @@ function parseWireResponse(payload, route) {
 var retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
-function wireQuestion(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
 function requestBody(request, model) {
-  return { model, state: request.state, questions: { [request.question.id]: wireQuestion(request.question) } };
+  return { model, state: request.state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
 }
 function batchRequestBody(request, model) {
-  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, wireQuestion(question)])) };
+  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
 }
 function measureRequestBody(serialized, model, route) {
   const bytes = Buffer.byteLength(serialized, "utf8");
@@ -39093,7 +39118,7 @@ var JevProvider = class {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
     } catch (error62) {
       if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
     }
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
@@ -39118,26 +39143,26 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
       if (!response.ok) {
         if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts);
+        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
+        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
-      const answer = answerSchema.safeParse(parsedResponse.data.answers[question.id]);
+      const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
         throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
       }
@@ -39186,7 +39211,7 @@ var JevProvider = class {
       apiKey = await this.credentialStore.readForAuthentication(this.config.route);
     } catch (error62) {
       if (error62 instanceof CredentialStoreError) throw new JevCallError(error62.message, 0, void 0, void 0, "run", error62.code);
-      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable");
+      throw new JevCallError(`The ${this.config.route} secure credential is unavailable.`, 0, void 0, void 0, "run", "credential_unavailable", void 0, { category: "credential" });
     }
     const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
     const startedAt = performance.now();
@@ -39207,31 +39232,31 @@ var JevProvider = class {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts);
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
       if (!response.ok) {
         if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
           await wait(retryDelayMs(attempts));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts);
+        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts);
+      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
       const outputTokens = parsedResponse.data.usage.output_tokens;
       const metadata2 = jevMetadata(this.config.route, parsedResponse.data.model);
       const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const answers = Object.entries(parsedResponse.data.answers).map(([questionId, rawValue]) => {
-        const answer = answerSchema.safeParse(rawValue);
-        return { questionId, value: answer.success ? toDecisionValue2(answer.data) : rawValue };
+        const answer = systemOneAnswerSchema.safeParse(rawValue);
+        return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
       });
       const execution = {
         attempts,
@@ -39254,11 +39279,6 @@ var JevProvider = class {
     return this.measureContext(request, this.config);
   }
 };
-function toDecisionValue2(answer) {
-  if (answer.type === "choice") return { type: "choice", choice: answer.choice, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
-  if (answer.type === "score") return { type: "score", score: answer.score, legend: answer.legend, probabilities: answer.probabilities, ...answer.confidence === void 0 ? {} : { confidence: answer.confidence } };
-  return { type: "noul", noul: answer.noul };
-}
 function missingMeasureFit2(config2, reason) {
   return { provider: "jev", status: "unavailable", method: "unavailable", modelIdentity: config2.model, tokenCount: "estimated", tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
 }
@@ -39597,35 +39617,14 @@ async function measureLayaContext(request, config2) {
 
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
-var LayaCallError = class extends Error {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", validationFailure) {
-    super(message);
-    this.attempts = attempts;
-    this.contextFit = contextFit;
+var LayaCallError = class extends ProviderCallError {
+  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", validationFailure, evidence) {
+    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope, ...validationFailure ? { validationFailure } : {}, ...evidence });
     this.decisionId = decisionId;
-    this.failureScope = failureScope;
-    this.validationFailure = validationFailure;
     this.name = "LayaCallError";
   }
-  attempts;
-  contextFit;
   decisionId;
-  failureScope;
-  validationFailure;
 };
-var choiceAnswerSchema2 = external_exports.object({
-  type: external_exports.literal("choice"),
-  choice: external_exports.string().min(1),
-  probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)),
-  confidence: external_exports.number().finite().min(0).max(1).optional()
-}).passthrough();
-var scoreAnswerSchema2 = external_exports.object({ type: external_exports.literal("score"), score: external_exports.number().finite(), legend: external_exports.record(external_exports.string(), external_exports.string()), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), confidence: external_exports.number().finite().min(0).max(1).optional() }).passthrough();
-var noulAnswerSchema2 = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().finite().min(0).max(1) }).passthrough();
-var answerSchema2 = external_exports.discriminatedUnion("type", [choiceAnswerSchema2, scoreAnswerSchema2, noulAnswerSchema2]);
-function wireQuestion2(question) {
-  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
-  return { type: question.type, instructions: question.instructions, ...criteria === void 0 ? {} : { criteria } };
-}
 var responseSchema = external_exports.object({
   model: external_exports.string().min(1),
   answers: external_exports.record(external_exports.string(), external_exports.unknown()),
@@ -39687,29 +39686,29 @@ var LayaProvider = class {
           model: this.config.checkpoint,
           state: parsedRequest.data.state,
           questions: {
-            [question.id]: wireQuestion2(question)
+            [question.id]: systemOneQuestion(question)
           }
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs)
       });
     } catch {
-      throw new LayaCallError("Laya local service request failed.", 1);
+      throw new LayaCallError("Laya local service request failed.", 1, void 0, void 0, "evaluation", void 0, { category: "transport" });
     }
-    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation");
+    if (!response.ok) throw new LayaCallError(`Laya local service returned HTTP ${response.status}.`, 1, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", void 0, { category: "http", httpStatus: response.status });
     let payload;
     try {
       payload = await response.json();
     } catch {
-      throw new LayaCallError("Laya local service returned unreadable JSON.", 1);
+      throw new LayaCallError("Laya local service returned unreadable JSON.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
     const parsedResponse = responseSchema.safeParse(payload);
     if (!parsedResponse.success) {
-      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1);
+      throw new LayaCallError("Laya response is missing model, answer, usage, or checkpoint routing metadata.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
     if (parsedResponse.data.routing.model !== this.config.checkpoint) {
-      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1);
+      throw new LayaCallError("Laya routed the request to a checkpoint other than the configured checkpoint.", 1, void 0, void 0, "evaluation", void 0, { category: "envelope" });
     }
-    const answer = answerSchema2.safeParse(parsedResponse.data.answers[question.id]);
+    const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
     if (!answer.success) throw new LayaCallError(`Laya returned an invalid ${question.type} answer for ${question.id}.`, 1, void 0, question.id, "evaluation", decisionValidationFailureForReason("malformed_answer"));
     const result = {
       ...answer.data,
@@ -39763,10 +39762,119 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
   if (state === "unavailable") throw new CredentialStoreError("credential_unavailable", route);
 }
 
+// src/infrastructure/run-runtime.ts
+function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platform, os.homedir()), service) {
+  let runtimeService;
+  let ownedStore;
+  let storeReady = service !== void 0;
+  let startupFailure;
+  if (service) runtimeService = service;
+  else {
+    try {
+      const runtime = createDefaultRunService(dataRoot);
+      runtimeService = runtime.service;
+      ownedStore = runtime.store;
+      storeReady = true;
+    } catch (error62) {
+      runtimeService = unavailableRunService();
+      startupFailure = error62;
+    }
+  }
+  async function storage(input2) {
+    if (input2.operation === "inspect") {
+      if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
+      const observed = inspectRunStoreCompatibility(dataRoot);
+      if (observed.status === "current") {
+        const runtime = createDefaultRunService(dataRoot);
+        runtimeService = runtime.service;
+        ownedStore = runtime.store;
+        storeReady = true;
+        startupFailure = void 0;
+        return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
+      }
+      const issue2 = startupFailure instanceof RunStoreError ? { code: startupFailure.code } : { code: observed.status === "unreadable" ? "datastore_unreadable" : "datastore_open_failed" };
+      const compatibility = compatibilityStatus(observed, startupFailure);
+      return { recoveryRequired: true, compatibility, issue: issue2, backupAvailable: runStoreBackupAvailable(dataRoot) };
+    }
+    if (input2.operation === "optimize") {
+      if (!storeReady) throw recoveryRequiredError();
+      runtimeService.optimizeStorage();
+      return { optimized: true };
+    }
+    const resetLock = await ProcessLock.acquire(dataRoot, "run-storage-reset");
+    try {
+      if (storeReady || inspectRunStoreCompatibility(dataRoot).status === "current") {
+        throw new RunServiceError("recovery_not_required", "The datastore no longer requires recovery; inspect its current status before taking further action.");
+      }
+      const reset = resetRunStore(dataRoot);
+      const runtime = createDefaultRunService(dataRoot);
+      runtimeService = runtime.service;
+      ownedStore = runtime.store;
+      storeReady = true;
+      startupFailure = void 0;
+      return { ...reset, recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
+    } catch (error62) {
+      startupFailure = error62;
+      throw error62;
+    } finally {
+      await resetLock.release();
+    }
+  }
+  return {
+    get service() {
+      return runtimeService;
+    },
+    close() {
+      ownedStore?.close();
+      ownedStore = void 0;
+    },
+    storage
+  };
+}
+function compatibilityStatus(observed, startupFailure) {
+  if (startupFailure instanceof RunStoreError && startupFailure.code.startsWith("migration_")) {
+    return { status: "migration_failed", schemaVersion: observed.status === "migration_available" ? observed.schemaVersion : null };
+  }
+  if (observed.status === "migration_available") return { status: "migration_available", schemaVersion: observed.schemaVersion };
+  if (observed.status === "uninitialized") return { status: "uninitialized", schemaVersion: 0 };
+  return { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
+}
+function createDefaultRunService(dataRoot) {
+  const store = openRunStore(dataRoot);
+  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
+}
+function unavailableRunService() {
+  return new Proxy(/* @__PURE__ */ Object.create(null), {
+    get: (_target, property) => property === "then" ? void 0 : () => {
+      throw recoveryRequiredError();
+    }
+  });
+}
+function recoveryRequiredError() {
+  return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Inspect storage before using study operations.");
+}
+
+// src/application/run-operations.ts
+var resetConfirmation = "RESET SHEG DATASTORE";
+var runStorageSchema = external_exports.discriminatedUnion("operation", [
+  external_exports.object({ operation: external_exports.literal("inspect") }).strict(),
+  external_exports.object({ operation: external_exports.literal("optimize") }).strict(),
+  external_exports.object({ operation: external_exports.literal("reset"), confirmation: external_exports.literal(resetConfirmation) }).strict()
+]);
+var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
+var runGetSchema = external_exports.discriminatedUnion("view", [
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("journey") }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("context"), evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
+  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
+]);
+
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.0-dev.13",
+  version: "0.3.0-dev.14",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
@@ -39806,114 +39914,31 @@ var productVersion = package_default.version;
 
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
-var resetConfirmation = "RESET SHEG DATASTORE";
-var runStorageSchema = external_exports.discriminatedUnion("operation", [
-  external_exports.object({ operation: external_exports.literal("inspect") }).strict(),
-  external_exports.object({ operation: external_exports.literal("optimize") }).strict(),
-  external_exports.object({ operation: external_exports.literal("reset"), confirmation: external_exports.literal(resetConfirmation) }).strict()
-]);
-var runDeleteSchema = external_exports.object({ runIds: external_exports.array(external_exports.string().uuid()).min(1).max(200).refine((ids) => new Set(ids).size === ids.length, "Run IDs must be unique."), dryRun: external_exports.boolean().default(false) }).strict();
-var runGetSchema = external_exports.discriminatedUnion("view", [
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("status") }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("request") }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("journey") }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("context"), evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("answers"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict(),
-  external_exports.object({ runId: external_exports.string().uuid(), view: external_exports.literal("attempts"), cursor: external_exports.string().optional(), limit: external_exports.number().int().min(1).max(200).optional() }).strict()
-]);
 function createPollingServer(service) {
-  const dataRoot = resolveDataRoot(process.env, process.platform, os.homedir());
-  let runtimeService;
-  let ownedStore;
-  let storeReady = service !== void 0;
-  let startupFailure;
-  if (service) runtimeService = service;
-  else {
-    try {
-      const runtime = createDefaultRunService(dataRoot);
-      runtimeService = runtime.service;
-      ownedStore = runtime.store;
-      storeReady = true;
-    } catch (error62) {
-      runtimeService = unavailableRunService();
-      startupFailure = error62;
-    }
-  }
+  const runtime = createRunRuntime(void 0, service);
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
-  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtimeService.inspect(request)));
-  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtimeService.start(submissionId, request)));
-  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtimeService.list(query)));
-  server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtimeService.queryEvidence(query)));
+  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Independent questions in one group share one frozen state; fit entries identify planned question groups and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
+  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
+  server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
+  server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtime.service.queryEvidence(query)));
   server.registerTool("run_get", { description: "Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {
-    if (input2.view === "status") return runtimeService.getStatus(input2.runId);
-    if (input2.view === "request") return runtimeService.getRequest(input2.runId);
-    if (input2.view === "journey") return runtimeService.getJourneyRun(input2.runId);
-    if (input2.view === "context") return runtimeService.getContext(input2.runId, input2.evaluationId, input2.contextId);
-    if (input2.view === "answers") return runtimeService.answers(input2.runId, input2.cursor, input2.limit);
-    return runtimeService.attempts(input2.runId, input2.cursor, input2.limit);
+    if (input2.view === "status") return runtime.service.getStatus(input2.runId);
+    if (input2.view === "request") return runtime.service.getRequest(input2.runId);
+    if (input2.view === "journey") return runtime.service.getJourneyRun(input2.runId);
+    if (input2.view === "context") return runtime.service.getContext(input2.runId, input2.evaluationId, input2.contextId);
+    if (input2.view === "answers") return runtime.service.answers(input2.runId, input2.cursor, input2.limit);
+    return runtime.service.attempts(input2.runId, input2.cursor, input2.limit);
   }));
-  server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.cancel(runId)));
-  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtimeService.resume(runId)));
-  server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtimeService.previewDelete(runIds) : runtimeService.deleteRuns(runIds)));
-  server.registerTool("run_storage", { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input2) => safeResult(async () => {
-    if (input2.operation === "inspect") {
-      if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
-      const observed = inspectRunStoreCompatibility(dataRoot);
-      if (observed.status === "current") {
-        const runtime = createDefaultRunService(dataRoot);
-        runtimeService = runtime.service;
-        ownedStore = runtime.store;
-        storeReady = true;
-        startupFailure = void 0;
-        return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
-      }
-      const failure2 = startupFailure instanceof RunStoreError ? { code: startupFailure.code } : { code: observed.status === "unreadable" ? "datastore_unreadable" : "datastore_open_failed" };
-      const compatibility = startupFailure instanceof RunStoreError && startupFailure.code.startsWith("migration_") ? { status: "migration_failed", schemaVersion: observed.status === "migration_available" ? observed.schemaVersion : null } : observed.status === "migration_available" ? { status: "migration_available", schemaVersion: observed.schemaVersion } : observed.status === "uninitialized" ? { status: "uninitialized", schemaVersion: 0 } : { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
-      return { recoveryRequired: true, compatibility, issue: failure2, backupAvailable: runStoreBackupAvailable(dataRoot) };
-    }
-    if (input2.operation === "optimize") {
-      if (!storeReady) throw recoveryRequiredError();
-      runtimeService.optimizeStorage();
-      return { optimized: true };
-    }
-    const resetLock = await ProcessLock.acquire(dataRoot, "run-storage-reset");
-    try {
-      if (storeReady || inspectRunStoreCompatibility(dataRoot).status === "current") throw new RunServiceError("recovery_not_required", "The datastore no longer requires recovery; inspect its current status before taking further action.");
-      const reset = resetRunStore(dataRoot);
-      const runtime = createDefaultRunService(dataRoot);
-      runtimeService = runtime.service;
-      ownedStore = runtime.store;
-      storeReady = true;
-      startupFailure = void 0;
-      return { ...reset, recoveryRequired: false, compatibility: { status: "current", schemaVersion: 8 } };
-    } catch (error62) {
-      startupFailure = error62;
-      throw error62;
-    } finally {
-      await resetLock.release();
-    }
-  }));
+  server.registerTool("run_cancel", { description: "Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.cancel(runId)));
+  server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.resume(runId)));
+  server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtime.service.previewDelete(runIds) : runtime.service.deleteRuns(runIds)));
+  server.registerTool("run_storage", { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input2) => safeResult(() => runtime.storage(input2)));
   const close = server.close.bind(server);
   server.close = async () => {
-    ownedStore?.close();
-    ownedStore = void 0;
+    runtime.close();
     await close();
   };
   return server;
-}
-function createDefaultRunService(dataRoot) {
-  const store = openRunStore(dataRoot);
-  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
-}
-function unavailableRunService() {
-  return new Proxy(/* @__PURE__ */ Object.create(null), {
-    get: (_target, property) => property === "then" ? void 0 : () => {
-      throw recoveryRequiredError();
-    }
-  });
-}
-function recoveryRequiredError() {
-  return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Call run_storage.inspect before using study tools.");
 }
 async function safeResult(operation) {
   try {

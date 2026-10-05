@@ -1,115 +1,55 @@
 # Sheg releases
 
-Sheg releases the Codex plugin from reviewed Git tags. The tag is the source
-identity; GitHub Releases attach a reproducible plugin ZIP built from that tag.
-The repository remains private to npm and is not published as an npm package.
+Sheg distributes a Codex plugin through Git marketplaces and versioned GitHub Release ZIPs. A reviewed `v<version>` tag identifies stable release source. Both distribution routes use the generated `plugins/sheg/` package. The repository is private to npm and is not published as an npm package.
 
 ## Version policy
 
-The root `package.json` `version` is the only authored product-version value. Change it to the version assigned to the planned develop merge or release, then run `npm run build` to regenerate the lockfile root fields, `plugin.json`, bundled MCP runtime, and `plugins/sheg/` metadata. Inspect generated diffs and run release validation; do not hand-edit generated version copies. The MCP initialization version must agree with the package identity.
+Root `package.json` is the only authored product-version value. Change it for the assigned development checkpoint or release, then run `npm run build` to regenerate the lockfile root fields, plugin manifests, bundled MCP identity, and `plugins/sheg/` package. Inspect generated diffs and validate the package; do not hand-edit generated version copies. See [ADR-0023](../decisions/0023-identify-development-and-candidate-builds.md).
 
-Planned dogfood feature merges to `develop` use their assigned `MAJOR.MINOR.PATCH-dev.N`; commits within one pull request do not increment it. Prepared release candidates may use `MAJOR.MINOR.PATCH-rc.N`. The roadmap assigns each planned develop merge its candidate identity, and these manifests do not create a release tag. See [ADR-0023](../decisions/0023-identify-development-and-candidate-builds.md).
+Use `MAJOR.MINOR.PATCH-dev.N` for deliberate development checkpoints and `MAJOR.MINOR.PATCH-rc.N` for prepared release candidates. The active plan assigns the checkpoint identity; commits within a PR do not increment it. These versions and local archives do not create tags or publish releases. Stable publication accepts only `vMAJOR.MINOR.PATCH` tags with matching stable manifests.
 
-Before `1.0.0`:
-
-- Increment the patch for compatible fixes.
-- Increment the minor version for a coherent bundle of backward-compatible
-  functionality.
-- Document breaking changes clearly. Pre-1.0 does not make breakage invisible
-  to users.
+Before `1.0.0`, increment the patch for compatible fixes and the minor version for a coherent functionality bundle. Document breaking changes and their recovery path. Use `1.0.0` when the public compatibility contract is explicitly declared for a stable, usable product, including supported harnesses, runtime, entrypoints, study contracts, provider settings, and persisted data. An elapsed period or release bundle alone does not establish that contract.
 
 ## Datastore compatibility
 
-Schema 8 is the first supported datastore baseline in v0.3.0; older development
-databases are disposable. Every later release that changes the SQLite schema
-must include sequential, tested forward migrations from every supported
-released schema. Preserve frozen request and packet payloads, answers, lineage,
-and physical-attempt accounting. Before each migration, verify a recoverable
-SQLite backup, apply the step transactionally, and check database integrity and
-foreign keys before committing the new version.
+Schema 8 is the first supported released datastore baseline, in v0.3.0. Earlier development databases have no compatibility promise. Later schema-changing releases must include sequential, tested forward migrations from every supported released schema, preserving frozen inputs, answers, lineage, and physical-attempt accounting. Payload contract changes must introduce explicit versions and upcasters independently of the SQLite schema version. See [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md) for migration, backup, and recovery guarantees.
 
-Keep persisted JSON format versions separate from the SQLite schema version.
-Add an explicit payload upcaster when a payload contract changes, and reject
-unknown formats without rewriting stored evidence. If startup cannot open or
-migrate the database, keep the MCP recovery inspection available and block
-study operations until recovery succeeds. A confirmed reset keeps a verified
-SQLite backup when readable, or quarantines the original database and sidecars
-when SQLite cannot read them. Never reset data automatically or rewrite a
-newer unsupported schema. See [ADR-0027](../decisions/0027-migrate-supported-datastore-schemas.md).
-
-Use `1.0.0` when Sheg is a stable, usable product and the public compatibility
-contract is explicitly declared. That contract must identify the supported
-harness (currently Codex), runtime requirements, supported plugin entrypoints,
-and the compatibility expectations for study manifests, provider settings,
-and persisted run data. A release bundle or elapsed time alone does not satisfy
-the v1 condition.
+If startup cannot open or migrate a database, MCP recovery inspection remains available while study operations are blocked. Reset requires explicit confirmation and preserves a verified SQLite backup or, for unreadable databases, quarantined original files. Upgrades never reset data automatically.
 
 ## Branches and promotion
 
-- `develop` is the default integration branch. Start feature branches from its
-  latest commit and target feature pull requests at `develop`.
-- Cut `release/<version>` from `develop` when a coherent bundle is ready. Make
-  only version, release-note, packaging, and stabilization fixes on that
-  branch. The release pull request targets `main`.
-- Feature pull requests may use squash merge. Release and hotfix pull requests
-  use a merge commit, as does release/hotfix reconciliation into `develop`, so
-  Gitflow ancestry stays explicit.
-- Merge the reviewed release pull request to `main`, then create and push the
-  matching `v<version>` tag at that merge commit.
-- Only repository administrators can create or change `v*` tags; GitHub rules
-  prevent other actors from creating, updating, or deleting version tags.
-- The tag workflow validates the tag, all version fields, and ancestry on `main`
-  before installing dependencies. It builds the ZIP in a read-only job; a
-  separate publication job receives only that ZIP and the minimum release
-  permission needed to create the GitHub Release with generated notes.
-- After promotion, reconcile the release branch into `develop` so release
-  fixes and version metadata remain in the integration line. Close the release
-  branch after reconciliation.
-- For an urgent production fix, start `hotfix/<version>` from `main`, make only
-  the fix and version update, then open a reviewed pull request to `main`. Tag
-  the verified merge and reconcile the hotfix into `develop`.
+- `develop` is the default integration branch. Feature branches start from its latest commit and target it in their PRs.
+- Cut `release/<version>` from `develop`. Limit it to version, release-note, packaging, and stabilization changes, then open its PR into `main`.
+- Planning artifacts, including plans, specifications, and roadmaps, have temporary Git residency on `develop`. Before opening the release PR, promote durable decisions and operating rules to maintained documentation and remove all contents of `.agents/plans/` and `.agents/specs/`, plus any equivalent planning files elsewhere. The final `main` tree contains no planning artifacts.
+- Feature PRs may use squash merge. Release and hotfix PRs, and their reconciliation into `develop`, use merge commits to retain Gitflow ancestry.
+- After the reviewed release PR merges to `main`, create the matching `v<version>` tag at that merge commit. Only repository administrators can create or change `v*` tags; active GitHub rules protect tag creation, updates, and deletion.
+- The tag workflow validates version identity and main ancestry, builds and verifies the ZIP in a read-only job, then publishes from a separate job with release-write permission.
+- Reconcile release fixes and version metadata into `develop`. Preserve active or mixed-scope planning artifacts from its pre-reconciliation tree; completed or retired artifacts stay retired. Close the release branch afterward.
+- For an urgent production fix, start `hotfix/<version>` from `main`, merge its reviewed fix and version update into `main`, tag the verified merge, and reconcile it into `develop`.
 
-The release workflow only runs for `v*` tags. Ordinary pushes and merges to
-`develop` do not publish a release or change the version. Re-running a workflow
-for an existing release replaces the ZIP asset for the same tag; it does not
-create a second release or change the tag.
+Ordinary pushes and merges do not publish releases. The release workflow runs only for `v*` tags. Re-running it for an existing release replaces the ZIP asset for that tag without changing its source identity.
 
 ## Build and package locally
 
-Use Node.js 24 and Python 3:
+Use Node.js 24 and Python 3. Replace `<version>` below with the stable version in root `package.json`:
 
 ```sh
 npm ci
 npm run verify
 npm run build
-npm run plugin:package -- --tag v0.1.0
+npm run plugin:package -- --tag "v<version>" --validate-only
+npm run plugin:package -- --tag "v<version>"
 ```
 
-The package command rejects a malformed tag, a mismatch among package,
-plugin, and lockfile versions, or a tag that does not match those versions. To
-verify an identity without creating an archive, use:
+Packaging rejects malformed or mismatched versions and tags. To inspect a prerelease locally, omit `--tag` and supply an explicit output filename. This does not publish it. Promote a candidate by removing its suffix in root `package.json` on the release branch and rebuilding.
 
-```sh
-python3 scripts/package-plugin.py --tag v0.1.0 --validate-only
-```
-
-For local candidate inspection, omit the release tag and use an explicit candidate filename. This creates a local ZIP and does not publish it. Stable publication accepts only `vMAJOR.MINOR.PATCH` tags with matching stable manifests; prerelease tags do not publish. Promote a candidate by removing its suffix on the release branch, changing root `package.json`, and rebuilding before tagging.
-
-On Windows, the npm wrapper uses the Python launcher (`py -3`). By default the
-ZIP is written to `release-artifacts/sheg-v<version>.zip`.
-
-The archive has plugin-root paths and contains every file in the generated
-`plugins/sheg/` package. It excludes source, tests, the dependency tree, and
-build tooling. The bundled MCP entrypoint runs with Node.js 24 and does not
-need TypeScript or `node_modules` at runtime.
+The npm wrapper uses `py -3` on Windows. The default archive path is `release-artifacts/sheg-v<version>.zip`. The archive has plugin-root paths and contains every file in `plugins/sheg/`, excluding implementation source, tests, dependencies, and build tooling. Its bundled server requires Node.js 24 and no dependency installation or local build.
 
 ## Install a GitHub Release ZIP
 
 1. Download `sheg-v<version>.zip` from the matching GitHub Release.
-2. Create a local marketplace directory with a `plugins/sheg/` subdirectory,
-   then extract the archive into `plugins/sheg/` and keep its paths intact.
-3. Create `.agents/plugins/marketplace.json` at the marketplace root with the
-   following catalog, using the existing Sheg identity and local package path:
+2. Create a local marketplace directory with a `plugins/sheg/` subdirectory. Extract the archive there, preserving its paths.
+3. Create `.agents/plugins/marketplace.json` at the marketplace root with the existing Sheg identity:
 
    ```json
    {
@@ -125,24 +65,11 @@ need TypeScript or `node_modules` at runtime.
    }
    ```
 
-4. Register the marketplace root with
-   `codex plugin marketplace add <marketplace-root>`.
-5. Restart Codex, install or enable Sheg from the Plugins Directory, and
-   confirm its polling tools load.
+4. Register it with `codex plugin marketplace add <marketplace-root>`.
+5. Restart Codex, install or enable Sheg, and confirm its tools load.
 
-Alternatively, continue to add the Git repository as a marketplace and install
-from Git. The repository source remains available separately from the release
-ZIP.
+Git marketplace installation remains available; see the [installation guide](installing-codex-plugin.md).
 
 ## Failure and retry behavior
 
-If the tag format or any package, plugin, or lockfile version is invalid, the
-workflow stops before creating or changing a GitHub Release. If verification,
-build, or packaging fails, no release is published. Correct the source on the
-release branch, merge the correction to `main`, and create a new version tag;
-do not move an existing tag. If the release was created but asset upload
-failed, rerun the same tag workflow to replace the asset. Investigate any other
-publication failure before retrying.
-
-Never force-move or reuse a published version tag. The repository state at the
-tag remains the source of truth for the release.
+Invalid identity, verification, build, or packaging failures stop publication. Correct source through a reviewed PR into `main`, then create a new version tag. Never force-move or reuse a published tag. If release creation succeeded but asset upload failed, rerun the same tag workflow to replace its asset. Investigate other publication failures before retrying.

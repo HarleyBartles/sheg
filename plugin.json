@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "sheg",
-  "version": "0.3.0-dev.13",
+  "version": "0.3.0-dev.14",
   "description": "Run structured stimulus-task-response polls against simulated respondent cohorts using Jev.",
   "author": {
     "name": "Harley Bartles",

@@ -4,9 +4,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
-import type { RunCheckpoint } from '../src/infrastructure/checkpoint-store.js';
-import { buildReport, compareReports, compareRunReports, getReport } from '../src/application/reports.js';
-import { CheckpointStore, emptyAttemptSnapshot } from '../src/infrastructure/checkpoint-store.js';
+import type { RunCheckpoint } from '../src/infrastructure/legacy/run-archive.js';
+import { buildReport, compareReports, compareRunReports, getLegacyReport } from '../src/application/legacy/reports.js';
+import { emptyAttemptSnapshot } from '../src/infrastructure/legacy/run-archive.js';
 import { loadStudy } from '../src/infrastructure/study-loader.js';
 import { promptContractHash } from '../src/domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint } from '../src/infrastructure/identity.js';
@@ -129,6 +129,17 @@ test('compares two arms within the same run by respondent and comparison key', a
   assert.equal(comparison.itemChanges.length, 1);
   assert.deepEqual(comparison.taskChanges[0]?.fields, ['options']);
   assert.throws(() => compareReports(report, 'original', 'missing'), /both arm IDs/i);
+});
+
+test('same-run task differences include typed rubric, criteria and answer-history semantics', async (t) => {
+  const report = await buildReport((await setup(t)).checkpoint);
+  const left = report.arms[0]!; const right = report.arms[1]!;
+  left.tasks[0] = { id: 'tone', type: 'score', comparisonKey: 'meaning', instructions: 'Rate tone.', rubric: ['Plain', 'Formal'], responseHistory: 'include' };
+  right.tasks[0] = { id: 'tone', type: 'score', comparisonKey: 'meaning', instructions: 'Rate tone.', rubric: ['Casual', 'Formal'], responseHistory: 'omit' };
+  assert.deepEqual(compareReports(report, 'original', 'revised').taskChanges[0]?.fields, ['rubric', 'responseHistory']);
+  left.tasks[0] = { id: 'truth', type: 'noul', comparisonKey: 'meaning', instructions: 'Is it credible?', criteria: { true: 'credible', false: 'not credible' } };
+  right.tasks[0] = { id: 'truth', type: 'noul', comparisonKey: 'meaning', instructions: 'Is it credible?', criteria: { true: 'supported', false: 'not supported' } };
+  assert.deepEqual(compareReports(report, 'original', 'revised').taskChanges[0]?.fields, ['criteria']);
 });
 
 test('Choice agreement compares selected options rather than confidence evidence', async (t) => {
@@ -317,8 +328,11 @@ test('includes a declared comparison task when neither arm produced a response',
   assert.equal(comparison.comparisonTasks[1]?.leftResponses, 0);
   assert.equal(comparison.comparisonTasks[1]?.rightResponses, 0);
 });
-test('getReport reads the durable checkpoint through the checkpoint store', async (t) => {
+test('legacy report reads a historical checkpoint without changing stored bytes', async (t) => {
   const { directory, checkpoint } = await setup(t);
-  await new CheckpointStore(directory).create(checkpoint);
-  assert.equal((await getReport(directory, checkpoint.runId)).runId, checkpoint.runId);
+  const filename = path.join(directory, `run-${checkpoint.runId}.json`);
+  const historicalBytes = `${JSON.stringify(checkpoint)}\n`;
+  await writeFile(filename, historicalBytes);
+  assert.equal((await getLegacyReport(directory, checkpoint.runId)).runId, checkpoint.runId);
+  assert.equal(await readFile(filename, 'utf8'), historicalBytes);
 });

@@ -1042,6 +1042,17 @@ test('journey mapped Choice selections contribute to matched material coverage a
     assert.deepEqual(secondPage.matchedCoverage, firstPage.matchedCoverage);
     assert.equal(secondPage.items.find(({ result }) => result?.type === 'choice' && result.choice === 'no-fit')?.selectedMaterial, undefined);
     assert.equal(secondPage.items.filter(({ selectedMaterial }) => selectedMaterial !== undefined).length, 1);
+
+    const cursor = JSON.parse(Buffer.from(firstPage.nextCursor, 'base64url').toString('utf8'));
+    const alteredCursor = Buffer.from(JSON.stringify({ ...cursor, totalMatches: 900, sourceComplete: false,
+      coverage: { ...firstPage.coverage, totalEvaluations: 900 },
+      matchedCoverage: { ...firstPage.matchedCoverage, selectedMaterials: { evaluations: 900, respondents: 900, distinctMaterials: 900 } },
+    })).toString('base64url');
+    const alteredPage = store.queryEvidence({ sourceRunId: accepted.runId, criteria: { questionId: 'anchor' }, cursor: alteredCursor, limit: 2 });
+    assert.equal(alteredPage.totalMatches, firstPage.totalMatches);
+    assert.equal(alteredPage.sourceComplete, true);
+    assert.deepEqual(alteredPage.coverage, firstPage.coverage);
+    assert.deepEqual(alteredPage.matchedCoverage, firstPage.matchedCoverage);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

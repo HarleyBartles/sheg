@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-04
-- Supersedes: ADR-0018
+- Supersedes: ADR-0018's schema compatibility policy; its local SQLite storage decision remains accepted.
 
 ## Context
 

@@ -9,7 +9,7 @@ const layaConfigSchema = z.object({
   headLimit: z.number().int().positive(),
   tokenizerJsonPath: z.string().min(1),
   tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i),
-  precision: z.string().optional(),
+  precision: z.string().min(1).optional(),
   timeoutMs: z.number().int().positive(),
 }).strict();
 

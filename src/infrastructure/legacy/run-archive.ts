@@ -1,21 +1,14 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import type { JourneyResult } from '../domain/journey/run.js';
-import { decisionResultSchema, decisionValueSchema, type DecisionResult } from '../domain/decision/decision.js';
-import type { AttemptSnapshot } from '../domain/attempt-ledger.js';
-import { setTimeout as delay } from 'node:timers/promises';
-import { ProcessLockError, ProcessLock } from './process-lock.js';
-import { jevConfigInputSchema, jevConfigSchema } from '../providers/jev/config.js';
-import { executionFingerprint, legacyExecutionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from './identity.js';
-import { loadStudy } from './study-loader.js';
-import { legacyPromptContractHash, promptContractHash } from '../domain/decision/prompt.js';
-
-const providerConfigSchema = z.union([
-  jevConfigInputSchema.transform((config) => jevConfigSchema.parse(config)),
-  z.object({ kind: z.literal('laya'), baseUrl: z.string().url(), checkpoint: z.string().min(1), contextLimit: z.number().int().positive(), headLimit: z.number().int().positive(), tokenizerJsonPath: z.string().min(1), tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i), precision: z.string().optional(), timeoutMs: z.number().int().positive() }).strict(),
-]);
+import type { JourneyResult } from '../../domain/journey/run.js';
+import { decisionResultSchema, decisionValueSchema, type DecisionResult } from '../../domain/decision/decision.js';
+import type { AttemptSnapshot } from '../../domain/attempt-ledger.js';
+import { jevConfigSchema } from '../../providers/jev/config.js';
+import { providerConfigSchema } from '../../providers/config.js';
+import { executionFingerprint, legacyExecutionFingerprint, legacyChoiceStimulusFingerprint, stimulusFingerprint } from '../identity.js';
+import { loadStudy } from '../study-loader.js';
+import { legacyPromptContractHash, promptContractHash } from '../../domain/decision/prompt.js';
 
 const journeyResultSchema = z.object({
   events: z.array(z.discriminatedUnion('type', [
@@ -200,55 +193,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export class CheckpointStore {
+export class LegacyRunArchiveReader {
   constructor(readonly directory: string) {}
-
-  async create(input: Omit<RunCheckpoint, 'formatVersion' | 'runId'> & { runId?: string }): Promise<RunCheckpoint> {
-    const checkpoint = runCheckpointSchema.parse({ ...input, formatVersion: 4, runId: input.runId ?? randomUUID() });
-    await mkdir(this.directory, { recursive: true });
-    const filePath = this.filePath(checkpoint.runId);
-    try {
-      await readFile(filePath);
-      throw new Error(`Run checkpoint already exists: ${checkpoint.runId}.`);
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('Run checkpoint already exists:')) throw error;
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    await this.writeAtomic(checkpoint);
-    return checkpoint;
-  }
 
   async read(runId: string): Promise<RunCheckpoint> {
     const initial = await this.readValue(runId);
     const current = runCheckpointSchema.safeParse(initial);
     if (current.success) return current.data;
-    const runLock = await ProcessLock.acquire(this.directory, `run-${runId}`);
-    try {
-      const checkpointLock = await acquireCheckpointLock(this.directory, runId);
-      try { return await this.readCurrentOrMigrate(runId); }
-      finally { await checkpointLock.release(); }
-    } finally { await runLock.release(); }
-  }
-
-  async save(checkpoint: RunCheckpoint): Promise<void> {
-    const parsed = runCheckpointSchema.parse(checkpoint);
-    const existing = await this.read(parsed.runId);
-    if (existing.runId !== parsed.runId) throw new Error('Checkpoint identity changed while saving.');
-    await this.writeAtomic(parsed);
-  }
-
-  async update(runId: string, mutate: (checkpoint: RunCheckpoint) => RunCheckpoint): Promise<RunCheckpoint> {
-    await this.read(runId);
-    const lock = await acquireCheckpointLock(this.directory, runId);
-    try {
-      const current = await this.readCurrentOrMigrate(runId);
-      const updated = runCheckpointSchema.parse(mutate(current));
-      if (updated.runId !== current.runId) throw new Error('Checkpoint identity cannot be changed.');
-      await this.writeAtomic(updated);
-      return updated;
-    } finally {
-      await lock.release();
-    }
+    return this.readCurrentOrMigrate(runId);
   }
 
   async list(): Promise<RunCheckpoint[]> {
@@ -282,7 +234,6 @@ export class CheckpointStore {
     } catch (error) {
       throw new Error(`Legacy run checkpoint ${runId} failed migration validation.`, { cause: error });
     }
-    await this.writeAtomic(migrated);
     return migrated;
   }
 
@@ -298,52 +249,10 @@ export class CheckpointStore {
     catch (error) { throw new Error(`Run checkpoint ${runId} is not valid JSON.`, { cause: error }); }
   }
 
-  private async writeAtomic(checkpoint: RunCheckpoint): Promise<void> {
-    await mkdir(this.directory, { recursive: true });
-    const target = this.filePath(checkpoint.runId);
-    const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-    const handle = await open(temporary, 'wx', 0o600);
-    try {
-      await handle.writeFile(`${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    try {
-      try {
-        await rename(temporary, target);
-      } catch (error) {
-        if (!['EPERM', 'EEXIST'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-        const backup = `${target}.bak`;
-        await rm(backup, { force: true });
-        await rename(target, backup);
-        try {
-          await rename(temporary, target);
-          await rm(backup, { force: true });
-        } catch (replacementError) {
-          await rename(backup, target).catch(() => undefined);
-          throw replacementError;
-        }
-      }
-    } catch (error) {
-      await rm(temporary, { force: true });
-      throw error;
-    }
-  }
+
 }
 
 export function emptyAttemptSnapshot(maxCalls: number): AttemptSnapshot {
   return { maxCalls, usedCalls: 0, reservedCalls: 0, remainingCalls: maxCalls };
 }
 
-
-async function acquireCheckpointLock(directory: string, runId: string): Promise<ProcessLock> {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    try { return await ProcessLock.acquire(directory, `${runId}-checkpoint`); }
-    catch (error) {
-      if (!(error instanceof ProcessLockError) || Date.now() >= deadline) throw error;
-      await delay(10);
-    }
-  }
-}

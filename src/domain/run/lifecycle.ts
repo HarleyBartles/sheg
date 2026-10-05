@@ -1,3 +1,4 @@
+import type { ProviderFailureEvidence } from '../decision/provider-failure.js';
 import type { DecisionFailureDetail, DecisionResult, DecisionValue } from '../decision/decision.js';
 import type { ProviderContextFit } from '../decision/provider.js';
 import type { EvidenceCriteria, FollowOnSelectionExclusion, FrozenEvaluation, RunEvidenceItem, RunEvidencePage, RunEvidenceQuery, RunListQueryInput, SelectionCoverage } from './request.js';
@@ -61,7 +62,7 @@ export function resumeRefusalMessage(reason: ResumeRefusalReason): string {
 }
 
 export type RunProblem = { code: string; respondentId?: string; nodeId?: string; pathId?: string; message: string };
-export type EvaluationFailure = { code: string; message: string; detail?: DecisionFailureDetail };
+export type EvaluationFailure = { code: string; message: string; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence };
 
 export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: DecisionRequest & { state: PromptState } } & {
   turnId: string;
@@ -133,7 +134,7 @@ export type AnswerRow = {
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
   execution?: import('../decision/decision.js').ProviderExecutionEvidence;
-  failure?: { code: string; message: string };
+  failure?: EvaluationFailure;
 };
 
 export type RunContextDetail = {

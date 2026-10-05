@@ -21,16 +21,24 @@ export class ProcessLock {
     const lockPath = path.join(directory, `${name}.lock`);
     const record = { pid: process.pid, token: randomUUID() };
     const content = `${JSON.stringify(record)}\n`;
+    const temporaryPath = `${lockPath}.${process.pid}.${record.token}.tmp`;
     await mkdir(directory, { recursive: true });
 
     for (let attempt = 0; attempt < 25; attempt += 1) {
       try {
-        const handle = await open(lockPath, 'wx', 0o600);
+        const handle = await open(temporaryPath, 'wx', 0o600);
         try {
           await handle.writeFile(content, 'utf8');
           await handle.sync();
         } finally {
           await handle.close();
+        }
+        // A hard link publishes the complete, synced record atomically and fails
+        // if another owner has already created the destination.
+        try {
+          await link(temporaryPath, lockPath);
+        } finally {
+          await rm(temporaryPath, { force: true });
         }
         const claims = await staleClaims(lockPath);
         const activeClaims: Array<{ file: string; record: LockRecord }> = [];
@@ -52,8 +60,6 @@ export class ProcessLock {
       }
 
       const existing = await readLock(lockPath);
-      // The exclusive create publishes the file before its contents. Never treat
-      // that short, unreadable interval as stale ownership and rename a live lock.
       if (!existing) {
         await delay(Math.min(2 + attempt, 20));
         continue;
@@ -141,4 +147,3 @@ function processExists(pid: number): boolean {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
-

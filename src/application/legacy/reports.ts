@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
-import { loadStudy } from '../infrastructure/study-loader.js';
-import { CheckpointStore, contextFailureSchema, interruptionEvidenceSchema, runCheckpointSchema, type RunCheckpoint } from '../infrastructure/checkpoint-store.js';
-import { executionFingerprint, respondentCohortFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
-import { decisionValueSchema } from '../domain/decision/decision.js';
-import { promptContractHash } from '../domain/decision/prompt.js';
-import type { StudyArm } from '../domain/study/arm.js';
+import { loadStudy } from '../../infrastructure/study-loader.js';
+import { LegacyRunArchiveReader, contextFailureSchema, interruptionEvidenceSchema, runCheckpointSchema, type RunCheckpoint } from '../../infrastructure/legacy/run-archive.js';
+import { executionFingerprint, respondentCohortFingerprint, stimulusFingerprint } from '../../infrastructure/identity.js';
+import { decisionValueSchema, decisionValueFromResult } from '../../domain/decision/decision.js';
+import { journeyTransitionForResponse } from '../../domain/journey/topology.js';
+import { promptContractHash } from '../../domain/decision/prompt.js';
+import type { StudyArm } from '../../domain/study/arm.js';
 
 const responseSchema = z.object({ taskId: z.string(), comparisonKey: z.string().nullable(), occurrence: z.number().int().positive(), presentationOccurrence: z.number().int().positive(), requestFingerprint: z.string().regex(/^[a-f\d]{64}$/i), answer: decisionValueSchema, optionIds: z.array(z.string()), choice: z.string().optional(), correct: z.boolean().nullable(), attempts: z.number().int(), latencyMs: z.number().nonnegative(), confidence: z.number().nullable(), cost: z.object({ amountUsd: z.number().nonnegative(), basis: z.enum(['provider-reported', 'published-rate-estimate']) }).strict().nullable() }).strict();
 export const pollingReportSchema = z.object({
@@ -37,11 +38,7 @@ function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys
     }
     used.add(decisionIndex);
     const result = stored.decisions[decisionIndex]!.result;
-    const value = result.type === 'choice'
-      ? { type: 'choice', choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-      : result.type === 'score'
-        ? { type: 'score', score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-        : { type: 'noul', noul: result.noul };
+    const value = decisionValueFromResult(result);
     events.push({ type: 'response', sequence: sequence++, nodeId, taskId, result: value });
     return stored.decisions[decisionIndex]!;
   };
@@ -95,14 +92,7 @@ function reconstructPartialEvents(arm: StudyArm, stored: RunCheckpoint['journeys
       current = candidateEdges[0]!.toNodeId;
       continue;
     }
-    const edge = graph.transitions.find((candidate) => {
-      if (candidate.fromNodeId !== node.id) return false;
-      if (decision.result.type === 'choice') return candidate.optionId === decision.result.choice;
-      const range = candidate.when;
-      if (!range || range.type !== decision.result.type) return false;
-      const value = decision.result.type === 'score' ? decision.result.score : decision.result.noul;
-      return (value > range.minimum || (range.minimumInclusive && value === range.minimum)) && (value < range.maximum || (range.maximumInclusive && value === range.maximum));
-    });
+    const edge = journeyTransitionForResponse(graph, node.id, decisionValueFromResult(decision.result));
     if (!edge) break;
     current = edge.toNodeId;
   }
@@ -138,11 +128,7 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
         const presentationOccurrence = (presentationOccurrenceByTask.get(decisionId) ?? 0) + 1;
         presentationOccurrenceByTask.set(decisionId, presentationOccurrence);
         const choiceTask = task && 'options' in task ? task : undefined;
-        const answer = result.type === 'choice'
-          ? { type: 'choice' as const, choice: result.choice, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-          : result.type === 'score'
-            ? { type: 'score' as const, score: result.score, legend: result.legend, probabilities: result.probabilities, ...(result.confidence === undefined ? {} : { confidence: result.confidence }) }
-            : { type: 'noul' as const, noul: result.noul };
+        const answer = decisionValueFromResult(result);
         return { taskId: decisionId, comparisonKey: task?.comparisonKey ?? null, occurrence, presentationOccurrence, requestFingerprint: checkpointDecision.requestFingerprint, answer, optionIds: choiceTask ? Object.keys(choiceTask.options) : [], ...(result.type === 'choice' ? { choice: result.choice } : {}),
           correct: result.type === 'choice' && choiceTask?.answerKeyOptionId ? result.choice === choiceTask.answerKeyOptionId : null, attempts: result.attempts, latencyMs: result.latencyMs,
           confidence: 'confidence' in result ? result.confidence ?? null : null, cost: result.cost ?? null };
@@ -204,7 +190,7 @@ export async function buildReport(checkpoint: RunCheckpoint): Promise<PollingRep
     providerEvidence: { interruptions: checkpoint.interruptions ?? [], attempts: checkpoint.budget.usedCalls, maxCalls: checkpoint.budget.maxCalls, reservedCalls: checkpoint.budget.reservedCalls, remainingCalls: checkpoint.budget.remainingCalls,
       failedCells: checkpoint.journeys.filter((journey) => journey.status === 'failed').length } });
 }
-export async function getReport(outputDirectory: string, runId: string): Promise<PollingReport> { return buildReport(await new CheckpointStore(path.resolve(outputDirectory)).read(runId)); }
+export async function getLegacyReport(outputDirectory: string, runId: string): Promise<PollingReport> { return buildReport(await new LegacyRunArchiveReader(path.resolve(outputDirectory)).read(runId)); }
 
 export function compareReports(report: PollingReport, leftArmId: string, rightArmId: string) {
   if (leftArmId === rightArmId) throw new Error('Choose two distinct arms from the same run.');
@@ -270,14 +256,7 @@ export function compareReports(report: PollingReport, leftArmId: string, rightAr
   const leftSources = new Map(left.sources.map((source) => [source.path, source.sha256]));
   const rightSources = new Map(right.sources.map((source) => [source.path, source.sha256]));
   const sourceChanges = [...new Set([...leftSources.keys(), ...rightSources.keys()])].flatMap((sourcePath) => leftSources.get(sourcePath) === rightSources.get(sourcePath) ? [] : [{ path: sourcePath, leftSha256: leftSources.get(sourcePath) ?? null, rightSha256: rightSources.get(sourcePath) ?? null }]);
-  const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
-  const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
-  const taskChanges = [...new Set([...leftTasks.keys(), ...rightTasks.keys()])].flatMap((key) => {
-    const leftTask = leftTasks.get(key); const rightTask = rightTasks.get(key);
-    if (!leftTask || !rightTask) return [{ comparisonKey: key, fields: ['task-presence'] }];
-    const fields = (['instructions', 'options'] as const).filter((field) => JSON.stringify(leftTask[field]) !== JSON.stringify(rightTask[field]));
-    return fields.length ? [{ comparisonKey: key, fields }] : [];
-  });
+  const taskChanges = taskChangesBetween(left, right);
   return { runId: report.runId, leftArmId, rightArmId, leftFingerprint: left.fingerprint, rightFingerprint: right.fingerprint, sourceChanges, itemChanges, taskChanges, matchedRespondents: matched.length, comparisonTasks, matched };
 }
 
@@ -381,14 +360,7 @@ export function compareRunReports(leftReport: PollingReport, leftArmId: string, 
   const leftItems = new Map(left.stimulusItems.map((item) => [item.id, item.text]));
   const rightItems = new Map(right.stimulusItems.map((item) => [item.id, item.text]));
   const stimulusChanges = [...new Set([...leftItems.keys(), ...rightItems.keys()])].flatMap((id) => leftItems.get(id) === rightItems.get(id) ? [] : [{ id, leftText: leftItems.get(id) ?? null, rightText: rightItems.get(id) ?? null }]);
-  const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
-  const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
-  const taskChanges = [...new Set([...leftTasks.keys(), ...rightTasks.keys()])].flatMap((key) => {
-    const a = leftTasks.get(key); const b = rightTasks.get(key);
-    if (!a || !b) return [{ comparisonKey: key, fields: ['task-presence'] }];
-    const fields = (['type', 'instructions', 'options', 'rubric', 'criteria', 'responseHistory'] as const).filter((field) => JSON.stringify(a[field] ?? null) !== JSON.stringify(b[field] ?? null));
-    return fields.length ? [{ comparisonKey: key, fields }] : [];
-  });
+  const taskChanges = taskChangesBetween(left, right);
   const providerChanges = JSON.stringify(leftReport.provider) === JSON.stringify(rightReport.provider) ? null : { left: leftReport.provider, right: rightReport.provider };
   const presentationChanges = JSON.stringify(left.presentation) === JSON.stringify(right.presentation) ? null : { left: left.presentation, right: right.presentation };
   return { leftRunId: leftReport.runId, rightRunId: rightReport.runId, leftArmId, rightArmId, cohortFingerprint: leftReport.cohortFingerprint,
@@ -397,6 +369,18 @@ export function compareRunReports(leftReport: PollingReport, leftArmId: string, 
       runStatus: leftReport.status === rightReport.status ? null : { left: leftReport.status, right: rightReport.status },
       completion: { left: left.denominator, right: right.denominator } },
   };
+}
+
+function taskChangesBetween(left: PollingReport['arms'][number], right: PollingReport['arms'][number]) {
+  const leftTasks = new Map(left.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
+  const rightTasks = new Map(right.tasks.map((task) => [task.comparisonKey ?? task.id, task]));
+  return [...new Set([...leftTasks.keys(), ...rightTasks.keys()])].flatMap((comparisonKey) => {
+    const a = leftTasks.get(comparisonKey); const b = rightTasks.get(comparisonKey);
+    if (!a || !b) return [{ comparisonKey, fields: ['task-presence'] }];
+    const fields = (['type', 'instructions', 'options', 'rubric', 'criteria', 'responseHistory'] as const)
+      .filter((field) => JSON.stringify(a[field] ?? null) !== JSON.stringify(b[field] ?? null));
+    return fields.length ? [{ comparisonKey, fields }] : [];
+  });
 }
 
 function equivalentTasks(left: PollingReport['arms'][number], right: PollingReport['arms'][number], comparisonKey: string): boolean {

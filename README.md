@@ -6,11 +6,11 @@ Sheg runs structured stimulus-task-response polls against simulated respondent c
 
 A study combines a bounded text stimulus, one or more questions with explicit response options, a frozen cohort of distinct respondent profiles, and one or more arms. Arms let you compare versions of a stimulus or study design with the same cohort in one run.
 
-The harness runs each respondent once per arm, checkpoints progress, and reports response counts, task reach and completion, optional answer-key scoring, and matched comparisons. Use a sequence for straightforward item-then-question studies, or a bounded graph when conditional exposure or branching is part of the study.
+The CLI and MCP are entrypoints to the same durable run service. Both validate, admit, execute, store, query, cancel, resume, and recover the same requests in the same SQLite datastore. A finite journey can expose all material before questions or interleave material and questions, then route by typed answers.
 
-The MCP run tools accept a direct inline request with one or more independent typed questions, a finite sequence/graph journey, or a follow-on that selects exact recorded respondent contexts. Independent questions share one frozen respondent state, while each answer remains separate; Jev may batch them and local Laya currently sends one question per physical call. Each durable run ID supports later recall of frozen inputs, typed answers, exposures, routes, query evidence, and lineage. The [study-design skill](skills/study-design/SKILL.md) helps an agent shape the simplest request, and the [polling skill](skills/stimulus-response-polling/SKILL.md) covers querying and reusing recorded contexts. The repository also retains [respondent archetypes](dist/data/respondent-archetypes/) for file-backed cohort authoring.
+Both entrypoints accept direct requests with independent typed questions, finite journeys, or follow-ons that select exact recorded respondent contexts. Independent questions share one frozen respondent state, while each answer remains separate; Jev may batch them and local Laya currently sends one question per physical call. Each durable run ID supports later recall of frozen inputs, typed answers, exposures, routes, query evidence, and lineage. The [study-design skill](skills/study-design/SKILL.md) helps an agent shape the request, and the [polling skill](skills/stimulus-response-polling/SKILL.md) covers querying and reusing recorded contexts. The repository also retains [respondent archetypes](dist/data/respondent-archetypes/) for cohort authoring.
 
-These are simulated responses. Repeating the same respondent, stimulus, and task does not create a more meaningful sample. Reports do not establish human readership, real-world accuracy, statistical significance, or causal lift.
+These are simulated responses. Substantive variation comes from respondent profile, stimulus, question/response, and state. Repeating matching inputs does not add substantive coverage. Reports do not establish human readership, real-world accuracy, statistical significance, or causal lift.
 
 ## Supported harness
 
@@ -35,20 +35,19 @@ For the versioned GitHub Release, download the `sheg-v<version>.zip` asset and f
 
 ## Prepare and run a study
 
-1. Start with the text and what you want to learn. The [study-design skill](skills/study-design/SKILL.md) helps an agent identify the question, choose the simplest useful material unit and respondent perspectives, and build a direct request without asking the user to author a study file.
+1. Start with the text and what you want to learn. The [study-design skill](skills/study-design/SKILL.md) helps an agent choose a question, material units, and distinct respondent perspectives that cover the differences you need to understand.
 2. Configure one provider. Jev runs require a key in the selected Windows Credential Manager target and a `maxCalls` limit. Local Laya runs require a running service and the matching checkpoint tokenizer JSON and SHA-256 digest. See the [Jev setup and wire contract](docs/providers/jev.md) and [Laya capability notes](docs/providers/laya.md).
-3. Build the direct request, finite journey, or follow-on selection. Use `run_inspect` when a fit preview would help; it measures exact packet fit without inference or run creation, and `run_start` performs admission validation itself.
-4. Obtain authorization for hosted Jev inference and its `maxCalls` bound, then call `run_start` with a fresh UUID submission ID. Retain the returned run ID. Use `run_get` with status, request, journey, context, or answers views and `run_list` to discover runs. Call `run_query` to filter typed answers and journey outcomes; it returns exact evaluation/context IDs, provenance, denominators, and whether the source is complete. Use `run_get` with `view: "context"` and one returned evaluation/context pair to retrieve that exact frozen respondent-visible packet without fetching every run context. An agent may explicitly map Choice options to exact authored material items. A matched answer then includes `selectedMaterial` with `materialId`, exact `text`, author-supplied `sourceId` and `sourceSha256`, and Sheg-computed `textSha256`; use its `materialId` in a follow-on `context.materialIds`. Leave no-fit options unmapped. Choice selects among candidate meanings, Score records a position on an authored ordered rubric, and a journey records staged decisions. The agent chooses which evidence answers the user's question, then can submit those references or criteria in a follow-on request with an explicit context mode. Answers are machine-readable; the agent explains what they mean and reports incomplete or failed evaluations. `run_cancel` preserves any answer already in flight. An interrupted run can be resumed explicitly with `run_resume`; it keeps its original ID and call ceiling, and uncertain calls remain charged. Deletion accepts an explicit run selection; use `run_delete` with `dryRun: true` when a preview would help identify follow-on runs retained if a source is deleted. Active runs must be cancelled and polled to a terminal state. `run_storage` lets Sheg inspect datastore integrity/counts or run SQLite optimization. Discovery never starts or resumes work.
+3. Build the direct request, finite journey, or follow-on selection. Use `run_inspect` when a fit preview would help; it assesses packet fit without inference or run creation, and `run_start` performs admission validation itself.
+4. Obtain authorization for hosted Jev inference and its `maxCalls` bound, then call `run_start` with a fresh UUID submission ID. Retain the returned run ID for later recall and recovery.
+5. Query answers and coverage with `run_query`, and inspect frozen inputs or progress with `run_get`. The agent interprets typed answers against your original question, reports missing or failed coverage, and can author a follow-on using selected evidence. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md) for context selection, cancellation, explicit resume, deletion, and storage maintenance.
 
 In Codex, you can start with a request such as: “I have this article and want to know where readers lose interest. Help me decide what to ask and whose perspectives to include, then show me the proposed study journey.” The agent uses Sheg's design guidance to shape the human-language design, translates it into the harness, and checks fit before asking for approval to run.
 
-Jev is a hosted provider. Connect its key through the bundled Windows Credential Manager helper, never in a request or chat. The call limit bounds physical provider attempts. `run_inspect` does not make inference calls or require a key; `run_start` checks the selected credential before accepting a new request. See [run and recovery](skills/stimulus-response-polling/references/run-and-recovery.md).
+Local Laya requires a separately operated service, checkpoint, and matching tokenizer asset. The adapter checks the tokenizer digest and complete request fit before inference. See the [Laya capability notes](docs/providers/laya.md) for configuration and the supported integration boundary.
 
-The local Laya adapter bundles a pinned tokenizer and sequence builder for a pre-inference context-fit check. It sends a request only when the configured tokenizer matches its digest and the complete request fits; otherwise it rejects the request before inference. The service and checkpoint must be configured separately, and the integration still needs an operator smoke test against that service. See the [Laya capability notes](docs/providers/laya.md).
+## Use the CLI
 
-## Run the CLI from source
-
-The CLI is useful for scripted checks and local runs without Codex. From a clone, build the packaged runtime first:
+The CLI uses the same secure credentials and datastore as the MCP server. From a clone, build the runtime first:
 
 ```sh
 npm ci
@@ -56,32 +55,29 @@ npm run build
 node dist/cli.js --help
 ```
 
-Create a config such as `study-run.json` using your study and cohort paths:
+Write a direct request to `request.json`:
 
 ```json
 {
-  "manifestPath": "./study.json",
-  "cohortPath": "./cohort.json",
-  "provider": {
-    "kind": "jev",
-    "route": "openrouter"
-  },
-  "outputDirectory": "./.polling-runs",
-  "maxCalls": 10,
-  "concurrency": 1
+  "kind": "poll",
+  "respondents": [{ "id": "reader", "intent": "Learn", "context": "New", "desired_outcome": "Choose", "engagement_cues": "Examples", "friction_cues": "Hype" }],
+  "material": [{ "id": "opening", "text": "The exact stimulus text." }],
+  "questions": [{ "type": "choice", "id": "fit", "instructions": "Does this fit?", "options": { "yes": "Yes", "no": "No" } }],
+  "provider": { "kind": "jev", "route": "openrouter", "model": "typesafe/jev-1.13" },
+  "maxCalls": 10
 }
 ```
 
-Connect the route's key to Windows Credential Manager with the helper in [Jev provider routes](docs/providers/jev.md). Choose `openrouter` or `typesafe` explicitly. Check first, inspect the result, then start:
+Connect the route's key to Windows Credential Manager with the helper in [Jev provider routes](docs/providers/jev.md). The same durable commands and JSON operations are available through MCP:
 
 ```sh
-node dist/cli.js check --config study-run.json
-node dist/cli.js start --config study-run.json
-node dist/cli.js report --output ./.polling-runs --run-id <run-id>
-node dist/cli.js compare --output ./.polling-runs --run-id <run-id> --left-arm original --right-arm revised
+node dist/cli.js inspect --request request.json
+node dist/cli.js start --request request.json --submission-id <fresh-uuid>
+node dist/cli.js get --request answer-query.json
+node dist/cli.js query --query evidence-query.json
 ```
 
-The CLI also supports `trace`, `status`, `cancel`, and `resume`. See `node dist/cli.js --help` for the full syntax.
+The CLI also supports `list`, `cancel`, `resume`, `delete`, and `storage`. Historical manifests remain useful with keyless `trace` and `preflight` diagnostics; pre-release file-backed reports are read-only. See `node dist/cli.js --help` for the full syntax and request schemas.
 
 The build recreates `dist/` from the current source, bundles the MCP server and CLI, and copies the domain-owned archetype groups into the plugin package.
 
@@ -92,9 +88,7 @@ Use Node.js 24. Install dependencies with `npm ci`, then run the checks before s
 ```sh
 npm run contracts:build
 npm run build
-npm run lint
-npm run typecheck
-npm test
+npm run verify
 ```
 
 When changing contracts, update the TypeScript source of truth and regenerate the JSON Schemas. Include generated schemas and `dist/` changes with their source changes. Read [AGENTS.md](AGENTS.md) for repository surfaces and verification guidance, and [the decision log](docs/decisions/README.md) before changing an accepted architectural decision.
