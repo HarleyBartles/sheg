@@ -19,7 +19,9 @@ import { findRunBySubmission, hasAllFollowOnSelections, loadAcceptedRequest, loa
 import { encodeStoredPayload } from './sqlite/payload-codecs.js';
 import { loadJourneyWorkerTurn } from './sqlite/journey-queries.js';
 import { loadFollowOnSources } from './sqlite/follow-on-queries.js';
-import { refreshWorkerLease, requestRunCancellation } from './sqlite/commands/lifecycle.js';
+import { claimPreparedRun, refreshWorkerLease, requestRunCancellation } from './sqlite/commands/lifecycle.js';
+import { reservePhysicalAttempt } from './sqlite/commands/reservation.js';
+import { chargeReservedAttempt } from './sqlite/commands/settlement.js';
 import { insertAcceptedRun, insertPreparedJourneyData, insertPreparedRunData } from './sqlite/commands/acceptance.js';
 import { encounteredMaterialsFromState, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './sqlite/evidence-records.js';
 import { openSqliteConnection, type SqliteConnection } from './sqlite/connection.js';
@@ -824,8 +826,7 @@ class SQLiteRunStore implements RunStore {
       const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, 'created time') + LEASE_MS : asNumber(row.lease_expires_ms, 'launch deadline');
       if (asText(row.status, 'run status') !== 'prepared' || asNumber(row.cancel_requested, 'cancel flag') === 1 || nowMs >= launchDeadline) return null;
       const ownerToken = randomUUID();
-      this.database.prepare("UPDATE runs SET status = 'running', owner_token = ?, owner_pid = ?, lease_expires_ms = ? WHERE run_id = ? AND status = 'prepared'")
-        .run(ownerToken, workerPid, nowMs + LEASE_MS, runId);
+      if (!claimPreparedRun(this.connection.orm, runId, ownerToken, workerPid, nowMs + LEASE_MS)) return null;
       return { runId, ownerToken };
     });
   }
@@ -846,10 +847,11 @@ class SQLiteRunStore implements RunStore {
       if (!row) return null;
       const attemptId = randomUUID();
       const evaluationId = asText(row.evaluation_id, 'evaluation ID');
-      this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)")
-        .run(attemptId, claim.runId, asText(row.group_id, 'group ID'), evaluationId, asText(row.packet_fingerprint, 'packet fingerprint'), claim.ownerToken, nowMs);
-      this.database.prepare('INSERT INTO attempt_evaluations (run_id, attempt_id, evaluation_id) VALUES (?, ?, ?)').run(claim.runId, attemptId, evaluationId);
-      this.database.prepare('UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?').run(claim.runId);
+      reservePhysicalAttempt(this.connection.orm, {
+        attemptId, runId: claim.runId, groupId: asText(row.group_id, 'group ID'), anchorEvaluationId: evaluationId,
+        packetFingerprint: asText(row.packet_fingerprint, 'packet fingerprint'), ownerToken: claim.ownerToken,
+        startedMs: nowMs, evaluationIds: [evaluationId],
+      });
       return { attemptId, evaluation: this.evaluationFromRow(row) };
     });
   }
@@ -874,11 +876,11 @@ class SQLiteRunStore implements RunStore {
       const state = parseJson(group.state_json, 'group state');
       const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet')).question);
       const packetFingerprint = hashCanonical({ state, questions: packetQuestions });
-      this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)")
-        .run(attemptId, claim.runId, groupId, anchorId, packetFingerprint, claim.ownerToken, nowMs);
-      const link = this.database.prepare('INSERT INTO attempt_evaluations (run_id, attempt_id, evaluation_id) VALUES (?, ?, ?)');
-      for (const row of sorted) link.run(claim.runId, attemptId, asText(row.evaluation_id, 'evaluation ID'));
-      this.database.prepare('UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?').run(claim.runId);
+      reservePhysicalAttempt(this.connection.orm, {
+        attemptId, runId: claim.runId, groupId, anchorEvaluationId: anchorId, packetFingerprint,
+        ownerToken: claim.ownerToken, startedMs: nowMs,
+        evaluationIds: sorted.map((row) => asText(row.evaluation_id, 'evaluation ID')),
+      });
       return { attemptId, evaluations: sorted.map((row) => this.evaluationFromRow(row)) };
     });
   }
@@ -944,8 +946,9 @@ class SQLiteRunStore implements RunStore {
           }
         }
       }
-      this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
-        .run(chargedCalls, claim.runId);
+      if (!chargeReservedAttempt(this.connection.orm, claim.runId, chargedCalls)) {
+        throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to settle.');
+      }
     });
   }
 
@@ -983,8 +986,9 @@ class SQLiteRunStore implements RunStore {
             .run(outcome.scope, outcome.code, outcome.message, claim.runId);
         }
       }
-      this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
-        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts, claim.runId);
+      if (!chargeReservedAttempt(this.connection.orm, claim.runId, outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
+        throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to settle.');
+      }
     });
   }
 
@@ -1104,8 +1108,9 @@ class SQLiteRunStore implements RunStore {
           transition.state.revision, JSON.stringify(transition.state.events), JSON.stringify(transition.state.route), transition.state.outcome ?? null,
           claim.runId, respondentId, transition.expectedRevision);
       if (updatedState.changes !== 1) throw new RunStoreError('journey_transition_conflict', 'Journey respondent state changed before its transition committed.');
-      this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
-        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts, claim.runId);
+      if (!chargeReservedAttempt(this.connection.orm, claim.runId, outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
+        throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to settle.');
+      }
     });
   }
 

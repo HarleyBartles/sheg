@@ -12,6 +12,12 @@ export function requestRunCancellation(database: NodeSQLiteDatabase, runId: stri
   }
 }
 
+export function claimPreparedRun(database: NodeSQLiteDatabase, runId: string, ownerToken: string, workerPid: number, leaseExpiresMs: number): boolean {
+  return database.update(runs).set({ status: 'running', ownerToken, ownerPid: workerPid, leaseExpiresMs })
+    .where(and(eq(runs.runId, runId), eq(runs.status, 'prepared')))
+    .returning({ runId: runs.runId }).all().length === 1;
+}
+
 export function refreshWorkerLease(database: NodeSQLiteDatabase, claim: WorkerClaim, nowMs: number, leaseMs: number): boolean {
   return database.update(runs).set({ leaseExpiresMs: nowMs + leaseMs })
     .where(and(
