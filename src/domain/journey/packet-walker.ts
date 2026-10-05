@@ -155,7 +155,7 @@ export function walkStudyPackets(
           activeNodes.delete(nodeId);
           return;
         }
-        const branches = 'options' in task
+        const branches = task.type === 'choice'
           ? Object.keys(task.options).map((choice) => ({ edge: graph.transitions.find((candidate) => candidate.fromNodeId === nodeId && candidate.optionId === choice), response: { type: 'choice' as const, choice } }))
           : graph.transitions.filter((candidate) => candidate.fromNodeId === nodeId && candidate.when !== undefined).map((edge) => ({ edge, response: representativeResponses(task, edge.when)[0]! }));
         for (const branch of branches) {
@@ -189,16 +189,16 @@ export function walkStudyPackets(
 }
 
 function representativeResponses(task: JourneyDefinition['tasks'][number], interval?: NonNullable<Extract<JourneyDefinition['presentation'], { kind: 'graph' }>['transitions'][number]['when']>): DecisionValue[] {
-  if ('options' in task) return Object.keys(task.options).map((choice) => ({ type: 'choice', choice }));
+  if (task.type === 'choice') return Object.keys(task.options).map((choice) => ({ type: 'choice', choice }));
   const values: number[] = [];
   if (interval) {
     values.push(interval.minimum === interval.maximum ? interval.minimum : (interval.minimum + interval.maximum) / 2);
-  } else if ('rubric' in task) {
+  } else if (task.type === 'score') {
     const last = task.rubric.length - 1;
     for (let level = 0; level <= last; level += 0.5) values.push(level);
   } else values.push(0, 0.5, 1);
   return values.map((value): DecisionValue => {
-    if ('rubric' in task) {
+    if (task.type === 'score') {
       const probabilities = Object.fromEntries(task.rubric.map((_meaning, index) => [String(index), 0]));
       const low = Math.floor(value);
       const high = Math.ceil(value);

@@ -1,21 +1,21 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { RunStoreError } from '../../application/run-store.js';
-import { decisionRequestSchema } from '../../domain/decision/decision.js';
+import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type ParsedFollowOnRunRequest } from '../../domain/run/request.js';
-import { asNumber, asText, parseJson, type DatabaseRow } from './rows.js';
+import { asNumber, asText, parseJson, parseJsonRecord, type DatabaseRow } from './rows.js';
 import { materialCatalogForRequest, resultFromStorage } from './evidence-records.js';
 
 export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowOnRunRequest, notFound: () => Error): FollowOnSourceSet {
   const request = followOnRunRequestSchema.parse(input);
   const run = database.prepare('SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?').get(request.sourceRunId) as DatabaseRow | undefined;
   if (!run) throw notFound();
-  const stored = parseJson<{ request?: unknown; lineage?: unknown }>(run.request_json, 'source run request');
-  const sourceRequest = runRequestSchema.safeParse(stored.request);
+  const storedRecord = parseJsonRecord(run.request_json, 'source run request');
+  const sourceRequest = runRequestSchema.safeParse(storedRecord.request);
   if (!sourceRequest.success) throw new RunStoreError('data_integrity_error', 'Stored source run request is invalid.');
   let sourceLineage: FollowOnLineage | undefined;
   if (sourceRequest.data.kind === 'follow-on') {
-    const parsedLineage = followOnLineageSchema.safeParse(stored.lineage);
+    const parsedLineage = followOnLineageSchema.safeParse(storedRecord.lineage);
     if (!parsedLineage.success) throw new RunStoreError('data_integrity_error', 'Stored source follow-on material lineage is invalid.');
     sourceLineage = parsedLineage.data;
   }
@@ -63,7 +63,7 @@ export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowO
     throw new RunStoreError('follow_on_reference_not_found', 'One or more evaluation/context references were not found in the source run.');
   }
   const turns: FollowOnSourceSet['turns'] = rows.map((row) => {
-    const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'source packet')) as FollowOnSourceSet['turns'][number]['packet'];
+    const packet = decisionPacketSchema.parse(parseJson(row.packet_json, 'source packet'));
     const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'source answer'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'source execution'));
     const contextId = asText(row.context_id, 'context ID');
     const respondentId = asText(row.respondent_id, 'respondent ID');

@@ -1,4 +1,5 @@
 import { RunStoreError } from '../../application/run-store.js';
+import type { ZodType } from 'zod';
 
 export type AttemptCursorPayload = { kind: 'attempts'; runId: string; sequence: number };
 const DEFAULT_PAGE_SIZE = 50;
@@ -8,11 +9,13 @@ export function encodeCursor(value: object): string {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
 }
 
-export function decodeCursor<T>(value: string, label: string): T {
+export function decodeCursor<T>(value: string, label: string, schema: ZodType<T>): T {
   try {
     const parsed: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new TypeError('Cursor must be an object.');
-    return parsed as T;
+    const decoded = schema.safeParse(parsed);
+    if (!decoded.success) throw decoded.error;
+    return decoded.data;
   }
   catch (error) { throw new RunStoreError('invalid_cursor', `The ${label} cursor is invalid.`, { cause: error }); }
 }

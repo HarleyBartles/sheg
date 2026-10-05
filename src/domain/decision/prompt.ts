@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
-import { decisionRequestSchema, type DecisionRequest, type DecisionValue } from './decision.js';
-import type { RespondentPerspective, RespondentProfile } from '../respondents/profile.js';
+import { z } from 'zod';
+import { decisionRequestSchema, decisionValueSchema, type DecisionRequest, type DecisionValue } from './decision.js';
+import { respondentPerspectiveSchema, type RespondentPerspective, type RespondentProfile } from '../respondents/profile.js';
 import type { JourneyDefinition } from '../study/arm.js';
 
-export type PromptHistoryEvent =
-  | { type: 'exposure'; sequence: number; nodeId: string; itemId: string }
-  | { type: 'choice'; sequence: number; nodeId: string; taskId: string; choice: string }
-  | { type: 'response'; sequence: number; nodeId: string; taskId: string; result: DecisionValue };
+export const promptHistoryEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('exposure'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), itemId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('choice'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), taskId: z.string().min(1), choice: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('response'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), taskId: z.string().min(1), result: decisionValueSchema }).strict(),
+]);
+export type PromptHistoryEvent = z.infer<typeof promptHistoryEventSchema>;
 
 export type TrajectoryChoice = {
   taskId: string;
@@ -15,27 +18,31 @@ export type TrajectoryChoice = {
   exposedItemIds: string[];
 };
 
-export type TrajectoryResponse =
-  | (TrajectoryChoice & { type: 'choice'; probabilities?: Record<string, number>; confidence?: number })
-  | { type: 'score'; taskId: string; score: number; meaning: string; probabilities: Record<string, number>; legend: Record<string, string>; confidence?: number; exposedItemIds: string[] }
-  | { type: 'noul'; taskId: string; noul: number; proposition: string; exposedItemIds: string[] };
+export type TrajectoryResponse = z.output<typeof trajectoryResponseSchema>;
 
-export type TrajectorySummary = {
-  version: 1;
-  eventCount: number;
-  exposureCount: number;
-  decisionCount: number;
-  eventRange: { firstSequence: number; lastSequence: number } | null;
-  choices: TrajectoryChoice[];
-  responses: TrajectoryResponse[];
-  payloadUtf8Bytes: number;
-};
+export type TrajectorySummary = z.output<typeof trajectorySummarySchema>;
 
-export type PromptState = {
-  respondent: { profile: RespondentPerspective };
-  encounteredItems: Array<{ id: string; text: string }>;
-  trajectory: TrajectorySummary;
-};
+const trajectoryChoiceSchema = z.object({
+  taskId: z.string().min(1), choiceId: z.string().min(1), choiceMeaning: z.string().min(1), exposedItemIds: z.array(z.string().min(1)),
+}).strict();
+const trajectoryResponseSchema = z.discriminatedUnion('type', [
+  z.object({ ...trajectoryChoiceSchema.shape, type: z.literal('choice'), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)).optional(), confidence: z.number().finite().min(0).max(1).optional() }).strict(),
+  z.object({ type: z.literal('score'), taskId: z.string().min(1), score: z.number().finite(), meaning: z.string(), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), legend: z.record(z.string(), z.string()), confidence: z.number().finite().min(0).max(1).optional(), exposedItemIds: z.array(z.string().min(1)) }).strict(),
+  z.object({ type: z.literal('noul'), taskId: z.string().min(1), noul: z.number().finite().min(0).max(1), proposition: z.string(), exposedItemIds: z.array(z.string().min(1)) }).strict(),
+]);
+const trajectorySummarySchema = z.object({
+  version: z.literal(1), eventCount: z.number().int().nonnegative(), exposureCount: z.number().int().nonnegative(), decisionCount: z.number().int().nonnegative(),
+  eventRange: z.object({ firstSequence: z.number().int().nonnegative(), lastSequence: z.number().int().nonnegative() }).strict().nullable(),
+  choices: z.array(trajectoryChoiceSchema), responses: z.array(trajectoryResponseSchema), payloadUtf8Bytes: z.number().int().nonnegative(),
+}).strict();
+export const promptStateSchema = z.object({
+  respondent: z.object({ profile: respondentPerspectiveSchema }).strict(),
+  encounteredItems: z.array(z.object({ id: z.string().min(1), text: z.string().min(1) }).strict()),
+  trajectory: trajectorySummarySchema,
+}).strict();
+export type PromptState = z.infer<typeof promptStateSchema>;
+export const decisionPacketSchema = decisionRequestSchema.and(z.object({ state: promptStateSchema }).strict());
+export type DecisionPacket = z.infer<typeof decisionPacketSchema>;
 
 export type DecisionPacketParts = {
   respondentProfile: RespondentPerspective;
@@ -45,8 +52,8 @@ export type DecisionPacketParts = {
 };
 
 export function questionForTask(task: JourneyDefinition['tasks'][number]): DecisionRequest['question'] {
-  if ('options' in task) return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}) };
-  if ('rubric' in task) return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
+  if (task.type === 'choice') return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}) };
+  if (task.type === 'score') return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
   return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }) };
 }
 

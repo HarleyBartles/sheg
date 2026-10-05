@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   check, foreignKey, index, integer, primaryKey, sqliteTable, text, unique,
 } from 'drizzle-orm/sqlite-core';
+import { attemptStatuses, evaluationStatuses, journeyRespondentStatuses, runStatuses } from '../../domain/run/lifecycle.js';
 
 export const runs = sqliteTable('runs', {
   runId: text('run_id').notNull(),
@@ -10,7 +11,7 @@ export const runs = sqliteTable('runs', {
   createdAt: text('created_at').notNull(),
   createdMs: integer('created_ms').notNull(),
   label: text('label'),
-  status: text('status', { enum: ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] }).notNull(),
+  status: text('status', { enum: runStatuses }).notNull(),
   requestJson: text('request_json').notNull(),
   evaluationCount: integer('evaluation_count').notNull(),
   maxCalls: integer('max_calls').notNull(),
@@ -65,7 +66,7 @@ export const evaluations = sqliteTable('evaluations', {
   occurrence: integer('occurrence'),
   packetJson: text('packet_json').notNull(),
   packetFingerprint: text('packet_fingerprint').notNull(),
-  status: text('status', { enum: ['pending', 'answered', 'failed', 'unreached'] }).notNull(),
+  status: text('status', { enum: evaluationStatuses }).notNull(),
   resultJson: text('result_json'),
   failureCode: text('failure_code'),
   failureMessage: text('failure_message'),
@@ -89,7 +90,7 @@ export const evaluations = sqliteTable('evaluations', {
 export const journeyRespondents = sqliteTable('journey_respondents', {
   runId: text('run_id').notNull().references(() => runs.runId, { onDelete: 'cascade' }),
   respondentId: text('respondent_id').notNull(),
-  status: text('status', { enum: ['active', 'completed', 'failed', 'unreached'] }).notNull(),
+  status: text('status', { enum: journeyRespondentStatuses }).notNull(),
   currentNodeId: text('current_node_id'),
   currentTurnId: text('current_turn_id'),
   currentContextId: text('current_context_id'),
@@ -112,7 +113,7 @@ export const attempts = sqliteTable('attempts', {
   evaluationId: text('evaluation_id').notNull(),
   packetFingerprint: text('packet_fingerprint').notNull(),
   ownerToken: text('owner_token').notNull(),
-  status: text('status', { enum: ['reserved', 'answered', 'failed', 'uncertain'] }).notNull(),
+  status: text('status', { enum: attemptStatuses }).notNull(),
   startedMs: integer('started_ms').notNull(),
   settledMs: integer('settled_ms'),
   chargedCalls: integer('charged_calls').notNull().default(0),

@@ -87,7 +87,7 @@ function preparedJourneyRun(): PreparedJourneyRun {
     const turnId = `turn-${respondent.id}-opening`;
     const contextId = `context-${respondent.id}-opening`;
     const nodeId = 'ask-interest';
-    const packet = compileDecisionPacket(journeyRequest.journey, respondent, 'interest', initialEvents);
+    const packet = compileDecisionPacket(request.journey, respondent, 'interest', initialEvents);
     return {
       evaluationId: `evaluation-${respondent.id}-opening`, contextId, respondentId: respondent.id,
       questionId: 'interest', packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
@@ -384,6 +384,52 @@ test('journey acceptance freezes exact reached packets and respondent state acro
     assert.equal(run.respondents[1]!.respondentId, 'reader-b');
   } finally {
     reopened.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('journey recall rejects corrupt history and route fields behind valid JSON arrays', async () => {
+  const corruptions = [
+    { column: 'events_json', value: [{ type: 'exposure', sequence: 'zero', nodeId: 'show-opening', itemId: 'section-one' }] },
+    { column: 'route_json', value: [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 42 }, toNodeId: 17 }] },
+  ] as const;
+
+  for (const { column, value } of corruptions) {
+    const root = await temporaryRoot();
+    const store = openRunStore(root);
+    const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try {
+      const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+      database.prepare(`UPDATE journey_respondents SET ${column} = ? WHERE run_id = ? AND respondent_id = ?`)
+        .run(JSON.stringify(value), accepted.run.runId, 'reader-a');
+      assert.throws(() => store.getJourneyRun(accepted.run.runId),
+        (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
+    } finally {
+      database.close();
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('journey recall validates model-visible packet state after JSON and fingerprint checks', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+    const row = database.prepare('SELECT packet_json FROM evaluations WHERE run_id = ? ORDER BY ordinal LIMIT 1').get(accepted.run.runId) as { packet_json: string };
+    const packet = JSON.parse(row.packet_json) as Record<string, unknown>;
+    packet.state = { respondent: 'not-a-profile', encounteredItems: [null], trajectory: {} };
+    const packetJson = JSON.stringify(packet);
+    database.prepare('UPDATE evaluations SET packet_json = ?, packet_fingerprint = ? WHERE run_id = ? AND ordinal = 0')
+      .run(packetJson, hashCanonical({ packet, compilerFingerprint: promptContractHash() }), accepted.run.runId);
+
+    assert.throws(() => store.getJourneyRun(accepted.run.runId),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
+  } finally {
+    database.close();
+    store.close();
     await rm(root, { recursive: true, force: true });
   }
 });

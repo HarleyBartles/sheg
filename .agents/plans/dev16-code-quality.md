@@ -48,11 +48,11 @@
 
 **Interfaces:** Input compatibility uses schema input types; internal parsed tasks use schema output types. Domain-owned vocabularies feed schemas and unions. JSON parsing yields `unknown`; payload decoders return validated domain values. Cursor-specific validation remains explicit.
 
-- [ ] Map each duplicated vocabulary/type to its semantic owner. Preserve serialized values and compatibility defaults. Replace expanded topology constructions with the existing alias and replace handwritten schema duplicates with inferred types.
-- [ ] Separate permissive task input from normalized task output; update consumers to discriminate on the parsed type. Convert the failure-rule table to a module-owned checked mapping instead of constructing and asserting it per call.
-- [ ] Add malformed persisted history, route, and state behavior cases at the read boundary. Confirm existing shallow checks miss the intended cases before implementing validated codecs. Keep safe failures consistent with the storage error contract.
-- [ ] Remove generic typed JSON assertions; adapt callers to schema validation or explicit unknown-field checks. Decode execution/result once and reuse it. Do not make low-level generic decision state pretend to be a journey-specific state; validate that stronger contract at the journey boundary.
-- [ ] Run affected domain, payload, journey and storage tests and typecheck. Check that SQL constraints remain aligned without rewriting historical migrations. Commit.
+- [x] Map each duplicated vocabulary/type to its semantic owner. Preserve serialized values and compatibility defaults. Replace expanded topology constructions with the existing alias and replace handwritten schema duplicates with inferred types.
+- [x] Separate permissive task input from normalized task output; update consumers to discriminate on the parsed type. Convert the failure-rule table to a module-owned checked mapping instead of constructing and asserting it per call.
+- [x] Add malformed persisted history, route, and state behavior cases at the read boundary. Confirm existing shallow checks miss the intended cases before implementing validated codecs. Keep safe failures consistent with the storage error contract.
+- [x] Remove generic typed JSON assertions; adapt callers to schema validation or explicit unknown-field checks. Decode execution/result once and reuse it. Do not make low-level generic decision state pretend to be a journey-specific state; validate that stronger contract at the journey boundary.
+- [x] Run affected domain, payload, journey and storage tests and typecheck. Check that SQL constraints remain aligned without rewriting historical migrations. Commit.
 
 ## Task 3: Build the owned SQL query library and asset pipeline
 

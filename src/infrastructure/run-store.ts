@@ -2,16 +2,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
 import { decisionRequestSchema, decisionValueFromResult, decisionValueSchema } from '../domain/decision/decision.js';
 import { validateDecision } from '../domain/decision/validate.js';
-import { compileDecisionPacketForCompiler } from '../domain/decision/prompt.js';
+import { compileDecisionPacketForCompiler, decisionPacketSchema } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import { deriveRunLifecycle, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord, type JourneyWorkerTurn, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
-import { decisionFailureDetailForReason, decisionResultSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
-import { followOnLineageSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
+import { deriveRunLifecycle, evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord, type JourneyWorkerTurn, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
+import { decisionFailureDetailForReason, decisionResultSchema, decisionBatchResultSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
+import { followOnLineageSchema, followOnRunRequestSchema, inlineRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
 import { journeyTopology } from '../domain/journey/topology.js';
-import { asNumber, asNullableText, asText, parseJson, type DatabaseRow } from './sqlite/rows.js';
+import { asNumber, asNullableText, asText, parseJson, parseJsonRecord, parseStored, type DatabaseRow } from './sqlite/rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './sqlite/cursors.js';
 import { loadAttempts } from './sqlite/attempt-queries.js';
 import { loadRunDeletionSnapshot, type RunDeletionSnapshot } from './sqlite/run-deletion-queries.js';
@@ -26,7 +27,7 @@ import { chargeReservedAttempt, linkWinningAnswer, markAttemptAnswered, markAtte
 import { persistJourneyRespondentState, persistNextJourneyTurn } from './sqlite/commands/journey-transition.js';
 import { deleteRuns as deleteSelectedRuns, markActiveJourneyRespondentsUnreached, markPendingEvaluationsUnreached, prepareResumedRun, reopenFailedQuestions, reopenJourneyEvaluation, reopenSharedFailure, restoreFailedJourneyRespondent } from './sqlite/commands/recovery.js';
 import { insertAcceptedRun, insertPreparedJourneyData, insertPreparedRunData } from './sqlite/commands/acceptance.js';
-import { encounteredMaterialsFromState, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './sqlite/evidence-records.js';
+import { decodeResultAndExecution, encounteredMaterialsFromState, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, storedEvaluationFailure } from './sqlite/evidence-records.js';
 import { openSqliteConnection, type SqliteConnection } from './sqlite/connection.js';
 import { SCHEMA_VERSION } from './sqlite/schema.js';
 import { RunStoreError } from '../application/run-store.js';
@@ -36,6 +37,13 @@ export type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, Ru
 export { RunStoreError } from '../application/run-store.js';
 export { inspectRunStoreCompatibility, runStoreBackupAvailable, type StoreCompatibility } from './sqlite/recovery.js';
 import { resetRunStore as resetRunStoreInternal } from './sqlite/recovery.js';
+
+const preparedRunRecordSchema = z.object({
+  request: z.union([inlineRunRequestSchema, followOnRunRequestSchema]),
+  requestFingerprint: z.string().min(1),
+  compilerFingerprint: z.string().min(1),
+  lineage: followOnLineageSchema.optional(),
+});
 
 function sameDecisionValue(left: import('../domain/decision/decision.js').DecisionValue, right: import('../domain/decision/decision.js').DecisionValue): boolean {
   if (left.type !== right.type) return false;
@@ -69,6 +77,8 @@ const LEASE_MS = 30_000;
 
 type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; filtersFingerprint: string };
 type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
+const runCursorSchema = z.object({ kind: z.literal('runs'), createdMs: z.number().int().nonnegative(), runId: z.string().min(1), filtersFingerprint: z.string() }).strict();
+const answerCursorSchema = z.object({ kind: z.literal('answers'), runId: z.string().min(1), ordinal: z.number().int().nonnegative() }).strict();
 
 function validateRunIds(runIds: string[]): void {
   if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
@@ -394,7 +404,7 @@ class SQLiteRunStore implements RunStore {
       this.statusInside(runId);
       const row = loadAcceptedRequest(this.connection.orm, runId);
       if (!row) throw this.notFound();
-      const stored = parseJson<unknown>(row.requestJson, 'request');
+      const stored = parseJsonRecord(row.requestJson, 'request');
       if (typeof stored !== 'object' || stored === null || !('request' in stored)) {
         throw new RunStoreError('data_integrity_error', 'Stored run request has an invalid shape.');
       }
@@ -410,23 +420,21 @@ class SQLiteRunStore implements RunStore {
     this.statusInside(runId);
     const row = loadAcceptedRequest(this.connection.orm, runId);
     if (!row) throw this.notFound();
-    const stored = parseJson<unknown>(row.requestJson, 'request');
-    if (typeof stored !== 'object' || stored === null || !('request' in stored) || !('requestFingerprint' in stored) || !('compilerFingerprint' in stored)) {
-      throw new RunStoreError('data_integrity_error', 'Stored run request has an invalid shape.');
-    }
+    const stored = parseStored(preparedRunRecordSchema, parseJson(row.requestJson, 'request'), 'run request');
+    const { lineage, ...storedBase } = stored;
     const evaluations = loadPreparedEvaluations(this.connection.orm, runId);
     const groups = loadQuestionGroups(this.connection.orm, runId);
-    const prepared = stored as Omit<PreparedRun, 'evaluations'>;
-    const parsed = validatePrepared({ ...prepared, groups: groups.map((row) => ({
+    const parsed = validatePrepared({ ...storedBase, ...(lineage === undefined ? {} : { lineage }), groups: groups.map((row) => ({
       groupId: row.groupId, contextId: row.contextId, respondentId: row.respondentId,
-      state: parseJson(row.stateJson, 'group state'), questionIds: parseJson(row.questionIdsJson, 'group question IDs'),
+      state: parseStored(z.record(z.string(), z.unknown()), parseJson(row.stateJson, 'group state'), 'group state'),
+      questionIds: parseStored(z.array(z.string().min(1)), parseJson(row.questionIdsJson, 'group question IDs'), 'group question IDs'),
     })), evaluations: evaluations.map((row) => ({
       groupId: row.groupId,
       evaluationId: row.evaluationId,
       contextId: row.contextId,
       respondentId: row.respondentId,
       questionId: row.questionId,
-      packet: parseJson(row.packetJson, 'frozen packet'),
+      packet: parseStored(decisionRequestSchema, parseJson(row.packetJson, 'frozen packet'), 'frozen packet'),
       packetFingerprint: row.packetFingerprint,
     })) });
     if (parsed.requestFingerprint !== row.requestFingerprint) {
@@ -451,7 +459,7 @@ class SQLiteRunStore implements RunStore {
     this.statusInside(runId);
     const row = this.database.prepare('SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
     if (!row) throw this.notFound();
-    const stored = parseJson<unknown>(row.request_json, 'request');
+    const stored = parseJsonRecord(row.request_json, 'request');
     if (typeof stored !== 'object' || stored === null || !('request' in stored) || !('requestFingerprint' in stored) || !('compilerFingerprint' in stored)) {
       throw new RunStoreError('data_integrity_error', 'Stored journey request has an invalid shape.');
     }
@@ -465,7 +473,7 @@ class SQLiteRunStore implements RunStore {
       (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id) WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
       FROM evaluations e WHERE e.run_id = ? ORDER BY e.ordinal`).all(runId) as DatabaseRow[];
     const evaluations: JourneyEvaluationRecord[] = evaluationRows.map((evaluation) => {
-      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, 'frozen packet')) as JourneyEvaluationRecord['packet'];
+      const packet = parseStored(decisionPacketSchema, parseJson(evaluation.packet_json, 'frozen packet'), 'frozen packet');
       const base: JourneyEvaluationRecord = {
         evaluationId: asText(evaluation.evaluation_id, 'evaluation ID'),
         contextId: asText(evaluation.context_id, 'context ID'),
@@ -478,7 +486,7 @@ class SQLiteRunStore implements RunStore {
         pathId: asText(evaluation.path_id, 'path ID'),
         occurrence: asNumber(evaluation.occurrence, 'turn occurrence'),
         ordinal: asNumber(evaluation.ordinal, 'evaluation ordinal'),
-        status: asText(evaluation.status, 'evaluation status') as JourneyEvaluationRecord['status'],
+        status: evaluationStatusSchema.parse(asText(evaluation.status, 'evaluation status')),
       };
       if (!['pending', 'answered', 'failed', 'unreached'].includes(base.status) ||
           (base.status === 'answered' && evaluation.result_json === null) || (base.status === 'failed' && evaluation.failure_code === null)) {
@@ -488,8 +496,9 @@ class SQLiteRunStore implements RunStore {
         throw new RunStoreError('data_integrity_error', 'Stored journey packet does not match its context identity.');
       }
       if (evaluation.result_json !== null) {
-        const result = resultFromStorage(parseJson(evaluation.result_json, 'decision value'), evaluation.execution_json === null ? undefined : parseJson(evaluation.execution_json, 'provider execution'));
-        base.result = validateDecision(packet, result, { maxAttempts: result.attempts });
+        const decoded = decodeResultAndExecution(parseJson(evaluation.result_json, 'decision value'), parseJson(evaluation.execution_json, 'provider execution'));
+        base.result = validateDecision(packet, decoded.result, { maxAttempts: decoded.result.attempts });
+        base.execution = decoded.execution;
       }
       const evaluationFailure = storedEvaluationFailure(evaluation);
       if (evaluationFailure) base.failure = evaluationFailure;
@@ -497,21 +506,18 @@ class SQLiteRunStore implements RunStore {
     });
     const stateRows = this.database.prepare('SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id').all(runId) as DatabaseRow[];
     const respondents: JourneyRespondentState[] = stateRows.map((state) => {
-      const status = asText(state.status, 'journey respondent status');
-      const events = parseJson<unknown>(state.events_json, 'journey history');
-      const route = parseJson<unknown>(state.route_json, 'journey route');
-      if (!['active', 'completed', 'failed', 'unreached'].includes(status) || !Array.isArray(events) || !Array.isArray(route)) {
-        throw new RunStoreError('data_integrity_error', 'Stored journey respondent state has an invalid shape.');
-      }
+      const status = parseStored(journeyRespondentStatusSchema, asText(state.status, 'journey respondent status'), 'journey respondent status');
+      const events = parseStored(journeyEventsSchema, parseJson(state.events_json, 'journey history'), 'journey history');
+      const route = parseStored(journeyRouteSchema, parseJson(state.route_json, 'journey route'), 'journey route');
       return {
         respondentId: asText(state.respondent_id, 'respondent ID'),
-        status: status as JourneyRespondentState['status'],
+        status,
         currentNodeId: asNullableText(state.current_node_id, 'current node ID'),
         currentTurnId: asNullableText(state.current_turn_id, 'current turn ID'),
         currentContextId: asNullableText(state.current_context_id, 'current context ID'),
         revision: asNumber(state.revision, 'journey state revision'),
-        events: events as JourneyRespondentState['events'],
-        route: route as JourneyRespondentState['route'],
+        events,
+        route,
         ...(state.outcome === null ? {} : { outcome: asText(state.outcome, 'journey outcome') }),
       };
     });
@@ -533,7 +539,7 @@ class SQLiteRunStore implements RunStore {
     const filtersFingerprint = hashCanonical({ status: query.status ?? null, label: query.label ?? null, createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null, materialId: query.materialId ?? null });
     let cursor: CursorPayload | undefined;
     if (query.cursor) {
-      cursor = decodeCursor<CursorPayload>(query.cursor, 'run list');
+      cursor = decodeCursor(query.cursor, 'run list', runCursorSchema);
       if (cursor.kind !== 'runs' || !Number.isSafeInteger(cursor.createdMs) || cursor.createdMs < 0 || typeof cursor.runId !== 'string' || cursor.runId.length === 0 ||
           cursor.filtersFingerprint !== filtersFingerprint) {
         throw new RunStoreError('invalid_cursor', 'The run list cursor does not match the requested filters.');
@@ -595,9 +601,9 @@ class SQLiteRunStore implements RunStore {
       const row = this.database.prepare(`SELECT e.*, r.request_json FROM evaluations e JOIN runs r USING (run_id)
         WHERE e.run_id = ? AND e.evaluation_id = ? AND e.context_id = ?`).get(runId, evaluationId, contextId) as DatabaseRow | undefined;
       if (!row) throw new RunStoreError('context_not_found', 'The evaluation and context handles do not identify a context in this run.');
-      const stored = parseJson<{ compilerFingerprint?: unknown }>(row.request_json, 'run request');
+      const stored = parseJsonRecord(row.request_json, 'run request');
       if (typeof stored.compilerFingerprint !== 'string' || stored.compilerFingerprint.length === 0) throw new RunStoreError('data_integrity_error', 'Stored compiler identity is invalid.');
-      const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet')) as import('../domain/decision/decision.js').DecisionRequest & { state: import('../domain/decision/prompt.js').PromptState };
+      const packet = parseStored(decisionRequestSchema, parseJson(row.packet_json, 'frozen packet'), 'frozen packet');
       const packetFingerprint = asText(row.packet_fingerprint, 'packet fingerprint');
       if (hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== packetFingerprint) throw new RunStoreError('data_integrity_error', 'Stored context packet fingerprint does not match its frozen input.');
       return {
@@ -624,7 +630,7 @@ class SQLiteRunStore implements RunStore {
     const limit = pageSize(requestedLimit);
     let cursor: AnswerCursorPayload | undefined;
     if (cursorText) {
-      cursor = decodeCursor<AnswerCursorPayload>(cursorText, 'answer');
+      cursor = decodeCursor(cursorText, 'answer', answerCursorSchema);
       if (cursor.kind !== 'answers' || cursor.runId !== runId || !Number.isInteger(cursor.ordinal) || cursor.ordinal < 0) {
         throw new RunStoreError('invalid_cursor', 'The answer cursor does not match this run.');
       }
@@ -638,14 +644,14 @@ class SQLiteRunStore implements RunStore {
     const pageRows = rows.slice(0, limit);
     const items = pageRows.map((row): AnswerRow => {
       const failure = storedEvaluationFailure(row);
+      const decoded = row.result_json === null ? undefined : decodeResultAndExecution(parseJson(row.result_json, 'decision result'), parseJson(row.execution_json, 'provider execution'));
       return {
         evaluationId: asText(row.evaluation_id, 'evaluation ID'),
         contextId: asText(row.context_id, 'context ID'),
         respondentId: asText(row.respondent_id, 'respondent ID'),
         questionId: asText(row.question_id, 'question ID'),
         status: asText(row.status, 'evaluation status') as AnswerRow['status'],
-        ...(row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution')) }),
-        ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
+        ...(decoded === undefined ? {} : { result: decoded.result, execution: decoded.execution }),
         ...(failure === undefined ? {} : { failure }),
       };
     });
@@ -683,7 +689,7 @@ class SQLiteRunStore implements RunStore {
       const run = this.database.prepare('SELECT status, failure_scope, reserved_calls, cancel_requested, used_calls, max_calls, request_json FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
       if (!run) throw this.notFound();
       const status = asText(run.status, 'run status');
-      const storedRequest = parseJson<{ request?: unknown }>(run.request_json, 'run request');
+      const storedRequest = parseJsonRecord(run.request_json, 'run request');
       const parsedRequest = runRequestSchema.safeParse(storedRequest.request);
       if (!parsedRequest.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
       const isJourney = parsedRequest.data.kind === 'journey';
@@ -861,7 +867,7 @@ class SQLiteRunStore implements RunStore {
           asNumber(run.reserved_calls, 'reserved calls') !== 0 || asNumber(run.used_calls, 'used calls') >= asNumber(run.max_calls, 'maximum calls')) return null;
       const group = this.database.prepare('SELECT * FROM question_groups WHERE run_id = ? AND group_id = ?').get(claim.runId, groupId) as DatabaseRow | undefined;
       if (!group) throw new RunStoreError('question_group_not_found', 'The requested question group was not found in this run.');
-      const orderedIds = parseJson<string[]>(group.question_ids_json, 'group question IDs');
+      const orderedIds = parseStored(z.array(z.string().min(1)), parseJson(group.question_ids_json, 'group question IDs'), 'group question IDs');
       const rows = this.database.prepare(`SELECT * FROM evaluations WHERE run_id = ? AND group_id = ? AND status = 'pending'`).all(claim.runId, groupId) as DatabaseRow[];
       const byId = new Map(rows.map((row) => [asText(row.evaluation_id, 'evaluation ID'), row]));
       const selected = evaluationIds.map((id) => byId.get(id));
@@ -1002,14 +1008,14 @@ class SQLiteRunStore implements RunStore {
           asText(stateRow.current_turn_id, 'current turn ID') !== turnId || asText(stateRow.current_node_id, 'current node ID') !== nodeId) {
         throw new RunStoreError('journey_transition_conflict', 'Journey respondent state has moved since this turn was reserved.');
       }
-      const priorEvents = parseJson<JourneyRespondentState['events']>(stateRow.events_json, 'journey history');
-      const priorRoute = parseJson<JourneyRespondentState['route']>(stateRow.route_json, 'journey route');
+      const priorEvents = parseStored(journeyEventsSchema, parseJson(stateRow.events_json, 'journey history'), 'journey history');
+      const priorRoute = parseStored(journeyRouteSchema, parseJson(stateRow.route_json, 'journey route'), 'journey route');
       if (transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) ||
           transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
         throw new RunStoreError('journey_transition_conflict', 'Journey transitions must preserve ordered prior evidence.');
       }
       const runRow = this.database.prepare('SELECT request_json FROM runs WHERE run_id = ?').get(claim.runId) as DatabaseRow | undefined;
-      const storedRun = parseJson<{ request?: unknown; compilerFingerprint?: unknown }>(runRow?.request_json, 'run request');
+      const storedRun = parseJsonRecord(runRow?.request_json, 'run request');
       const parsedRunRequest = runRequestSchema.safeParse(storedRun.request);
       if (!parsedRunRequest.success || parsedRunRequest.data.kind !== 'journey' || typeof storedRun.compilerFingerprint !== 'string') {
         throw new RunStoreError('data_integrity_error', 'Stored journey request is invalid.');
@@ -1229,7 +1235,7 @@ class SQLiteRunStore implements RunStore {
           (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = jr.run_id AND e.respondent_id = jr.respondent_id AND e.status = 'failed') <> 1)) AS retryable_journey_failure
       FROM runs r WHERE r.run_id IN (${runIds.map(() => '?').join(', ')}) ORDER BY r.created_ms, r.run_id`).all(...runIds) as DatabaseRow[];
     return rows.map((row) => {
-      const stored = parseJson<{ request?: unknown }>(row.request_json, 'run request');
+      const stored = parseJsonRecord(row.request_json, 'run request');
       const request = runRequestSchema.safeParse(stored.request);
       if (!request.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
       const status = asText(row.status, 'run status') as RunStatus;

@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import type { ProviderContextFit } from './provider.js';
+import { providerContextFitStatusSchema, providerKindSchema, providerTokenCountKindSchema, type ProviderContextFit } from './provider.js';
 import type { DecisionFailureDetail } from './decision.js';
 
 export const providerContextFitSchema = z.object({
-  provider: z.enum(['jev', 'laya']), status: z.enum(['fits', 'overflow', 'unavailable']),
-  method: z.string().min(1), modelIdentity: z.string().min(1), tokenCount: z.enum(['measured', 'estimated']),
+  provider: providerKindSchema, status: providerContextFitStatusSchema,
+  method: z.string().min(1), modelIdentity: z.string().min(1), tokenCount: providerTokenCountKindSchema,
   tokens: z.number().finite().nonnegative(), contextLimit: z.number().finite().nonnegative().nullable(),
   headroomTokens: z.number().finite().nullable(), effectiveLimit: z.number().finite().nonnegative().nullable(),
   details: z.record(z.string(), z.union([z.number().finite(), z.string()])), reason: z.string().optional(),

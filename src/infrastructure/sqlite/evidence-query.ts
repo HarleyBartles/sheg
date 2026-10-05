@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { RunStoreError } from '../../application/run-store.js';
-import { asNumber, asText, parseJson, type DatabaseRow } from './rows.js';
+import { asNumber, asText, parseJson, parseJsonRecord, type DatabaseRow } from './rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './cursors.js';
 import { encounteredMaterialsFromState, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './evidence-records.js';
-import { decisionRequestSchema, providerExecutionEvidenceSchema } from '../../domain/decision/decision.js';
+import { providerExecutionEvidenceSchema } from '../../domain/decision/decision.js';
+import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { hashCanonical } from '../identity.js';
-import { type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView } from '../../domain/run/lifecycle.js';
+import { runStatusSchema, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView } from '../../domain/run/lifecycle.js';
 import { followOnLineageSchema, runEvidenceQuerySchema, runLifecycleSchema, runRequestSchema, type FollowOnLineage } from '../../domain/run/request.js';
 import { decisionValueSchema } from '../../domain/decision/decision.js';
 import { decodeStoredPayload } from './payload-codecs.js';
@@ -23,6 +24,7 @@ type EvidenceCursorPayload = {
   usedCalls: number;
   reservedCalls: number;
 };
+const evidenceCursorSchema = z.object({ kind: z.literal('evidence'), sourceRunId: z.string(), criteriaFingerprint: z.string(), maxOrdinal: z.number().int().min(-1), lastOrdinal: z.number().int().min(-1), sourceStatus: runStatusSchema, lifecycle: runLifecycleSchema, usedCalls: z.number().int().nonnegative(), reservedCalls: z.number().int().nonnegative() }).passthrough();
 
 export type EvidenceQueryContext = {
   database: DatabaseSync;
@@ -46,22 +48,22 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       const sourceStatus = asText(run.status, 'run status') as RunStatus;
       const usedCalls = asNumber(run.used_calls, 'used calls');
       const reservedCalls = asNumber(run.reserved_calls, 'reserved calls');
-      const runRecord = parseJson<{ request?: unknown; compilerFingerprint?: unknown; lineage?: unknown }>(run.request_json, 'run request');
-      const parsedRequest = runRequestSchema.safeParse(runRecord.request);
-      if (!parsedRequest.success || typeof runRecord.compilerFingerprint !== 'string') {
+      const storedRecord = parseJsonRecord(run.request_json, 'run request');
+      const parsedRequest = runRequestSchema.safeParse(storedRecord.request);
+      if (!parsedRequest.success || typeof storedRecord.compilerFingerprint !== 'string') {
         throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
       }
-      const compilerFingerprint = runRecord.compilerFingerprint;
+      const compilerFingerprint = storedRecord.compilerFingerprint;
       let lineage: FollowOnLineage | undefined;
       if (parsedRequest.data.kind === 'follow-on') {
-        const parsedLineage = followOnLineageSchema.safeParse(runRecord.lineage);
+        const parsedLineage = followOnLineageSchema.safeParse(storedRecord.lineage);
         if (!parsedLineage.success) throw new RunStoreError('data_integrity_error', 'Stored follow-on material lineage is invalid.');
         lineage = parsedLineage.data;
       }
 
       let cursor: EvidenceCursorPayload | undefined;
       if (query.cursor) {
-        cursor = decodeCursor<EvidenceCursorPayload>(query.cursor, 'evidence');
+        cursor = decodeCursor(query.cursor, 'evidence', evidenceCursorSchema);
         if (cursor.kind !== 'evidence' || cursor.sourceRunId !== query.sourceRunId || cursor.criteriaFingerprint !== criteriaFingerprint ||
             !Number.isSafeInteger(cursor.maxOrdinal) || cursor.maxOrdinal < -1 || !Number.isSafeInteger(cursor.lastOrdinal) ||
             cursor.lastOrdinal < -1 || cursor.lastOrdinal > cursor.maxOrdinal ||
@@ -190,7 +192,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       const items: RunEvidencePage['items'] = pageRows.map((row) => {
         const contextId = asText(row.context_id, 'context ID');
         const respondentId = asText(row.respondent_id, 'respondent ID');
-        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'evidence packet'));
+        const packet = decisionPacketSchema.parse(parseJson(row.packet_json, 'evidence packet'));
         const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution'));
         const failure = storedEvaluationFailure(row);
         let selectedMaterial: RunEvidencePage['items'][number]['selectedMaterial'];

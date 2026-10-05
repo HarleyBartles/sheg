@@ -1,4 +1,5 @@
 import type { SQLOutputValue } from 'node:sqlite';
+import type { ZodType } from 'zod';
 import { RunStoreError } from '../../application/run-store.js';
 
 export type DatabaseRow = Record<string, SQLOutputValue>;
@@ -21,11 +22,23 @@ export function asNumber(value: SQLOutputValue | undefined, label: string): numb
 }
 
 
-export function parseJson<T>(value: SQLOutputValue | undefined, label: string): T {
-  try { return JSON.parse(asText(value, label)) as T; }
+export function parseJson(value: SQLOutputValue | undefined, label: string): unknown {
+  try { return JSON.parse(asText(value, label)) as unknown; }
   catch (error) {
     if (error instanceof RunStoreError) throw error;
     throw new RunStoreError('data_integrity_error', `Stored ${label} is not valid JSON.`, { cause: error });
   }
+}
+
+export function parseStored<T>(schema: ZodType<T>, value: unknown, label: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new RunStoreError('data_integrity_error', `Stored ${label} is invalid.`, { cause: parsed.error });
+  return parsed.data;
+}
+
+export function parseJsonRecord(value: SQLOutputValue | undefined, label: string): Record<string, unknown> {
+  const parsed: unknown = parseJson(value, label);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new RunStoreError('data_integrity_error', `Stored ${label} is not an object.`);
+  return parsed as Record<string, unknown>;
 }
 
