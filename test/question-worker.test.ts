@@ -180,6 +180,10 @@ test('a grouped poll batches independent questions and resumes only the failed q
     { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Mixed', 'Clear'] }];
   const settledAt = Date.now();
   const f = await fixture(input, () => settledAt); const dispatched: Array<{ ids: string[]; state: unknown }> = [];
+  const persistence = splitRunStore(f.store);
+  const readStatuses = persistence.reads.evaluationStatuses.bind(persistence.reads);
+  let statusReads = 0;
+  persistence.reads.evaluationStatuses = (runId) => { statusReads += 1; return readStatuses(runId); };
   try {
     const provider: DecisionProvider = { measureBatch: () => ({ provider: 'jev', status: 'fits', method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated', tokens: 20, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} }), async decide() { throw new Error('Expected grouped request dispatch.'); }, async decideBatch(batch: DecisionBatchRequest) {
       dispatched.push({ ids: batch.questions.map(({ id }) => id), state: batch.state });
@@ -192,7 +196,8 @@ test('a grouped poll batches independent questions and resumes only the failed q
         { questionId: 'clarity', value: { type: 'score', score: 2, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.1, 2: 0.8 } } },
       ] };
     } };
-    await executeQuestionRun(f.store, f.runId, factory(provider));
+    await executeWorker(persistence, f.runId, factory(provider));
+    assert.equal(statusReads, 1, 'batch settlement returns affected statuses without a whole-run reload');
     assert.equal(f.store.getStatus(f.runId).status, 'partial');
     assert.equal(f.store.getStatus(f.runId).usedCalls, 1);
     const failedBefore = f.store.answers(f.runId).items.find(({ questionId }) => questionId === 'clarity')!;
@@ -200,7 +205,8 @@ test('a grouped poll batches independent questions and resumes only the failed q
     const resumed = f.store.resume(f.runId, Date.now()); assert.equal(resumed.started, true);
     assert.equal(f.store.getRequest(f.runId).groups?.length, 1);
     assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'pending']);
-    await executeQuestionRun(f.store, f.runId, factory(provider));
+    await executeWorker(persistence, f.runId, factory(provider));
+    assert.equal(statusReads, 2, 'resume reads the initial status snapshot once');
     assert.equal(f.store.getStatus(f.runId).status, 'completed', JSON.stringify(f.store.getStatus(f.runId)));
     assert.deepEqual(f.store.answers(f.runId).items.map(({ status }) => status), ['answered', 'answered', 'answered']);
     assert.deepEqual(dispatched.map(({ ids }) => ids), [['interest', 'interest-loss', 'clarity'], ['clarity']]);

@@ -1,35 +1,35 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { decisionRequestSchema, decisionValueFromResult, decisionValueSchema } from '../domain/decision/decision.js';
-import { validateDecision } from '../domain/decision/validate.js';
-import { compileDecisionPacketForCompiler } from '../domain/decision/prompt.js';
+import { decisionRequestSchema } from '../domain/decision/decision.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import { evaluationStatusSchema, journeyEventsSchema, journeyRouteSchema, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyRespondentState, type JourneyRunRecord, type JourneyWorkerTurn, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
-import { decisionFailureDetailForReason, decisionResultSchema, decisionBatchResultSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
-import { followOnLineageSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
+import { evaluationStatusSchema, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyRunRecord, type JourneyWorkerTurn, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
+import type { DecisionBatchResult } from '../domain/decision/decision.js';
+import { runRequestSchema, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
-import { journeyTopology } from '../domain/journey/topology.js';
+import { journeyTopology, journeyTransitionForResponse } from '../domain/journey/topology.js';
 import { asNumber, asText, parseJson, parseJsonRecord, parseStored, type DatabaseRow } from './sqlite/rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './sqlite/cursors.js';
 import { loadAttempts } from './sqlite/attempt-queries.js';
 import { loadRunDeletionSnapshot, type RunDeletionSnapshot } from './sqlite/run-deletion-queries.js';
 import { queryEvidencePage } from './sqlite/evidence-query.js';
-import { findRunBySubmission, hasAllFollowOnSelections, loadEvaluationStatuses, runExists } from './sqlite/run-identity-queries.js';
-import { encodeStoredPayload } from './sqlite/payload-codecs.js';
+import { findRunBySubmission, loadEvaluationStatuses, runExists } from './sqlite/run-identity-queries.js';
 import { loadJourneyWorkerTurn } from './sqlite/journey-queries.js';
 import { loadFollowOnSources } from './sqlite/follow-on-queries.js';
-import { claimPreparedRun, failOwnedRun, failPreparedLaunch, finishRun, interruptExpiredRun, interruptReservedAttempts, interruptUnclaimedRun, refreshWorkerLease, requestRunCancellation } from './sqlite/commands/lifecycle.js';
+import { claimPreparedRun, failOwnedRun, failPreparedLaunch, finishRun, refreshWorkerLease, requestRunCancellation } from './sqlite/commands/lifecycle.js';
 import { reservePhysicalAttempt } from './sqlite/commands/reservation.js';
-import { chargeReservedAttempt, linkWinningAnswer, markAttemptAnswered, markAttemptFailed, markAttemptUncertain, markEvaluationAnswered, markEvaluationFailed, markRunFailed, saveAttemptEvaluationFailure } from './sqlite/commands/settlement.js';
-import { persistJourneyRespondentState, persistNextJourneyTurn } from './sqlite/commands/journey-transition.js';
-import { deleteRuns as deleteSelectedRuns, markActiveJourneyRespondentsUnreached, markPendingEvaluationsUnreached, prepareResumedRun, reopenFailedQuestions, reopenJourneyEvaluation, reopenSharedFailure, restoreFailedJourneyRespondent } from './sqlite/commands/recovery.js';
-import { insertAcceptedRun, insertPreparedJourneyData, insertPreparedRunData } from './sqlite/commands/acceptance.js';
-import { decodeResultAndExecution, encounteredMaterialsFromState, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, storedEvaluationFailure } from './sqlite/evidence-records.js';
-import { openSqliteConnection, type SqliteConnection } from './sqlite/connection.js';
+import { chargeReservedAttempt, markAttemptUncertain, settlePollBatch, settleSingleAttempt } from './sqlite/commands/settlement.js';
+import { settleJourneyTurn } from './sqlite/commands/journey-transition.js';
+import { deleteRunSelection, markActiveJourneyRespondentsUnreached, markPendingEvaluationsUnreached, prepareResumedRun, reopenFailedQuestions, reopenJourneyEvaluation, reopenSharedFailure, restoreFailedJourneyRespondent } from './sqlite/commands/recovery.js';
+import { acceptPreparedJourney, acceptPreparedRun } from './sqlite/commands/acceptance.js';
+import { validatePrepared } from './sqlite/commands/prepared-validation.js';
+import { reconcileRun, reconcileSelectedRuns } from './sqlite/commands/reconciliation.js';
+import { decodeResultAndExecution, storedEvaluationFailure } from './sqlite/evidence-records.js';
+import { openSqliteConnection, readTransaction, writeTransaction, type SqliteConnection } from './sqlite/connection.js';
 import { SCHEMA_VERSION } from './sqlite/schema.js';
+import { PREPARED_LAUNCH_WINDOW_MS, RECONCILE_SELECTION_LIMIT, WORKER_LEASE_DURATION_MS } from './sqlite/work-policy.js';
 import { RunStoreError } from '../application/run-store.js';
 import type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, RunCommandRepository, RunListQuery, RunPersistence, RunReadRepository, RunStore, StorageInfo } from '../application/run-store.js';
 export { SCHEMA_VERSION } from './sqlite/schema.js';
@@ -55,22 +55,8 @@ function isJourneyAskNode(journey: JourneyDefinition, nodeId: string, questionId
 }
 
 function journeyRouteTarget(journey: JourneyDefinition, nodeId: string, response: import('../domain/decision/decision.js').DecisionValue): string | undefined {
-  const graph = journeyTopology(journey);
-  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
-  if (node?.kind !== 'ask') return undefined;
-  const edge = graph.transitions.find((candidate) => {
-    if (candidate.fromNodeId !== nodeId) return false;
-    if (response.type === 'choice') return candidate.optionId === response.choice;
-    const interval = candidate.when;
-    const value = response.type === 'score' ? response.score : response.noul;
-    return interval?.type === response.type &&
-      (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) &&
-      (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
-  });
-  return edge?.toNodeId;
+  return journeyTransitionForResponse(journeyTopology(journey), nodeId, response)?.toNodeId;
 }
-
-const LEASE_MS = 30_000;
 
 type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; filtersFingerprint: string };
 type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
@@ -83,186 +69,6 @@ function validateRunIds(runIds: string[]): void {
   }
 }
 
-
-function validatePrepared(prepared: PreparedRun): PreparedRun {
-  const parsedRequest = runRequestSchema.safeParse(prepared.request);
-  if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 ||
-      hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
-    throw new RunStoreError('invalid_prepared_run', 'Prepared run request or fingerprint is invalid.');
-  }
-  if (parsedRequest.data.kind === 'follow-on') {
-    const parsedLineage = followOnLineageSchema.safeParse(prepared.lineage);
-    if (!parsedLineage.success) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on material lineage is invalid.');
-    const lineage = parsedLineage.data;
-    const includesSelectedMaterial = parsedRequest.data.context.includeSelectedMaterial === true;
-    if (includesSelectedMaterial) {
-      const coverage = lineage.selectionCoverage;
-      const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
-      const eligibleIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
-      if (!coverage || coverage.eligible !== eligibleIds.size || coverage.matched !== coverage.eligible + lineage.excludedSelections.length ||
-          [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial }) => !selectedMaterial)) {
-        throw new RunStoreError('invalid_prepared_run', 'Selected-material coverage and source lineage are inconsistent.');
-      }
-    } else if (lineage.selectionCoverage !== undefined || lineage.selections.some(({ selectedMaterial }) => selectedMaterial !== undefined)) {
-      throw new RunStoreError('invalid_prepared_run', 'Selected-material lineage cannot be attached to a request without the resolver flag.');
-    }
-    const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
-    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId ||
-        lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === 'completed')) {
-      throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on lineage does not match its request and frozen evaluations.');
-    }
-    const evaluationIds = new Set<string>(); const groupIds = new Set<string>();
-    const questionIdsByGroup = new Map<string, string[]>();
-    if (!prepared.groups || prepared.groups.length === 0 || new Set(prepared.groups.map(({ groupId }) => groupId)).size !== prepared.groups.length) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on groups are missing or duplicated.');
-    for (const group of prepared.groups) groupIds.add(group.groupId);
-    const snapshotKeys = new Set<string>();
-    const snapshotsByKey = new Map<string, FollowOnLineage['materialSnapshots'][number]>();
-    for (const snapshot of lineage.materialSnapshots) {
-      const key = `${snapshot.contextId}:${snapshot.respondentId}`;
-      if (snapshotKeys.has(key) || !prepared.groups.some((group) => group.contextId === snapshot.contextId && group.respondentId === snapshot.respondentId)) {
-        throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on material snapshots do not match an accepted respondent context.');
-      }
-      snapshotKeys.add(key);
-      snapshotsByKey.set(key, snapshot);
-    }
-    for (const evaluation of prepared.evaluations) {
-      const packet = decisionRequestSchema.safeParse(evaluation.packet);
-      if (!packet.success || !prepared.groups?.some((group) => group.groupId === evaluation.groupId && group.contextId === evaluation.contextId && group.respondentId === evaluation.respondentId && group.questionIds.includes(evaluation.questionId) && hashCanonical(group.state) === hashCanonical(packet.data.state)) ||
-          !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId ||
-          hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint ||
-          evaluationIds.has(evaluation.evaluationId) || !groupIds.has(evaluation.groupId ?? '')) {
-        throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on evaluation or source selection is inconsistent.');
-      }
-      if (packet.data.question.type === 'choice' && packet.data.question.materialOptions) {
-        const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
-        for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
-          const item = catalog.find(({ id }) => id === materialId);
-          if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
-            throw new RunStoreError('invalid_prepared_run', `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
-          }
-        }
-      }
-      if (includesSelectedMaterial) {
-        const mappings = lineage.selections.filter(({ evaluationId }) => evaluationId === evaluation.evaluationId);
-        const selected = mappings[0]?.selectedMaterial;
-        const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
-        const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
-        const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text }) => id === selected.materialId && text === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed ||
-            selected.textSha256 !== createHash('sha256').update(selected.text, 'utf8').digest('hex') ||
-            snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
-          throw new RunStoreError('invalid_prepared_run', 'Selected-material lineage does not match its frozen recipient packet and catalog.');
-        }
-      }
-      evaluationIds.add(evaluation.evaluationId);
-      const ids = questionIdsByGroup.get(evaluation.groupId!) ?? []; ids.push(evaluation.questionId); questionIdsByGroup.set(evaluation.groupId!, ids);
-    }
-    if (!prepared.groups || prepared.groups.length === 0 || lineage.selections.some((selection) => !evaluationIds.has(selection.evaluationId)) ||
-      prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) ||
-          JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on group lineage is inconsistent.');
-    if (includesSelectedMaterial) {
-      const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => question.type === 'choice' ? Object.values(question.materialOptions ?? {}) : []));
-      for (const group of prepared.groups) {
-        const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
-        const expectedIds = new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
-        if (!snapshot || JSON.stringify([...snapshot.materials.map(({ id }) => id)].sort()) !== JSON.stringify([...expectedIds].sort())) {
-          throw new RunStoreError('invalid_prepared_run', 'Selected-material catalog contains unrelated material or omits a packet dependency.');
-        }
-      }
-    }
-    return { ...prepared, request: parsedRequest.data, lineage };
-  }
-  if (parsedRequest.data.kind !== 'poll') throw new RunStoreError('invalid_prepared_run', 'A journey must be accepted through journey preparation.');
-  if (!prepared.groups || prepared.groups.length !== parsedRequest.data.respondents.length || prepared.evaluations.length !== parsedRequest.data.respondents.length * parsedRequest.data.questions.length) {
-    throw new RunStoreError('invalid_prepared_run', 'Prepared run question groups do not match respondents and questions.');
-  }
-  const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-  const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
-  const evaluationIds = new Set<string>();
-  const seenRespondents = new Set<string>();
-  const questionIdsByGroup = new Map<string, string[]>();
-  for (const evaluation of prepared.evaluations) {
-    const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    const group = prepared.groups.find(({ groupId }) => groupId === evaluation.groupId);
-    if (!packet.success || !group || group.respondentId !== evaluation.respondentId || group.contextId !== evaluation.contextId || hashCanonical(group.state) !== hashCanonical(packet.data.state) || !respondentIds.has(evaluation.respondentId) || evaluationIds.has(evaluation.evaluationId) ||
-        !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId ||
-        hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
-      throw new RunStoreError('invalid_prepared_run', 'Prepared run evaluation or packet fingerprint is invalid.');
-    }
-    evaluationIds.add(evaluation.evaluationId);
-    seenRespondents.add(evaluation.respondentId);
-    const ids = questionIdsByGroup.get(group.groupId) ?? []; ids.push(evaluation.questionId); questionIdsByGroup.set(group.groupId, ids);
-  }
-  if (seenRespondents.size !== respondentIds.size || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) ||
-      JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds) || !respondentIds.has(group.respondentId))) throw new RunStoreError('invalid_prepared_run', 'Every respondent must have one complete ordered question group.');
-  return { ...prepared, request: parsedRequest.data };
-}
-
-function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJourneyRun {
-  const parsedRequest = runRequestSchema.safeParse(prepared.request);
-  if (!parsedRequest.success || parsedRequest.data.kind !== 'journey' || prepared.compilerFingerprint.length === 0 ||
-      hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
-    throw new RunStoreError('invalid_prepared_run', 'Prepared journey request or fingerprint is invalid.');
-  }
-  const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
-  const respondentIdSet = new Set(respondentIds);
-  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length !== respondentIds.length || prepared.evaluations.length === 0) {
-    throw new RunStoreError('invalid_prepared_run', 'Prepared journey requires unique respondent state and at least one reached turn.');
-  }
-  const stateById = new Map<string, JourneyRespondentState>();
-  const allowedStatuses = new Set(['active', 'completed', 'failed', 'unreached']);
-  for (const state of prepared.respondents) {
-    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || stateById.has(state.respondentId) || !Number.isSafeInteger(state.revision) || state.revision < 0 ||
-        !Array.isArray(state.events) || !Array.isArray(state.route) ||
-        (state.status === 'active' ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) :
-          state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null)) {
-      throw new RunStoreError('invalid_prepared_run', 'Prepared journey respondent state is inconsistent.');
-    }
-    stateById.set(state.respondentId, state);
-  }
-  if (stateById.size !== respondentIdSet.size) throw new RunStoreError('invalid_prepared_run', 'Every journey respondent requires durable state.');
-
-  const evaluationIds = new Set<string>();
-  const turnIds = new Set<string>();
-  const contextIds = new Set<string>();
-  const nodeOccurrences = new Set<string>();
-  const activeTurnIds = new Set<string>();
-  for (const evaluation of prepared.evaluations) {
-    const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    const state = stateById.get(evaluation.respondentId);
-    const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
-    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
-    if (!packet.success || !state || !respondent || state.status !== 'active' ||
-        !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 ||
-        !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id ||
-        state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId ||
-        !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) ||
-        hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) ||
-        evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) ||
-        !respondentIdSet.has(evaluation.respondentId) ||
-        hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
-      throw new RunStoreError('invalid_prepared_run', 'Prepared journey turn or context reference is invalid.');
-    }
-    evaluationIds.add(evaluation.evaluationId);
-    turnIds.add(evaluation.turnId);
-    contextIds.add(evaluation.contextId);
-    nodeOccurrences.add(nodeOccurrence);
-    activeTurnIds.add(evaluation.turnId);
-  }
-  for (const state of prepared.respondents) {
-    if (state.status === 'active' && !activeTurnIds.has(state.currentTurnId!)) {
-      throw new RunStoreError('invalid_prepared_run', 'Every active journey respondent requires one pending turn.');
-    }
-    if (state.status !== 'active' && prepared.evaluations.some(({ respondentId }) => respondentId === state.respondentId)) {
-      throw new RunStoreError('invalid_prepared_run', 'A terminal or unreached respondent cannot have a pending turn.');
-    }
-  }
-  const ordered = prepared.evaluations.toSorted((left, right) => left.ordinal - right.ordinal);
-  if (ordered.some((evaluation, index) => evaluation.ordinal !== index)) {
-    throw new RunStoreError('invalid_prepared_run', 'Prepared journey turn ordinals must be contiguous from zero.');
-  }
-  return { ...prepared, request: parsedRequest.data };
-}
 
 export function openRunStore(dataRoot: string, options: { now?: () => number } = {}): RunStore {
   if (!path.isAbsolute(dataRoot)) throw new RunStoreError('invalid_data_root', 'Sheg data directory must be an absolute path.');
@@ -321,62 +127,12 @@ class SQLiteRunStore implements RunStore {
 
   accept(submissionId: string, preparedInput: PreparedRun): { created: boolean; run: RunStatusView } {
     this.ensureOpen();
-    if (!submissionId.trim()) throw new RunStoreError('invalid_submission_id', 'A submission ID is required.');
-    const prepared = validatePrepared(preparedInput);
-    return this.transaction(() => {
-      const prior = this.database.prepare('SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?').get(submissionId) as DatabaseRow | undefined;
-      if (prior) {
-        const priorFingerprint = asText(prior.request_fingerprint, 'request fingerprint');
-        if (priorFingerprint !== prepared.requestFingerprint) throw new RunStoreError('submission_conflict', 'This submission ID has already been used with different request contents.');
-        const runId = asText(prior.run_id, 'run ID');
-        this.reconcileInside(runId, this.now());
-        return { created: false, run: this.statusInside(runId) };
-      }
-
-      if (prepared.request.kind === 'follow-on') {
-        const source = this.database.prepare('SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?').get(prepared.lineage!.sourceRunId) as DatabaseRow | undefined;
-        if (!source) throw this.notFound();
-        const maxOrdinal = asNumber((this.database.prepare('SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?').get(prepared.lineage!.sourceRunId) as DatabaseRow).maximum, 'maximum evaluation ordinal');
-        const version = prepared.lineage!.sourceVersion;
-        if (asText(source.status, 'source run status') !== version.status || asNumber(source.used_calls, 'source used calls') !== version.usedCalls ||
-            asNumber(source.reserved_calls, 'source reserved calls') !== version.reservedCalls || maxOrdinal !== version.maxOrdinal) {
-          throw new RunStoreError('source_changed_during_acceptance', 'The source run changed after follow-on inspection. Inspect the request again to use its current evidence.');
-        }
-        if (!hasAllFollowOnSelections(this.database, prepared.lineage!.sourceRunId, prepared.lineage!.selections)) {
-          throw new RunStoreError('source_changed_during_acceptance', 'A selected source evaluation changed after follow-on inspection. Inspect the request again.');
-        }
-      }
-
-      const runId = randomUUID();
-      const nowMs = this.now();
-      const createdAt = new Date(nowMs).toISOString();
-      insertAcceptedRun(this.connection.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
-      insertPreparedRunData(this.connection.orm, runId, prepared);
-      return { created: true, run: this.statusInside(runId) };
-    });
+    return acceptPreparedRun(this.acceptanceContext(), submissionId, preparedInput);
   }
 
   acceptJourney(submissionId: string, preparedInput: PreparedJourneyRun): { created: boolean; run: RunStatusView } {
     this.ensureOpen();
-    if (!submissionId.trim()) throw new RunStoreError('invalid_submission_id', 'A submission ID is required.');
-    const prepared = validatePreparedJourney(preparedInput);
-    return this.transaction(() => {
-      const prior = this.database.prepare('SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?').get(submissionId) as DatabaseRow | undefined;
-      if (prior) {
-        const priorFingerprint = asText(prior.request_fingerprint, 'request fingerprint');
-        if (priorFingerprint !== prepared.requestFingerprint) throw new RunStoreError('submission_conflict', 'This submission ID has already been used with different request contents.');
-        const runId = asText(prior.run_id, 'run ID');
-        this.reconcileInside(runId, this.now());
-        return { created: false, run: this.statusInside(runId) };
-      }
-
-      const runId = randomUUID();
-      const nowMs = this.now();
-      const createdAt = new Date(nowMs).toISOString();
-      insertAcceptedRun(this.connection.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
-      insertPreparedJourneyData(this.connection.orm, runId, prepared);
-      return { created: true, run: this.statusInside(runId) };
-    });
+    return acceptPreparedJourney(this.acceptanceContext(), submissionId, preparedInput);
   }
 
   getStatus(runId: string): RunStatusView {
@@ -589,7 +345,7 @@ class SQLiteRunStore implements RunStore {
           throw new RunStoreError('data_integrity_error', 'The saved failed journey checkpoint changed during resume.');
         }
       }
-      prepareResumedRun(this.connection.orm, runId, nowMs + LEASE_MS);
+      prepareResumedRun(this.connection.orm, runId, nowMs + PREPARED_LAUNCH_WINDOW_MS);
       return { started: true, run: this.statusInside(runId) };
     });
   }
@@ -604,7 +360,7 @@ class SQLiteRunStore implements RunStore {
       const selected = new Set(runIds);
       const runs = runIds.map((runId) => {
         const row = snapshot.runs.find((candidate) => candidate.runId === runId)!;
-        const status = this.deletePreviewStatus(row, nowMs);
+        const status = deletePreviewStatus(row, nowMs);
         return {
           runId,
           status,
@@ -621,38 +377,15 @@ class SQLiteRunStore implements RunStore {
   deleteRuns(runIds: string[]): DeleteResult {
     this.ensureOpen();
     validateRunIds(runIds);
-    const result = this.transaction(() => {
-      const nowMs = this.now();
-      const snapshot = loadRunDeletionSnapshot(this.connection.orm, runIds, { includeReservedAttemptCounts: true });
-      if (snapshot.runs.length !== runIds.length) throw this.notFound();
-      const statuses = this.reconcileSelectedRuns(snapshot, nowMs);
-      const counts = runIds.map((runId) => {
-        const status = statuses.get(runId)!;
-        if (status === 'prepared' || status === 'running') {
-          throw new RunStoreError('runs_active', 'Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.');
-        }
-        return {
-          runId,
-          evaluations: snapshot.evaluationCounts.get(runId) ?? 0,
-          attempts: snapshot.attemptCounts.get(runId) ?? 0,
-        };
-      });
-      deleteSelectedRuns(this.connection.orm, runIds);
-      const violations = this.database.prepare('PRAGMA foreign_key_check').all() as DatabaseRow[];
-      const integrity = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
-      if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
-        throw new RunStoreError('storage_integrity_failed', 'The datastore integrity check failed; no runs were deleted.');
-      }
-      return { deletedRunIds: counts.map(({ runId }) => runId), removed: { runs: counts.length, evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0), attempts: counts.reduce((sum, item) => sum + item.attempts, 0) } };
-    });
-    let maintenance: DeleteResult['maintenance'];
-    try {
-      this.optimizeStorage();
-      maintenance = { optimization: 'completed' };
-    } catch (error) {
-      maintenance = { optimization: 'failed', failureCode: error instanceof RunStoreError ? error.code : 'storage_operation_failed' };
-    }
-    return { ...result, maintenance };
+    return deleteRunSelection({
+      database: this.database,
+      orm: this.connection.orm,
+      transaction: <T>(operation: () => T) => this.transaction(operation),
+      now: this.now,
+      reconcile: (snapshot, nowMs) => reconcileSelectedRuns(this.connection.orm, snapshot, nowMs),
+      notFound: () => this.notFound(),
+      optimize: () => this.optimizeStorage(),
+    }, runIds);
   }
 
   storageInfo(): StorageInfo {
@@ -691,17 +424,17 @@ class SQLiteRunStore implements RunStore {
     return this.transaction(() => {
       const row = this.database.prepare('SELECT status, created_ms, cancel_requested, lease_expires_ms FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
       if (!row) throw this.notFound();
-      const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, 'created time') + LEASE_MS : asNumber(row.lease_expires_ms, 'launch deadline');
+      const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, 'created time') + PREPARED_LAUNCH_WINDOW_MS : asNumber(row.lease_expires_ms, 'launch deadline');
       if (asText(row.status, 'run status') !== 'prepared' || asNumber(row.cancel_requested, 'cancel flag') === 1 || nowMs >= launchDeadline) return null;
       const ownerToken = randomUUID();
-      if (!claimPreparedRun(this.connection.orm, runId, ownerToken, workerPid, nowMs + LEASE_MS)) return null;
+      if (!claimPreparedRun(this.connection.orm, runId, ownerToken, workerPid, nowMs + WORKER_LEASE_DURATION_MS)) return null;
       return { runId, ownerToken };
     });
   }
 
   heartbeat(claim: WorkerClaim, nowMs: number): boolean {
     this.ensureOpen();
-    return this.transaction(() => refreshWorkerLease(this.connection.orm, claim, nowMs, LEASE_MS));
+    return this.transaction(() => refreshWorkerLease(this.connection.orm, claim, nowMs, WORKER_LEASE_DURATION_MS));
   }
 
   reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null {
@@ -753,205 +486,19 @@ class SQLiteRunStore implements RunStore {
     });
   }
 
-  settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): void {
+  settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): Array<{ evaluationId: string; status: AnswerRow['status'] }> {
     this.ensureOpen();
-    this.transaction(() => {
-      const nowMs = this.now(); this.ownedRun(claim, nowMs);
-      const attempt = this.database.prepare("SELECT * FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'")
-        .get(attemptId, claim.runId, claim.ownerToken) as DatabaseRow | undefined;
-      if (!attempt) throw new RunStoreError('attempt_not_reserved', 'The provider attempt is not reserved by this worker.');
-      const rows = this.database.prepare(`SELECT e.* FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id) WHERE ae.attempt_id = ? ORDER BY e.ordinal`).all(attemptId) as DatabaseRow[];
-      if (!rows.length) throw new RunStoreError('data_integrity_error', 'The provider attempt has no linked evaluations.');
-      const chargedCalls = outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.execution.attempts;
-      if (outcome.kind === 'failed') {
-        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
-        for (const row of rows) {
-          const evaluationId = asText(row.evaluation_id, 'evaluation ID');
-          markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
-          if (outcome.detail || outcome.providerFailure) saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId,
-            evaluationFailureJson({ code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) }));
-        }
-        if (outcome.scope === 'run') markRunFailed(this.connection.orm, claim.runId, outcome.code, outcome.message);
-      } else {
-        const result = decisionBatchResultSchema.safeParse(outcome.result);
-        if (!result.success) throw new RunStoreError('invalid_batch_result', 'The batch result envelope is invalid.');
-        const expected = new Map(rows.map((row) => [asText(row.question_id, 'question ID'), row]));
-        if (result.data.answers.some(({ questionId }) => !expected.has(questionId))) throw new RunStoreError('invalid_batch_result', 'The batch result contains an unknown question ID.');
-        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.data.execution.attempts, JSON.stringify(result.data.execution));
-        for (const [questionId, row] of expected) {
-          const answer = result.data.answers.find((item) => item.questionId === questionId);
-          const evaluationId = asText(row.evaluation_id, 'evaluation ID');
-          if (!answer) {
-            markEvaluationFailed(this.connection.orm, evaluationId, 'missing_batch_answer', 'Provider returned no answer for this question.');
-            saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId,
-              evaluationFailureJson({ code: 'missing_batch_answer', message: 'Provider returned no answer for this question.' }));
-          } else if ('failure' in answer) {
-            const failure = { code: answer.failure.code, message: answer.failure.message, ...(answer.failure.detail ? { detail: answer.failure.detail } : {}) };
-            markEvaluationFailed(this.connection.orm, evaluationId, failure.code, failure.message, failureEvidenceJson(failure));
-            saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
-          } else {
-            const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet'));
-            let validated: ReturnType<typeof validateDecision> | undefined;
-            try {
-              const typed = decisionResultSchema.parse({ ...answer.value, ...result.data.execution });
-              validated = validateDecision(packet, typed, { maxAttempts: 1 });
-            } catch {
-              const failure = { code: 'invalid_decision', message: 'The stored answer did not satisfy this question contract.', detail: decisionFailureDetailForReason('invalid_answer') };
-              markEvaluationFailed(this.connection.orm, evaluationId, failure.code, failure.message, failureEvidenceJson(failure));
-              saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
-            }
-            if (validated) {
-              markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload('decision-value', answer.value, decisionValueSchema));
-              linkWinningAnswer(this.connection.orm, claim.runId, evaluationId, attemptId);
-            }
-          }
-        }
-      }
-      if (!chargeReservedAttempt(this.connection.orm, claim.runId, chargedCalls)) {
-        throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to settle.');
-      }
-    });
+    return this.transaction(() => settlePollBatch({ database: this.database, orm: this.connection.orm, now: this.now, ownedRun: (owner, nowMs) => this.ownedRun(owner, nowMs) }, claim, attemptId, outcome));
   }
-
   settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void {
     this.ensureOpen();
-    this.transaction(() => {
-      const nowMs = this.now();
-      this.ownedRun(claim, nowMs);
-      const attempt = this.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'")
-        .get(attemptId, claim.runId, claim.ownerToken) as DatabaseRow | undefined;
-      if (!attempt) throw new RunStoreError('attempt_not_reserved', 'The provider attempt is not reserved by this worker.');
-      const evaluationId = asText(attempt.evaluation_id, 'evaluation ID');
-      const evaluation = this.database.prepare('SELECT packet_json FROM evaluations WHERE evaluation_id = ? AND run_id = ?').get(evaluationId, claim.runId) as DatabaseRow | undefined;
-      if (!evaluation) throw new RunStoreError('data_integrity_error', 'The reserved evaluation is missing.');
-      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, 'frozen packet'));
-
-      if (outcome.kind === 'answered') {
-        const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.attempts, JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), JSON.stringify(result));
-        markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema));
-        linkWinningAnswer(this.connection.orm, claim.runId, evaluationId, attemptId);
-      } else {
-        const chargedCalls = outcome.providerAttempts ?? 1;
-        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
-        markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
-        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
-        saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
-        if (outcome.scope === 'run') {
-          markRunFailed(this.connection.orm, claim.runId, outcome.code, outcome.message);
-        }
-      }
-      if (!chargeReservedAttempt(this.connection.orm, claim.runId, outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
-        throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to settle.');
-      }
-    });
+    this.transaction(() => settleSingleAttempt({ database: this.database, orm: this.connection.orm, now: this.now, ownedRun: (owner, nowMs) => this.ownedRun(owner, nowMs) }, claim, attemptId, outcome));
   }
 
   settleJourney(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome, transition: JourneyTransition): void {
     this.ensureOpen();
-    this.transaction(() => {
-      const nowMs = this.now();
-      this.ownedRun(claim, nowMs);
-      const attempt = this.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'")
-        .get(attemptId, claim.runId, claim.ownerToken) as DatabaseRow | undefined;
-      if (!attempt) throw new RunStoreError('attempt_not_reserved', 'The provider attempt is not reserved by this worker.');
-      const evaluationId = asText(attempt.evaluation_id, 'evaluation ID');
-      const evaluation = this.database.prepare('SELECT packet_json, turn_id, node_id, respondent_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?')
-        .get(evaluationId, claim.runId) as DatabaseRow | undefined;
-      if (!evaluation) throw new RunStoreError('data_integrity_error', 'The reserved journey turn is missing.');
-      const turnId = asText(evaluation.turn_id, 'turn ID');
-      const nodeId = asText(evaluation.node_id, 'node ID');
-      const respondentId = asText(evaluation.respondent_id, 'respondent ID');
-      if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId ||
-          !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 ||
-          transition.state.revision !== transition.expectedRevision + 1) {
-        throw new RunStoreError('journey_transition_conflict', 'Journey transition does not match the reserved respondent turn.');
-      }
-      const stateRow = this.database.prepare('SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ?')
-        .get(claim.runId, respondentId) as DatabaseRow | undefined;
-      if (!stateRow || asNumber(stateRow.revision, 'journey state revision') !== transition.expectedRevision ||
-          asText(stateRow.current_turn_id, 'current turn ID') !== turnId || asText(stateRow.current_node_id, 'current node ID') !== nodeId) {
-        throw new RunStoreError('journey_transition_conflict', 'Journey respondent state has moved since this turn was reserved.');
-      }
-      const priorEvents = parseStored(journeyEventsSchema, parseJson(stateRow.events_json, 'journey history'), 'journey history');
-      const priorRoute = parseStored(journeyRouteSchema, parseJson(stateRow.route_json, 'journey route'), 'journey route');
-      if (transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) ||
-          transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
-        throw new RunStoreError('journey_transition_conflict', 'Journey transitions must preserve ordered prior evidence.');
-      }
-      const runRow = this.database.prepare('SELECT request_json FROM runs WHERE run_id = ?').get(claim.runId) as DatabaseRow | undefined;
-      const storedRun = parseJsonRecord(runRow?.request_json, 'run request');
-      const parsedRunRequest = runRequestSchema.safeParse(storedRun.request);
-      if (!parsedRunRequest.success || parsedRunRequest.data.kind !== 'journey' || typeof storedRun.compilerFingerprint !== 'string') {
-        throw new RunStoreError('data_integrity_error', 'Stored journey request is invalid.');
-      }
-      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, 'frozen packet'));
-      if (outcome.kind === 'answered') {
-        const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        const answerEvent = transition.state.events.slice(priorEvents.length).findLast(
-          (event): event is Extract<JourneyRespondentState['events'][number], { type: 'response' }> => event.type === 'response' && event.nodeId === nodeId,
-        );
-        if (!answerEvent || answerEvent.taskId !== packet.question.id ||
-            !sameDecisionValue(answerEvent.result, result)) {
-          throw new RunStoreError('journey_transition_conflict', 'Journey transition must append the exact typed answer for this turn.');
-        }
-        const routeAddition = transition.state.route.slice(priorRoute.length);
-        const expectedTarget = journeyRouteTarget(parsedRunRequest.data.journey, nodeId, result);
-        if (routeAddition.length !== 1 || routeAddition[0]!.nodeId !== nodeId || routeAddition[0]!.toNodeId !== expectedTarget ||
-            !sameDecisionValue(routeAddition[0]!.response, result) || transition.state.status === 'failed') {
-          throw new RunStoreError('journey_transition_conflict', 'Journey transition must record the exact typed response and matching route outcome.');
-        }
-        if (transition.state.status === 'active') {
-          if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId ||
-              transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId ||
-              transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
-            throw new RunStoreError('journey_transition_conflict', 'An active respondent must point to exactly one next reached turn.');
-          }
-        } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
-          throw new RunStoreError('journey_transition_conflict', 'A terminal respondent state cannot have a next reached turn.');
-        }
-        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.attempts,
-          JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }),
-          JSON.stringify(result));
-        markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema));
-        linkWinningAnswer(this.connection.orm, claim.runId, evaluationId, attemptId);
-      } else {
-        const sharedFailure = outcome.scope === 'run';
-        if (transition.nextEvaluation || (sharedFailure
-          ? transition.state.status !== 'active' || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, 'current context ID') || transition.state.currentNodeId !== nodeId
-          : transition.state.status !== 'failed' || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
-          throw new RunStoreError('journey_transition_conflict', 'A failed turn must preserve a resumable shared turn or stop only this respondent.');
-        }
-        const chargedCalls = outcome.providerAttempts ?? 1;
-        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
-        markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
-        const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
-        saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure));
-        if (outcome.scope === 'run') markRunFailed(this.connection.orm, claim.runId, outcome.code, outcome.message);
-      }
-      if (transition.nextEvaluation) {
-        const next = transition.nextEvaluation;
-        const nextPacket = decisionRequestSchema.safeParse(next.packet);
-        const respondent = parsedRunRequest.data.respondents.find(({ id }) => id === respondentId);
-        const current = this.database.prepare('SELECT COALESCE(MAX(ordinal), -1) AS ordinal FROM evaluations WHERE run_id = ?').get(claim.runId) as DatabaseRow;
-        if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 ||
-            !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, 'evaluation ordinal') + 1 ||
-            next.questionId !== nextPacket.data.question.id || !isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) ||
-            hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) ||
-            hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
-          throw new RunStoreError('invalid_journey_turn', 'Next journey turn is invalid or does not follow the persisted evaluation order.');
-        }
-        persistNextJourneyTurn(this.connection.orm, claim.runId, next);
-      }
-      if (!persistJourneyRespondentState(this.connection.orm, claim.runId, transition)) {
-        throw new RunStoreError('journey_transition_conflict', 'Journey respondent state changed before its transition committed.');
-      }
-      if (!chargeReservedAttempt(this.connection.orm, claim.runId, outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
-        throw new RunStoreError('data_integrity_error', 'The run has no reserved physical call to settle.');
-      }
-    });
+    this.transaction(() => settleJourneyTurn({ database: this.database, orm: this.connection.orm, now: this.now, ownedRun: (owner, nowMs) => this.ownedRun(owner, nowMs), sameDecisionValue, journeyRouteTarget, isJourneyAskNode }, claim, attemptId, outcome, transition));
   }
-
   finish(claim: WorkerClaim): RunStatusView {
     this.ensureOpen();
     return this.transaction(() => {
@@ -1040,36 +587,39 @@ class SQLiteRunStore implements RunStore {
   reconcileActive(nowMs: number): void {
     this.ensureOpen();
     this.transaction(() => {
-      const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all() as DatabaseRow[];
-      for (const row of active) this.reconcileInside(asText(row.run_id, 'run ID'), nowMs);
+      while (true) {
+        const active = this.database.prepare(`SELECT run_id FROM runs WHERE
+          (status = 'prepared' AND COALESCE(lease_expires_ms, created_ms + ?) <= ?) OR
+          (status = 'running' AND lease_expires_ms <= ?)
+          ORDER BY COALESCE(lease_expires_ms, created_ms), run_id LIMIT ?`)
+          .all(PREPARED_LAUNCH_WINDOW_MS, nowMs, nowMs, RECONCILE_SELECTION_LIMIT) as DatabaseRow[];
+        if (!active.length) break;
+        for (const row of active) this.reconcileInside(asText(row.run_id, 'run ID'), nowMs);
+      }
     });
   }
 
   private transaction<T>(operation: () => T): T {
-    this.database.exec('BEGIN IMMEDIATE');
-    try {
-      const result = operation();
-      this.database.exec('COMMIT');
-      return result;
-    } catch (error) {
-      try { this.database.exec('ROLLBACK'); } catch { /* The original operation error carries the useful detail. */ }
-      throw error;
-    }
+    return writeTransaction(this.database, operation);
+  }
+
+  private acceptanceContext() {
+    return {
+      database: this.database,
+      orm: this.connection.orm,
+      now: this.now,
+      transaction: <T>(operation: () => T) => this.transaction(operation),
+      statusInside: (runId: string) => this.statusInside(runId),
+      reconcileInside: (runId: string, nowMs: number) => this.reconcileInside(runId, nowMs),
+      notFound: () => this.notFound(),
+    };
   }
 
   private readTransaction<T>(operation: () => T): T {
-    this.database.exec('BEGIN');
-    try {
-      const result = operation();
-      this.database.exec('COMMIT');
-      return result;
-    } catch (error) {
-      try { this.database.exec('ROLLBACK'); } catch { /* Preserve the useful resolver error. */ }
-      throw error;
-    }
+    return readTransaction(this.database, operation);
   }
 
-  private notFound(): RunStoreError { return new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.'); }
+  private notFound(): never { throw new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.'); }
 
   private statusInside(runId: string): RunStatusView {
     const result = this.statusesInside([runId])[0];
@@ -1100,57 +650,17 @@ class SQLiteRunStore implements RunStore {
   }
 
   private reconcileInside(runId: string, nowMs: number): void {
-    const run = this.database.prepare('SELECT * FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
-    if (!run) throw this.notFound();
-    const status = asText(run.status, 'run status');
-    const launchDeadline = run.lease_expires_ms === null ? asNumber(run.created_ms, 'created time') + LEASE_MS : asNumber(run.lease_expires_ms, 'launch deadline');
-    if (status === 'prepared' && nowMs >= launchDeadline) {
-      interruptUnclaimedRun(this.connection.orm, runId);
-    } else if (status === 'running' && run.lease_expires_ms !== null && asNumber(run.lease_expires_ms, 'worker lease') <= nowMs) {
-      const attempts = this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ? AND status = 'reserved'").get(runId) as DatabaseRow;
-      const uncertain = asNumber(attempts.count, 'uncertain attempt count');
-      if (uncertain !== asNumber(run.reserved_calls, 'reserved calls')) {
-        throw new RunStoreError('data_integrity_error', 'Reserved call counters do not match reserved attempts.');
-      }
-      const updatedUncertainAttempts = interruptReservedAttempts(this.connection.orm, runId, nowMs);
-      if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(this.connection.orm, runId, nowMs, uncertain)) {
-        throw new RunStoreError('data_integrity_error', 'Expired worker reservations changed during reconciliation.');
-      }
-    }
+    reconcileRun(this.database, this.connection.orm, runId, nowMs, () => this.notFound());
   }
 
-  private deletePreviewStatus(run: RunDeletionSnapshot['runs'][number], nowMs: number): RunStatus {
-    const status = asText(run.status, 'run status') as RunStatus;
-    const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
-    const expired = status === 'prepared' && leaseExpires <= nowMs ||
-      status === 'running' && run.leaseExpiresMs !== null && leaseExpires <= nowMs;
-    return expired ? 'interrupted' : status;
-  }
+}
 
-  private reconcileSelectedRuns(snapshot: RunDeletionSnapshot, nowMs: number): Map<string, RunStatus> {
-    const statuses = new Map<string, RunStatus>();
-    for (const run of snapshot.runs) {
-      const status = asText(run.status, 'run status') as RunStatus;
-      const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
-      if (status === 'prepared' && nowMs >= leaseExpires) {
-        interruptUnclaimedRun(this.connection.orm, run.runId);
-        statuses.set(run.runId, 'interrupted');
-      } else if (status === 'running' && run.leaseExpiresMs !== null && run.leaseExpiresMs <= nowMs) {
-        const uncertain = snapshot.reservedAttemptCounts.get(run.runId) ?? 0;
-        if (uncertain !== run.reservedCalls) {
-          throw new RunStoreError('data_integrity_error', 'Reserved call counters do not match reserved attempts.');
-        }
-        const updatedUncertainAttempts = interruptReservedAttempts(this.connection.orm, run.runId, nowMs);
-        if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(this.connection.orm, run.runId, nowMs, uncertain)) {
-          throw new RunStoreError('data_integrity_error', 'Expired worker reservations changed during reconciliation.');
-        }
-        statuses.set(run.runId, 'interrupted');
-      } else {
-        statuses.set(run.runId, status);
-      }
-    }
-    return statuses;
-  }
+function deletePreviewStatus(run: RunDeletionSnapshot['runs'][number], nowMs: number): RunStatus {
+  const status = asText(run.status, 'run status') as RunStatus;
+  const leaseExpires = run.leaseExpiresMs ?? run.createdMs + PREPARED_LAUNCH_WINDOW_MS;
+  const expired = status === 'prepared' && leaseExpires <= nowMs ||
+    status === 'running' && run.leaseExpiresMs !== null && leaseExpires <= nowMs;
+  return expired ? 'interrupted' : status;
 }
 
 export function resetRunStore(dataRoot: string): ReturnType<typeof import('./sqlite/recovery.js').resetRunStore> {

@@ -84,12 +84,12 @@
 
 **Interfaces:** Commands own live precondition validation and mutation. A shared synchronous transaction owner exposes deferred reads and immediate writes. Settlement returns affected evaluation outcomes for worker state updates; application callers see no ORM or SQLite objects. `openRunStore` preserves its public composition result.
 
-- [ ] Move prepared validation, acceptance, lifecycle reconciliation, settlement, journey advancement and deletion orchestration to focused command owners. Keep operation atomicity explicit rather than distributing implicit nested commits.
-- [ ] Invoke domain transition matching and shared material consistency rules from persistence. Retain boundary-specific error translation without independently reimplementing rules.
-- [ ] Return actual affected outcomes from poll settlement and update the worker's local statuses from those outcomes, removing whole-run status reloads after each batch.
-- [ ] Select eligible expired work in bounded queries and distinguish launch/lease policies by meaning. Reuse established policy owners rather than relying on coincidentally equal numeric literals.
-- [ ] Exercise injected rollback during settlement, mixed batch outcomes, uncertain charged calls, stale respondent revisions, preserved previous journey answers, resume allowance, and cancellation. Reuse existing cases and fill genuine gaps.
-- [ ] Verify `run-store.ts` now owns composition and lifecycle of the persistence subsystem, not its operations. No line-count assertion. Run affected tests and commit.
+- [x] Move prepared validation, acceptance, lifecycle reconciliation, settlement, journey advancement and deletion orchestration to focused command owners. Keep operation atomicity explicit rather than distributing implicit nested commits.
+- [x] Invoke domain transition matching and shared material consistency rules from persistence. Retain boundary-specific error translation without independently reimplementing rules.
+- [x] Return actual affected outcomes from poll settlement and update the worker's local statuses from those outcomes, removing whole-run status reloads after each batch.
+- [x] Select eligible expired work in bounded queries and distinguish launch/lease policies by meaning. Reuse established policy owners rather than relying on coincidentally equal numeric literals.
+- [x] Exercise injected rollback during settlement, mixed batch outcomes, uncertain charged calls, stale respondent revisions, preserved previous journey answers, resume allowance, and cancellation. Reuse existing cases and fill genuine gaps.
+- [x] Verify `run-store.ts` now owns composition and lifecycle of the persistence subsystem, not its operations. No line-count assertion. Run affected tests and commit.
 
 ## Task 6: Unify provider execution and application dispatch
 

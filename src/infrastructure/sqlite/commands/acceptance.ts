@@ -1,5 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import type { RunStatusView } from '../../../domain/run/lifecycle.js';
 import type { PreparedJourneyRun, PreparedRun } from '../../../domain/run/request.js';
+import { RunStoreError } from '../../../application/run-store.js';
+import { asNumber, asText, type DatabaseRow } from '../rows.js';
+import { hasAllFollowOnSelections } from '../run-identity-queries.js';
+import { validatePrepared, validatePreparedJourney } from './prepared-validation.js';
 import { evaluations, journeyRespondents, questionGroups, runs } from '../tables.js';
 
 const SQLITE_INSERT_BATCH_SIZE = 250;
@@ -11,6 +18,76 @@ type AcceptedRun = {
   createdAt: string;
   createdMs: number;
 };
+
+type AcceptanceContext = {
+  database: DatabaseSync;
+  orm: NodeSQLiteDatabase;
+  now(): number;
+  transaction<T>(operation: () => T): T;
+  statusInside(runId: string): RunStatusView;
+  reconcileInside(runId: string, nowMs: number): void;
+  notFound(): never;
+};
+
+export function acceptPreparedRun(context: AcceptanceContext, submissionId: string, preparedInput: PreparedRun): { created: boolean; run: RunStatusView } {
+  if (!submissionId.trim()) throw new RunStoreError('invalid_submission_id', 'A submission ID is required.');
+  const prepared = validatePrepared(preparedInput);
+  return context.transaction(() => {
+    const prior = context.database.prepare('SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?').get(submissionId) as DatabaseRow | undefined;
+    if (prior) {
+      if (asText(prior.request_fingerprint, 'request fingerprint') !== prepared.requestFingerprint) {
+        throw new RunStoreError('submission_conflict', 'This submission ID has already been used with different request contents.');
+      }
+      const runId = asText(prior.run_id, 'run ID');
+      context.reconcileInside(runId, context.now());
+      return { created: false, run: context.statusInside(runId) };
+    }
+
+    if (prepared.request.kind === 'follow-on') {
+      const lineage = prepared.lineage;
+      if (!lineage) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on lineage is missing.');
+      const sourceId = lineage.sourceRunId;
+      const source = context.database.prepare('SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?').get(sourceId) as DatabaseRow | undefined;
+      if (!source) throw context.notFound();
+      const maxOrdinal = asNumber((context.database.prepare('SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?').get(sourceId) as DatabaseRow).maximum, 'maximum evaluation ordinal');
+      const version = lineage.sourceVersion;
+      if (asText(source.status, 'source run status') !== version.status || asNumber(source.used_calls, 'source used calls') !== version.usedCalls ||
+          asNumber(source.reserved_calls, 'source reserved calls') !== version.reservedCalls || maxOrdinal !== version.maxOrdinal) {
+        throw new RunStoreError('source_changed_during_acceptance', 'The source run changed after follow-on inspection. Inspect the request again to use its current evidence.');
+      }
+      if (!hasAllFollowOnSelections(context.database, sourceId, lineage.selections)) {
+        throw new RunStoreError('source_changed_during_acceptance', 'A selected source evaluation changed after follow-on inspection. Inspect the request again.');
+      }
+    }
+
+    const runId = randomUUID();
+    const nowMs = context.now();
+    insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
+    insertPreparedRunData(context.orm, runId, prepared);
+    return { created: true, run: context.statusInside(runId) };
+  });
+}
+
+export function acceptPreparedJourney(context: AcceptanceContext, submissionId: string, preparedInput: PreparedJourneyRun): { created: boolean; run: RunStatusView } {
+  if (!submissionId.trim()) throw new RunStoreError('invalid_submission_id', 'A submission ID is required.');
+  const prepared = validatePreparedJourney(preparedInput);
+  return context.transaction(() => {
+    const prior = context.database.prepare('SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?').get(submissionId) as DatabaseRow | undefined;
+    if (prior) {
+      if (asText(prior.request_fingerprint, 'request fingerprint') !== prepared.requestFingerprint) {
+        throw new RunStoreError('submission_conflict', 'This submission ID has already been used with different request contents.');
+      }
+      const runId = asText(prior.run_id, 'run ID');
+      context.reconcileInside(runId, context.now());
+      return { created: false, run: context.statusInside(runId) };
+    }
+    const runId = randomUUID();
+    const nowMs = context.now();
+    insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
+    insertPreparedJourneyData(context.orm, runId, prepared);
+    return { created: true, run: context.statusInside(runId) };
+  });
+}
 
 function chunks<T>(values: T[], size: number): T[][] {
   const result: T[][] = [];

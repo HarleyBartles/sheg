@@ -20246,6 +20246,7 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory) {
       const reservation = commands.reserveBatch(claim2, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
       if (!reservation) break;
       const batch = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
+      let settled;
       try {
         let result;
         if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
@@ -20261,15 +20262,13 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory) {
             ...single.cost ? { cost: single.cost } : {}
           } };
         }
-        commands.settleBatch(claim2, reservation.attemptId, { kind: "answered", result });
+        settled = commands.settleBatch(claim2, reservation.attemptId, { kind: "answered", result });
       } catch (error62) {
         const scope = failureScope(error62);
-        commands.settleBatch(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope });
+        settled = commands.settleBatch(claim2, reservation.attemptId, { kind: "failed", ...failureDetails(error62, scope), scope });
         if (scope === "run") return;
       }
-      for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, "answered");
-      const latest = new Map(reads.evaluationStatuses(runId2).map((answer) => [answer.evaluationId, answer.status]));
-      for (const evaluation of evaluations2) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId));
+      for (const evaluation of settled) answers.set(evaluation.evaluationId, evaluation.status);
     }
   }
 }
@@ -20352,155 +20351,9 @@ function failureDetails(error62, scope) {
 }
 
 // src/infrastructure/run-store.ts
-import { createHash as createHash6, randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 import { mkdirSync as mkdirSync2, statSync } from "node:fs";
 import path3 from "node:path";
-
-// src/domain/decision/validate.ts
-var DecisionError = class extends Error {
-  reason;
-  constructor(message, options2) {
-    super(message, options2);
-    this.name = "DecisionError";
-    this.reason = options2?.reason ?? "invalid_answer";
-  }
-};
-var probabilitySumTolerance = 0.01;
-function validateProviderExecution(evidence, options2) {
-  const maxAttempts = options2.maxAttempts ?? 1;
-  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || evidence.attempts > maxAttempts) {
-    throw new DecisionError(`Provider execution attempts exceed the configured limit of ${maxAttempts}.`);
-  }
-  for (const key of ["provider", "model", "checkpoint"]) {
-    if (options2[key] !== void 0 && evidence[key] !== options2[key]) {
-      throw new DecisionError(`Provider execution ${key} does not match the configured ${key}.`);
-    }
-  }
-  return evidence;
-}
-function validateDecision(request, result, options2 = {}) {
-  const parsedRequest = decisionRequestSchema.safeParse(request);
-  if (!parsedRequest.success) {
-    throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
-  }
-  const parsed = decisionResultSchema.safeParse(result);
-  if (!parsed.success) {
-    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error, reason: "malformed_answer" });
-  }
-  const decision = parsed.data;
-  const normalizedRequest = parsedRequest.data;
-  validateProviderExecution(decision, options2);
-  if (decision.type !== normalizedRequest.question.type) {
-    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`, { reason: "answer_type_mismatch" });
-  }
-  if (decision.type === "choice") {
-    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.", { reason: "answer_type_mismatch" });
-    const optionIds = Object.keys(normalizedRequest.question.options);
-    if (!optionIds.includes(decision.choice)) {
-      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`, { reason: "unknown_option" });
-    }
-    validateDistribution(decision.probabilities, optionIds, "Choice");
-  } else if (decision.type === "score") {
-    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.", { reason: "answer_type_mismatch" });
-    const rubric = normalizedRequest.question.rubric;
-    const levelIds = rubric.map((_level, index2) => String(index2));
-    if (decision.score < 0 || decision.score > rubric.length - 1) {
-      throw new DecisionError("Score result is outside the declared rubric range.", { reason: "score_out_of_range" });
-    }
-    validateDistribution(decision.probabilities, levelIds, "Score");
-    for (const [index2, meaning] of rubric.entries()) {
-      if (decision.legend[String(index2)] !== meaning) {
-        throw new DecisionError(`Score legend does not match rubric level ${index2}.`, { reason: "score_legend_mismatch" });
-      }
-    }
-  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.", { reason: "answer_type_mismatch" });
-  return decision;
-}
-function validateDecisionBatch(request, result, options2 = {}) {
-  const parsedRequest = decisionBatchRequestSchema.safeParse(request);
-  if (!parsedRequest.success) {
-    throw new DecisionError(`Decision batch request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
-  }
-  const envelope = batchEnvelopeSchema.safeParse(result);
-  if (!envelope.success) {
-    throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: envelope.error });
-  }
-  const execution = validateProviderExecution(envelope.data.execution, options2);
-  for (const answer of envelope.data.answers) {
-    if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
-      throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);
-    }
-  }
-  const answers = parsedRequest.data.questions.map((question) => {
-    const matches = envelope.data.answers.filter(({ questionId }) => questionId === question.id);
-    if (matches.length > 1) return { questionId: question.id, failure: { code: "duplicate_answer", message: "The provider returned this question more than once." } };
-    const answer = matches[0];
-    if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
-    if (answer.failure) return { questionId: question.id, failure: answer.failure };
-    const value = decisionValueSchema.safeParse(answer.value);
-    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The answer does not match a supported typed-answer shape.", detail: decisionFailureDetailForReason("malformed_answer") } };
-    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The answer type does not match the question type.", detail: decisionFailureDetailForReason("answer_type_mismatch") } };
-    if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
-      return { questionId: question.id, failure: { code: "invalid_answer", message: "The selected option was not offered by this question.", detail: decisionFailureDetailForReason("unknown_option") } };
-    }
-    try {
-      const enriched = { ...value.data, ...execution };
-      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
-      return { questionId: question.id, value: decisionValueFromResult(checked) };
-    } catch (error62) {
-      if (!(error62 instanceof DecisionError)) throw error62;
-      return { questionId: question.id, failure: decisionValidationFailure(error62) };
-    }
-  });
-  return decisionBatchResultSchema.parse({ answers, execution });
-}
-function decisionValidationFailure(error62) {
-  return decisionValidationFailureForReason(error62.reason);
-}
-function decisionValidationFailureForReason(reason) {
-  const detail = decisionFailureDetailForReason(reason);
-  return { code: detail.reason === "answer_type_mismatch" ? "answer_type_mismatch" : "invalid_answer", message: decisionFailureMessage(detail), detail };
-}
-function decisionFailureMessage(detail) {
-  switch (detail.reason) {
-    case "malformed_answer":
-      return "The answer does not match a supported typed-answer shape.";
-    case "answer_type_mismatch":
-      return "The answer type does not match the question type.";
-    case "unknown_option":
-      return "The selected option was not offered by this question.";
-    case "probability_keys":
-      return "The probability distribution must contain exactly the declared outcomes.";
-    case "probability_sum":
-      return "The probability distribution must sum to 1 within the accepted tolerance.";
-    case "score_out_of_range":
-      return "The score falls outside the declared rubric range.";
-    case "score_legend_mismatch":
-      return "The score legend does not match the declared rubric.";
-    case "invalid_answer":
-      return "The answer failed a typed-answer validation rule.";
-  }
-}
-var batchEnvelopeSchema = external_exports.object({
-  answers: external_exports.array(external_exports.object({
-    questionId: external_exports.string().min(1),
-    value: external_exports.unknown().optional(),
-    failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional()
-  }).strict().superRefine((answer, context) => {
-    if ("value" in answer === Boolean(answer.failure)) context.addIssue({ code: "custom", message: "Each batch answer must contain exactly one value or failure." });
-  })),
-  execution: providerExecutionEvidenceSchema
-}).strict();
-function validateDistribution(distribution, expectedIds, label) {
-  const ids = Object.keys(distribution);
-  if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
-    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`, { reason: "probability_keys" });
-  }
-  const total = Object.values(distribution).reduce((sum2, value) => sum2 + value, 0);
-  if (Math.abs(total - 1) > probabilitySumTolerance) {
-    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`, { reason: "probability_sum" });
-  }
-}
 
 // src/domain/run/lifecycle.ts
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
@@ -27084,6 +26937,152 @@ function reservePhysicalAttempt(database, attempt) {
   database.update(runs).set({ reservedCalls: sql`${runs.reservedCalls} + 1` }).where(eq(runs.runId, attempt.runId)).run();
 }
 
+// src/domain/decision/validate.ts
+var DecisionError = class extends Error {
+  reason;
+  constructor(message, options2) {
+    super(message, options2);
+    this.name = "DecisionError";
+    this.reason = options2?.reason ?? "invalid_answer";
+  }
+};
+var probabilitySumTolerance = 0.01;
+function validateProviderExecution(evidence, options2) {
+  const maxAttempts = options2.maxAttempts ?? 1;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || evidence.attempts > maxAttempts) {
+    throw new DecisionError(`Provider execution attempts exceed the configured limit of ${maxAttempts}.`);
+  }
+  for (const key of ["provider", "model", "checkpoint"]) {
+    if (options2[key] !== void 0 && evidence[key] !== options2[key]) {
+      throw new DecisionError(`Provider execution ${key} does not match the configured ${key}.`);
+    }
+  }
+  return evidence;
+}
+function validateDecision(request, result, options2 = {}) {
+  const parsedRequest = decisionRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
+  }
+  const parsed = decisionResultSchema.safeParse(result);
+  if (!parsed.success) {
+    throw new DecisionError(`Decision result is invalid: ${parsed.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsed.error, reason: "malformed_answer" });
+  }
+  const decision = parsed.data;
+  const normalizedRequest = parsedRequest.data;
+  validateProviderExecution(decision, options2);
+  if (decision.type !== normalizedRequest.question.type) {
+    throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`, { reason: "answer_type_mismatch" });
+  }
+  if (decision.type === "choice") {
+    if (normalizedRequest.question.type !== "choice") throw new DecisionError("Choice response does not match the task type.", { reason: "answer_type_mismatch" });
+    const optionIds = Object.keys(normalizedRequest.question.options);
+    if (!optionIds.includes(decision.choice)) {
+      throw new DecisionError(`Decision choice ${decision.choice} was not offered.`, { reason: "unknown_option" });
+    }
+    validateDistribution(decision.probabilities, optionIds, "Choice");
+  } else if (decision.type === "score") {
+    if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.", { reason: "answer_type_mismatch" });
+    const rubric = normalizedRequest.question.rubric;
+    const levelIds = rubric.map((_level, index2) => String(index2));
+    if (decision.score < 0 || decision.score > rubric.length - 1) {
+      throw new DecisionError("Score result is outside the declared rubric range.", { reason: "score_out_of_range" });
+    }
+    validateDistribution(decision.probabilities, levelIds, "Score");
+    for (const [index2, meaning] of rubric.entries()) {
+      if (decision.legend[String(index2)] !== meaning) {
+        throw new DecisionError(`Score legend does not match rubric level ${index2}.`, { reason: "score_legend_mismatch" });
+      }
+    }
+  } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.", { reason: "answer_type_mismatch" });
+  return decision;
+}
+function validateDecisionBatch(request, result, options2 = {}) {
+  const parsedRequest = decisionBatchRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new DecisionError(`Decision batch request is invalid: ${parsedRequest.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: parsedRequest.error });
+  }
+  const envelope = batchEnvelopeSchema.safeParse(result);
+  if (!envelope.success) {
+    throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue2) => issue2.message).join(" ")}`, { cause: envelope.error });
+  }
+  const execution = validateProviderExecution(envelope.data.execution, options2);
+  for (const answer of envelope.data.answers) {
+    if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
+      throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);
+    }
+  }
+  const answers = parsedRequest.data.questions.map((question) => {
+    const matches = envelope.data.answers.filter(({ questionId }) => questionId === question.id);
+    if (matches.length > 1) return { questionId: question.id, failure: { code: "duplicate_answer", message: "The provider returned this question more than once." } };
+    const answer = matches[0];
+    if (!answer) return { questionId: question.id, failure: { code: "missing_answer", message: "The provider did not return an answer for this question." } };
+    if (answer.failure) return { questionId: question.id, failure: answer.failure };
+    const value = decisionValueSchema.safeParse(answer.value);
+    if (!value.success) return { questionId: question.id, failure: { code: "invalid_answer", message: "The answer does not match a supported typed-answer shape.", detail: decisionFailureDetailForReason("malformed_answer") } };
+    if (value.data.type !== question.type) return { questionId: question.id, failure: { code: "answer_type_mismatch", message: "The answer type does not match the question type.", detail: decisionFailureDetailForReason("answer_type_mismatch") } };
+    if (question.type === "choice" && (value.data.type !== "choice" || !Object.hasOwn(question.options, value.data.choice))) {
+      return { questionId: question.id, failure: { code: "invalid_answer", message: "The selected option was not offered by this question.", detail: decisionFailureDetailForReason("unknown_option") } };
+    }
+    try {
+      const enriched = { ...value.data, ...execution };
+      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
+      return { questionId: question.id, value: decisionValueFromResult(checked) };
+    } catch (error62) {
+      if (!(error62 instanceof DecisionError)) throw error62;
+      return { questionId: question.id, failure: decisionValidationFailure(error62) };
+    }
+  });
+  return decisionBatchResultSchema.parse({ answers, execution });
+}
+function decisionValidationFailure(error62) {
+  return decisionValidationFailureForReason(error62.reason);
+}
+function decisionValidationFailureForReason(reason) {
+  const detail = decisionFailureDetailForReason(reason);
+  return { code: detail.reason === "answer_type_mismatch" ? "answer_type_mismatch" : "invalid_answer", message: decisionFailureMessage(detail), detail };
+}
+function decisionFailureMessage(detail) {
+  switch (detail.reason) {
+    case "malformed_answer":
+      return "The answer does not match a supported typed-answer shape.";
+    case "answer_type_mismatch":
+      return "The answer type does not match the question type.";
+    case "unknown_option":
+      return "The selected option was not offered by this question.";
+    case "probability_keys":
+      return "The probability distribution must contain exactly the declared outcomes.";
+    case "probability_sum":
+      return "The probability distribution must sum to 1 within the accepted tolerance.";
+    case "score_out_of_range":
+      return "The score falls outside the declared rubric range.";
+    case "score_legend_mismatch":
+      return "The score legend does not match the declared rubric.";
+    case "invalid_answer":
+      return "The answer failed a typed-answer validation rule.";
+  }
+}
+var batchEnvelopeSchema = external_exports.object({
+  answers: external_exports.array(external_exports.object({
+    questionId: external_exports.string().min(1),
+    value: external_exports.unknown().optional(),
+    failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional()
+  }).strict().superRefine((answer, context) => {
+    if ("value" in answer === Boolean(answer.failure)) context.addIssue({ code: "custom", message: "Each batch answer must contain exactly one value or failure." });
+  })),
+  execution: providerExecutionEvidenceSchema
+}).strict();
+function validateDistribution(distribution, expectedIds, label) {
+  const ids = Object.keys(distribution);
+  if (ids.length !== expectedIds.length || expectedIds.some((id) => !Object.hasOwn(distribution, id))) {
+    throw new DecisionError(`${label} probabilities must contain exactly one entry for every declared outcome.`, { reason: "probability_keys" });
+  }
+  const total = Object.values(distribution).reduce((sum2, value) => sum2 + value, 0);
+  if (Math.abs(total - 1) > probabilitySumTolerance) {
+    throw new DecisionError(`${label} probabilities must sum to 1 within ${probabilitySumTolerance}.`, { reason: "probability_sum" });
+  }
+}
+
 // src/infrastructure/sqlite/commands/settlement.ts
 function chargeReservedAttempt(database, runId2, chargedCalls) {
   return database.update(runs).set({
@@ -27114,6 +27113,101 @@ function linkWinningAnswer(database, runId2, evaluationId, attemptId) {
 }
 function markRunFailed(database, runId2, code, message) {
   database.update(runs).set({ failureScope: "run", failureCode: code, failureMessage: message }).where(eq(runs.runId, runId2)).run();
+}
+function settlePollBatch(context, claim2, attemptId, outcome) {
+  const nowMs = context.now();
+  context.ownedRun(claim2, nowMs);
+  const attempt = context.database.prepare("SELECT * FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
+  if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
+  const rows = context.database.prepare(`SELECT e.* FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id) WHERE ae.attempt_id = ? ORDER BY e.ordinal`).all(attemptId);
+  if (!rows.length) throw new RunStoreError("data_integrity_error", "The provider attempt has no linked evaluations.");
+  const chargedCalls = outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.execution.attempts;
+  if (outcome.kind === "failed") {
+    markAttemptFailed(context.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
+    for (const row of rows) {
+      const evaluationId = asText(row.evaluation_id, "evaluation ID");
+      markEvaluationFailed(context.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
+      if (outcome.detail || outcome.providerFailure) saveAttemptEvaluationFailure(
+        context.orm,
+        attemptId,
+        evaluationId,
+        evaluationFailureJson({ code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} })
+      );
+    }
+    if (outcome.scope === "run") markRunFailed(context.orm, claim2.runId, outcome.code, outcome.message);
+  } else {
+    const result = decisionBatchResultSchema.safeParse(outcome.result);
+    if (!result.success) throw new RunStoreError("invalid_batch_result", "The batch result envelope is invalid.");
+    const expected = new Map(rows.map((row) => [asText(row.question_id, "question ID"), row]));
+    if (result.data.answers.some(({ questionId }) => !expected.has(questionId))) throw new RunStoreError("invalid_batch_result", "The batch result contains an unknown question ID.");
+    markAttemptAnswered(context.orm, attemptId, nowMs, result.data.execution.attempts, JSON.stringify(result.data.execution));
+    for (const [questionId, row] of expected) {
+      const answer = result.data.answers.find((item) => item.questionId === questionId);
+      const evaluationId = asText(row.evaluation_id, "evaluation ID");
+      if (!answer) {
+        markEvaluationFailed(context.orm, evaluationId, "missing_batch_answer", "Provider returned no answer for this question.");
+        saveAttemptEvaluationFailure(
+          context.orm,
+          attemptId,
+          evaluationId,
+          evaluationFailureJson({ code: "missing_batch_answer", message: "Provider returned no answer for this question." })
+        );
+      } else if ("failure" in answer) {
+        const failure2 = { code: answer.failure.code, message: answer.failure.message, ...answer.failure.detail ? { detail: answer.failure.detail } : {} };
+        markEvaluationFailed(context.orm, evaluationId, failure2.code, failure2.message, failureEvidenceJson(failure2));
+        saveAttemptEvaluationFailure(context.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
+      } else {
+        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet"));
+        let validated;
+        try {
+          const typed = decisionResultSchema.parse({ ...answer.value, ...result.data.execution });
+          validated = validateDecision(packet, typed, { maxAttempts: 1 });
+        } catch {
+          const failure2 = { code: "invalid_decision", message: "The stored answer did not satisfy this question contract.", detail: decisionFailureDetailForReason("invalid_answer") };
+          markEvaluationFailed(context.orm, evaluationId, failure2.code, failure2.message, failureEvidenceJson(failure2));
+          saveAttemptEvaluationFailure(context.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
+        }
+        if (validated) {
+          markEvaluationAnswered(context.orm, evaluationId, encodeStoredPayload("decision-value", answer.value, decisionValueSchema));
+          linkWinningAnswer(context.orm, claim2.runId, evaluationId, attemptId);
+        }
+      }
+    }
+  }
+  if (!chargeReservedAttempt(context.orm, claim2.runId, chargedCalls)) {
+    throw new RunStoreError("data_integrity_error", "The run has no reserved physical call to settle.");
+  }
+  return context.database.prepare(`SELECT e.evaluation_id, e.status FROM attempt_evaluations ae
+        JOIN evaluations e USING (evaluation_id) WHERE ae.attempt_id = ? ORDER BY e.ordinal`).all(attemptId).map((row) => ({
+    evaluationId: asText(row.evaluation_id, "evaluation ID"),
+    status: parseStored(evaluationStatusSchema, row.status, "evaluation status")
+  }));
+}
+function settleSingleAttempt(context, claim2, attemptId, outcome) {
+  const nowMs = context.now();
+  context.ownedRun(claim2, nowMs);
+  const attempt = context.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
+  if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
+  const evaluationId = asText(attempt.evaluation_id, "evaluation ID");
+  const evaluation = context.database.prepare("SELECT packet_json FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
+  if (!evaluation) throw new RunStoreError("data_integrity_error", "The reserved evaluation is missing.");
+  const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
+  if (outcome.kind === "answered") {
+    const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
+    markAttemptAnswered(context.orm, attemptId, nowMs, result.attempts, JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), JSON.stringify(result));
+    markEvaluationAnswered(context.orm, evaluationId, encodeStoredPayload("decision-value", decisionValueFromResult(result), decisionValueSchema));
+    linkWinningAnswer(context.orm, claim2.runId, evaluationId, attemptId);
+  } else {
+    const chargedCalls = outcome.providerAttempts ?? 1;
+    markAttemptFailed(context.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
+    markEvaluationFailed(context.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
+    const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
+    saveAttemptEvaluationFailure(context.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
+    if (outcome.scope === "run") markRunFailed(context.orm, claim2.runId, outcome.code, outcome.message);
+  }
+  if (!chargeReservedAttempt(context.orm, claim2.runId, outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
+    throw new RunStoreError("data_integrity_error", "The run has no reserved physical call to settle.");
+  }
 }
 
 // src/infrastructure/sqlite/commands/journey-transition.ts
@@ -27160,6 +27254,95 @@ function persistJourneyRespondentState(database, runId2, transition) {
     eq(journeyRespondents.respondentId, transition.respondentId),
     eq(journeyRespondents.revision, transition.expectedRevision)
   )).returning({ runId: journeyRespondents.runId }).all().length === 1;
+}
+function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
+  const nowMs = context.now();
+  context.ownedRun(claim2, nowMs);
+  const attempt = context.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
+  if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
+  const evaluationId = asText(attempt.evaluation_id, "evaluation ID");
+  const evaluation = context.database.prepare("SELECT packet_json, turn_id, node_id, respondent_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
+  if (!evaluation) throw new RunStoreError("data_integrity_error", "The reserved journey turn is missing.");
+  const turnId = asText(evaluation.turn_id, "turn ID");
+  const nodeId = asText(evaluation.node_id, "node ID");
+  const respondentId = asText(evaluation.respondent_id, "respondent ID");
+  if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId || !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 || transition.state.revision !== transition.expectedRevision + 1) {
+    throw new RunStoreError("journey_transition_conflict", "Journey transition does not match the reserved respondent turn.");
+  }
+  const stateRow = context.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ?").get(claim2.runId, respondentId);
+  if (!stateRow || asNumber(stateRow.revision, "journey state revision") !== transition.expectedRevision || asText(stateRow.current_turn_id, "current turn ID") !== turnId || asText(stateRow.current_node_id, "current node ID") !== nodeId) {
+    throw new RunStoreError("journey_transition_conflict", "Journey respondent state has moved since this turn was reserved.");
+  }
+  const priorEvents = parseStored(journeyEventsSchema, parseJson(stateRow.events_json, "journey history"), "journey history");
+  const priorRoute = parseStored(journeyRouteSchema, parseJson(stateRow.route_json, "journey route"), "journey route");
+  if (transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) || transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
+    throw new RunStoreError("journey_transition_conflict", "Journey transitions must preserve ordered prior evidence.");
+  }
+  const runRow = context.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(claim2.runId);
+  const storedRun = parseJsonRecord(runRow?.request_json, "run request");
+  const parsedRunRequest = runRequestSchema.safeParse(storedRun.request);
+  if (!parsedRunRequest.success || parsedRunRequest.data.kind !== "journey" || typeof storedRun.compilerFingerprint !== "string") {
+    throw new RunStoreError("data_integrity_error", "Stored journey request is invalid.");
+  }
+  const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
+  if (outcome.kind === "answered") {
+    const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
+    const answerEvent = transition.state.events.slice(priorEvents.length).findLast(
+      (event) => event.type === "response" && event.nodeId === nodeId
+    );
+    if (!answerEvent || answerEvent.taskId !== packet.question.id || !context.sameDecisionValue(answerEvent.result, result)) {
+      throw new RunStoreError("journey_transition_conflict", "Journey transition must append the exact typed answer for this turn.");
+    }
+    const routeAddition = transition.state.route.slice(priorRoute.length);
+    const expectedTarget = context.journeyRouteTarget(parsedRunRequest.data.journey, nodeId, result);
+    if (routeAddition.length !== 1 || routeAddition[0].nodeId !== nodeId || routeAddition[0].toNodeId !== expectedTarget || !context.sameDecisionValue(routeAddition[0].response, result) || transition.state.status === "failed") {
+      throw new RunStoreError("journey_transition_conflict", "Journey transition must record the exact typed response and matching route outcome.");
+    }
+    if (transition.state.status === "active") {
+      if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId || transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId || transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
+        throw new RunStoreError("journey_transition_conflict", "An active respondent must point to exactly one next reached turn.");
+      }
+    } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
+      throw new RunStoreError("journey_transition_conflict", "A terminal respondent state cannot have a next reached turn.");
+    }
+    markAttemptAnswered(
+      context.orm,
+      attemptId,
+      nowMs,
+      result.attempts,
+      JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }),
+      JSON.stringify(result)
+    );
+    markEvaluationAnswered(context.orm, evaluationId, encodeStoredPayload("decision-value", decisionValueFromResult(result), decisionValueSchema));
+    linkWinningAnswer(context.orm, claim2.runId, evaluationId, attemptId);
+  } else {
+    const sharedFailure = outcome.scope === "run";
+    if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
+      throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
+    }
+    const chargedCalls = outcome.providerAttempts ?? 1;
+    markAttemptFailed(context.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
+    markEvaluationFailed(context.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
+    const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
+    saveAttemptEvaluationFailure(context.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
+    if (outcome.scope === "run") markRunFailed(context.orm, claim2.runId, outcome.code, outcome.message);
+  }
+  if (transition.nextEvaluation) {
+    const next = transition.nextEvaluation;
+    const nextPacket = decisionRequestSchema.safeParse(next.packet);
+    const respondent = parsedRunRequest.data.respondents.find(({ id }) => id === respondentId);
+    const current = context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS ordinal FROM evaluations WHERE run_id = ?").get(claim2.runId);
+    if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !context.isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
+      throw new RunStoreError("invalid_journey_turn", "Next journey turn is invalid or does not follow the persisted evaluation order.");
+    }
+    persistNextJourneyTurn(context.orm, claim2.runId, next);
+  }
+  if (!persistJourneyRespondentState(context.orm, claim2.runId, transition)) {
+    throw new RunStoreError("journey_transition_conflict", "Journey respondent state changed before its transition committed.");
+  }
+  if (!chargeReservedAttempt(context.orm, claim2.runId, outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
+    throw new RunStoreError("data_integrity_error", "The run has no reserved physical call to settle.");
+  }
 }
 
 // src/infrastructure/sqlite/commands/recovery.ts
@@ -27208,9 +27391,264 @@ function markActiveJourneyRespondentsUnreached(database, runId2) {
 function deleteRuns(database, runIds) {
   database.delete(runs).where(inArray(runs.runId, runIds)).run();
 }
+function deleteRunSelection(context, runIds) {
+  const result = context.transaction(() => {
+    const snapshot = loadRunDeletionSnapshot(context.orm, runIds, { includeReservedAttemptCounts: true });
+    if (snapshot.runs.length !== runIds.length) throw context.notFound();
+    const statuses = context.reconcile(snapshot, context.now());
+    const counts = runIds.map((runId2) => {
+      const status = statuses.get(runId2);
+      if (status === "prepared" || status === "running") {
+        throw new RunStoreError("runs_active", "Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.");
+      }
+      return { evaluations: snapshot.evaluationCounts.get(runId2) ?? 0, attempts: snapshot.attemptCounts.get(runId2) ?? 0 };
+    });
+    deleteRuns(context.orm, runIds);
+    const violations = context.database.prepare("PRAGMA foreign_key_check").all();
+    const integrity = context.database.prepare("PRAGMA integrity_check").all();
+    if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
+      throw new RunStoreError("storage_integrity_failed", "The datastore integrity check failed; no runs were deleted.");
+    }
+    return { deletedRunIds: [...runIds], removed: {
+      runs: counts.length,
+      evaluations: counts.reduce((sum2, item) => sum2 + item.evaluations, 0),
+      attempts: counts.reduce((sum2, item) => sum2 + item.attempts, 0)
+    } };
+  });
+  let maintenance;
+  try {
+    context.optimize();
+    maintenance = { optimization: "completed" };
+  } catch (error62) {
+    maintenance = { optimization: "failed", failureCode: error62 instanceof RunStoreError ? error62.code : "storage_operation_failed" };
+  }
+  return { ...result, maintenance };
+}
+
+// src/infrastructure/sqlite/commands/acceptance.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+// src/infrastructure/sqlite/commands/prepared-validation.ts
+import { createHash as createHash5 } from "node:crypto";
+function isJourneyAskNode(journey, nodeId, questionId) {
+  const node2 = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
+  return node2?.kind === "ask" && node2.taskId === questionId;
+}
+function validatePrepared(prepared) {
+  const parsedRequest = runRequestSchema.safeParse(prepared.request);
+  if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared run request or fingerprint is invalid.");
+  }
+  if (parsedRequest.data.kind === "follow-on") {
+    const parsedLineage = followOnLineageSchema.safeParse(prepared.lineage);
+    if (!parsedLineage.success) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material lineage is invalid.");
+    const lineage = parsedLineage.data;
+    const includesSelectedMaterial = parsedRequest.data.context.includeSelectedMaterial === true;
+    if (includesSelectedMaterial) {
+      const coverage = lineage.selectionCoverage;
+      const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const eligibleIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      if (!coverage || coverage.eligible !== eligibleIds.size || coverage.matched !== coverage.eligible + lineage.excludedSelections.length || [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial }) => !selectedMaterial)) {
+        throw new RunStoreError("invalid_prepared_run", "Selected-material coverage and source lineage are inconsistent.");
+      }
+    } else if (lineage.selectionCoverage !== void 0 || lineage.selections.some(({ selectedMaterial }) => selectedMaterial !== void 0)) {
+      throw new RunStoreError("invalid_prepared_run", "Selected-material lineage cannot be attached to a request without the resolver flag.");
+    }
+    const requestedQuestionIds2 = parsedRequest.data.questions.map(({ id }) => id);
+    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId || lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === "completed")) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage does not match its request and frozen evaluations.");
+    }
+    const evaluationIds2 = /* @__PURE__ */ new Set();
+    const groupIds = /* @__PURE__ */ new Set();
+    const questionIdsByGroup2 = /* @__PURE__ */ new Map();
+    if (!prepared.groups || prepared.groups.length === 0 || new Set(prepared.groups.map(({ groupId }) => groupId)).size !== prepared.groups.length) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on groups are missing or duplicated.");
+    for (const group of prepared.groups) groupIds.add(group.groupId);
+    const snapshotKeys = /* @__PURE__ */ new Set();
+    const snapshotsByKey = /* @__PURE__ */ new Map();
+    for (const snapshot of lineage.materialSnapshots) {
+      const key = `${snapshot.contextId}:${snapshot.respondentId}`;
+      if (snapshotKeys.has(key) || !prepared.groups.some((group) => group.contextId === snapshot.contextId && group.respondentId === snapshot.respondentId)) {
+        throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material snapshots do not match an accepted respondent context.");
+      }
+      snapshotKeys.add(key);
+      snapshotsByKey.set(key, snapshot);
+    }
+    for (const evaluation of prepared.evaluations) {
+      const packet = decisionRequestSchema.safeParse(evaluation.packet);
+      if (!packet.success || !prepared.groups?.some((group) => group.groupId === evaluation.groupId && group.contextId === evaluation.contextId && group.respondentId === evaluation.respondentId && group.questionIds.includes(evaluation.questionId) && hashCanonical(group.state) === hashCanonical(packet.data.state)) || !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint || evaluationIds2.has(evaluation.evaluationId) || !groupIds.has(evaluation.groupId ?? "")) {
+        throw new RunStoreError("invalid_prepared_run", "Prepared follow-on evaluation or source selection is inconsistent.");
+      }
+      if (packet.data.question.type === "choice" && packet.data.question.materialOptions) {
+        const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
+        for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
+          const item = catalog.find(({ id }) => id === materialId);
+          if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
+            throw new RunStoreError("invalid_prepared_run", `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
+          }
+        }
+      }
+      if (includesSelectedMaterial) {
+        const mappings = lineage.selections.filter(({ evaluationId }) => evaluationId === evaluation.evaluationId);
+        const selected = mappings[0]?.selectedMaterial;
+        const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
+        const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
+        const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text: text2 }) => id === selected.materialId && text2 === selected.text);
+        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash5("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+          throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
+        }
+      }
+      evaluationIds2.add(evaluation.evaluationId);
+      const ids = questionIdsByGroup2.get(evaluation.groupId) ?? [];
+      ids.push(evaluation.questionId);
+      questionIdsByGroup2.set(evaluation.groupId, ids);
+    }
+    if (!prepared.groups || prepared.groups.length === 0 || lineage.selections.some((selection) => !evaluationIds2.has(selection.evaluationId)) || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds2) || JSON.stringify(questionIdsByGroup2.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on group lineage is inconsistent.");
+    if (includesSelectedMaterial) {
+      const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
+      for (const group of prepared.groups) {
+        const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
+        const expectedIds = /* @__PURE__ */ new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
+        if (!snapshot || JSON.stringify([...snapshot.materials.map(({ id }) => id)].sort()) !== JSON.stringify([...expectedIds].sort())) {
+          throw new RunStoreError("invalid_prepared_run", "Selected-material catalog contains unrelated material or omits a packet dependency.");
+        }
+      }
+    }
+    return { ...prepared, request: parsedRequest.data, lineage };
+  }
+  if (parsedRequest.data.kind !== "poll") throw new RunStoreError("invalid_prepared_run", "A journey must be accepted through journey preparation.");
+  if (!prepared.groups || prepared.groups.length !== parsedRequest.data.respondents.length || prepared.evaluations.length !== parsedRequest.data.respondents.length * parsedRequest.data.questions.length) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared run question groups do not match respondents and questions.");
+  }
+  const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
+  const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
+  const evaluationIds = /* @__PURE__ */ new Set();
+  const seenRespondents = /* @__PURE__ */ new Set();
+  const questionIdsByGroup = /* @__PURE__ */ new Map();
+  for (const evaluation of prepared.evaluations) {
+    const packet = decisionRequestSchema.safeParse(evaluation.packet);
+    const group = prepared.groups.find(({ groupId }) => groupId === evaluation.groupId);
+    if (!packet.success || !group || group.respondentId !== evaluation.respondentId || group.contextId !== evaluation.contextId || hashCanonical(group.state) !== hashCanonical(packet.data.state) || !respondentIds.has(evaluation.respondentId) || evaluationIds.has(evaluation.evaluationId) || !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared run evaluation or packet fingerprint is invalid.");
+    }
+    evaluationIds.add(evaluation.evaluationId);
+    seenRespondents.add(evaluation.respondentId);
+    const ids = questionIdsByGroup.get(group.groupId) ?? [];
+    ids.push(evaluation.questionId);
+    questionIdsByGroup.set(group.groupId, ids);
+  }
+  if (seenRespondents.size !== respondentIds.size || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) || JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds) || !respondentIds.has(group.respondentId))) throw new RunStoreError("invalid_prepared_run", "Every respondent must have one complete ordered question group.");
+  return { ...prepared, request: parsedRequest.data };
+}
+function validatePreparedJourney(prepared) {
+  const parsedRequest = runRequestSchema.safeParse(prepared.request);
+  if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared journey request or fingerprint is invalid.");
+  }
+  const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
+  const respondentIdSet = new Set(respondentIds);
+  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length !== respondentIds.length || prepared.evaluations.length === 0) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared journey requires unique respondent state and at least one reached turn.");
+  }
+  const stateById = /* @__PURE__ */ new Map();
+  const allowedStatuses = /* @__PURE__ */ new Set(["active", "completed", "failed", "unreached"]);
+  for (const state of prepared.respondents) {
+    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || stateById.has(state.respondentId) || !Number.isSafeInteger(state.revision) || state.revision < 0 || !Array.isArray(state.events) || !Array.isArray(state.route) || (state.status === "active" ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) : state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null)) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared journey respondent state is inconsistent.");
+    }
+    stateById.set(state.respondentId, state);
+  }
+  if (stateById.size !== respondentIdSet.size) throw new RunStoreError("invalid_prepared_run", "Every journey respondent requires durable state.");
+  const evaluationIds = /* @__PURE__ */ new Set();
+  const turnIds = /* @__PURE__ */ new Set();
+  const contextIds = /* @__PURE__ */ new Set();
+  const nodeOccurrences = /* @__PURE__ */ new Set();
+  const activeTurnIds = /* @__PURE__ */ new Set();
+  for (const evaluation of prepared.evaluations) {
+    const packet = decisionRequestSchema.safeParse(evaluation.packet);
+    const state = stateById.get(evaluation.respondentId);
+    const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
+    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
+    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
+      throw new RunStoreError("invalid_prepared_run", "Prepared journey turn or context reference is invalid.");
+    }
+    evaluationIds.add(evaluation.evaluationId);
+    turnIds.add(evaluation.turnId);
+    contextIds.add(evaluation.contextId);
+    nodeOccurrences.add(nodeOccurrence);
+    activeTurnIds.add(evaluation.turnId);
+  }
+  for (const state of prepared.respondents) {
+    if (state.status === "active" && !activeTurnIds.has(state.currentTurnId)) {
+      throw new RunStoreError("invalid_prepared_run", "Every active journey respondent requires one pending turn.");
+    }
+    if (state.status !== "active" && prepared.evaluations.some(({ respondentId }) => respondentId === state.respondentId)) {
+      throw new RunStoreError("invalid_prepared_run", "A terminal or unreached respondent cannot have a pending turn.");
+    }
+  }
+  const ordered = prepared.evaluations.toSorted((left, right) => left.ordinal - right.ordinal);
+  if (ordered.some((evaluation, index2) => evaluation.ordinal !== index2)) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared journey turn ordinals must be contiguous from zero.");
+  }
+  return { ...prepared, request: parsedRequest.data };
+}
 
 // src/infrastructure/sqlite/commands/acceptance.ts
 var SQLITE_INSERT_BATCH_SIZE = 250;
+function acceptPreparedRun(context, submissionId, preparedInput) {
+  if (!submissionId.trim()) throw new RunStoreError("invalid_submission_id", "A submission ID is required.");
+  const prepared = validatePrepared(preparedInput);
+  return context.transaction(() => {
+    const prior = context.database.prepare("SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?").get(submissionId);
+    if (prior) {
+      if (asText(prior.request_fingerprint, "request fingerprint") !== prepared.requestFingerprint) {
+        throw new RunStoreError("submission_conflict", "This submission ID has already been used with different request contents.");
+      }
+      const runId3 = asText(prior.run_id, "run ID");
+      context.reconcileInside(runId3, context.now());
+      return { created: false, run: context.statusInside(runId3) };
+    }
+    if (prepared.request.kind === "follow-on") {
+      const lineage = prepared.lineage;
+      if (!lineage) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage is missing.");
+      const sourceId = lineage.sourceRunId;
+      const source = context.database.prepare("SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?").get(sourceId);
+      if (!source) throw context.notFound();
+      const maxOrdinal = asNumber(context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(sourceId).maximum, "maximum evaluation ordinal");
+      const version2 = lineage.sourceVersion;
+      if (asText(source.status, "source run status") !== version2.status || asNumber(source.used_calls, "source used calls") !== version2.usedCalls || asNumber(source.reserved_calls, "source reserved calls") !== version2.reservedCalls || maxOrdinal !== version2.maxOrdinal) {
+        throw new RunStoreError("source_changed_during_acceptance", "The source run changed after follow-on inspection. Inspect the request again to use its current evidence.");
+      }
+      if (!hasAllFollowOnSelections(context.database, sourceId, lineage.selections)) {
+        throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
+      }
+    }
+    const runId2 = randomUUID2();
+    const nowMs = context.now();
+    insertAcceptedRun(context.orm, { runId: runId2, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
+    insertPreparedRunData(context.orm, runId2, prepared);
+    return { created: true, run: context.statusInside(runId2) };
+  });
+}
+function acceptPreparedJourney(context, submissionId, preparedInput) {
+  if (!submissionId.trim()) throw new RunStoreError("invalid_submission_id", "A submission ID is required.");
+  const prepared = validatePreparedJourney(preparedInput);
+  return context.transaction(() => {
+    const prior = context.database.prepare("SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?").get(submissionId);
+    if (prior) {
+      if (asText(prior.request_fingerprint, "request fingerprint") !== prepared.requestFingerprint) {
+        throw new RunStoreError("submission_conflict", "This submission ID has already been used with different request contents.");
+      }
+      const runId3 = asText(prior.run_id, "run ID");
+      context.reconcileInside(runId3, context.now());
+      return { created: false, run: context.statusInside(runId3) };
+    }
+    const runId2 = randomUUID2();
+    const nowMs = context.now();
+    insertAcceptedRun(context.orm, { runId: runId2, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
+    insertPreparedJourneyData(context.orm, runId2, prepared);
+    return { created: true, run: context.statusInside(runId2) };
+  });
+}
 function chunks(values, size) {
   const result = [];
   for (let index2 = 0; index2 < values.length; index2 += size) result.push(values.slice(index2, index2 + size));
@@ -27298,6 +27736,56 @@ function insertPreparedJourneyData(database, runId2, prepared) {
     outcome: respondent.outcome ?? null
   }));
   for (const batch of chunks(respondentRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(journeyRespondents).values(batch).run();
+}
+
+// src/infrastructure/sqlite/work-policy.ts
+var PREPARED_LAUNCH_WINDOW_MS = 3e4;
+var WORKER_LEASE_DURATION_MS = 3e4;
+var RECONCILE_SELECTION_LIMIT = 100;
+
+// src/infrastructure/sqlite/commands/reconciliation.ts
+function reconcileRun(database, orm, runId2, nowMs, notFound) {
+  const run = database.prepare("SELECT * FROM runs WHERE run_id = ?").get(runId2);
+  if (!run) throw notFound();
+  const status = asText(run.status, "run status");
+  const launchDeadline = run.lease_expires_ms === null ? asNumber(run.created_ms, "created time") + PREPARED_LAUNCH_WINDOW_MS : asNumber(run.lease_expires_ms, "launch deadline");
+  if (status === "prepared" && nowMs >= launchDeadline) {
+    interruptUnclaimedRun(orm, runId2);
+  } else if (status === "running" && run.lease_expires_ms !== null && asNumber(run.lease_expires_ms, "worker lease") <= nowMs) {
+    const attempts2 = database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ? AND status = 'reserved'").get(runId2);
+    const uncertain = asNumber(attempts2.count, "uncertain attempt count");
+    if (uncertain !== asNumber(run.reserved_calls, "reserved calls")) {
+      throw new RunStoreError("data_integrity_error", "Reserved call counters do not match reserved attempts.");
+    }
+    const updatedUncertainAttempts = interruptReservedAttempts(orm, runId2, nowMs);
+    if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(orm, runId2, nowMs, uncertain)) {
+      throw new RunStoreError("data_integrity_error", "Expired worker reservations changed during reconciliation.");
+    }
+  }
+}
+function reconcileSelectedRuns(orm, snapshot, nowMs) {
+  const statuses = /* @__PURE__ */ new Map();
+  for (const run of snapshot.runs) {
+    const status = asText(run.status, "run status");
+    const leaseExpires = run.leaseExpiresMs ?? run.createdMs + PREPARED_LAUNCH_WINDOW_MS;
+    if (status === "prepared" && nowMs >= leaseExpires) {
+      interruptUnclaimedRun(orm, run.runId);
+      statuses.set(run.runId, "interrupted");
+    } else if (status === "running" && run.leaseExpiresMs !== null && run.leaseExpiresMs <= nowMs) {
+      const uncertain = snapshot.reservedAttemptCounts.get(run.runId) ?? 0;
+      if (uncertain !== run.reservedCalls) {
+        throw new RunStoreError("data_integrity_error", "Reserved call counters do not match reserved attempts.");
+      }
+      const updatedUncertainAttempts = interruptReservedAttempts(orm, run.runId, nowMs);
+      if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(orm, run.runId, nowMs, uncertain)) {
+        throw new RunStoreError("data_integrity_error", "Expired worker reservations changed during reconciliation.");
+      }
+      statuses.set(run.runId, "interrupted");
+    } else {
+      statuses.set(run.runId, status);
+    }
+  }
+  return statuses;
 }
 
 // node_modules/drizzle-orm/node-sqlite/session.js
@@ -27404,7 +27892,7 @@ function drizzle(...params) {
 })(drizzle || (drizzle = {}));
 
 // src/infrastructure/sqlite/schema.ts
-import { createHash as createHash5, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID3 } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync as readFileSync2, unlinkSync } from "node:fs";
 import path2 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
@@ -27413,7 +27901,6 @@ var BASELINE_SCHEMA_VERSION = 9;
 var SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var MIGRATION_BACKUP_RETRIES = 3;
-var PREPARED_LAUNCH_WINDOW_MS = 3e4;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
 function baselineSqlPath() {
@@ -27437,7 +27924,7 @@ function registeredMigrations() {
   return [baselineMigration()];
 }
 function migrationChecksum(migration) {
-  return createHash5("sha256").update(migration.sql).digest("hex");
+  return createHash6("sha256").update(migration.sql).digest("hex");
 }
 function isTransientSqliteLock(error62) {
   return typeof error62 === "object" && error62 !== null && "errcode" in error62 && typeof error62.errcode === "number" && SQLITE_TRANSIENT_LOCK_CODES.has(error62.errcode);
@@ -27483,7 +27970,7 @@ function migrationHistoryThrough(migrations, targetVersion) {
 function schemaFingerprint(database) {
   const objects = database.prepare(`SELECT type, name, tbl_name AS tableName, sql FROM sqlite_schema
     WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name, tbl_name`).all();
-  return createHash5("sha256").update(JSON.stringify(objects)).digest("hex");
+  return createHash6("sha256").update(JSON.stringify(objects)).digest("hex");
 }
 function validateMigrationSource(database, migrations, version2) {
   if (pragmaNumber(database, "user_version") !== version2) {
@@ -27543,7 +28030,7 @@ function checkDatabaseIntegrity(database, checkForeignKeys = true) {
 function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `before-${toVersion}`, checkForeignKeys = true) {
   const backupRoot = path2.join(dataRoot, "backups");
   mkdirSync(backupRoot, { recursive: true });
-  const backupPath = path2.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID2()}.sqlite`);
+  const backupPath = path2.join(backupRoot, `runs-schema-${fromVersion}-${purpose}-${randomUUID3()}.sqlite`);
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
@@ -27712,6 +28199,34 @@ function openInitializedDatabase(databasePath, dataRoot) {
 }
 
 // src/infrastructure/sqlite/connection.ts
+function writeTransaction(database, operation) {
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const result = operation();
+    database.exec("COMMIT");
+    return result;
+  } catch (error62) {
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+    }
+    throw error62;
+  }
+}
+function readTransaction(database, operation) {
+  database.exec("BEGIN");
+  try {
+    const result = operation();
+    database.exec("COMMIT");
+    return result;
+  } catch (error62) {
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+    }
+    throw error62;
+  }
+}
 function openSqliteConnection(databasePath, dataRoot) {
   const client = openInitializedDatabase(databasePath, dataRoot);
   const orm = drizzle({ client });
@@ -27935,187 +28450,19 @@ function sameDecisionValue(left, right) {
   if (left.type === "score" && right.type === "score") return left.score === right.score && hashCanonical(left.probabilities) === hashCanonical(right.probabilities) && hashCanonical(left.legend) === hashCanonical(right.legend) && left.confidence === right.confidence;
   return left.type === "noul" && right.type === "noul" && left.noul === right.noul;
 }
-function isJourneyAskNode(journey, nodeId, questionId) {
+function isJourneyAskNode2(journey, nodeId, questionId) {
   const node2 = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
   return node2?.kind === "ask" && node2.taskId === questionId;
 }
 function journeyRouteTarget(journey, nodeId, response) {
-  const graph = journeyTopology(journey);
-  const node2 = graph.nodes.find((candidate) => candidate.id === nodeId);
-  if (node2?.kind !== "ask") return void 0;
-  const edge = graph.transitions.find((candidate) => {
-    if (candidate.fromNodeId !== nodeId) return false;
-    if (response.type === "choice") return candidate.optionId === response.choice;
-    const interval = candidate.when;
-    const value = response.type === "score" ? response.score : response.noul;
-    return interval?.type === response.type && (value > interval.minimum || value === interval.minimum && interval.minimumInclusive) && (value < interval.maximum || value === interval.maximum && interval.maximumInclusive);
-  });
-  return edge?.toNodeId;
+  return journeyTransitionForResponse(journeyTopology(journey), nodeId, response)?.toNodeId;
 }
-var LEASE_MS = 3e4;
 var runCursorSchema = external_exports.object({ kind: external_exports.literal("runs"), createdMs: external_exports.number().int().nonnegative(), runId: external_exports.string().min(1), filtersFingerprint: external_exports.string() }).strict();
 var answerCursorSchema = external_exports.object({ kind: external_exports.literal("answers"), runId: external_exports.string().min(1), ordinal: external_exports.number().int().nonnegative() }).strict();
 function validateRunIds(runIds) {
   if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > 200 || runIds.some((id) => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) || new Set(runIds).size !== runIds.length) {
     throw new RunStoreError("invalid_run_selection", "Select between 1 and 200 unique run IDs.");
   }
-}
-function validatePrepared(prepared) {
-  const parsedRequest = runRequestSchema.safeParse(prepared.request);
-  if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
-    throw new RunStoreError("invalid_prepared_run", "Prepared run request or fingerprint is invalid.");
-  }
-  if (parsedRequest.data.kind === "follow-on") {
-    const parsedLineage = followOnLineageSchema.safeParse(prepared.lineage);
-    if (!parsedLineage.success) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material lineage is invalid.");
-    const lineage = parsedLineage.data;
-    const includesSelectedMaterial = parsedRequest.data.context.includeSelectedMaterial === true;
-    if (includesSelectedMaterial) {
-      const coverage = lineage.selectionCoverage;
-      const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
-      const eligibleIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
-      if (!coverage || coverage.eligible !== eligibleIds.size || coverage.matched !== coverage.eligible + lineage.excludedSelections.length || [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial }) => !selectedMaterial)) {
-        throw new RunStoreError("invalid_prepared_run", "Selected-material coverage and source lineage are inconsistent.");
-      }
-    } else if (lineage.selectionCoverage !== void 0 || lineage.selections.some(({ selectedMaterial }) => selectedMaterial !== void 0)) {
-      throw new RunStoreError("invalid_prepared_run", "Selected-material lineage cannot be attached to a request without the resolver flag.");
-    }
-    const requestedQuestionIds2 = parsedRequest.data.questions.map(({ id }) => id);
-    if (!lineage || lineage.sourceRunId !== parsedRequest.data.sourceRunId || lineage.sourceVersion.status !== lineage.sourceStatusAtAcceptance || lineage.sourceCompleteAtAcceptance !== (lineage.sourceStatusAtAcceptance === "completed")) {
-      throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage does not match its request and frozen evaluations.");
-    }
-    const evaluationIds2 = /* @__PURE__ */ new Set();
-    const groupIds = /* @__PURE__ */ new Set();
-    const questionIdsByGroup2 = /* @__PURE__ */ new Map();
-    if (!prepared.groups || prepared.groups.length === 0 || new Set(prepared.groups.map(({ groupId }) => groupId)).size !== prepared.groups.length) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on groups are missing or duplicated.");
-    for (const group of prepared.groups) groupIds.add(group.groupId);
-    const snapshotKeys = /* @__PURE__ */ new Set();
-    const snapshotsByKey = /* @__PURE__ */ new Map();
-    for (const snapshot of lineage.materialSnapshots) {
-      const key = `${snapshot.contextId}:${snapshot.respondentId}`;
-      if (snapshotKeys.has(key) || !prepared.groups.some((group) => group.contextId === snapshot.contextId && group.respondentId === snapshot.respondentId)) {
-        throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material snapshots do not match an accepted respondent context.");
-      }
-      snapshotKeys.add(key);
-      snapshotsByKey.set(key, snapshot);
-    }
-    for (const evaluation of prepared.evaluations) {
-      const packet = decisionRequestSchema.safeParse(evaluation.packet);
-      if (!packet.success || !prepared.groups?.some((group) => group.groupId === evaluation.groupId && group.contextId === evaluation.contextId && group.respondentId === evaluation.respondentId && group.questionIds.includes(evaluation.questionId) && hashCanonical(group.state) === hashCanonical(packet.data.state)) || !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint || evaluationIds2.has(evaluation.evaluationId) || !groupIds.has(evaluation.groupId ?? "")) {
-        throw new RunStoreError("invalid_prepared_run", "Prepared follow-on evaluation or source selection is inconsistent.");
-      }
-      if (packet.data.question.type === "choice" && packet.data.question.materialOptions) {
-        const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
-        for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
-          const item = catalog.find(({ id }) => id === materialId);
-          if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
-            throw new RunStoreError("invalid_prepared_run", `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
-          }
-        }
-      }
-      if (includesSelectedMaterial) {
-        const mappings = lineage.selections.filter(({ evaluationId }) => evaluationId === evaluation.evaluationId);
-        const selected = mappings[0]?.selectedMaterial;
-        const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
-        const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
-        const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text: text2 }) => id === selected.materialId && text2 === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash6("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
-          throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
-        }
-      }
-      evaluationIds2.add(evaluation.evaluationId);
-      const ids = questionIdsByGroup2.get(evaluation.groupId) ?? [];
-      ids.push(evaluation.questionId);
-      questionIdsByGroup2.set(evaluation.groupId, ids);
-    }
-    if (!prepared.groups || prepared.groups.length === 0 || lineage.selections.some((selection) => !evaluationIds2.has(selection.evaluationId)) || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds2) || JSON.stringify(questionIdsByGroup2.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on group lineage is inconsistent.");
-    if (includesSelectedMaterial) {
-      const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
-      for (const group of prepared.groups) {
-        const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
-        const expectedIds = /* @__PURE__ */ new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
-        if (!snapshot || JSON.stringify([...snapshot.materials.map(({ id }) => id)].sort()) !== JSON.stringify([...expectedIds].sort())) {
-          throw new RunStoreError("invalid_prepared_run", "Selected-material catalog contains unrelated material or omits a packet dependency.");
-        }
-      }
-    }
-    return { ...prepared, request: parsedRequest.data, lineage };
-  }
-  if (parsedRequest.data.kind !== "poll") throw new RunStoreError("invalid_prepared_run", "A journey must be accepted through journey preparation.");
-  if (!prepared.groups || prepared.groups.length !== parsedRequest.data.respondents.length || prepared.evaluations.length !== parsedRequest.data.respondents.length * parsedRequest.data.questions.length) {
-    throw new RunStoreError("invalid_prepared_run", "Prepared run question groups do not match respondents and questions.");
-  }
-  const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-  const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
-  const evaluationIds = /* @__PURE__ */ new Set();
-  const seenRespondents = /* @__PURE__ */ new Set();
-  const questionIdsByGroup = /* @__PURE__ */ new Map();
-  for (const evaluation of prepared.evaluations) {
-    const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    const group = prepared.groups.find(({ groupId }) => groupId === evaluation.groupId);
-    if (!packet.success || !group || group.respondentId !== evaluation.respondentId || group.contextId !== evaluation.contextId || hashCanonical(group.state) !== hashCanonical(packet.data.state) || !respondentIds.has(evaluation.respondentId) || evaluationIds.has(evaluation.evaluationId) || !parsedRequest.data.questions.some((question) => question.id === evaluation.questionId) || packet.data.question.id !== evaluation.questionId || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
-      throw new RunStoreError("invalid_prepared_run", "Prepared run evaluation or packet fingerprint is invalid.");
-    }
-    evaluationIds.add(evaluation.evaluationId);
-    seenRespondents.add(evaluation.respondentId);
-    const ids = questionIdsByGroup.get(group.groupId) ?? [];
-    ids.push(evaluation.questionId);
-    questionIdsByGroup.set(group.groupId, ids);
-  }
-  if (seenRespondents.size !== respondentIds.size || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) || JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds) || !respondentIds.has(group.respondentId))) throw new RunStoreError("invalid_prepared_run", "Every respondent must have one complete ordered question group.");
-  return { ...prepared, request: parsedRequest.data };
-}
-function validatePreparedJourney(prepared) {
-  const parsedRequest = runRequestSchema.safeParse(prepared.request);
-  if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
-    throw new RunStoreError("invalid_prepared_run", "Prepared journey request or fingerprint is invalid.");
-  }
-  const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
-  const respondentIdSet = new Set(respondentIds);
-  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length !== respondentIds.length || prepared.evaluations.length === 0) {
-    throw new RunStoreError("invalid_prepared_run", "Prepared journey requires unique respondent state and at least one reached turn.");
-  }
-  const stateById = /* @__PURE__ */ new Map();
-  const allowedStatuses = /* @__PURE__ */ new Set(["active", "completed", "failed", "unreached"]);
-  for (const state of prepared.respondents) {
-    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || stateById.has(state.respondentId) || !Number.isSafeInteger(state.revision) || state.revision < 0 || !Array.isArray(state.events) || !Array.isArray(state.route) || (state.status === "active" ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) : state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null)) {
-      throw new RunStoreError("invalid_prepared_run", "Prepared journey respondent state is inconsistent.");
-    }
-    stateById.set(state.respondentId, state);
-  }
-  if (stateById.size !== respondentIdSet.size) throw new RunStoreError("invalid_prepared_run", "Every journey respondent requires durable state.");
-  const evaluationIds = /* @__PURE__ */ new Set();
-  const turnIds = /* @__PURE__ */ new Set();
-  const contextIds = /* @__PURE__ */ new Set();
-  const nodeOccurrences = /* @__PURE__ */ new Set();
-  const activeTurnIds = /* @__PURE__ */ new Set();
-  for (const evaluation of prepared.evaluations) {
-    const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    const state = stateById.get(evaluation.respondentId);
-    const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
-    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
-    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
-      throw new RunStoreError("invalid_prepared_run", "Prepared journey turn or context reference is invalid.");
-    }
-    evaluationIds.add(evaluation.evaluationId);
-    turnIds.add(evaluation.turnId);
-    contextIds.add(evaluation.contextId);
-    nodeOccurrences.add(nodeOccurrence);
-    activeTurnIds.add(evaluation.turnId);
-  }
-  for (const state of prepared.respondents) {
-    if (state.status === "active" && !activeTurnIds.has(state.currentTurnId)) {
-      throw new RunStoreError("invalid_prepared_run", "Every active journey respondent requires one pending turn.");
-    }
-    if (state.status !== "active" && prepared.evaluations.some(({ respondentId }) => respondentId === state.respondentId)) {
-      throw new RunStoreError("invalid_prepared_run", "A terminal or unreached respondent cannot have a pending turn.");
-    }
-  }
-  const ordered = prepared.evaluations.toSorted((left, right) => left.ordinal - right.ordinal);
-  if (ordered.some((evaluation, index2) => evaluation.ordinal !== index2)) {
-    throw new RunStoreError("invalid_prepared_run", "Prepared journey turn ordinals must be contiguous from zero.");
-  }
-  return { ...prepared, request: parsedRequest.data };
 }
 function openRunStore(dataRoot, options2 = {}) {
   if (!path3.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
@@ -28193,57 +28540,11 @@ var SQLiteRunStore = class {
   }
   accept(submissionId, preparedInput) {
     this.ensureOpen();
-    if (!submissionId.trim()) throw new RunStoreError("invalid_submission_id", "A submission ID is required.");
-    const prepared = validatePrepared(preparedInput);
-    return this.transaction(() => {
-      const prior = this.database.prepare("SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?").get(submissionId);
-      if (prior) {
-        const priorFingerprint = asText(prior.request_fingerprint, "request fingerprint");
-        if (priorFingerprint !== prepared.requestFingerprint) throw new RunStoreError("submission_conflict", "This submission ID has already been used with different request contents.");
-        const runId3 = asText(prior.run_id, "run ID");
-        this.reconcileInside(runId3, this.now());
-        return { created: false, run: this.statusInside(runId3) };
-      }
-      if (prepared.request.kind === "follow-on") {
-        const source = this.database.prepare("SELECT status, used_calls, reserved_calls FROM runs WHERE run_id = ?").get(prepared.lineage.sourceRunId);
-        if (!source) throw this.notFound();
-        const maxOrdinal = asNumber(this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(prepared.lineage.sourceRunId).maximum, "maximum evaluation ordinal");
-        const version2 = prepared.lineage.sourceVersion;
-        if (asText(source.status, "source run status") !== version2.status || asNumber(source.used_calls, "source used calls") !== version2.usedCalls || asNumber(source.reserved_calls, "source reserved calls") !== version2.reservedCalls || maxOrdinal !== version2.maxOrdinal) {
-          throw new RunStoreError("source_changed_during_acceptance", "The source run changed after follow-on inspection. Inspect the request again to use its current evidence.");
-        }
-        if (!hasAllFollowOnSelections(this.database, prepared.lineage.sourceRunId, prepared.lineage.selections)) {
-          throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
-        }
-      }
-      const runId2 = randomUUID3();
-      const nowMs = this.now();
-      const createdAt = new Date(nowMs).toISOString();
-      insertAcceptedRun(this.connection.orm, { runId: runId2, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
-      insertPreparedRunData(this.connection.orm, runId2, prepared);
-      return { created: true, run: this.statusInside(runId2) };
-    });
+    return acceptPreparedRun(this.acceptanceContext(), submissionId, preparedInput);
   }
   acceptJourney(submissionId, preparedInput) {
     this.ensureOpen();
-    if (!submissionId.trim()) throw new RunStoreError("invalid_submission_id", "A submission ID is required.");
-    const prepared = validatePreparedJourney(preparedInput);
-    return this.transaction(() => {
-      const prior = this.database.prepare("SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?").get(submissionId);
-      if (prior) {
-        const priorFingerprint = asText(prior.request_fingerprint, "request fingerprint");
-        if (priorFingerprint !== prepared.requestFingerprint) throw new RunStoreError("submission_conflict", "This submission ID has already been used with different request contents.");
-        const runId3 = asText(prior.run_id, "run ID");
-        this.reconcileInside(runId3, this.now());
-        return { created: false, run: this.statusInside(runId3) };
-      }
-      const runId2 = randomUUID3();
-      const nowMs = this.now();
-      const createdAt = new Date(nowMs).toISOString();
-      insertAcceptedRun(this.connection.orm, { runId: runId2, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
-      insertPreparedJourneyData(this.connection.orm, runId2, prepared);
-      return { created: true, run: this.statusInside(runId2) };
-    });
+    return acceptPreparedJourney(this.acceptanceContext(), submissionId, preparedInput);
   }
   getStatus(runId2) {
     this.ensureOpen();
@@ -28451,7 +28752,7 @@ var SQLiteRunStore = class {
           throw new RunStoreError("data_integrity_error", "The saved failed journey checkpoint changed during resume.");
         }
       }
-      prepareResumedRun(this.connection.orm, runId2, nowMs + LEASE_MS);
+      prepareResumedRun(this.connection.orm, runId2, nowMs + PREPARED_LAUNCH_WINDOW_MS);
       return { started: true, run: this.statusInside(runId2) };
     });
   }
@@ -28465,7 +28766,7 @@ var SQLiteRunStore = class {
       const selected = new Set(runIds);
       const runs2 = runIds.map((runId2) => {
         const row = snapshot.runs.find((candidate) => candidate.runId === runId2);
-        const status = this.deletePreviewStatus(row, nowMs);
+        const status = deletePreviewStatus(row, nowMs);
         return {
           runId: runId2,
           status,
@@ -28481,38 +28782,15 @@ var SQLiteRunStore = class {
   deleteRuns(runIds) {
     this.ensureOpen();
     validateRunIds(runIds);
-    const result = this.transaction(() => {
-      const nowMs = this.now();
-      const snapshot = loadRunDeletionSnapshot(this.connection.orm, runIds, { includeReservedAttemptCounts: true });
-      if (snapshot.runs.length !== runIds.length) throw this.notFound();
-      const statuses = this.reconcileSelectedRuns(snapshot, nowMs);
-      const counts = runIds.map((runId2) => {
-        const status = statuses.get(runId2);
-        if (status === "prepared" || status === "running") {
-          throw new RunStoreError("runs_active", "Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.");
-        }
-        return {
-          runId: runId2,
-          evaluations: snapshot.evaluationCounts.get(runId2) ?? 0,
-          attempts: snapshot.attemptCounts.get(runId2) ?? 0
-        };
-      });
-      deleteRuns(this.connection.orm, runIds);
-      const violations = this.database.prepare("PRAGMA foreign_key_check").all();
-      const integrity = this.database.prepare("PRAGMA integrity_check").all();
-      if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
-        throw new RunStoreError("storage_integrity_failed", "The datastore integrity check failed; no runs were deleted.");
-      }
-      return { deletedRunIds: counts.map(({ runId: runId2 }) => runId2), removed: { runs: counts.length, evaluations: counts.reduce((sum2, item) => sum2 + item.evaluations, 0), attempts: counts.reduce((sum2, item) => sum2 + item.attempts, 0) } };
-    });
-    let maintenance;
-    try {
-      this.optimizeStorage();
-      maintenance = { optimization: "completed" };
-    } catch (error62) {
-      maintenance = { optimization: "failed", failureCode: error62 instanceof RunStoreError ? error62.code : "storage_operation_failed" };
-    }
-    return { ...result, maintenance };
+    return deleteRunSelection({
+      database: this.database,
+      orm: this.connection.orm,
+      transaction: (operation) => this.transaction(operation),
+      now: this.now,
+      reconcile: (snapshot, nowMs) => reconcileSelectedRuns(this.connection.orm, snapshot, nowMs),
+      notFound: () => this.notFound(),
+      optimize: () => this.optimizeStorage()
+    }, runIds);
   }
   storageInfo() {
     this.ensureOpen();
@@ -28551,16 +28829,16 @@ var SQLiteRunStore = class {
     return this.transaction(() => {
       const row = this.database.prepare("SELECT status, created_ms, cancel_requested, lease_expires_ms FROM runs WHERE run_id = ?").get(runId2);
       if (!row) throw this.notFound();
-      const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, "created time") + LEASE_MS : asNumber(row.lease_expires_ms, "launch deadline");
+      const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, "created time") + PREPARED_LAUNCH_WINDOW_MS : asNumber(row.lease_expires_ms, "launch deadline");
       if (asText(row.status, "run status") !== "prepared" || asNumber(row.cancel_requested, "cancel flag") === 1 || nowMs >= launchDeadline) return null;
-      const ownerToken = randomUUID3();
-      if (!claimPreparedRun(this.connection.orm, runId2, ownerToken, workerPid, nowMs + LEASE_MS)) return null;
+      const ownerToken = randomUUID4();
+      if (!claimPreparedRun(this.connection.orm, runId2, ownerToken, workerPid, nowMs + WORKER_LEASE_DURATION_MS)) return null;
       return { runId: runId2, ownerToken };
     });
   }
   heartbeat(claim2, nowMs) {
     this.ensureOpen();
-    return this.transaction(() => refreshWorkerLease(this.connection.orm, claim2, nowMs, LEASE_MS));
+    return this.transaction(() => refreshWorkerLease(this.connection.orm, claim2, nowMs, WORKER_LEASE_DURATION_MS));
   }
   reserveNext(claim2, nowMs) {
     this.ensureOpen();
@@ -28571,7 +28849,7 @@ var SQLiteRunStore = class {
       if (asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
       const row = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
       if (!row) return null;
-      const attemptId = randomUUID3();
+      const attemptId = randomUUID4();
       const evaluationId = asText(row.evaluation_id, "evaluation ID");
       reservePhysicalAttempt(this.connection.orm, {
         attemptId,
@@ -28601,7 +28879,7 @@ var SQLiteRunStore = class {
         throw new RunStoreError("invalid_batch_reservation", "A batch may reserve only pending evaluations from the requested group.");
       }
       const sorted = [...selected].sort((left, right) => orderedIds.indexOf(asText(left.question_id, "question ID")) - orderedIds.indexOf(asText(right.question_id, "question ID")));
-      const attemptId = randomUUID3();
+      const attemptId = randomUUID4();
       const anchorId = asText(sorted[0].evaluation_id, "evaluation ID");
       const state = parseJson(group.state_json, "group state");
       const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")).question);
@@ -28621,193 +28899,15 @@ var SQLiteRunStore = class {
   }
   settleBatch(claim2, attemptId, outcome) {
     this.ensureOpen();
-    this.transaction(() => {
-      const nowMs = this.now();
-      this.ownedRun(claim2, nowMs);
-      const attempt = this.database.prepare("SELECT * FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
-      if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
-      const rows = this.database.prepare(`SELECT e.* FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id) WHERE ae.attempt_id = ? ORDER BY e.ordinal`).all(attemptId);
-      if (!rows.length) throw new RunStoreError("data_integrity_error", "The provider attempt has no linked evaluations.");
-      const chargedCalls = outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.execution.attempts;
-      if (outcome.kind === "failed") {
-        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
-        for (const row of rows) {
-          const evaluationId = asText(row.evaluation_id, "evaluation ID");
-          markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
-          if (outcome.detail || outcome.providerFailure) saveAttemptEvaluationFailure(
-            this.connection.orm,
-            attemptId,
-            evaluationId,
-            evaluationFailureJson({ code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} })
-          );
-        }
-        if (outcome.scope === "run") markRunFailed(this.connection.orm, claim2.runId, outcome.code, outcome.message);
-      } else {
-        const result = decisionBatchResultSchema.safeParse(outcome.result);
-        if (!result.success) throw new RunStoreError("invalid_batch_result", "The batch result envelope is invalid.");
-        const expected = new Map(rows.map((row) => [asText(row.question_id, "question ID"), row]));
-        if (result.data.answers.some(({ questionId }) => !expected.has(questionId))) throw new RunStoreError("invalid_batch_result", "The batch result contains an unknown question ID.");
-        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.data.execution.attempts, JSON.stringify(result.data.execution));
-        for (const [questionId, row] of expected) {
-          const answer = result.data.answers.find((item) => item.questionId === questionId);
-          const evaluationId = asText(row.evaluation_id, "evaluation ID");
-          if (!answer) {
-            markEvaluationFailed(this.connection.orm, evaluationId, "missing_batch_answer", "Provider returned no answer for this question.");
-            saveAttemptEvaluationFailure(
-              this.connection.orm,
-              attemptId,
-              evaluationId,
-              evaluationFailureJson({ code: "missing_batch_answer", message: "Provider returned no answer for this question." })
-            );
-          } else if ("failure" in answer) {
-            const failure2 = { code: answer.failure.code, message: answer.failure.message, ...answer.failure.detail ? { detail: answer.failure.detail } : {} };
-            markEvaluationFailed(this.connection.orm, evaluationId, failure2.code, failure2.message, failureEvidenceJson(failure2));
-            saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
-          } else {
-            const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet"));
-            let validated;
-            try {
-              const typed = decisionResultSchema.parse({ ...answer.value, ...result.data.execution });
-              validated = validateDecision(packet, typed, { maxAttempts: 1 });
-            } catch {
-              const failure2 = { code: "invalid_decision", message: "The stored answer did not satisfy this question contract.", detail: decisionFailureDetailForReason("invalid_answer") };
-              markEvaluationFailed(this.connection.orm, evaluationId, failure2.code, failure2.message, failureEvidenceJson(failure2));
-              saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
-            }
-            if (validated) {
-              markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload("decision-value", answer.value, decisionValueSchema));
-              linkWinningAnswer(this.connection.orm, claim2.runId, evaluationId, attemptId);
-            }
-          }
-        }
-      }
-      if (!chargeReservedAttempt(this.connection.orm, claim2.runId, chargedCalls)) {
-        throw new RunStoreError("data_integrity_error", "The run has no reserved physical call to settle.");
-      }
-    });
+    return this.transaction(() => settlePollBatch({ database: this.database, orm: this.connection.orm, now: this.now, ownedRun: (owner, nowMs) => this.ownedRun(owner, nowMs) }, claim2, attemptId, outcome));
   }
   settle(claim2, attemptId, outcome) {
     this.ensureOpen();
-    this.transaction(() => {
-      const nowMs = this.now();
-      this.ownedRun(claim2, nowMs);
-      const attempt = this.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
-      if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
-      const evaluationId = asText(attempt.evaluation_id, "evaluation ID");
-      const evaluation = this.database.prepare("SELECT packet_json FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
-      if (!evaluation) throw new RunStoreError("data_integrity_error", "The reserved evaluation is missing.");
-      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
-      if (outcome.kind === "answered") {
-        const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        markAttemptAnswered(this.connection.orm, attemptId, nowMs, result.attempts, JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), JSON.stringify(result));
-        markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload("decision-value", decisionValueFromResult(result), decisionValueSchema));
-        linkWinningAnswer(this.connection.orm, claim2.runId, evaluationId, attemptId);
-      } else {
-        const chargedCalls = outcome.providerAttempts ?? 1;
-        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
-        markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
-        saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
-        if (outcome.scope === "run") {
-          markRunFailed(this.connection.orm, claim2.runId, outcome.code, outcome.message);
-        }
-      }
-      if (!chargeReservedAttempt(this.connection.orm, claim2.runId, outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
-        throw new RunStoreError("data_integrity_error", "The run has no reserved physical call to settle.");
-      }
-    });
+    this.transaction(() => settleSingleAttempt({ database: this.database, orm: this.connection.orm, now: this.now, ownedRun: (owner, nowMs) => this.ownedRun(owner, nowMs) }, claim2, attemptId, outcome));
   }
   settleJourney(claim2, attemptId, outcome, transition) {
     this.ensureOpen();
-    this.transaction(() => {
-      const nowMs = this.now();
-      this.ownedRun(claim2, nowMs);
-      const attempt = this.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
-      if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
-      const evaluationId = asText(attempt.evaluation_id, "evaluation ID");
-      const evaluation = this.database.prepare("SELECT packet_json, turn_id, node_id, respondent_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
-      if (!evaluation) throw new RunStoreError("data_integrity_error", "The reserved journey turn is missing.");
-      const turnId = asText(evaluation.turn_id, "turn ID");
-      const nodeId = asText(evaluation.node_id, "node ID");
-      const respondentId = asText(evaluation.respondent_id, "respondent ID");
-      if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId || !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 || transition.state.revision !== transition.expectedRevision + 1) {
-        throw new RunStoreError("journey_transition_conflict", "Journey transition does not match the reserved respondent turn.");
-      }
-      const stateRow = this.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ?").get(claim2.runId, respondentId);
-      if (!stateRow || asNumber(stateRow.revision, "journey state revision") !== transition.expectedRevision || asText(stateRow.current_turn_id, "current turn ID") !== turnId || asText(stateRow.current_node_id, "current node ID") !== nodeId) {
-        throw new RunStoreError("journey_transition_conflict", "Journey respondent state has moved since this turn was reserved.");
-      }
-      const priorEvents = parseStored(journeyEventsSchema, parseJson(stateRow.events_json, "journey history"), "journey history");
-      const priorRoute = parseStored(journeyRouteSchema, parseJson(stateRow.route_json, "journey route"), "journey route");
-      if (transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) || transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
-        throw new RunStoreError("journey_transition_conflict", "Journey transitions must preserve ordered prior evidence.");
-      }
-      const runRow = this.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(claim2.runId);
-      const storedRun = parseJsonRecord(runRow?.request_json, "run request");
-      const parsedRunRequest = runRequestSchema.safeParse(storedRun.request);
-      if (!parsedRunRequest.success || parsedRunRequest.data.kind !== "journey" || typeof storedRun.compilerFingerprint !== "string") {
-        throw new RunStoreError("data_integrity_error", "Stored journey request is invalid.");
-      }
-      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
-      if (outcome.kind === "answered") {
-        const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        const answerEvent = transition.state.events.slice(priorEvents.length).findLast(
-          (event) => event.type === "response" && event.nodeId === nodeId
-        );
-        if (!answerEvent || answerEvent.taskId !== packet.question.id || !sameDecisionValue(answerEvent.result, result)) {
-          throw new RunStoreError("journey_transition_conflict", "Journey transition must append the exact typed answer for this turn.");
-        }
-        const routeAddition = transition.state.route.slice(priorRoute.length);
-        const expectedTarget = journeyRouteTarget(parsedRunRequest.data.journey, nodeId, result);
-        if (routeAddition.length !== 1 || routeAddition[0].nodeId !== nodeId || routeAddition[0].toNodeId !== expectedTarget || !sameDecisionValue(routeAddition[0].response, result) || transition.state.status === "failed") {
-          throw new RunStoreError("journey_transition_conflict", "Journey transition must record the exact typed response and matching route outcome.");
-        }
-        if (transition.state.status === "active") {
-          if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId || transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId || transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
-            throw new RunStoreError("journey_transition_conflict", "An active respondent must point to exactly one next reached turn.");
-          }
-        } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
-          throw new RunStoreError("journey_transition_conflict", "A terminal respondent state cannot have a next reached turn.");
-        }
-        markAttemptAnswered(
-          this.connection.orm,
-          attemptId,
-          nowMs,
-          result.attempts,
-          JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }),
-          JSON.stringify(result)
-        );
-        markEvaluationAnswered(this.connection.orm, evaluationId, encodeStoredPayload("decision-value", decisionValueFromResult(result), decisionValueSchema));
-        linkWinningAnswer(this.connection.orm, claim2.runId, evaluationId, attemptId);
-      } else {
-        const sharedFailure = outcome.scope === "run";
-        if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
-          throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
-        }
-        const chargedCalls = outcome.providerAttempts ?? 1;
-        markAttemptFailed(this.connection.orm, attemptId, nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope);
-        markEvaluationFailed(this.connection.orm, evaluationId, outcome.code, outcome.message, failureEvidenceJson(outcome));
-        const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
-        saveAttemptEvaluationFailure(this.connection.orm, attemptId, evaluationId, evaluationFailureJson(failure2));
-        if (outcome.scope === "run") markRunFailed(this.connection.orm, claim2.runId, outcome.code, outcome.message);
-      }
-      if (transition.nextEvaluation) {
-        const next = transition.nextEvaluation;
-        const nextPacket = decisionRequestSchema.safeParse(next.packet);
-        const respondent = parsedRunRequest.data.respondents.find(({ id }) => id === respondentId);
-        const current = this.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS ordinal FROM evaluations WHERE run_id = ?").get(claim2.runId);
-        if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
-          throw new RunStoreError("invalid_journey_turn", "Next journey turn is invalid or does not follow the persisted evaluation order.");
-        }
-        persistNextJourneyTurn(this.connection.orm, claim2.runId, next);
-      }
-      if (!persistJourneyRespondentState(this.connection.orm, claim2.runId, transition)) {
-        throw new RunStoreError("journey_transition_conflict", "Journey respondent state changed before its transition committed.");
-      }
-      if (!chargeReservedAttempt(this.connection.orm, claim2.runId, outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
-        throw new RunStoreError("data_integrity_error", "The run has no reserved physical call to settle.");
-      }
-    });
+    this.transaction(() => settleJourneyTurn({ database: this.database, orm: this.connection.orm, now: this.now, ownedRun: (owner, nowMs) => this.ownedRun(owner, nowMs), sameDecisionValue, journeyRouteTarget, isJourneyAskNode: isJourneyAskNode2 }, claim2, attemptId, outcome, transition));
   }
   finish(claim2) {
     this.ensureOpen();
@@ -28890,40 +28990,35 @@ var SQLiteRunStore = class {
   reconcileActive(nowMs) {
     this.ensureOpen();
     this.transaction(() => {
-      const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all();
-      for (const row of active) this.reconcileInside(asText(row.run_id, "run ID"), nowMs);
+      while (true) {
+        const active = this.database.prepare(`SELECT run_id FROM runs WHERE
+          (status = 'prepared' AND COALESCE(lease_expires_ms, created_ms + ?) <= ?) OR
+          (status = 'running' AND lease_expires_ms <= ?)
+          ORDER BY COALESCE(lease_expires_ms, created_ms), run_id LIMIT ?`).all(PREPARED_LAUNCH_WINDOW_MS, nowMs, nowMs, RECONCILE_SELECTION_LIMIT);
+        if (!active.length) break;
+        for (const row of active) this.reconcileInside(asText(row.run_id, "run ID"), nowMs);
+      }
     });
   }
   transaction(operation) {
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      const result = operation();
-      this.database.exec("COMMIT");
-      return result;
-    } catch (error62) {
-      try {
-        this.database.exec("ROLLBACK");
-      } catch {
-      }
-      throw error62;
-    }
+    return writeTransaction(this.database, operation);
+  }
+  acceptanceContext() {
+    return {
+      database: this.database,
+      orm: this.connection.orm,
+      now: this.now,
+      transaction: (operation) => this.transaction(operation),
+      statusInside: (runId2) => this.statusInside(runId2),
+      reconcileInside: (runId2, nowMs) => this.reconcileInside(runId2, nowMs),
+      notFound: () => this.notFound()
+    };
   }
   readTransaction(operation) {
-    this.database.exec("BEGIN");
-    try {
-      const result = operation();
-      this.database.exec("COMMIT");
-      return result;
-    } catch (error62) {
-      try {
-        this.database.exec("ROLLBACK");
-      } catch {
-      }
-      throw error62;
-    }
+    return readTransaction(this.database, operation);
   }
   notFound() {
-    return new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
+    throw new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
   }
   statusInside(runId2) {
     const result = this.statusesInside([runId2])[0];
@@ -28949,55 +29044,15 @@ var SQLiteRunStore = class {
     return run;
   }
   reconcileInside(runId2, nowMs) {
-    const run = this.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(runId2);
-    if (!run) throw this.notFound();
-    const status = asText(run.status, "run status");
-    const launchDeadline = run.lease_expires_ms === null ? asNumber(run.created_ms, "created time") + LEASE_MS : asNumber(run.lease_expires_ms, "launch deadline");
-    if (status === "prepared" && nowMs >= launchDeadline) {
-      interruptUnclaimedRun(this.connection.orm, runId2);
-    } else if (status === "running" && run.lease_expires_ms !== null && asNumber(run.lease_expires_ms, "worker lease") <= nowMs) {
-      const attempts2 = this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ? AND status = 'reserved'").get(runId2);
-      const uncertain = asNumber(attempts2.count, "uncertain attempt count");
-      if (uncertain !== asNumber(run.reserved_calls, "reserved calls")) {
-        throw new RunStoreError("data_integrity_error", "Reserved call counters do not match reserved attempts.");
-      }
-      const updatedUncertainAttempts = interruptReservedAttempts(this.connection.orm, runId2, nowMs);
-      if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(this.connection.orm, runId2, nowMs, uncertain)) {
-        throw new RunStoreError("data_integrity_error", "Expired worker reservations changed during reconciliation.");
-      }
-    }
-  }
-  deletePreviewStatus(run, nowMs) {
-    const status = asText(run.status, "run status");
-    const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
-    const expired = status === "prepared" && leaseExpires <= nowMs || status === "running" && run.leaseExpiresMs !== null && leaseExpires <= nowMs;
-    return expired ? "interrupted" : status;
-  }
-  reconcileSelectedRuns(snapshot, nowMs) {
-    const statuses = /* @__PURE__ */ new Map();
-    for (const run of snapshot.runs) {
-      const status = asText(run.status, "run status");
-      const leaseExpires = run.leaseExpiresMs ?? run.createdMs + LEASE_MS;
-      if (status === "prepared" && nowMs >= leaseExpires) {
-        interruptUnclaimedRun(this.connection.orm, run.runId);
-        statuses.set(run.runId, "interrupted");
-      } else if (status === "running" && run.leaseExpiresMs !== null && run.leaseExpiresMs <= nowMs) {
-        const uncertain = snapshot.reservedAttemptCounts.get(run.runId) ?? 0;
-        if (uncertain !== run.reservedCalls) {
-          throw new RunStoreError("data_integrity_error", "Reserved call counters do not match reserved attempts.");
-        }
-        const updatedUncertainAttempts = interruptReservedAttempts(this.connection.orm, run.runId, nowMs);
-        if (updatedUncertainAttempts !== uncertain || !interruptExpiredRun(this.connection.orm, run.runId, nowMs, uncertain)) {
-          throw new RunStoreError("data_integrity_error", "Expired worker reservations changed during reconciliation.");
-        }
-        statuses.set(run.runId, "interrupted");
-      } else {
-        statuses.set(run.runId, status);
-      }
-    }
-    return statuses;
+    reconcileRun(this.database, this.connection.orm, runId2, nowMs, () => this.notFound());
   }
 };
+function deletePreviewStatus(run, nowMs) {
+  const status = asText(run.status, "run status");
+  const leaseExpires = run.leaseExpiresMs ?? run.createdMs + PREPARED_LAUNCH_WINDOW_MS;
+  const expired = status === "prepared" && leaseExpires <= nowMs || status === "running" && run.leaseExpiresMs !== null && leaseExpires <= nowMs;
+  return expired ? "interrupted" : status;
+}
 
 // src/infrastructure/credentials/windows.ts
 import { spawn as nodeSpawn } from "node:child_process";

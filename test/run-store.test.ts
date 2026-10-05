@@ -310,6 +310,35 @@ test('a batch-wide provider failure records one physical call and fails every re
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('failed batch settlement rolls attempt and call accounting back together', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root, { now: () => 10_000 });
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const prepared = await preparedRun({ ...input, respondents: [input.respondents[0]!], maxCalls: 1 });
+    const runId = store.accept(randomUUID(), prepared).run.runId;
+    const claim = store.claim(runId, 10_000, 1234);
+    assert.ok(claim);
+    const reservation = store.reserveBatch(claim, prepared.groups![0]!.groupId, [prepared.evaluations[0]!.evaluationId], 10_000);
+    assert.ok(reservation);
+    database.exec(`CREATE TRIGGER reject_evaluation_settlement BEFORE UPDATE ON evaluations
+      BEGIN SELECT RAISE(ABORT, 'injected settlement failure'); END`);
+
+    assert.throws(() => store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result: {
+      execution: { attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} },
+      answers: [{ questionId: prepared.evaluations[0]!.questionId, value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }],
+    } }));
+    assert.equal(store.getStatus(runId).usedCalls, 0);
+    assert.equal(store.getStatus(runId).reservedCalls, 1);
+    assert.equal(store.attempts(runId).items[0]!.status, 'reserved');
+    assert.equal(store.answers(runId).items[0]!.status, 'pending');
+  } finally {
+    database.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('safe typed-answer diagnostics persist in answers, filtered queries, and attempt history after resume', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);
@@ -1045,6 +1074,26 @@ test('run discovery observes explicit batch reconciliation before applying statu
     assert.equal(page.items.length, 1);
     assert.equal(page.items[0]!.runId, accepted.run.runId);
     assert.equal(page.items[0]!.status, 'interrupted');
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('active reconciliation processes expired work beyond one bounded selection', async () => {
+  const root = await temporaryRoot();
+  let nowMs = 10_000;
+  const store = openRunStore(root, { now: () => nowMs });
+  try {
+    for (let index = 0; index < 101; index += 1) {
+      const value = { ...input, respondents: [{ ...input.respondents[0]!, id: `bounded-${index}` }], maxCalls: 1 };
+      store.accept(randomUUID(), await preparedRun(value));
+    }
+    nowMs += 31_000;
+    store.reconcileActive(nowMs);
+    const page = store.list({ status: 'interrupted', limit: 200 });
+    assert.equal(page.items.length, 101);
+    assert.ok(page.items.every(({ status }) => status === 'interrupted'));
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });

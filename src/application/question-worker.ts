@@ -60,6 +60,7 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
       const reservation = commands.reserveBatch(claim, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
       if (!reservation) break;
       const batch: DecisionBatchRequest = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
+      let settled: Array<{ evaluationId: string; status: import('../domain/run/lifecycle.js').AnswerRow['status'] }>;
       try {
         let result: DecisionBatchResult;
         if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
@@ -71,15 +72,13 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
             ...(single.cost ? { cost: single.cost } : {}),
           } };
         }
-        commands.settleBatch(claim, reservation.attemptId, { kind: 'answered', result });
+        settled = commands.settleBatch(claim, reservation.attemptId, { kind: 'answered', result });
       } catch (error) {
         const scope = failureScope(error);
-        commands.settleBatch(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope });
+        settled = commands.settleBatch(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope });
         if (scope === 'run') return;
       }
-      for (const evaluation of batchEvaluations) answers.set(evaluation.evaluationId, 'answered');
-      const latest = new Map(reads.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
-      for (const evaluation of evaluations) answers.set(evaluation.evaluationId, latest.get(evaluation.evaluationId) ?? answers.get(evaluation.evaluationId)!);
+      for (const evaluation of settled) answers.set(evaluation.evaluationId, evaluation.status);
     }
   }
 }

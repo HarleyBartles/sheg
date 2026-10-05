@@ -7,12 +7,12 @@ import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { RunStoreError } from '../../application/run-store.js';
 import { asNumber, asText, type DatabaseRow } from './rows.js';
 import { sqliteTables } from './tables.js';
+import { PREPARED_LAUNCH_WINDOW_MS } from './work-policy.js';
 
 export const BASELINE_SCHEMA_VERSION = 9;
 export const SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
 export const BASELINE_MIGRATION_ID = 'baseline-v9';
 const MIGRATION_BACKUP_RETRIES = 3;
-const PREPARED_LAUNCH_WINDOW_MS = 30_000;
 const SQLITE_TRANSIENT_LOCK_CODES = new Set([5, 6]);
 const SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
 
