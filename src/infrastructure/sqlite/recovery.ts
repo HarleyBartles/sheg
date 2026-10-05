@@ -7,11 +7,11 @@ import { asNumber, type DatabaseRow } from './rows.js';
 import { checkDatabaseIntegrity, hasMigrationPath, SCHEMA_VERSION, validateSchemaShape, verifiedBackup } from './schema.js';
 
 export type StoreCompatibility =
-  | { status: 'current'; schemaVersion: 8 }
-  | { status: 'migration_available'; schemaVersion: number; targetSchemaVersion: 8 }
-  | { status: 'unsupported'; schemaVersion: number | null; targetSchemaVersion: 8 }
-  | { status: 'uninitialized'; schemaVersion: 0; targetSchemaVersion: 8 }
-  | { status: 'unreadable'; schemaVersion: null; targetSchemaVersion: 8 };
+  | { status: 'current'; schemaVersion: number }
+  | { status: 'migration_available'; schemaVersion: number; targetSchemaVersion: number }
+  | { status: 'unsupported'; schemaVersion: number | null; targetSchemaVersion: number }
+  | { status: 'uninitialized'; schemaVersion: 0; targetSchemaVersion: number }
+  | { status: 'unreadable'; schemaVersion: null; targetSchemaVersion: number };
 
 export function inspectRunStoreCompatibility(dataRoot: string): StoreCompatibility {
   if (!path.isAbsolute(dataRoot)) return { status: 'unreadable', schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
@@ -44,7 +44,7 @@ export function runStoreBackupAvailable(dataRoot: string): boolean {
   catch { return false; }
 }
 
-export function resetRunStore(dataRoot: string, openFreshStore: () => void): { reset: true; backupRetained: true; preservation: 'verified-sqlite-backup'; schemaVersion: 8 } | { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: 8 } {
+export function resetRunStore(dataRoot: string, openFreshStore: () => void): { reset: true; backupRetained: true; preservation: 'verified-sqlite-backup'; schemaVersion: number } | { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: number } {
   if (!path.isAbsolute(dataRoot)) throw new RunStoreError('invalid_data_root', 'Sheg data directory must be an absolute path.');
   const databasePath = path.join(dataRoot, 'runs.sqlite');
   let inspectionDatabase: DatabaseSync | undefined;
@@ -94,7 +94,7 @@ export function resetRunStore(dataRoot: string, openFreshStore: () => void): { r
   }
 }
 
-function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFreshStore: () => void): { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: 8 } {
+function resetUnreadableRunStore(dataRoot: string, databasePath: string, openFreshStore: () => void): { reset: true; backupRetained: false; preservation: 'quarantined-original-files'; schemaVersion: number } {
   if (!existsSync(databasePath)) throw new RunStoreError('recovery_backup_failed', 'Sheg could not find the original datastore files to preserve; no reset was performed.');
   const recoveryRoot = path.join(dataRoot, 'recovery', randomUUID());
   mkdirSync(recoveryRoot, { recursive: true });

@@ -1,73 +1,121 @@
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, unlinkSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { RunStoreError } from '../../application/run-store.js';
 import { asNumber, asText, type DatabaseRow } from './rows.js';
-import { hasSequentialMigrationPath } from '../schema-migration-path.js';
+import { sqliteTables } from './tables.js';
 
-export const SCHEMA_VERSION = 8;
+export const BASELINE_SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
+export const BASELINE_MIGRATION_ID = 'baseline-v9';
+const MIGRATION_BACKUP_RETRIES = 3;
+const PREPARED_LAUNCH_WINDOW_MS = 30_000;
+const SQLITE_TRANSIENT_LOCK_CODES = new Set([5, 6]);
+const SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
+
+export type SqliteMigration = {
+  id: string;
+  fromVersion: number;
+  toVersion: number;
+  sql: string;
+};
+
+function baselineSqlPath(): string {
+  const candidates = [
+    fileURLToPath(new URL('../../../migrations/0000_baseline_v9/migration.sql', import.meta.url)),
+    fileURLToPath(new URL('./migrations/0000_baseline_v9/migration.sql', import.meta.url)),
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError('datastore_schema_invalid', 'The schema 9 migration asset is missing from this Sheg installation.');
+  return match;
+}
+
+export function baselineMigration(): SqliteMigration {
+  return {
+    id: BASELINE_MIGRATION_ID,
+    fromVersion: 0,
+    toVersion: BASELINE_SCHEMA_VERSION,
+    sql: readFileSync(baselineSqlPath(), 'utf8'),
+  };
+}
+
+export function registeredMigrations(): SqliteMigration[] {
+  return [baselineMigration()];
+}
+
+function migrationChecksum(migration: SqliteMigration): string {
+  return createHash('sha256').update(migration.sql).digest('hex');
+}
 
 function isTransientSqliteLock(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'errcode' in error &&
-    (error.errcode === 5 || error.errcode === 6);
+    typeof error.errcode === 'number' && SQLITE_TRANSIENT_LOCK_CODES.has(error.errcode);
 }
 
-function setWriteAheadLogMode(database: DatabaseSync): void {
-  const deadline = Date.now() + 5_000;
-  const waitCell = new Int32Array(new SharedArrayBuffer(4));
-  while (true) {
+function enableWriteAheadLogging(database: DatabaseSync): void {
+  for (const delayMs of SQLITE_WAL_RETRY_DELAYS_MS) {
     try {
       database.exec('PRAGMA journal_mode = WAL');
       return;
     } catch (error) {
-      if (!isTransientSqliteLock(error) || Date.now() >= deadline) throw error;
-      Atomics.wait(waitCell, 0, 0, Math.min(25, deadline - Date.now()));
+      if (!isTransientSqliteLock(error)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
     }
   }
+  database.exec('PRAGMA journal_mode = WAL');
 }
 
-type SchemaMigration = { fromVersion: number; toVersion: number; id: string; apply(database: DatabaseSync): void };
-
-const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [{
-  fromVersion: 7,
-  toVersion: 8,
-  id: 'schema-v7-to-v8-ledger',
-  apply(database) {
-    database.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL)');
-    database.prepare('INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (?, ?, ?)')
-      .run(8, 'schema-v7-to-v8-ledger', new Date().toISOString());
-  },
-}];
-
-export function hasMigrationPath(fromVersion: number, targetVersion = SCHEMA_VERSION): boolean {
-  return hasSequentialMigrationPath(fromVersion, targetVersion, SCHEMA_MIGRATIONS);
+function runMigrationSql(database: DatabaseSync, migrationSql: string): void {
+  const statements = migrationSql.split('--> statement-breakpoint').map((statement) => statement.trim()).filter(Boolean);
+  if (statements.length === 0) throw new RunStoreError('datastore_schema_invalid', 'A schema migration contained no SQL statements.');
+  for (const statement of statements) database.exec(statement);
 }
 
-const REQUIRED_SCHEMA_COLUMNS = {
-  runs: ['run_id', 'submission_id', 'request_fingerprint', 'created_at', 'created_ms', 'label', 'status', 'request_json', 'evaluation_count', 'max_calls', 'used_calls', 'reserved_calls', 'cancel_requested', 'owner_token', 'owner_pid', 'lease_expires_ms', 'failure_scope', 'failure_code', 'failure_message'],
-  question_groups: ['group_id', 'run_id', 'ordinal', 'context_id', 'respondent_id', 'state_json', 'question_ids_json'],
-  evaluations: ['evaluation_id', 'run_id', 'ordinal', 'context_id', 'respondent_id', 'question_id', 'group_id', 'turn_id', 'node_id', 'path_id', 'occurrence', 'packet_json', 'packet_fingerprint', 'status', 'result_json', 'failure_code', 'failure_message', 'failure_detail_json'],
-  journey_respondents: ['run_id', 'respondent_id', 'status', 'current_node_id', 'current_turn_id', 'current_context_id', 'revision', 'events_json', 'route_json', 'outcome'],
-  attempts: ['attempt_sequence', 'attempt_id', 'run_id', 'group_id', 'evaluation_id', 'packet_fingerprint', 'owner_token', 'status', 'started_ms', 'settled_ms', 'result_json', 'execution_json', 'failure_code', 'failure_message', 'failure_scope'],
-  attempt_evaluations: ['attempt_id', 'evaluation_id', 'failure_json'],
-  evaluation_answer_attempts: ['evaluation_id', 'attempt_id'],
-  schema_migrations: ['version', 'migration_id', 'applied_at'],
-} as const;
+function pragmaNumber(database: DatabaseSync, name: 'user_version' | 'data_version'): number {
+  const row = database.prepare(`PRAGMA ${name}`).get() as DatabaseRow | undefined;
+  return asNumber(row?.[name], `SQLite ${name}`);
+}
 
-export function validateSchemaShape(database: DatabaseSync): void {
-  const rows = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as DatabaseRow[];
-  const actual = new Set(rows.map((row) => asText(row.name, 'schema table name')));
-  for (const [table, requiredColumns] of Object.entries(REQUIRED_SCHEMA_COLUMNS)) {
-    if (!actual.has(table)) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
-    const columns = database.prepare(`PRAGMA table_info("${table}")`).all() as DatabaseRow[];
-    const columnNames = new Set(columns.map((column) => asText(column.name, `${table} column name`)));
-    if (requiredColumns.some((column) => !columnNames.has(column))) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
+function applicationTableCount(database: DatabaseSync): number {
+  const row = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() as DatabaseRow | undefined;
+  return asNumber(row?.count, 'application table count');
+}
+
+export function validateSchemaShape(database: DatabaseSync, migrations = registeredMigrations()): void {
+  const existingTables = new Set((database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as DatabaseRow[])
+    .map((row) => asText(row.name, 'schema table name')));
+  for (const table of Object.values(sqliteTables)) {
+    const definition = getTableConfig(table);
+    if (!existingTables.has(definition.name)) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
+    const actualColumns = new Map((database.prepare(`PRAGMA table_info("${definition.name}")`).all() as DatabaseRow[])
+      .map((column) => [asText(column.name, `${definition.name} column name`), column]));
+    const primaryKeyColumnCount = [...actualColumns.values()].filter((column) => asNumber(column.pk, `${definition.name} primary key position`) > 0).length;
+    for (const expected of definition.columns) {
+      const actual = actualColumns.get(expected.name);
+      const implicitIntegerPrimaryKey = actual !== undefined && primaryKeyColumnCount === 1 &&
+        asNumber(actual.pk, `${definition.name}.${expected.name} primary key position`) === 1 && actual.type === 'INTEGER';
+      if (!actual || (expected.notNull && asNumber(actual.notnull, `${definition.name}.${expected.name} nullability`) !== 1 && !implicitIntegerPrimaryKey)) {
+        throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.');
+      }
+    }
   }
-  const migration = database.prepare('SELECT migration_id FROM schema_migrations WHERE version = ?').get(SCHEMA_VERSION) as DatabaseRow | undefined;
-  const migrationId = migration?.migration_id;
-  const validMigrationIds = [`baseline-v${SCHEMA_VERSION}`, ...SCHEMA_MIGRATIONS.filter(({ toVersion }) => toVersion === SCHEMA_VERSION).map(({ id }) => id)];
-  if (typeof migrationId !== 'string' || !validMigrationIds.includes(migrationId)) throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore has no recognized applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.');
+  const applied = database.prepare('SELECT version, migration_id, checksum FROM schema_migrations ORDER BY version').all() as DatabaseRow[];
+  const expectedChain = [...migrations].sort((left, right) => left.toVersion - right.toVersion);
+  let expectedFromVersion = 0;
+  const historyMatches = expectedChain.length === applied.length && expectedChain.every((migration, index) => {
+    const row = applied[index];
+    const sequential = migration.fromVersion === expectedFromVersion && migration.toVersion === expectedFromVersion + (expectedFromVersion === 0 ? migration.toVersion : 1);
+    expectedFromVersion = migration.toVersion;
+    return sequential &&
+      asNumber(row?.version, 'migration version') === migration.toVersion &&
+      row?.migration_id === migration.id && row.checksum === migrationChecksum(migration);
+  });
+  if (!historyMatches || pragmaNumber(database, 'user_version') !== SCHEMA_VERSION || expectedChain.at(-1)?.toVersion !== SCHEMA_VERSION) {
+    throw new RunStoreError('datastore_schema_invalid', 'The Sheg datastore has no recognized migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.');
+  }
 }
 
 export function checkDatabaseIntegrity(database: DatabaseSync, checkForeignKeys = true): void {
@@ -90,10 +138,7 @@ export function verifiedBackup(database: DatabaseSync, dataRoot: string, fromVer
     database.exec(`VACUUM INTO '${escapedPath}'`);
     const backup = new DatabaseSync(backupPath, { readOnly: true });
     try {
-      const versionRow = backup.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
-      if (asNumber(versionRow?.user_version, 'backup schema version') !== fromVersion) {
-        throw new RunStoreError('migration_backup_failed', 'The datastore backup does not match the source schema version.');
-      }
+      if (pragmaNumber(backup, 'user_version') !== fromVersion) throw new RunStoreError('migration_backup_failed', 'The datastore backup does not match the source schema version.');
       checkDatabaseIntegrity(backup, checkForeignKeys);
     } finally { backup.close(); }
     return backupPath;
@@ -104,206 +149,126 @@ export function verifiedBackup(database: DatabaseSync, dataRoot: string, fromVer
   }
 }
 
-function migrate(database: DatabaseSync, dataRoot: string, startingVersion: number): void {
-  let version = startingVersion;
-  while (version < SCHEMA_VERSION) {
-    const step = SCHEMA_MIGRATIONS.find(({ fromVersion }) => fromVersion === version);
-    if (!step || step.toVersion !== step.fromVersion + 1 || step.toVersion > SCHEMA_VERSION) {
-      throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema ${version} has no supported migration path to ${SCHEMA_VERSION}. Preserve the database and use run_storage to inspect recovery options.`);
-    }
-    const liveVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-    if (liveVersion === step.toVersion) { version = liveVersion; continue; }
-    if (liveVersion !== step.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${liveVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
-    try { verifiedBackup(database, dataRoot, step.fromVersion, step.toVersion); }
-    catch (error) {
-      const updatedVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-      if (updatedVersion === step.toVersion) { version = updatedVersion; continue; }
-      throw error;
-    }
-    database.exec('BEGIN IMMEDIATE');
+function liveWorkExists(database: DatabaseSync, nowMs: number): boolean {
+  const row = database.prepare(`SELECT 1 AS found FROM runs
+    WHERE (status = 'prepared' AND COALESCE(lease_expires_ms, created_ms + ?) > ?)
+       OR (status = 'running' AND lease_expires_ms > ?)
+    LIMIT 1`).get(PREPARED_LAUNCH_WINDOW_MS, nowMs, nowMs) as DatabaseRow | undefined;
+  return row !== undefined;
+}
+
+function applyUpgrade(database: DatabaseSync, dataRoot: string, migration: SqliteMigration, now: () => number): void {
+  for (let retry = 0; retry < MIGRATION_BACKUP_RETRIES; retry += 1) {
+    const observedVersion = pragmaNumber(database, 'user_version');
+    if (observedVersion === migration.toVersion) return;
+    if (observedVersion !== migration.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${observedVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
+    if (observedVersion === SCHEMA_VERSION) validateSchemaShape(database);
+    if (liveWorkExists(database, now())) throw new RunStoreError('migration_deferred', 'A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.');
+    const beforeBackupDataVersion = pragmaNumber(database, 'data_version');
+    const backupPath = verifiedBackup(database, dataRoot, migration.fromVersion, migration.toVersion);
+    let transactionOpen = false;
+    let foreignKeysDisabled = false;
     try {
-      const lockedVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-      if (lockedVersion === step.toVersion) {
-        database.exec('COMMIT');
-        version = lockedVersion;
-        continue;
+      database.exec('PRAGMA foreign_keys = OFF');
+      foreignKeysDisabled = Number((database.prepare('PRAGMA foreign_keys').get() as DatabaseRow).foreign_keys) === 0;
+      if (!foreignKeysDisabled) throw new RunStoreError('migration_failed', 'Sheg could not safely disable foreign keys for a schema rebuild.');
+      database.exec('BEGIN IMMEDIATE');
+      transactionOpen = true;
+      const lockedVersion = pragmaNumber(database, 'user_version');
+      if (lockedVersion === migration.toVersion) { database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); return; }
+      if (lockedVersion !== migration.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
+      if (pragmaNumber(database, 'data_version') !== beforeBackupDataVersion) {
+        database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); continue;
       }
-      if (lockedVersion !== step.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
-      step.apply(database);
-      database.exec(`PRAGMA user_version = ${step.toVersion}`);
+      if (liveWorkExists(database, now())) throw new RunStoreError('migration_deferred', 'A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.');
+      runMigrationSql(database, migration.sql);
+      const checksum = migrationChecksum(migration);
+      database.prepare('INSERT INTO schema_migrations (version, migration_id, checksum, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.toVersion, migration.id, checksum, new Date(now()).toISOString());
+      database.exec(`PRAGMA user_version = ${migration.toVersion}`);
       checkDatabaseIntegrity(database);
-      if (step.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
+      if (migration.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
       database.exec('COMMIT');
-      version = step.toVersion;
+      transactionOpen = false;
+      return;
     } catch (error) {
-      try { database.exec('ROLLBACK'); } catch { /* Preserve the migration error. */ }
+      if (transactionOpen) { try { database.exec('ROLLBACK'); } catch { /* Preserve the migration failure. */ } }
+      if (isTransientSqliteLock(error) && retry + 1 < MIGRATION_BACKUP_RETRIES) { try { unlinkSync(backupPath); } catch { /* A recoverable backup may remain. */ } continue; }
       if (error instanceof RunStoreError) throw error;
-      throw new RunStoreError('migration_failed', `Sheg could not migrate the datastore from schema ${step.fromVersion} to ${step.toVersion}. A verified backup was retained; use run_storage to inspect recovery options.`, { cause: error });
+      throw new RunStoreError('migration_failed', `Sheg could not migrate the datastore from schema ${migration.fromVersion} to ${migration.toVersion}. A verified backup was retained; use run_storage to inspect recovery options.`, { cause: error });
+    } finally {
+      if (foreignKeysDisabled) database.exec('PRAGMA foreign_keys = ON');
     }
   }
+  throw new RunStoreError('migration_backup_stale', 'The datastore changed while Sheg prepared its migration backup. No migration was applied; retry when other writers are idle.');
+}
+
+export function applySchemaMigrations(database: DatabaseSync, dataRoot: string, migrations: readonly SqliteMigration[], targetVersion: number, now = Date.now): void {
+  let currentVersion = pragmaNumber(database, 'user_version');
+  while (currentVersion < targetVersion) {
+    const migration = migrations.find(({ fromVersion }) => fromVersion === currentVersion);
+    if (!migration || migration.toVersion !== currentVersion + 1 && currentVersion !== 0) {
+      throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema ${currentVersion} has no supported sequential migration path to ${targetVersion}. Preserve it and use run_storage to inspect recovery options.`);
+    }
+    if (currentVersion === 0) {
+      if (applicationTableCount(database) !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.');
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        const lockedVersion = pragmaNumber(database, 'user_version');
+        const lockedTables = applicationTableCount(database);
+        if (lockedVersion === SCHEMA_VERSION && lockedTables > 0) {
+          database.exec('COMMIT');
+          validateSchemaShape(database);
+          return;
+        }
+        if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.');
+        runMigrationSql(database, migration.sql);
+        database.prepare('INSERT INTO schema_migrations (version, migration_id, checksum, applied_at) VALUES (?, ?, ?, ?)')
+          .run(migration.toVersion, migration.id, migrationChecksum(migration), new Date(now()).toISOString());
+        database.exec(`PRAGMA user_version = ${migration.toVersion}`);
+        checkDatabaseIntegrity(database);
+        validateSchemaShape(database);
+        database.exec('COMMIT');
+      } catch (error) {
+        try { database.exec('ROLLBACK'); } catch { /* Preserve the initialization error. */ }
+        if (error instanceof RunStoreError) throw error;
+        throw new RunStoreError('migration_failed', 'Sheg could not initialize its schema; no partial schema was retained.', { cause: error });
+      }
+    } else {
+      applyUpgrade(database, dataRoot, migration, now);
+    }
+    currentVersion = pragmaNumber(database, 'user_version');
+  }
+  if (currentVersion !== targetVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema ${currentVersion} is newer than this migration target ${targetVersion}. Preserve it and use run_storage to inspect compatibility.`);
+}
+
+export function hasMigrationPath(fromVersion: number, targetVersion = SCHEMA_VERSION): boolean {
+  if (!Number.isSafeInteger(fromVersion) || !Number.isSafeInteger(targetVersion) || fromVersion < 0 || targetVersion < fromVersion) return false;
+  const migrations = registeredMigrations();
+  let current = fromVersion;
+  while (current < targetVersion) {
+    const next = migrations.find(({ fromVersion: migrationStart }) => migrationStart === current);
+    if (!next) return false;
+    current = next.toVersion;
+  }
+  return current === targetVersion;
 }
 
 export function initialize(database: DatabaseSync, dataRoot: string): void {
-  const versionRow = database.prepare('PRAGMA user_version').get() as DatabaseRow | undefined;
-  const version = asNumber(versionRow?.user_version, 'schema version');
-  const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() as DatabaseRow | undefined;
-  const tableCount = asNumber(existing?.count, 'table count');
-
-  if (version === 0 && tableCount !== 0) {
-    throw new RunStoreError('unsupported_schema_version', 'The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.');
+  const version = pragmaNumber(database, 'user_version');
+  if (version > SCHEMA_VERSION) throw new RunStoreError('unsupported_schema_version', `The Sheg database schema version ${version} is newer than this build. Preserve it and use run_storage to inspect recovery options.`);
+  if (version === 0 && applicationTableCount(database) !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.');
+  if (version !== 0 && version !== SCHEMA_VERSION && !hasMigrationPath(version, SCHEMA_VERSION)) {
+    throw new RunStoreError('unsupported_schema_version', `The Sheg datastore schema version ${version} predates the v0.3.0 release baseline or has no supported migration path to ${SCHEMA_VERSION}. Preserve it and use run_storage to inspect options.`);
   }
-  if (version > SCHEMA_VERSION) {
-    throw new RunStoreError('unsupported_schema_version', `The Sheg database schema version ${version} is newer than this build. Preserve it and use run_storage to inspect recovery options.`);
-  }
-  if (version !== 0 && version < 7) {
-    throw new RunStoreError('unsupported_schema_version', `The Sheg database schema version ${version} is not supported. Export or reset this pre-v1 datastore only through explicit run_storage recovery.`);
-  }
-
   database.exec('PRAGMA foreign_keys = ON;');
   database.exec('PRAGMA synchronous = FULL;');
-
-  if (version === SCHEMA_VERSION) {
-    checkDatabaseIntegrity(database);
+  enableWriteAheadLogging(database);
+  if (version < SCHEMA_VERSION) applySchemaMigrations(database, dataRoot, registeredMigrations(), SCHEMA_VERSION);
+  else {
     validateSchemaShape(database);
-    setWriteAheadLogMode(database);
-    return;
-  }
-  if (version >= 7 && version < SCHEMA_VERSION) {
-    migrate(database, dataRoot, version);
-    setWriteAheadLogMode(database);
-    return;
-  }
-
-  setWriteAheadLogMode(database);
-  database.exec('BEGIN IMMEDIATE');
-  try {
-    const lockedVersion = asNumber((database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version, 'schema version');
-    const lockedTables = asNumber((database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() as DatabaseRow).count, 'table count');
-    if (lockedVersion === SCHEMA_VERSION && lockedTables > 0) {
-      database.exec('COMMIT');
-      checkDatabaseIntegrity(database);
-      return;
-    }
-    if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError('unsupported_schema_version', 'The Sheg datastore changed while being initialized; preserve it and use run_storage to inspect compatibility.');
-    database.exec(`
-    CREATE TABLE runs (
-      run_id TEXT PRIMARY KEY,
-      submission_id TEXT NOT NULL UNIQUE,
-      request_fingerprint TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      created_ms INTEGER NOT NULL,
-      label TEXT,
-      status TEXT NOT NULL CHECK (status IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')),
-      request_json TEXT NOT NULL,
-      evaluation_count INTEGER NOT NULL CHECK (evaluation_count > 0),
-      max_calls INTEGER NOT NULL CHECK (max_calls > 0),
-      used_calls INTEGER NOT NULL DEFAULT 0 CHECK (used_calls >= 0),
-      reserved_calls INTEGER NOT NULL DEFAULT 0 CHECK (reserved_calls >= 0),
-      cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
-      owner_token TEXT,
-      owner_pid INTEGER,
-      lease_expires_ms INTEGER,
-      failure_scope TEXT CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run')),
-      failure_code TEXT,
-      failure_message TEXT,
-      CHECK (used_calls + reserved_calls <= max_calls)
-    );
-    CREATE TABLE evaluations (
-      evaluation_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-      context_id TEXT NOT NULL,
-      respondent_id TEXT NOT NULL,
-      question_id TEXT NOT NULL,
-      group_id TEXT NOT NULL,
-      turn_id TEXT,
-      node_id TEXT,
-      path_id TEXT,
-      occurrence INTEGER,
-      packet_json TEXT NOT NULL,
-      packet_fingerprint TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed', 'unreached')),
-      result_json TEXT,
-      failure_code TEXT,
-      failure_message TEXT,
-      failure_detail_json TEXT,
-      UNIQUE (run_id, ordinal),
-      UNIQUE (run_id, evaluation_id),
-      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE,
-      UNIQUE (run_id, turn_id),
-      UNIQUE (run_id, respondent_id, node_id, occurrence),
-      CHECK ((turn_id IS NULL AND node_id IS NULL AND path_id IS NULL AND occurrence IS NULL) OR
-             (turn_id IS NOT NULL AND node_id IS NOT NULL AND path_id IS NOT NULL AND occurrence IS NOT NULL AND occurrence >= 1))
-    );
-    CREATE TABLE journey_respondents (
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      respondent_id TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed', 'unreached')),
-      current_node_id TEXT,
-      current_turn_id TEXT,
-      current_context_id TEXT,
-      revision INTEGER NOT NULL CHECK (revision >= 0),
-      events_json TEXT NOT NULL,
-      route_json TEXT NOT NULL,
-      outcome TEXT,
-      PRIMARY KEY (run_id, respondent_id),
-      CHECK ((status = 'active' AND current_node_id IS NOT NULL AND current_turn_id IS NOT NULL AND current_context_id IS NOT NULL) OR
-             (status <> 'active' AND current_node_id IS NULL AND current_turn_id IS NULL AND current_context_id IS NULL))
-    );
-    CREATE TABLE attempts (
-      attempt_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-      attempt_id TEXT NOT NULL UNIQUE,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      group_id TEXT NOT NULL,
-      evaluation_id TEXT NOT NULL,
-      packet_fingerprint TEXT NOT NULL,
-      owner_token TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('reserved', 'answered', 'failed', 'uncertain')),
-      started_ms INTEGER NOT NULL,
-      settled_ms INTEGER,
-      result_json TEXT,
-      execution_json TEXT,
-      failure_code TEXT,
-      failure_message TEXT,
-      failure_scope TEXT CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run')),
-      FOREIGN KEY (run_id, evaluation_id) REFERENCES evaluations(run_id, evaluation_id) ON DELETE CASCADE,
-      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE
-    );
-    CREATE TABLE question_groups (
-      group_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      ordinal INTEGER NOT NULL,
-      context_id TEXT NOT NULL,
-      respondent_id TEXT NOT NULL,
-      state_json TEXT NOT NULL,
-      question_ids_json TEXT NOT NULL,
-      UNIQUE (run_id, ordinal),
-      UNIQUE (run_id, group_id)
-    );
-    CREATE TABLE attempt_evaluations (
-      attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
-      evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
-      failure_json TEXT,
-      PRIMARY KEY (attempt_id, evaluation_id)
-    );
-    CREATE TABLE evaluation_answer_attempts (
-      evaluation_id TEXT PRIMARY KEY REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
-      attempt_id TEXT NOT NULL,
-      FOREIGN KEY (attempt_id, evaluation_id) REFERENCES attempt_evaluations(attempt_id, evaluation_id) ON DELETE CASCADE
-    );
-    CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
-    CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
-    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL);
-    INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (${SCHEMA_VERSION}, 'baseline-v${SCHEMA_VERSION}', '${new Date().toISOString()}');
-    PRAGMA user_version = ${SCHEMA_VERSION};
-  `);
-    database.exec('COMMIT');
-  } catch (error) {
-    try { database.exec('ROLLBACK'); } catch { /* Preserve the initialization error. */ }
-    throw error;
   }
 }
-
 
 export function openInitializedDatabase(databasePath: string, dataRoot: string): DatabaseSync {
   const database = new DatabaseSync(databasePath, { timeout: 5_000, enableForeignKeyConstraints: true });

@@ -1,11 +1,11 @@
 import path from 'node:path';
 import type { DecisionProvider } from '../domain/decision/provider.js';
-import type { AnswerRow, Page, RunAttempt, RunStatusView } from '../domain/run/lifecycle.js';
+import type { AnswerRow, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunStatusView } from '../domain/run/lifecycle.js';
 import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
 import type { PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
-import type { DeletePreview, DeleteResult, RunListQuery, RunStore, StorageInfo } from './run-store.js';
+import type { DeletePreview, DeleteResult, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
 import { CredentialStoreError } from '../infrastructure/credentials/windows.js';
 import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
 
@@ -30,10 +30,10 @@ export interface RunService {
   optimizeStorage(): void;
   list(query: RunListQuery): Page<RunStatusView>;
   queryEvidence(query: import('../domain/run/request.js').RunEvidenceQuery): import('../domain/run/request.js').RunEvidencePage;
-  getContext(runId: string, evaluationId: string, contextId: string): ReturnType<RunStore['getContext']>;
+  getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail;
   getStatus(runId: string): RunStatusView;
-  getRequest(runId: string): PreparedRun | ReturnType<RunStore['getJourneyRun']>;
-  getJourneyRun(runId: string): ReturnType<RunStore['getJourneyRun']>;
+  getRequest(runId: string): PreparedRun | JourneyRunRecord;
+  getJourneyRun(runId: string): JourneyRunRecord;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   attempts(runId: string, cursor?: string, limit?: number): Page<RunAttempt>;
   cancel(runId: string): RunStatusView;
@@ -49,12 +49,13 @@ function normalizeRequest(input: unknown): RunRequest {
 }
 
 export function createRunService(
-  store: RunStore,
+  persistence: RunPersistence,
   dataRoot: string,
   providerFactory: ProviderFactory,
   launcher: WorkerLauncher,
   options: RunServiceOptions = {},
 ): RunService {
+  const { reads, commands } = persistence;
   async function assertReady(provider: ProviderConfigInput): Promise<void> {
     try { await options.assertProviderReady?.(provider); }
     catch (error) {
@@ -76,7 +77,8 @@ export function createRunService(
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
-        const source = store.resolveFollowOnSources(followOn);
+        commands.reconcile(followOn.sourceRunId, Date.now());
+        const source = reads.resolveFollowOnSources(followOn);
         return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
       } catch (error) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error instanceof Error && 'code' in error ? String(error.code) : 'follow_on_resolution_failed', message: error instanceof Error ? error.message : 'Follow-on request could not be resolved.' }], fits: [] };
@@ -90,18 +92,19 @@ export function createRunService(
     const request = normalizeRequest(input);
     const requestFingerprint = fingerprintRunRequest(request);
     if (!requestFingerprint) throw new RunServiceError('invalid_request', 'Request is invalid.');
-    const prior = store.findSubmission(submissionId, requestFingerprint);
-    if (prior) return prior;
+    const prior = reads.findSubmission(submissionId, requestFingerprint);
+    if (prior) { commands.reconcile(prior.runId, Date.now()); return reads.getStatus(prior.runId); }
 
     await assertReady(request.provider);
-    let accepted: ReturnType<RunStore['accept']>;
+    let accepted: ReturnType<RunCommandRepository['accept']>;
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
-        const source = store.resolveFollowOnSources(followOn);
+        commands.reconcile(followOn.sourceRunId, Date.now());
+        const source = reads.resolveFollowOnSources(followOn);
         const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
         if (!admission.inspection.valid) throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
-        accepted = store.accept(submissionId, admission.prepared);
+        accepted = commands.accept(submissionId, admission.prepared);
       } catch (error) {
         if (error instanceof RunServiceError) throw error;
         if (error instanceof Error && 'code' in error) throw new RunServiceError(String(error.code), error.message, { cause: error });
@@ -113,49 +116,50 @@ export function createRunService(
         throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
       }
       accepted = admission.prepared
-        ? store.accept(submissionId, admission.prepared)
-        : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey!));
+        ? commands.accept(submissionId, admission.prepared)
+        : commands.acceptJourney(submissionId, materializeJourneyRun(admission.journey!));
     }
     if (!accepted.created) return accepted.run;
     try { await launcher.launch(dataRoot, accepted.run.runId); }
-    catch { store.failLaunch(accepted.run.runId, 'worker_launch_failed'); }
-    return store.getStatus(accepted.run.runId);
+    catch { commands.failLaunch(accepted.run.runId, 'worker_launch_failed'); }
+    return reads.getStatus(accepted.run.runId);
   }
 
   async function resume(runId: string): Promise<RunStatusView> {
-    const current = store.getStatus(runId);
+    commands.reconcile(runId, Date.now());
+    const current = reads.getStatus(runId);
     if (current.status === 'prepared') return current;
     if (!current.lifecycle.resume.eligible) {
       throw new RunServiceError('run_not_resumable', resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    const frozenProvider = store.getRequestKind(runId) === 'journey'
-      ? store.getJourneyRun(runId).request.provider
-      : store.getRequest(runId).request.provider;
+    const frozenProvider = reads.getRequestKind(runId) === 'journey'
+      ? reads.getJourneyRun(runId).request.provider
+      : reads.getRequest(runId).request.provider;
     await assertReady(frozenProvider);
-    const resumed = store.resume(runId, Date.now());
+    const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {
       try { await launcher.launch(dataRoot, runId); }
-      catch { store.failLaunch(runId, 'worker_launch_failed'); }
+      catch { commands.failLaunch(runId, 'worker_launch_failed'); }
     }
-    return store.getStatus(runId);
+    return reads.getStatus(runId);
   }
 
   return {
     inspect,
     start,
     resume,
-    previewDelete: (runIds) => store.previewDelete(runIds),
-    deleteRuns: (runIds) => store.deleteRuns(runIds),
-    storageInfo: () => store.storageInfo(),
-    optimizeStorage: () => store.optimizeStorage(),
-    list: (query) => store.list(query),
-    queryEvidence: (query) => store.queryEvidence(runEvidenceQuerySchema.parse(query)),
-    getContext: (runId, evaluationId, contextId) => store.getContext(runId, evaluationId, contextId),
-    getStatus: (runId) => store.reconcile(runId, Date.now()),
-    getRequest: (runId) => store.getRequestKind(runId) === 'journey' ? store.getJourneyRun(runId) : store.getRequest(runId),
-    getJourneyRun: (runId) => store.getJourneyRun(runId),
-    answers: (runId, cursor, limit) => { store.reconcile(runId, Date.now()); return store.answers(runId, cursor, limit); },
-    attempts: (runId, cursor, limit) => { store.reconcile(runId, Date.now()); return store.attempts(runId, cursor, limit); },
-    cancel: (runId) => store.requestCancel(runId),
+    previewDelete: (runIds) => { commands.reconcileMany(runIds, Date.now()); return reads.previewDelete(runIds); },
+    deleteRuns: (runIds) => commands.deleteRuns(runIds),
+    storageInfo: () => { commands.reconcileActive(Date.now()); return reads.storageInfo(); },
+    optimizeStorage: () => commands.optimizeStorage(),
+    list: (query) => { commands.reconcileActive(Date.now()); return reads.list(query); },
+    queryEvidence: (query) => { const parsed = runEvidenceQuerySchema.parse(query); commands.reconcile(parsed.sourceRunId, Date.now()); return reads.queryEvidence(parsed); },
+    getContext: (runId, evaluationId, contextId) => reads.getContext(runId, evaluationId, contextId),
+    getStatus: (runId) => { commands.reconcile(runId, Date.now()); return reads.getStatus(runId); },
+    getRequest: (runId) => reads.getRequestKind(runId) === 'journey' ? reads.getJourneyRun(runId) : reads.getRequest(runId),
+    getJourneyRun: (runId) => reads.getJourneyRun(runId),
+    answers: (runId, cursor, limit) => { commands.reconcile(runId, Date.now()); return reads.answers(runId, cursor, limit); },
+    attempts: (runId, cursor, limit) => { commands.reconcile(runId, Date.now()); return reads.attempts(runId, cursor, limit); },
+    cancel: (runId) => commands.requestCancel(runId),
   };
 }

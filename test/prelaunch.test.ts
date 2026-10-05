@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { runCli } from '../src/entrypoints/cli.js';
-import { createRunService } from '../src/application/run-service.js';
+import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { CredentialStoreError } from '../src/infrastructure/credentials/windows.js';
 

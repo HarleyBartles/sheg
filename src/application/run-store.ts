@@ -1,6 +1,6 @@
 import type { ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import type { DecisionFailureDetail, DecisionResult, DecisionBatchResult } from '../domain/decision/decision.js';
-import type { AnswerRow, AttemptReservation, JourneyEvaluation, JourneyRespondentState, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
+import type { AnswerRow, AttemptReservation, JourneyEvaluation, JourneyRespondentState, JourneyRunRecord, JourneyWorkerTurn, Page, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
 import type { FollowOnSourceSet, FrozenEvaluation, ParsedFollowOnRunRequest, PreparedJourneyRun, PreparedRun, RunListQueryInput } from '../domain/run/request.js';
 
 export type AttemptOutcome =
@@ -24,26 +24,31 @@ export class RunStoreError extends Error {
   }
 }
 
-export interface RunStore {
+export interface RunReadRepository {
   findSubmission(submissionId: string, requestFingerprint: string): RunStatusView | null;
-  accept(submissionId: string, prepared: PreparedRun): { created: boolean; run: RunStatusView };
-  acceptJourney(submissionId: string, prepared: PreparedJourneyRun): { created: boolean; run: RunStatusView };
   getStatus(runId: string): RunStatusView;
   evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }>;
   getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on';
   getRequest(runId: string): PreparedRun;
   getJourneyRun(runId: string): JourneyRunRecord;
+  getJourneyWorkerTurn(runId: string, evaluationId: string, respondentId: string): JourneyWorkerTurn;
   list(query: RunListQuery): Page<RunStatusView>;
   queryEvidence(query: RunEvidenceQuery): RunEvidencePage;
   getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail;
   resolveFollowOnSources(request: ParsedFollowOnRunRequest): FollowOnSourceSet;
   answers(runId: string, cursor?: string, limit?: number): Page<AnswerRow>;
   attempts(runId: string, cursor?: string, limit?: number): Page<RunAttempt>;
+  previewDelete(runIds: string[]): DeletePreview;
+  storageInfo(): StorageInfo;
+  close(): void;
+}
+
+export interface RunCommandRepository {
+  accept(submissionId: string, prepared: PreparedRun): { created: boolean; run: RunStatusView };
+  acceptJourney(submissionId: string, prepared: PreparedJourneyRun): { created: boolean; run: RunStatusView };
   requestCancel(runId: string): RunStatusView;
   resume(runId: string, nowMs: number): { started: boolean; run: RunStatusView };
-  previewDelete(runIds: string[]): DeletePreview;
   deleteRuns(runIds: string[]): DeleteResult;
-  storageInfo(): StorageInfo;
   optimizeStorage(): void;
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null;
   heartbeat(claim: WorkerClaim, nowMs: number): boolean;
@@ -56,5 +61,15 @@ export interface RunStore {
   failLaunch(runId: string, code: string): void;
   failRun(claim: WorkerClaim, code: string, message: string): void;
   reconcile(runId: string, nowMs: number): RunStatusView;
+  reconcileMany(runIds: string[], nowMs: number): void;
+  reconcileActive(nowMs: number): void;
+}
+
+export interface RunPersistence {
+  reads: RunReadRepository;
+  commands: RunCommandRepository;
   close(): void;
 }
+
+/** Compatibility surface retained only at the infrastructure adapter boundary during the cutover. */
+export interface RunStore extends RunReadRepository, RunCommandRepository {}

@@ -35,6 +35,8 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0027](0027-migrate-supported-datastore-schemas.md) | Migrate supported datastore schemas forward | Accepted |
 | [0028](0028-keep-planning-artifacts-off-main.md) | Keep planning artifacts off the stable release tree | Accepted |
 | [0029](0029-share-the-durable-run-system-across-entrypoints.md) | Share the durable run system across entrypoints | Accepted |
+| [0030](0030-use-drizzle-behind-typed-run-repositories.md) | Use Drizzle behind typed run repositories | Accepted |
+| [0031](0031-set-schema-nine-as-release-baseline.md) | Set schema 9 as the v0.3.0 release baseline | Accepted |
 
 ## Writing and changing decisions
 

@@ -1,6 +1,6 @@
 # Typed repositories and the v0.3.0 SQLite baseline
 
-Status: Approved for the paused dev.15 plan. Execution remains paused until the user resumes it.
+Status: Approved and in execution as the dev.15 work slice.
 
 ## Purpose and scope
 

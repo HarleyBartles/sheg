@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
+  for (var name2 in all)
+    __defProp(target, name2, { get: all[name2], enumerable: true });
 };
 
 // src/entrypoints/cli.ts
@@ -765,8 +765,8 @@ function assignProp(target, prop, value) {
   });
 }
 function rawShape(def) {
-  const desc = Object.getOwnPropertyDescriptor(def, "shape");
-  return desc?.get ? desc.get.raw : desc?.value;
+  const desc2 = Object.getOwnPropertyDescriptor(def, "shape");
+  return desc2?.get ? desc2.get.raw : desc2?.value;
 }
 function sourceShape(schema) {
   return rawShape(schema._zod.def) ?? schema._zod.def.shape;
@@ -791,27 +791,27 @@ function putProp(target, key, value) {
 function mirrorShape(target, source, keys, wrap) {
   const raw = sourceShape(source);
   for (const key of keys) {
-    const desc = Object.getOwnPropertyDescriptor(raw, key);
-    if (!desc.enumerable)
+    const desc2 = Object.getOwnPropertyDescriptor(raw, key);
+    if (!desc2.enumerable)
       continue;
-    if (desc.get) {
+    if (desc2.get) {
       deferProp(target, key, () => {
         const value = source._zod.def.shape[key];
         return wrap ? wrap(value, key) : value;
       });
     } else
-      putProp(target, key, wrap ? wrap(desc.value, key) : desc.value);
+      putProp(target, key, wrap ? wrap(desc2.value, key) : desc2.value);
   }
 }
 function mirrorProps(target, source) {
   for (const key of Reflect.ownKeys(source)) {
-    const desc = Object.getOwnPropertyDescriptor(source, key);
-    if (!desc.enumerable)
+    const desc2 = Object.getOwnPropertyDescriptor(source, key);
+    if (!desc2.enumerable)
       continue;
-    if (desc.get)
+    if (desc2.get)
       deferProp(target, key, () => source[key]);
     else
-      putProp(target, key, desc.value);
+      putProp(target, key, desc2.value);
   }
 }
 function mergeDefs(...defs) {
@@ -1127,12 +1127,12 @@ function merge(a, b) {
   });
   return clone(a, def);
 }
-function partial(Class2, schema, mask, name = "partial") {
+function partial(Class2, schema, mask, name2 = "partial") {
   const currDef = schema._zod.def;
   const checks = currDef.checks;
   const hasChecks = checks && checks.length > 0;
   if (hasChecks) {
-    throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
+    throw new Error(`.${name2}() cannot be used on object schemas containing refinements`);
   }
   const selected = mask ? new Set(maskedKeys(schema, mask)) : void 0;
   const newShape = {};
@@ -1320,11 +1320,11 @@ var Class = class {
 };
 function members(proto, table) {
   for (const key in table) {
-    const desc = Object.getOwnPropertyDescriptor(table, key);
-    if (desc.get)
-      Object.defineProperty(proto, key, { ...desc, enumerable: false });
+    const desc2 = Object.getOwnPropertyDescriptor(table, key);
+    if (desc2.get)
+      Object.defineProperty(proto, key, { ...desc2, enumerable: false });
     else
-      defineBound(proto, key, desc.value);
+      defineBound(proto, key, desc2.value);
   }
 }
 function own(inst, key, value, enumerable = true) {
@@ -1414,11 +1414,11 @@ function installLazyProp(inst, key, make, enumerable) {
   Object.defineProperty(proto, key, {
     configurable: true,
     get() {
-      const desc = { configurable: true, writable: true, enumerable, value: void 0 };
-      Object.defineProperty(this, key, desc);
-      desc.value = make(this);
-      Object.defineProperty(this, key, desc);
-      return desc.value;
+      const desc2 = { configurable: true, writable: true, enumerable, value: void 0 };
+      Object.defineProperty(this, key, desc2);
+      desc2.value = make(this);
+      Object.defineProperty(this, key, desc2);
+      return desc2.value;
     },
     set(value) {
       Object.defineProperty(this, key, { configurable: true, writable: true, enumerable, value });
@@ -1460,7 +1460,7 @@ function newError(Definition) {
   return new Definition();
 }
 // @__NO_SIDE_EFFECTS__
-function $constructor(name, initializer3, proto, params) {
+function $constructor(name2, initializer3, proto, params) {
   const zodProto = {};
   function Internals(def) {
     this.def = def;
@@ -1478,10 +1478,10 @@ function $constructor(name, initializer3, proto, params) {
       } finally {
         _zodDesc.value = void 0;
       }
-    } else if (inst._zod.traits.has(name)) {
+    } else if (inst._zod.traits.has(name2)) {
       return;
     }
-    inst._zod.traits.add(name);
+    inst._zod.traits.add(name2);
     initializer3(inst, def);
     if (initialized) {
       const own2 = Object.getPrototypeOf(inst);
@@ -1507,7 +1507,7 @@ function $constructor(name, initializer3, proto, params) {
   const Parent = params?.Parent ?? Object;
   class Definition extends Parent {
   }
-  Object.defineProperty(Definition, "name", { value: name });
+  Object.defineProperty(Definition, "name", { value: name2 });
   function _(def) {
     const inst = params?.Parent ? newError(Definition) : this;
     init(inst, def);
@@ -1528,10 +1528,10 @@ function $constructor(name, initializer3, proto, params) {
     value: (inst) => {
       if (params?.Parent && inst instanceof params.Parent)
         return true;
-      return inst?._zod?.traits?.has(name);
+      return inst?._zod?.traits?.has(name2);
     }
   });
-  Object.defineProperty(_, "name", { value: name });
+  Object.defineProperty(_, "name", { value: name2 });
   return _;
 }
 var $brand = /* @__PURE__ */ Symbol("zod_brand");
@@ -1541,8 +1541,8 @@ var $ZodAsyncError = class extends Error {
   }
 };
 var $ZodEncodeError = class extends Error {
-  constructor(name) {
-    super(`Encountered unidirectional transform during encode: ${name}`);
+  constructor(name2) {
+    super(`Encountered unidirectional transform during encode: ${name2}`);
     this.name = "ZodEncodeError";
   }
 };
@@ -3355,11 +3355,11 @@ var $ZodDate = /* @__PURE__ */ $constructor("$ZodDate", (inst, def) => {
     return payload;
   };
 });
-function handleArrayResult(result, final, index) {
+function handleArrayResult(result, final, index2) {
   if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+    final.issues.push(...prefixIssues(index2, result.issues));
   }
-  final.value[index] = result.value;
+  final.value[index2] = result.value;
 }
 var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
   $ZodType.init(inst, def);
@@ -3502,8 +3502,8 @@ function handleCatchall(proms, input2, payload, ctx, def, inst, abortEarly) {
 }
 var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
   $ZodType.init(inst, def);
-  const desc = Object.getOwnPropertyDescriptor(def, "shape");
-  const sh = desc?.get ? desc.get.raw : def.shape ?? {};
+  const desc2 = Object.getOwnPropertyDescriptor(def, "shape");
+  const sh = desc2?.get ? desc2.get.raw : def.shape ?? {};
   if (sh) {
     const get = () => {
       const newSh = { ...sh };
@@ -3828,8 +3828,8 @@ var $ZodXor = /* @__PURE__ */ $constructor("$ZodXor", (inst, def) => {
     });
   };
 });
-function getDiscriminatedOption(union2, value) {
-  const internals = union2._zod;
+function getDiscriminatedOption(union3, value) {
+  const internals = union3._zod;
   let map2 = internals.bag.optionsMap;
   if (!map2) {
     map2 = discriminatorMap(internals.def);
@@ -3970,14 +3970,14 @@ function mergeValues(a, b) {
       return { valid: false, mergeErrorPath: [] };
     }
     const newArray = [];
-    for (let index = 0; index < a.length; index++) {
-      const itemA = a[index];
-      const itemB = b[index];
+    for (let index2 = 0; index2 < a.length; index2++) {
+      const itemA = a[index2];
+      const itemB = b[index2];
       const sharedValue = mergeValues(itemA, itemB);
       if (!sharedValue.valid) {
         return {
           valid: false,
-          mergeErrorPath: [index, ...sharedValue.mergeErrorPath]
+          mergeErrorPath: [index2, ...sharedValue.mergeErrorPath]
         };
       }
       newArray.push(sharedValue.data);
@@ -4128,11 +4128,11 @@ function getTupleOptStart(items, key) {
   }
   return 0;
 }
-function handleTupleResult(result, final, index) {
+function handleTupleResult(result, final, index2) {
   if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+    final.issues.push(...prefixIssues(index2, result.issues));
   }
-  final.value[index] = result.value;
+  final.value[index2] = result.value;
 }
 function handleTupleResults(itemResults, final, items, input2, optoutStart) {
   for (let i = 0; i < items.length; i++) {
@@ -5043,7 +5043,7 @@ function isRecursive(inst, stack, resolve) {
     return PROVEN;
   stack.add(inst);
   let result = NONE;
-  const check2 = (child) => {
+  const check3 = (child) => {
     if (result !== PROVEN && child?._zod) {
       const answer = isRecursive(child, stack, resolve);
       if (answer > result)
@@ -5053,10 +5053,10 @@ function isRecursive(inst, stack, resolve) {
   const shape = (sh, spread) => {
     let answer = NONE;
     for (const key of Reflect.ownKeys(sh)) {
-      const desc = Object.getOwnPropertyDescriptor(sh, key);
-      if (spread && !desc.enumerable)
+      const desc2 = Object.getOwnPropertyDescriptor(sh, key);
+      if (spread && !desc2.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve) : NONE;
+      const child = desc2.get ? ASSUMED : desc2.value?._zod ? isRecursive(desc2.value, stack, resolve) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -5072,32 +5072,32 @@ function isRecursive(inst, stack, resolve) {
     case "object": {
       const raw = rawShape(def);
       merge2(raw ? shape(raw, true) : ASSUMED);
-      check2(def.catchall);
+      check3(def.catchall);
       break;
     }
     case "array":
-      check2(def.element);
+      check3(def.element);
       break;
     case "tuple":
       for (const el of def.items)
-        check2(el);
-      check2(def.rest);
+        check3(el);
+      check3(def.rest);
       break;
     case "record":
     case "map":
-      check2(def.keyType);
-      check2(def.valueType);
+      check3(def.keyType);
+      check3(def.valueType);
       break;
     case "set":
-      check2(def.valueType);
+      check3(def.valueType);
       break;
     case "union":
       for (const el of def.options)
-        check2(el);
+        check3(el);
       break;
     case "intersection":
-      check2(def.left);
-      check2(def.right);
+      check3(def.left);
+      check3(def.right);
       break;
     case "optional":
     case "nullable":
@@ -5108,15 +5108,15 @@ function isRecursive(inst, stack, resolve) {
     case "nonoptional":
     case "promise":
     case "success":
-      check2(def.innerType);
+      check3(def.innerType);
       break;
     case "pipe":
-      check2(def.in);
-      check2(def.out);
+      check3(def.in);
+      check3(def.out);
       break;
     case "function":
-      check2(def.input);
-      check2(def.output);
+      check3(def.input);
+      check3(def.output);
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
@@ -5150,17 +5150,17 @@ function isRecursive(inst, stack, resolve) {
     default: {
       kind;
       for (const key in def) {
-        const desc = Object.getOwnPropertyDescriptor(def, key);
-        if (!desc || desc.get)
+        const desc2 = Object.getOwnPropertyDescriptor(def, key);
+        if (!desc2 || desc2.get)
           continue;
-        const value = desc.value;
+        const value = desc2.value;
         if (!value || typeof value !== "object")
           continue;
         if (value._zod)
-          check2(value);
+          check3(value);
         else if (Array.isArray(value))
           for (const el of value)
-            check2(el);
+            check3(el);
       }
     }
   }
@@ -9318,8 +9318,8 @@ function ko_default() {
 }
 
 // node_modules/zod/v4/locales/lt.js
-var capitalizeFirstCharacter = (text) => {
-  return text.charAt(0).toUpperCase() + text.slice(1);
+var capitalizeFirstCharacter = (text2) => {
+  return text2.charAt(0).toUpperCase() + text2.slice(1);
 };
 function getUnitTypeFromNumber(number4) {
   const abs = Math.abs(number4);
@@ -13041,13 +13041,13 @@ ${code}
   return fn;
 }
 function addConstant(ctx, value) {
-  for (const [name2, v] of ctx.constants) {
+  for (const [name3, v] of ctx.constants) {
     if (v === value)
-      return name2;
+      return name3;
   }
-  const name = `c${ctx.constantCounter++}`;
-  ctx.constants.set(name, value);
-  return name;
+  const name2 = `c${ctx.constantCounter++}`;
+  ctx.constants.set(name2, value);
+  return name2;
 }
 function addUserConstant(ctx, fn) {
   ctx.definite = false;
@@ -13106,8 +13106,8 @@ function generateChecks(doc, ctx, schema, accessor) {
   if (!schemaChecks || schemaChecks.length === 0)
     return accessor;
   let currentAccessor = accessor;
-  for (const check2 of schemaChecks) {
-    const def = check2._zod.def;
+  for (const check3 of schemaChecks) {
+    const def = check3._zod.def;
     if (def.when && !WHEN_DEFAULTED_CHECKS.has(def.check)) {
       throw new ZodCompileUnsupportedError(`check with a custom "when" condition`);
     }
@@ -13155,7 +13155,7 @@ function generateChecks(doc, ctx, schema, accessor) {
         currentAccessor = generateStringFormatCheck(doc, ctx, def, currentAccessor);
         break;
       case "custom":
-        currentAccessor = generateCustomRefineCheck(doc, ctx, check2, currentAccessor);
+        currentAccessor = generateCustomRefineCheck(doc, ctx, check3, currentAccessor);
         break;
       case "bigint_format":
         generateBigIntFormatCheck(doc, def, currentAccessor);
@@ -13171,7 +13171,7 @@ function generateChecks(doc, ctx, schema, accessor) {
         break;
       case "overwrite": {
         const newAccessor = newVar(ctx);
-        generateOverwriteCheck(doc, ctx, check2, currentAccessor, newAccessor);
+        generateOverwriteCheck(doc, ctx, check3, currentAccessor, newAccessor);
         currentAccessor = newAccessor;
         break;
       }
@@ -13294,8 +13294,8 @@ function generatePropertyCheck(doc, ctx, def, accessor) {
   const propAccessor = `${accessor}[${JSON.stringify(def.property)}]`;
   generateCheck(doc, ctx, def.schema, propAccessor);
 }
-function generateOverwriteCheck(doc, ctx, check2, currentAccessor, newAccessor) {
-  const tx = check2._zod.def.tx;
+function generateOverwriteCheck(doc, ctx, check3, currentAccessor, newAccessor) {
+  const tx = check3._zod.def.tx;
   if (!tx) {
     throw new ZodCompileUnsupportedError("overwrite check without a transform function");
   }
@@ -13311,8 +13311,8 @@ function throwAsync() {
 function pushIssue(issue2) {
   this.issues.push(issue2);
 }
-function generateCustomRefineCheck(doc, ctx, check2, accessor) {
-  const def = check2._zod.def;
+function generateCustomRefineCheck(doc, ctx, check3, accessor) {
+  const def = check3._zod.def;
   if (def.fn) {
     if (isAsyncFunction(def.fn)) {
       throw new ZodCompileAsyncError("z.compile: async .refine() predicates are not supported");
@@ -13325,11 +13325,11 @@ function generateCustomRefineCheck(doc, ctx, check2, accessor) {
     doc.write(`if (!${resVar}) return INVALID;`);
     return accessor;
   }
-  if (check2._zod.check) {
-    if (isAsyncFunction(check2._zod.check)) {
+  if (check3._zod.check) {
+    if (isAsyncFunction(check3._zod.check)) {
       throw new ZodCompileAsyncError("z.compile: async .superRefine() / check functions are not supported");
     }
-    const checkFn = check2._zod.check;
+    const checkFn = check3._zod.check;
     const helperFn = (value) => {
       const fakePayload = { value, issues: [], addIssue: pushIssue };
       const result = checkFn(fakePayload);
@@ -15861,12 +15861,12 @@ function foldIntersection(json2) {
   if (!unions.length) {
     folded = foldObjects(allOf);
   } else {
-    const union2 = unions[0];
-    const keyword = UNION_KEYS.find((k) => Array.isArray(union2[k]));
-    if (Object.keys(union2).length !== 1)
+    const union3 = unions[0];
+    const keyword = UNION_KEYS.find((k) => Array.isArray(union3[k]));
+    if (Object.keys(union3).length !== 1)
       return;
-    const rest = allOf.filter((m) => m !== union2);
-    const branches = union2[keyword].map((branch) => foldObjects([...rest, branch]));
+    const rest = allOf.filter((m) => m !== union3);
+    const branches = union3[keyword].map((branch) => foldObjects([...rest, branch]));
     if (branches.some((b) => !b))
       return;
     folded = { [keyword]: branches };
@@ -17244,8 +17244,8 @@ var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
     reg.add(this, meta3);
     return this;
   },
-  refine(check2, params) {
-    return this.check(refine(check2, params));
+  refine(check3, params) {
+    return this.check(refine(check3, params));
   },
   superRefine(refinement, params) {
     return this.check(superRefine(refinement, params));
@@ -18813,7 +18813,7 @@ function detectVersion(schema, defaultTarget) {
   return defaultTarget ?? "draft-2020-12";
 }
 function applyMinItems(items, minItems) {
-  return items.map((item, index) => index < minItems ? item : item.optional());
+  return items.map((item, index2) => index2 < minItems ? item : item.optional());
 }
 function decodeJSONPointerSegment(segment) {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
@@ -19909,7 +19909,7 @@ function prepareFollowOnPacket(input2) {
     trajectory: source.state.trajectory,
     question
   });
-  const material = input2.material ? input2.material.map(({ id, text }) => ({ id, text })) : [];
+  const material = input2.material ? input2.material.map(({ id, text: text2 }) => ({ id, text: text2 })) : [];
   let state;
   if (mode === "continue") {
     if (!input2.result) throw new Error("Continue context requires the selected completed answer.");
@@ -20017,7 +20017,7 @@ function compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 
 function compileDecisionRequest(parts) {
   const state = {
     respondent: { profile: { ...parts.respondentProfile } },
-    encounteredItems: parts.encounteredItems.map(({ id, text }) => ({ id, text })),
+    encounteredItems: parts.encounteredItems.map(({ id, text: text2 }) => ({ id, text: text2 })),
     trajectory: parts.trajectory
   };
   const request = decisionRequestSchema.parse({
@@ -20042,15 +20042,15 @@ function journeyTopology(arm) {
   const exposes = arm.items.map((item) => `sequence-expose-${item.id}`);
   const asks = arm.tasks.map((task) => `sequence-ask-${task.id}`);
   const terminal = `sequence-terminal-${arm.id}`;
-  arm.items.forEach((item, index) => {
-    const id = exposes[index];
+  arm.items.forEach((item, index2) => {
+    const id = exposes[index2];
     nodes.push({ id, kind: "expose", itemId: item.id });
-    transitions.push({ fromNodeId: id, toNodeId: exposes[index + 1] ?? asks[0] });
+    transitions.push({ fromNodeId: id, toNodeId: exposes[index2 + 1] ?? asks[0] });
   });
-  arm.tasks.forEach((task, index) => {
-    const id = asks[index];
+  arm.tasks.forEach((task, index2) => {
+    const id = asks[index2];
     nodes.push({ id, kind: "ask", taskId: task.id });
-    const toNodeId = asks[index + 1] ?? terminal;
+    const toNodeId = asks[index2 + 1] ?? terminal;
     if ("options" in task) {
       for (const optionId of Object.keys(task.options)) transitions.push({ fromNodeId: id, optionId, toNodeId });
     } else {
@@ -20325,42 +20325,42 @@ function validateJourneyDefinition(arm, context) {
   if (!nodesById.has(presentation.entryNodeId)) {
     context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
   }
-  for (const [index, node2] of presentation.nodes.entries()) {
+  for (const [index2, node2] of presentation.nodes.entries()) {
     if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index2, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
     }
     if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index2, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
     }
   }
   const outgoing = /* @__PURE__ */ new Map();
-  for (const [index, edge] of presentation.transitions.entries()) {
+  for (const [index2, edge] of presentation.transitions.entries()) {
     const source = nodesById.get(edge.fromNodeId);
     if (!source) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
       continue;
     }
     if (!nodesById.has(edge.toNodeId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
     }
     const edges = outgoing.get(edge.fromNodeId) ?? [];
     outgoing.set(edge.fromNodeId, [...edges, edge]);
     if (source.kind === "terminal") {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Terminal nodes cannot have outgoing transitions." });
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Terminal nodes cannot have outgoing transitions." });
     }
     if (source.kind === "expose" && (edge.optionId !== void 0 || edge.when !== void 0)) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index], message: "Exposure transitions must be unconditional." });
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Exposure transitions must be unconditional." });
     }
   }
-  for (const [index, node2] of presentation.nodes.entries()) {
+  for (const [index2, node2] of presentation.nodes.entries()) {
     const edges = outgoing.get(node2.id) ?? [];
     if (node2.kind === "terminal") {
-      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Terminal nodes cannot have outgoing transitions." });
+      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Terminal nodes cannot have outgoing transitions." });
       continue;
     }
     if (node2.kind === "expose") {
       if (edges.length !== 1 || edges[0]?.optionId !== void 0 || edges[0]?.when !== void 0) {
-        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Each exposure node must have exactly one unconditional transition." });
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Each exposure node must have exactly one unconditional transition." });
       }
       continue;
     }
@@ -20370,11 +20370,11 @@ function validateJourneyDefinition(arm, context) {
       const optionIds = Object.keys(task.options);
       const edgeOptionIds = edges.map((edge) => edge.optionId);
       if (edges.some((edge) => edge.when !== void 0) || edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
-        context.addIssue({ code: "custom", path: ["presentation", "nodes", index], message: "Choice task transitions must contain exactly one edge for every offered option and no others." });
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Choice task transitions must contain exactly one edge for every offered option and no others." });
       }
     } else {
       const maximum = task.type === "score" ? task.rubric.length - 1 : 1;
-      validateResponseIntervals(edges, task.type, maximum, context, index);
+      validateResponseIntervals(edges, task.type, maximum, context, index2);
     }
   }
   if (nodesById.has(presentation.entryNodeId)) {
@@ -20436,7 +20436,7 @@ function validateJourneyDefinition(arm, context) {
 }
 function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
   const issues = context;
-  const ranges = edges.map((edge, index) => ({ edge, index, range: edge.when }));
+  const ranges = edges.map((edge, index2) => ({ edge, index: index2, range: edge.when }));
   const fail = (message) => issues.addIssue({
     code: "custom",
     path: ["presentation", "nodes", nodeIndex],
@@ -20459,9 +20459,9 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
     fail(`${type.toUpperCase()} route intervals must cover the complete response domain.`);
     return;
   }
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1].range;
-    const current = ordered[index].range;
+  for (let index2 = 1; index2 < ordered.length; index2 += 1) {
+    const previous = ordered[index2 - 1].range;
+    const current = ordered[index2].range;
     if (previous.maximum > current.minimum || previous.maximum === current.minimum && previous.maximumInclusive && current.minimumInclusive) {
       fail(`${type.toUpperCase()} route intervals overlap or leave an ambiguous boundary.`);
       return;
@@ -20515,10 +20515,10 @@ var respondentArchetypeSchema = external_exports.object({
   if (new Set(axisIds).size !== axisIds.length) {
     context.addIssue({ code: "custom", path: ["variation_axes"], message: "Variation axis IDs must be unique." });
   }
-  for (const [index, axis] of archetype.variation_axes.entries()) {
+  for (const [index2, axis] of archetype.variation_axes.entries()) {
     const valueIds = axis.values.map((value) => value.id);
     if (new Set(valueIds).size !== valueIds.length) {
-      context.addIssue({ code: "custom", path: ["variation_axes", index, "values"], message: "Variation values must have unique IDs within their axis." });
+      context.addIssue({ code: "custom", path: ["variation_axes", index2, "values"], message: "Variation values must have unique IDs within their axis." });
     }
   }
 });
@@ -20619,8 +20619,8 @@ async function parseJsonFile(filePath, label) {
     throw new StudyInputError(`${label} is missing or unreadable.`, { cause: error62 });
   }
   try {
-    const text = bytes.toString("utf8");
-    return JSON.parse(text.charCodeAt(0) === 65279 ? text.slice(1) : text);
+    const text2 = bytes.toString("utf8");
+    return JSON.parse(text2.charCodeAt(0) === 65279 ? text2.slice(1) : text2);
   } catch (error62) {
     throw new StudyInputError(`${label} must be valid UTF-8 JSON.`, { cause: error62 });
   }
@@ -20639,8 +20639,8 @@ async function loadStudy(manifestPath, cohortPath, options2 = {}) {
   }
   let manifestJson;
   try {
-    const text = manifestBytes.toString("utf8");
-    manifestJson = JSON.parse(text.charCodeAt(0) === 65279 ? text.slice(1) : text);
+    const text2 = manifestBytes.toString("utf8");
+    manifestJson = JSON.parse(text2.charCodeAt(0) === 65279 ? text2.slice(1) : text2);
   } catch (error62) {
     throw new StudyInputError("Manifest must be valid UTF-8 JSON.", { cause: error62 });
   }
@@ -20967,7 +20967,7 @@ async function migrateLegacyCheckpoint(checkpoint) {
   const legacyVersion = checkpoint.migratedFromFormatVersion;
   if (!legacyVersion) return checkpoint;
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
-  if (study.sources.length !== checkpoint.sourceHashes.length || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index])) {
+  if (study.sources.length !== checkpoint.sourceHashes.length || study.sources.some((source, index2) => source.sha256 !== checkpoint.sourceHashes[index2])) {
     throw new Error("Study source hashes changed since the legacy run was prepared.");
   }
   const oldStimulus = legacyVersion === 2 ? legacyChoiceStimulusFingerprint(study.manifest, study.cohort, legacyPromptContractHash) : stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
@@ -21005,7 +21005,7 @@ var LegacyRunArchiveReader = class {
       if (error62.code === "ENOENT") return [];
       throw error62;
     }
-    const files = names.filter((name) => /^run-[0-9a-f-]+\.json$/i.test(name)).sort();
+    const files = names.filter((name2) => /^run-[0-9a-f-]+\.json$/i.test(name2)).sort();
     const checkpoints = [];
     for (const filename of files) checkpoints.push(await this.read(filename.slice(4, -5)));
     return checkpoints;
@@ -21077,7 +21077,7 @@ function reconstructPartialEvents(arm, stored) {
   const used = /* @__PURE__ */ new Set();
   let sequence = 0;
   const responseFor = (taskId, nodeId) => {
-    const decisionIndex = stored.decisions.findIndex((decision, index) => !used.has(index) && decision.decisionId === taskId);
+    const decisionIndex = stored.decisions.findIndex((decision, index2) => !used.has(index2) && decision.decisionId === taskId);
     if (decisionIndex < 0) {
       events.push({ type: "pending-response", sequence: sequence++, nodeId, taskId });
       return null;
@@ -21149,7 +21149,7 @@ async function buildReport(checkpoint) {
   const study = await loadStudy(checkpoint.manifestPath, checkpoint.cohortPath);
   const stimulus = stimulusFingerprint(study.manifest, study.cohort, promptContractHash());
   const identityProvider = checkpoint.provider.kind === "laya" ? { kind: "laya", checkpoint: checkpoint.provider.checkpoint, contextLimit: checkpoint.provider.contextLimit, headLimit: checkpoint.provider.headLimit, tokenizerSha256: checkpoint.provider.tokenizerSha256, ...checkpoint.provider.precision === void 0 ? {} : { precision: checkpoint.provider.precision } } : checkpoint.provider;
-  if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint || study.sources.some((source, index) => source.sha256 !== checkpoint.sourceHashes[index]) || study.sources.length !== checkpoint.sourceHashes.length) {
+  if (stimulus !== checkpoint.stimulusFingerprint || executionFingerprint(stimulus, identityProvider) !== checkpoint.executionFingerprint || study.sources.some((source, index2) => source.sha256 !== checkpoint.sourceHashes[index2]) || study.sources.length !== checkpoint.sourceHashes.length) {
     throw new Error("Study inputs or provider settings changed since this run was prepared; the report cannot be reproduced.");
   }
   const { cohort, manifest } = study;
@@ -21205,8 +21205,8 @@ async function buildReport(checkpoint) {
     const taskResponses = {};
     for (const task of arm.tasks) {
       const occurrenceCount = Math.max(1, ...journeys.map((journey) => journey.responses.filter((response) => response.taskId === task.id).length), ...checkpoint.journeys.filter((journey) => journey.armId === arm.id).map((journey) => journey.presentedTaskIds.filter((taskId) => taskId === task.id).length));
-      const occurrences = Array.from({ length: occurrenceCount }, (_, index) => {
-        const occurrence = index + 1;
+      const occurrences = Array.from({ length: occurrenceCount }, (_, index2) => {
+        const occurrence = index2 + 1;
         const reachedJourneys = journeys.filter((journey) => journey.responses.some((response) => response.taskId === task.id && response.presentationOccurrence === occurrence) || (checkpoint.journeys.find((cell) => cell.armId === arm.id && cell.respondentId === journey.respondentId)?.presentedTaskIds.filter((taskId) => taskId === task.id).length ?? 0) >= occurrence);
         const responses = reachedJourneys.flatMap((journey) => journey.responses.filter((response) => response.taskId === task.id && response.presentationOccurrence === occurrence));
         const choiceTask = "options" in task ? task : void 0;
@@ -21220,8 +21220,8 @@ async function buildReport(checkpoint) {
         }));
         const scoreResponses = responses.filter((response) => response.answer.type === "score");
         const noulResponses = responses.filter((response) => response.answer.type === "noul");
-        const rubricProbabilities = scoreTask ? Object.fromEntries(scoreTask.rubric.map((_meaning, index2) => {
-          const levelId = String(index2);
+        const rubricProbabilities = scoreTask ? Object.fromEntries(scoreTask.rubric.map((_meaning, index3) => {
+          const levelId = String(index3);
           const average = scoreResponses.length ? scoreResponses.reduce((total, response) => total + (response.answer.type === "score" ? response.answer.probabilities[levelId] ?? 0 : 0), 0) / scoreResponses.length : 0;
           return [levelId, average];
         })) : void 0;
@@ -21694,7 +21694,7 @@ function representativeResponses(task, interval) {
   } else values.push(0, 0.5, 1);
   return values.map((value) => {
     if ("rubric" in task) {
-      const probabilities2 = Object.fromEntries(task.rubric.map((_meaning, index) => [String(index), 0]));
+      const probabilities2 = Object.fromEntries(task.rubric.map((_meaning, index2) => [String(index2), 0]));
       const low = Math.floor(value);
       const high = Math.ceil(value);
       if (low === high) probabilities2[String(low)] = 1;
@@ -21702,7 +21702,7 @@ function representativeResponses(task, interval) {
         probabilities2[String(low)] = high - value;
         probabilities2[String(high)] = value - low;
       }
-      return { type: "score", score: value, legend: Object.fromEntries(task.rubric.map((meaning, index) => [String(index), meaning])), probabilities: probabilities2 };
+      return { type: "score", score: value, legend: Object.fromEntries(task.rubric.map((meaning, index2) => [String(index2), meaning])), probabilities: probabilities2 };
     }
     return { type: "noul", noul: value };
   });
@@ -21791,14 +21791,14 @@ function validateDecision(request, result, options2 = {}) {
   } else if (decision.type === "score") {
     if (normalizedRequest.question.type !== "score") throw new DecisionError("Score response does not match the task type.", { reason: "answer_type_mismatch" });
     const rubric = normalizedRequest.question.rubric;
-    const levelIds = rubric.map((_level, index) => String(index));
+    const levelIds = rubric.map((_level, index2) => String(index2));
     if (decision.score < 0 || decision.score > rubric.length - 1) {
       throw new DecisionError("Score result is outside the declared rubric range.", { reason: "score_out_of_range" });
     }
     validateDistribution(decision.probabilities, levelIds, "Score");
-    for (const [index, meaning] of rubric.entries()) {
-      if (decision.legend[String(index)] !== meaning) {
-        throw new DecisionError(`Score legend does not match rubric level ${index}.`, { reason: "score_legend_mismatch" });
+    for (const [index2, meaning] of rubric.entries()) {
+      if (decision.legend[String(index2)] !== meaning) {
+        throw new DecisionError(`Score legend does not match rubric level ${index2}.`, { reason: "score_legend_mismatch" });
       }
     }
   } else if (normalizedRequest.question.type !== "noul") throw new DecisionError("Noul response does not match the task type.", { reason: "answer_type_mismatch" });
@@ -22022,7 +22022,7 @@ async function runPowerShell(helperPath, args, interactive = false) {
   ];
   if (interactive) childArgs.splice(2, 1);
   childArgs.push(helperPath, ...args);
-  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name) => process.env[name] === void 0 ? [] : [[name, process.env[name]]]));
+  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "TEMP", "TMP"].flatMap((name2) => process.env[name2] === void 0 ? [] : [[name2, process.env[name2]]]));
   return new Promise((resolve, reject) => {
     const child = nodeSpawn("powershell.exe", childArgs, {
       windowsHide: !interactive,
@@ -22072,8 +22072,8 @@ function systemOneQuestion(question) {
 
 // src/providers/jev.ts
 var JevCallError = class extends ProviderCallError {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
-    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope, code: failureCode, ...validationFailure ? { validationFailure } : {}, ...evidence });
+  constructor(message, attempts2, contextFit, decisionId, failureScope = "evaluation", failureCode = "provider_unavailable", validationFailure, evidence) {
+    super(message, { attempts: attempts2, ...contextFit ? { contextFit } : {}, scope: failureScope, code: failureCode, ...validationFailure ? { validationFailure } : {}, ...evidence });
     this.decisionId = decisionId;
     this.name = "JevCallError";
   }
@@ -22166,9 +22166,9 @@ var JevProvider = class {
     const { question } = parsedRequest.data;
     const body = JSON.stringify(requestBody(parsedRequest.data, this.config.model));
     const startedAt = performance.now();
-    let attempts = 0;
-    while (attempts < maxAttempts) {
-      attempts += 1;
+    let attempts2 = 0;
+    while (attempts2 < maxAttempts) {
+      attempts2 += 1;
       let response;
       try {
         response = await this.fetchRequest(this.config.endpoint, {
@@ -22182,32 +22182,32 @@ var JevProvider = class {
           signal: AbortSignal.timeout(this.config.timeoutMs)
         });
       } catch {
-        if (attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
+        if (attempts2 < maxAttempts) {
+          await wait(retryDelayMs(attempts2));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
       if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
+        if (retryableStatuses.has(response.status) && attempts2 < maxAttempts) {
+          await wait(retryDelayMs(attempts2));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts2, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+        throw new JevCallError("Jev returned an unreadable response.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const parsedResponse = parseWireResponse(payload, this.config.route);
       if (!parsedResponse.success) {
-        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+        throw new JevCallError("Jev response is missing required identity or usage fields.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const answer = systemOneAnswerSchema.safeParse(parsedResponse.data.answers[question.id]);
       if (!answer.success) {
-        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
+        throw new JevCallError(`Jev response does not contain a valid ${question.type} answer for ${question.id}.`, attempts2, void 0, question.id, "evaluation", "decision_failed", decisionValidationFailureForReason("malformed_answer"));
       }
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
@@ -22216,7 +22216,7 @@ var JevProvider = class {
       const estimatedAmount = inputTokens !== void 0 && outputTokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (inputTokens * metadata2.inputUsdPerMillion + outputTokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
       const result = {
         ...answer.data,
-        attempts,
+        attempts: attempts2,
         provider: "jev",
         model: parsedResponse.data.model,
         latencyMs: performance.now() - startedAt,
@@ -22230,12 +22230,12 @@ var JevProvider = class {
         return validateDecision(request, result, { maxAttempts, provider: "jev" });
       } catch (error62) {
         if (error62 instanceof DecisionError) {
-          throw new JevCallError("Jev response failed decision validation.", attempts, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
+          throw new JevCallError("Jev response failed decision validation.", attempts2, void 0, void 0, "evaluation", "decision_failed", decisionValidationFailure(error62));
         }
         throw error62;
       }
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts);
+    throw new JevCallError("Jev call limit reached without a response.", attempts2);
   }
   measureBatch(request) {
     const parsed = decisionBatchRequestSchema.safeParse(request);
@@ -22258,9 +22258,9 @@ var JevProvider = class {
     }
     const body = JSON.stringify(batchRequestBody(normalizedRequest, this.config.model));
     const startedAt = performance.now();
-    let attempts = 0;
-    while (attempts < maxAttempts) {
-      attempts += 1;
+    let attempts2 = 0;
+    while (attempts2 < maxAttempts) {
+      attempts2 += 1;
       let response;
       try {
         response = await this.fetchRequest(this.config.endpoint, {
@@ -22271,27 +22271,27 @@ var JevProvider = class {
           signal: AbortSignal.timeout(this.config.timeoutMs)
         });
       } catch {
-        if (attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
+        if (attempts2 < maxAttempts) {
+          await wait(retryDelayMs(attempts2));
           continue;
         }
-        throw new JevCallError("Jev request failed at the transport boundary.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
+        throw new JevCallError("Jev request failed at the transport boundary.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "transport" });
       }
       if (!response.ok) {
-        if (retryableStatuses.has(response.status) && attempts < maxAttempts) {
-          await wait(retryDelayMs(attempts));
+        if (retryableStatuses.has(response.status) && attempts2 < maxAttempts) {
+          await wait(retryDelayMs(attempts2));
           continue;
         }
-        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
+        throw new JevCallError(`Jev request failed with HTTP ${response.status}.`, attempts2, void 0, void 0, response.status === 401 || response.status === 403 ? "run" : "evaluation", "provider_unavailable", void 0, { category: "http", httpStatus: response.status });
       }
       let payload;
       try {
         payload = await response.json();
       } catch {
-        throw new JevCallError("Jev returned an unreadable response.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+        throw new JevCallError("Jev returned an unreadable response.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       }
       const parsedResponse = parseWireResponse(payload, this.config.route);
-      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
+      if (!parsedResponse.success) throw new JevCallError("Jev response is missing required identity or usage fields.", attempts2, void 0, void 0, "evaluation", "provider_unavailable", void 0, { category: "envelope" });
       const cost = parsedResponse.data.usage.cost;
       const inputTokens = parsedResponse.data.usage.input_tokens;
       const outputTokens = parsedResponse.data.usage.output_tokens;
@@ -22302,7 +22302,7 @@ var JevProvider = class {
         return { questionId, value: answer.success ? decisionValueFromResult(answer.data) : rawValue };
       });
       const execution = {
-        attempts,
+        attempts: attempts2,
         provider: "jev",
         model: parsedResponse.data.model,
         latencyMs: performance.now() - startedAt,
@@ -22312,11 +22312,11 @@ var JevProvider = class {
       try {
         return validateDecisionBatch(normalizedRequest, { answers, execution }, { maxAttempts, provider: "jev" });
       } catch (error62) {
-        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts);
+        if (error62 instanceof DecisionError) throw new JevCallError("Jev response failed batch decision validation.", attempts2);
         throw error62;
       }
     }
-    throw new JevCallError("Jev call limit reached without a response.", attempts);
+    throw new JevCallError("Jev call limit reached without a response.", attempts2);
   }
   measure(request) {
     return this.measureContext(request, this.config);
@@ -22447,12 +22447,12 @@ function bpeWord(chars, rank) {
     word = [...word.slice(0, idx), word[idx] + word[idx + 1], ...word.slice(idx + 2)];
   }
 }
-function bpeEncode(vocab, merges, text) {
+function bpeEncode(vocab, merges, text2) {
   const { b2u } = maps();
   const unkId = vocab.get("[UNK]") ?? CHECKPOINT_IDS.unk;
   const out = [];
   const enc = new TextEncoder();
-  const parts = text.normalize("NFC").match(GPT2_SPLIT);
+  const parts = text2.normalize("NFC").match(GPT2_SPLIT);
   if (!parts) return out;
   for (const piece of parts) {
     const chars = [];
@@ -22461,10 +22461,10 @@ function bpeEncode(vocab, merges, text) {
   }
   return out;
 }
-function metaspaceEncode(vocab, merges, text, unkId, replaces = [[" ", METASPACE_REPLACEMENT]]) {
+function metaspaceEncode(vocab, merges, text2, unkId, replaces = [[" ", METASPACE_REPLACEMENT]]) {
   const unk = unkId ?? vocab.get("<unk>") ?? vocab.get("[UNK]") ?? CHECKPOINT_IDS.unk;
-  if (!text) return [];
-  let t = text;
+  if (!text2) return [];
+  let t = text2;
   for (const [from, to] of replaces) t = t.split(from).join(to);
   const out = [];
   const push = (piece) => {
@@ -22483,8 +22483,8 @@ function metaspaceEncode(vocab, merges, text, unkId, replaces = [[" ", METASPACE
   }
   return out;
 }
-function encodeWithData(data, text) {
-  return data.kind === "metaspace" ? metaspaceEncode(data.vocab, data.merges, text, data.ids.unk, data.replaces) : bpeEncode(data.vocab, data.merges, text);
+function encodeWithData(data, text2) {
+  return data.kind === "metaspace" ? metaspaceEncode(data.vocab, data.merges, text2, data.ids.unk, data.replaces) : bpeEncode(data.vocab, data.merges, text2);
 }
 function childNodes(node2) {
   if (!node2 || typeof node2 !== "object") return [];
@@ -22606,7 +22606,7 @@ function tokenizerLike(data) {
     maskId: data.ids.mask,
     padId: data.ids.pad,
     maskToken: data.maskToken,
-    encode: (text) => encodeWithData(data, text)
+    encode: (text2) => encodeWithData(data, text2)
   };
 }
 async function measureLayaContext(request, config2) {
@@ -22661,8 +22661,8 @@ async function measureLayaContext(request, config2) {
 // src/providers/laya.ts
 var MAX_LAYA_SCORE_LEVELS = 32;
 var LayaCallError = class extends ProviderCallError {
-  constructor(message, attempts, contextFit, decisionId, failureScope = "evaluation", validationFailure, evidence) {
-    super(message, { attempts, ...contextFit ? { contextFit } : {}, scope: failureScope, ...validationFailure ? { validationFailure } : {}, ...evidence });
+  constructor(message, attempts2, contextFit, decisionId, failureScope = "evaluation", validationFailure, evidence) {
+    super(message, { attempts: attempts2, ...contextFit ? { contextFit } : {}, scope: failureScope, ...validationFailure ? { validationFailure } : {}, ...evidence });
     this.decisionId = decisionId;
     this.name = "LayaCallError";
   }
@@ -22860,8 +22860,8 @@ async function preflightStudy(input2, dependencies = {}) {
   return { provisional: config2.mode === "maximum-profile", mode: config2.mode, inputFingerprint, compilerFingerprint, providers: results };
 }
 function maximumProfile() {
-  const text = "\u6F22".repeat(300);
-  return respondentProfileSchema.parse({ id: "maximum-profile", intent: text, context: text, desired_outcome: text, engagement_cues: text, friction_cues: text });
+  const text2 = "\u6F22".repeat(300);
+  return respondentProfileSchema.parse({ id: "maximum-profile", intent: text2, context: text2, desired_outcome: text2, engagement_cues: text2, friction_cues: text2 });
 }
 function packetRef(packet) {
   return { packetId: packet.packetId, respondentId: packet.respondentId, armId: packet.armId, pathId: packet.pathId, decisionIndex: packet.decisionIndex, nodeId: packet.nodeId };
@@ -23261,7 +23261,7 @@ async function prepareFollowOnRun(request, source, provider) {
   const compilerFingerprint = promptContractHash();
   const fits = [];
   const problems = [];
-  const evaluations = [];
+  const evaluations2 = [];
   const preparedGroups = [];
   const groups = /* @__PURE__ */ new Map();
   const selectionExclusions = [];
@@ -23342,7 +23342,7 @@ async function prepareFollowOnRun(request, source, provider) {
         packet,
         packetFingerprint: hashCanonical({ packet, compilerFingerprint })
       };
-      evaluations.push(evaluation);
+      evaluations2.push(evaluation);
       return evaluation;
     });
     const linkedMaterialIds = new Set(request.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
@@ -23401,7 +23401,7 @@ async function prepareFollowOnRun(request, source, provider) {
   return {
     sourceVersion: source.version,
     inspection,
-    prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, groups: preparedGroups, lineage }
+    prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations: evaluations2, groups: preparedGroups, lineage }
   };
 }
 var RunProblemError = class extends Error {
@@ -23414,7 +23414,7 @@ var RunProblemError = class extends Error {
 };
 function materializeJourneyRun(admission) {
   const { request, requestFingerprint, compilerFingerprint, packets } = admission;
-  const evaluations = [];
+  const evaluations2 = [];
   const respondents = [];
   let ordinal = 0;
   for (const profile of request.respondents) {
@@ -23436,7 +23436,7 @@ function materializeJourneyRun(admission) {
       occurrence: 1,
       ordinal: ordinal++
     };
-    evaluations.push(evaluation);
+    evaluations2.push(evaluation);
     const events = initialJourneyEvents(request.journey);
     respondents.push({
       respondentId: profile.id,
@@ -23449,7 +23449,7 @@ function materializeJourneyRun(admission) {
       route: []
     });
   }
-  return { request, requestFingerprint, compilerFingerprint, evaluations, respondents };
+  return { request, requestFingerprint, compilerFingerprint, evaluations: evaluations2, respondents };
 }
 function initialJourneyEvents(arm) {
   const events = [];
@@ -23522,7 +23522,7 @@ async function prepareRun(input2, provider) {
     } };
   }
   const compilerFingerprint = promptContractHash();
-  const evaluations = [];
+  const evaluations2 = [];
   const preparedGroups = [];
   const fits = [];
   const problems = [];
@@ -23551,7 +23551,7 @@ async function prepareRun(input2, provider) {
     fits.push(...planned.fits);
     problems.push(...planned.problems);
     for (const packet of packets) {
-      evaluations.push({
+      evaluations2.push({
         groupId,
         evaluationId: randomUUID(),
         contextId,
@@ -23577,7 +23577,7 @@ async function prepareRun(input2, provider) {
     request,
     requestFingerprint: hashCanonical({ request, compilerFingerprint }),
     compilerFingerprint,
-    evaluations,
+    evaluations: evaluations2,
     groups: preparedGroups
   };
   return { inspection, prepared };
@@ -23587,10 +23587,10 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
   const batches = [];
   const fits = [];
   const problems = [];
-  const measureOne = async (index) => {
+  const measureOne = async (index2) => {
     if (!provider.measure) return missingMeasureFit2(provider, kind, modelIdentity);
     try {
-      return await provider.measure(packets[index]);
+      return await provider.measure(packets[index2]);
     } catch {
       return { ...missingMeasureFit2(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
     }
@@ -23609,9 +23609,9 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
     if (problem) problems.push(problem);
   };
   if (!provider.measureBatch) {
-    for (let index = 0; index < questions.length; index += 1) {
-      const question = questions[index];
-      const fit = await measureOne(index);
+    for (let index2 = 0; index2 < questions.length; index2 += 1) {
+      const question = questions[index2];
+      const fit = await measureOne(index2);
       recordFit([question.id], fit);
       batches.push({ state, questions: [question] });
     }
@@ -23744,7 +23744,8 @@ function normalizeRequest(input2) {
   }
   return parsed.data;
 }
-function createRunService(store, dataRoot, providerFactory, launcher, options2 = {}) {
+function createRunService(persistence, dataRoot, providerFactory, launcher, options2 = {}) {
+  const { reads, commands } = persistence;
   async function assertReady(provider) {
     try {
       await options2.assertProviderReady?.(provider);
@@ -23767,7 +23768,8 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     if (request.kind === "follow-on") {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
-        const source = store.resolveFollowOnSources(followOn);
+        commands.reconcile(followOn.sourceRunId, Date.now());
+        const source = reads.resolveFollowOnSources(followOn);
         return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
       } catch (error62) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error62 instanceof Error && "code" in error62 ? String(error62.code) : "follow_on_resolution_failed", message: error62 instanceof Error ? error62.message : "Follow-on request could not be resolved." }], fits: [] };
@@ -23780,17 +23782,21 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
     const request = normalizeRequest(input2);
     const requestFingerprint = fingerprintRunRequest(request);
     if (!requestFingerprint) throw new RunServiceError("invalid_request", "Request is invalid.");
-    const prior = store.findSubmission(submissionId, requestFingerprint);
-    if (prior) return prior;
+    const prior = reads.findSubmission(submissionId, requestFingerprint);
+    if (prior) {
+      commands.reconcile(prior.runId, Date.now());
+      return reads.getStatus(prior.runId);
+    }
     await assertReady(request.provider);
     let accepted;
     if (request.kind === "follow-on") {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
-        const source = store.resolveFollowOnSources(followOn);
+        commands.reconcile(followOn.sourceRunId, Date.now());
+        const source = reads.resolveFollowOnSources(followOn);
         const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
         if (!admission.inspection.valid) throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
-        accepted = store.accept(submissionId, admission.prepared);
+        accepted = commands.accept(submissionId, admission.prepared);
       } catch (error62) {
         if (error62 instanceof RunServiceError) throw error62;
         if (error62 instanceof Error && "code" in error62) throw new RunServiceError(String(error62.code), error62.message, { cause: error62 });
@@ -23801,57 +23807,74 @@ function createRunService(store, dataRoot, providerFactory, launcher, options2 =
       if (!admission.prepared && !admission.journey || !admission.inspection.valid) {
         throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
       }
-      accepted = admission.prepared ? store.accept(submissionId, admission.prepared) : store.acceptJourney(submissionId, materializeJourneyRun(admission.journey));
+      accepted = admission.prepared ? commands.accept(submissionId, admission.prepared) : commands.acceptJourney(submissionId, materializeJourneyRun(admission.journey));
     }
     if (!accepted.created) return accepted.run;
     try {
       await launcher.launch(dataRoot, accepted.run.runId);
     } catch {
-      store.failLaunch(accepted.run.runId, "worker_launch_failed");
+      commands.failLaunch(accepted.run.runId, "worker_launch_failed");
     }
-    return store.getStatus(accepted.run.runId);
+    return reads.getStatus(accepted.run.runId);
   }
   async function resume(runId) {
-    const current = store.getStatus(runId);
+    commands.reconcile(runId, Date.now());
+    const current = reads.getStatus(runId);
     if (current.status === "prepared") return current;
     if (!current.lifecycle.resume.eligible) {
       throw new RunServiceError("run_not_resumable", resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    const frozenProvider = store.getRequestKind(runId) === "journey" ? store.getJourneyRun(runId).request.provider : store.getRequest(runId).request.provider;
+    const frozenProvider = reads.getRequestKind(runId) === "journey" ? reads.getJourneyRun(runId).request.provider : reads.getRequest(runId).request.provider;
     await assertReady(frozenProvider);
-    const resumed = store.resume(runId, Date.now());
+    const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {
       try {
         await launcher.launch(dataRoot, runId);
       } catch {
-        store.failLaunch(runId, "worker_launch_failed");
+        commands.failLaunch(runId, "worker_launch_failed");
       }
     }
-    return store.getStatus(runId);
+    return reads.getStatus(runId);
   }
   return {
     inspect,
     start,
     resume,
-    previewDelete: (runIds) => store.previewDelete(runIds),
-    deleteRuns: (runIds) => store.deleteRuns(runIds),
-    storageInfo: () => store.storageInfo(),
-    optimizeStorage: () => store.optimizeStorage(),
-    list: (query) => store.list(query),
-    queryEvidence: (query) => store.queryEvidence(runEvidenceQuerySchema.parse(query)),
-    getContext: (runId, evaluationId, contextId) => store.getContext(runId, evaluationId, contextId),
-    getStatus: (runId) => store.reconcile(runId, Date.now()),
-    getRequest: (runId) => store.getRequestKind(runId) === "journey" ? store.getJourneyRun(runId) : store.getRequest(runId),
-    getJourneyRun: (runId) => store.getJourneyRun(runId),
+    previewDelete: (runIds) => {
+      commands.reconcileMany(runIds, Date.now());
+      return reads.previewDelete(runIds);
+    },
+    deleteRuns: (runIds) => commands.deleteRuns(runIds),
+    storageInfo: () => {
+      commands.reconcileActive(Date.now());
+      return reads.storageInfo();
+    },
+    optimizeStorage: () => commands.optimizeStorage(),
+    list: (query) => {
+      commands.reconcileActive(Date.now());
+      return reads.list(query);
+    },
+    queryEvidence: (query) => {
+      const parsed = runEvidenceQuerySchema.parse(query);
+      commands.reconcile(parsed.sourceRunId, Date.now());
+      return reads.queryEvidence(parsed);
+    },
+    getContext: (runId, evaluationId, contextId) => reads.getContext(runId, evaluationId, contextId),
+    getStatus: (runId) => {
+      commands.reconcile(runId, Date.now());
+      return reads.getStatus(runId);
+    },
+    getRequest: (runId) => reads.getRequestKind(runId) === "journey" ? reads.getJourneyRun(runId) : reads.getRequest(runId),
+    getJourneyRun: (runId) => reads.getJourneyRun(runId),
     answers: (runId, cursor, limit) => {
-      store.reconcile(runId, Date.now());
-      return store.answers(runId, cursor, limit);
+      commands.reconcile(runId, Date.now());
+      return reads.answers(runId, cursor, limit);
     },
     attempts: (runId, cursor, limit) => {
-      store.reconcile(runId, Date.now());
-      return store.attempts(runId, cursor, limit);
+      commands.reconcile(runId, Date.now());
+      return reads.attempts(runId, cursor, limit);
     },
-    cancel: (runId) => store.requestCancel(runId)
+    cancel: (runId) => commands.requestCancel(runId)
   };
 }
 
@@ -23860,10 +23883,10 @@ import path7 from "node:path";
 function pathsFor(platform) {
   return platform === "win32" ? path7.win32 : path7.posix;
 }
-function requiredAbsolute(value, name, paths, allowMissing = false) {
+function requiredAbsolute(value, name2, paths, allowMissing = false) {
   if (value === void 0 && allowMissing) return void 0;
-  if (value === void 0 || value.length === 0) throw new TypeError(`${name} must not be empty.`);
-  if (!paths.isAbsolute(value)) throw new TypeError(`${name} must be an absolute path.`);
+  if (value === void 0 || value.length === 0) throw new TypeError(`${name2} must not be empty.`);
+  if (!paths.isAbsolute(value)) throw new TypeError(`${name2} must be an absolute path.`);
   return paths.normalize(value);
 }
 function resolveDataRoot(env, platform, home) {
@@ -23902,9 +23925,9 @@ var ProcessLock = class _ProcessLock {
   }
   lockPath;
   record;
-  static async acquire(directory, name, operations = {}) {
-    if (!/^[a-zA-Z0-9-]{1,100}$/.test(name)) throw new TypeError("Lock name contains unsupported characters.");
-    const lockPath = path8.join(directory, `${name}.lock`);
+  static async acquire(directory, name2, operations = {}) {
+    if (!/^[a-zA-Z0-9-]{1,100}$/.test(name2)) throw new TypeError("Lock name contains unsupported characters.");
+    const lockPath = path8.join(directory, `${name2}.lock`);
     const record2 = { pid: process.pid, token: randomUUID2() };
     const content = `${JSON.stringify(record2)}
 `;
@@ -24026,7 +24049,7 @@ function processExists(pid) {
 }
 
 // src/infrastructure/run-store.ts
-import { createHash as createHash8, randomUUID as randomUUID5 } from "node:crypto";
+import { createHash as createHash9, randomUUID as randomUUID5 } from "node:crypto";
 import { mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
 import path11 from "node:path";
 
@@ -24090,7 +24113,41 @@ function pageSize(limit) {
 // src/infrastructure/sqlite/evidence-query.ts
 import { createHash as createHash7 } from "node:crypto";
 
+// src/infrastructure/sqlite/payload-codecs.ts
+var envelopeSchema = external_exports.object({
+  formatVersion: external_exports.number().int(),
+  kind: external_exports.string().min(1),
+  value: external_exports.unknown()
+}).strict();
+function encodeStoredPayload(kind, value, schema) {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new RunStoreError("invalid_stored_payload", `Cannot store an invalid ${kind} payload.`);
+  return JSON.stringify({ formatVersion: 1, kind, value: parsed.data });
+}
+function decodeStoredPayload(json2, kind, schema) {
+  let raw;
+  try {
+    raw = JSON.parse(json2);
+  } catch (error62) {
+    throw new RunStoreError("data_integrity_error", `The stored ${kind} payload is not valid JSON.`, { cause: error62 });
+  }
+  const envelope = envelopeSchema.safeParse(raw);
+  if (!envelope.success || envelope.data.kind !== kind) throw new RunStoreError("data_integrity_error", `The stored ${kind} payload has an invalid envelope.`);
+  if (envelope.data.formatVersion !== 1) throw new RunStoreError("unsupported_payload_version", `Sheg cannot read unsupported stored ${kind} format version ${envelope.data.formatVersion}.`);
+  const parsed = schema.safeParse(envelope.data.value);
+  if (!parsed.success) throw new RunStoreError("data_integrity_error", `The stored ${kind} payload has an invalid stored ${kind} value.`);
+  return parsed.data;
+}
+
 // src/infrastructure/sqlite/evidence-records.ts
+var evaluationFailureEvidenceSchema = external_exports.object({
+  detail: decisionFailureDetailSchema.optional(),
+  providerFailure: providerFailureEvidenceSchema.optional()
+}).strict();
+var attemptEvaluationFailureSchema = evaluationFailureEvidenceSchema.extend({
+  code: external_exports.string().min(1),
+  message: external_exports.string()
+}).strict();
 function mergeMaterialCatalog(...collections) {
   const merged = /* @__PURE__ */ new Map();
   for (const collection of collections) for (const item of collection) {
@@ -24112,21 +24169,21 @@ function encounteredMaterialsFromState(state) {
   return state.encounteredItems.flatMap((item) => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "text" in item && typeof item.text === "string" ? [{ id: item.id, text: item.text }] : []);
 }
 function resultFromStorage(value, execution) {
-  const complete = decisionResultSchema.safeParse(value);
-  if (complete.success) return complete.data;
-  const typed = decisionValueSchema.parse(value);
+  const typed = decodeStoredPayload(JSON.stringify(value), "decision-value", decisionValueSchema);
   const evidence = providerExecutionEvidenceSchema.parse(execution);
   return decisionResultSchema.parse({ ...typed, ...evidence });
 }
 function failureEvidenceFromStorage(value) {
   if (value === null || value === void 0) return {};
-  const parsed = parseJson(value, "evaluation failure evidence");
-  if ("reason" in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
-  return { ...parsed.detail === void 0 ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
+  const decoded = decodeStoredPayload(asText(value, "evaluation failure evidence"), "evaluation-failure-evidence", evaluationFailureEvidenceSchema);
+  return { ...decoded.detail ? { detail: decoded.detail } : {}, ...decoded.providerFailure ? { providerFailure: decoded.providerFailure } : {} };
 }
 function failureEvidenceJson(failure2) {
-  if (failure2.providerFailure) return JSON.stringify({ ...failure2.detail ? { detail: failure2.detail } : {}, providerFailure: providerFailureEvidenceSchema.parse(failure2.providerFailure) });
-  return failure2.detail ? JSON.stringify(failure2.detail) : null;
+  if (!failure2.detail && !failure2.providerFailure) return null;
+  return encodeStoredPayload("evaluation-failure-evidence", {
+    ...failure2.detail ? { detail: failure2.detail } : {},
+    ...failure2.providerFailure ? { providerFailure: failure2.providerFailure } : {}
+  }, evaluationFailureEvidenceSchema);
 }
 function storedEvaluationFailure(row) {
   if (row.failure_code === null) return void 0;
@@ -24138,14 +24195,17 @@ function storedEvaluationFailure(row) {
   };
 }
 function evaluationFailureJson(failure2) {
-  return JSON.stringify(failure2);
+  return encodeStoredPayload("attempt-evaluation-failure", failure2, attemptEvaluationFailureSchema);
 }
 function evaluationFailureFromJson(value) {
   if (value === null || value === void 0) return void 0;
-  const parsed = parseJson(value, "attempt evaluation failure");
-  if (typeof parsed.code !== "string" || typeof parsed.message !== "string") throw new RunStoreError("data_integrity_error", "Stored attempt evaluation failure is invalid.");
-  const detail = parsed.detail === void 0 ? void 0 : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...detail ? { detail } : {}, ...parsed.providerFailure === void 0 ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) } };
+  const decoded = decodeStoredPayload(asText(value, "attempt evaluation failure"), "attempt-evaluation-failure", attemptEvaluationFailureSchema);
+  return {
+    code: decoded.code,
+    message: decoded.message,
+    ...decoded.detail === void 0 ? {} : { detail: decoded.detail },
+    ...decoded.providerFailure === void 0 ? {} : { providerFailure: decoded.providerFailure }
+  };
 }
 
 // src/infrastructure/sqlite/evidence-query.ts
@@ -24156,9 +24216,7 @@ function queryEvidencePage(context, input2) {
   const query = parsed.data;
   const limit = pageSize(query.limit);
   const criteriaFingerprint = hashCanonical(query.criteria);
-  return context.transaction(() => {
-    const nowMs = context.now();
-    context.reconcileInside(query.sourceRunId, nowMs);
+  return context.readTransaction(() => {
     const run = context.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(query.sourceRunId);
     if (!run) throw context.notFound();
     const sourceStatus = asText(run.status, "run status");
@@ -24212,12 +24270,12 @@ function queryEvidencePage(context, input2) {
       parameters.push(criteria.materialId);
     }
     if (criteria.answer?.type === "choice") {
-      where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
+      where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
       parameters.push(criteria.answer.choiceId);
     } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
       const field = criteria.answer.type === "score" ? "score" : "noul";
-      const valueExpression = criteria.answer.type === "score" ? "json_extract(e.result_json, '$.score')" : "json_extract(e.result_json, '$.noul')";
-      where.push(`json_extract(e.result_json, '$.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">="} ?`);
+      const valueExpression = criteria.answer.type === "score" ? "json_extract(e.result_json, '$.value.score')" : "json_extract(e.result_json, '$.value.noul')";
+      where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">="} ?`);
       parameters.push(criteria.answer.value);
     }
     if (criteria.outcome !== void 0) {
@@ -24226,7 +24284,6 @@ function queryEvidencePage(context, input2) {
     }
     const whereSql = where.join(" AND ");
     const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
-    const snapshotCount = asNumber(context.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters).count, "query match count");
     const evaluationCoverage = {
       totalEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
       completedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
@@ -24251,10 +24308,9 @@ function queryEvidencePage(context, input2) {
     }
     const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
     const lifecycle = currentLifecycle;
-    const matchedCoverage = (() => {
-      const matchedRows = context.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
-          (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
-            WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+    const matched = (() => {
+      const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id,
+          json_extract(e.packet_json, '$.question') AS question_json, e.result_json
           FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters);
       const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
       const respondents = /* @__PURE__ */ new Set();
@@ -24263,16 +24319,18 @@ function queryEvidencePage(context, input2) {
       let selectedMaterialEvaluations = 0;
       for (const row of matchedRows) {
         const status = asText(row.status, "matched evaluation status");
+        if (!Object.hasOwn(counts, status)) throw new RunStoreError("data_integrity_error", "A matched evaluation has an unsupported status.");
         counts.total += 1;
         counts[status] += 1;
         const respondentId = asText(row.respondent_id, "matched respondent ID");
         respondents.add(respondentId);
         if (status !== "answered" || row.result_json === null) continue;
-        const result = resultFromStorage(parseJson(row.result_json, "matched result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "matched execution"));
-        if (result.type !== "choice") continue;
-        const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "matched packet"));
-        if (packet.question.type !== "choice") continue;
-        const materialId = packet.question.materialOptions?.[result.choice];
+        if (typeof row.result_json !== "string") throw new RunStoreError("data_integrity_error", "A matched answer is not valid stored text.");
+        const value = decodeStoredPayload(row.result_json, "decision-value", decisionValueSchema);
+        const question = external_exports.object({ type: external_exports.string(), materialOptions: external_exports.record(external_exports.string(), external_exports.string()).optional() }).safeParse(parseJson(row.question_json, "matched question"));
+        if (!question.success) throw new RunStoreError("data_integrity_error", "A matched question has invalid material mapping evidence.");
+        if (value.type !== "choice" || question.data.type !== "choice") continue;
+        const materialId = question.data.materialOptions?.[value.choice];
         if (materialId) {
           selectedMaterialEvaluations += 1;
           selectedMaterialIds.add(materialId);
@@ -24280,16 +24338,25 @@ function queryEvidencePage(context, input2) {
         }
       }
       return {
+        count: counts.total,
         evaluations: counts,
         representedRespondents: respondents.size,
-        selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size }
+        selectedMaterialIds: [...selectedMaterialIds],
+        selectedMaterialRespondents,
+        selectedMaterialEvaluations,
+        selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size },
+        ordinals: matchedRows.map((row) => asNumber(row.ordinal, "matched evaluation ordinal")),
+        evaluationIds: matchedRows.map((row) => asText(row.evaluation_id, "matched evaluation ID"))
       };
     })();
-    const rows = context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
+    const matchedCoverage = { evaluations: matched.evaluations, representedRespondents: matched.representedRespondents, selectedMaterials: matched.selectedMaterials };
+    const matchingOrdinalPairs = matched.ordinals.map((ordinal, index2) => ({ ordinal, evaluationId: matched.evaluationIds[index2] })).filter(({ ordinal }) => !cursor || ordinal > cursor.lastOrdinal);
+    const pageIds = matchingOrdinalPairs.slice(0, limit + 1).map(({ evaluationId }) => evaluationId);
+    const rows = pageIds.length === 0 ? [] : context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
         (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
           WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e ${join}
-        WHERE ${whereSql} ${cursor ? "AND e.ordinal > ?" : ""} ORDER BY e.ordinal LIMIT ?`).all(...parameters, ...cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1]);
+        WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
     const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.baseUrl;
@@ -24343,7 +24410,7 @@ function queryEvidencePage(context, input2) {
     const sourceComplete = sourceStatus === "completed";
     return {
       items,
-      totalMatches: snapshotCount,
+      totalMatches: matched.count,
       sourceRunId: query.sourceRunId,
       sourceStatus,
       sourceComplete,
@@ -24365,76 +24432,5380 @@ function queryEvidencePage(context, input2) {
   });
 }
 
-// src/infrastructure/sqlite/schema.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
-import { mkdirSync, unlinkSync } from "node:fs";
-import path9 from "node:path";
-import { DatabaseSync } from "node:sqlite";
-
-// src/infrastructure/schema-migration-path.ts
-function hasSequentialMigrationPath(fromVersion, targetVersion, migrations) {
-  let version2 = fromVersion;
-  while (version2 < targetVersion) {
-    const migration = migrations.find(({ fromVersion: candidate }) => candidate === version2);
-    if (!migration || migration.toVersion !== version2 + 1 || migration.toVersion > targetVersion) return false;
-    version2 = migration.toVersion;
+// node_modules/drizzle-orm/entity.js
+var entityKind = /* @__PURE__ */ Symbol.for("drizzle:entityKind");
+function is(value, type) {
+  if (!value || typeof value !== "object") return false;
+  if (value instanceof type) return true;
+  if (!Object.prototype.hasOwnProperty.call(type, entityKind)) throw new Error(`Class "${type.name ?? "<unknown>"}" doesn't look like a Drizzle entity. If this is incorrect and the class is provided by Drizzle, please report this as a bug.`);
+  let cls = Object.getPrototypeOf(value)?.constructor;
+  if (cls) while (cls) {
+    if (entityKind in cls && cls[entityKind] === type[entityKind]) return true;
+    cls = Object.getPrototypeOf(cls);
   }
-  return version2 === targetVersion;
+  return false;
 }
 
-// src/infrastructure/sqlite/schema.ts
-var SCHEMA_VERSION = 8;
-function isTransientSqliteLock(error62) {
-  return typeof error62 === "object" && error62 !== null && "errcode" in error62 && (error62.errcode === 5 || error62.errcode === 6);
+// node_modules/drizzle-orm/query-promise.js
+var QueryPromise = class {
+  static [entityKind] = "QueryPromise";
+  [Symbol.toStringTag] = "QueryPromise";
+  catch(onRejected) {
+    return this.then(void 0, onRejected);
+  }
+  finally(onFinally) {
+    return this.then((value) => {
+      onFinally?.();
+      return value;
+    }, (reason) => {
+      onFinally?.();
+      throw reason;
+    });
+  }
+  then(onFulfilled, onRejected) {
+    return this.execute().then(onFulfilled, onRejected);
+  }
+};
+
+// node_modules/drizzle-orm/column-common.js
+var OriginalColumn = /* @__PURE__ */ Symbol.for("drizzle:OriginalColumn");
+
+// node_modules/drizzle-orm/column.js
+var noop = (v) => v;
+noop.isNoop = true;
+var Column = class {
+  static [entityKind] = "Column";
+  /** @internal */
+  codec;
+  name;
+  keyAsName;
+  primary;
+  notNull;
+  default;
+  defaultFn;
+  onUpdateFn;
+  hasDefault;
+  isUnique;
+  uniqueName;
+  uniqueType;
+  dataType;
+  columnType;
+  enumValues = void 0;
+  generated = void 0;
+  generatedIdentity = void 0;
+  length;
+  isLengthExact;
+  isAlias;
+  /** @internal */
+  config;
+  /** @internal */
+  table;
+  /** @internal */
+  onInit() {
+  }
+  constructor(table, config2) {
+    this.config = config2;
+    this.onInit();
+    this.table = table;
+    this.name = config2.name;
+    this.isAlias = false;
+    this.keyAsName = config2.keyAsName;
+    this.notNull = config2.notNull;
+    this.default = config2.default;
+    this.defaultFn = config2.defaultFn;
+    this.onUpdateFn = config2.onUpdateFn;
+    this.hasDefault = config2.hasDefault;
+    this.primary = config2.primaryKey;
+    this.isUnique = config2.isUnique;
+    this.uniqueName = config2.uniqueName;
+    this.uniqueType = config2.uniqueType;
+    this.dataType = config2.dataType;
+    this.columnType = config2.columnType;
+    this.generated = config2.generated;
+    this.generatedIdentity = config2.generatedIdentity;
+    this.length = config2["length"];
+    this.isLengthExact = config2["isLengthExact"];
+  }
+  mapFromDriverValue = noop;
+  mapToDriverValue = noop;
+  /** @internal */
+  postBuild() {
+    return this;
+  }
+  /** @internal */
+  shouldDisableInsert() {
+    return this.config.generated !== void 0 && this.config.generated.type !== "byDefault";
+  }
+  /** @internal */
+  [OriginalColumn]() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/table.utils.js
+var TableName = /* @__PURE__ */ Symbol.for("drizzle:Name");
+
+// node_modules/drizzle-orm/table.js
+var TableSchema = /* @__PURE__ */ Symbol.for("drizzle:Schema");
+var TableColumns = /* @__PURE__ */ Symbol.for("drizzle:Columns");
+var ExtraConfigColumns = /* @__PURE__ */ Symbol.for("drizzle:ExtraConfigColumns");
+var OriginalName = /* @__PURE__ */ Symbol.for("drizzle:OriginalName");
+var BaseName = /* @__PURE__ */ Symbol.for("drizzle:BaseName");
+var IsAlias = /* @__PURE__ */ Symbol.for("drizzle:IsAlias");
+var ExtraConfigBuilder = /* @__PURE__ */ Symbol.for("drizzle:ExtraConfigBuilder");
+var IsDrizzleTable = /* @__PURE__ */ Symbol.for("drizzle:IsDrizzleTable");
+var Table = class {
+  static [entityKind] = "Table";
+  /** @internal */
+  static Symbol = {
+    Name: TableName,
+    Schema: TableSchema,
+    OriginalName,
+    Columns: TableColumns,
+    ExtraConfigColumns,
+    BaseName,
+    IsAlias,
+    ExtraConfigBuilder
+  };
+  /**
+  * @internal
+  * Can be changed if the table is aliased.
+  */
+  [TableName];
+  /**
+  * @internal
+  * Used to store the original name of the table, before any aliasing.
+  */
+  [OriginalName];
+  /** @internal */
+  [TableSchema];
+  /** @internal */
+  [TableColumns];
+  /** @internal */
+  [ExtraConfigColumns];
+  /**
+  *  @internal
+  * Used to store the table name before the transformation via the `tableCreator` functions.
+  */
+  [BaseName];
+  /** @internal */
+  [IsAlias] = false;
+  /** @internal */
+  [IsDrizzleTable] = true;
+  /** @internal */
+  [ExtraConfigBuilder] = void 0;
+  constructor(name2, schema, baseName) {
+    this[TableName] = this[OriginalName] = name2;
+    this[TableSchema] = schema;
+    this[BaseName] = baseName;
+  }
+};
+function getTableName(table) {
+  return table[TableName];
 }
-function setWriteAheadLogMode(database) {
-  const deadline = Date.now() + 5e3;
-  const waitCell = new Int32Array(new SharedArrayBuffer(4));
-  while (true) {
+
+// node_modules/drizzle-orm/subquery.js
+var Subquery = class {
+  static [entityKind] = "Subquery";
+  constructor(sql2, fields, alias, isWith = false, usedTables = []) {
+    this._ = {
+      brand: "Subquery",
+      sql: sql2,
+      selectedFields: fields,
+      alias,
+      isWith,
+      usedTables
+    };
+  }
+};
+var WithSubquery = class extends Subquery {
+  static [entityKind] = "WithSubquery";
+};
+
+// node_modules/drizzle-orm/tracing.js
+var tracer = { startActiveSpan(name2, fn) {
+  return fn();
+} };
+
+// node_modules/drizzle-orm/view-common.js
+var ViewBaseConfig = /* @__PURE__ */ Symbol.for("drizzle:ViewBaseConfig");
+
+// node_modules/drizzle-orm/sql/sql.js
+var FakePrimitiveParam = class {
+  static [entityKind] = "FakePrimitiveParam";
+};
+function isSQLWrapper(value) {
+  return value !== null && value !== void 0 && typeof value.getSQL === "function";
+}
+function mergeQueries(queries) {
+  const result = {
+    sql: "",
+    params: []
+  };
+  for (const query of queries) {
+    result.sql += query.sql;
+    result.params.push(...query.params);
+  }
+  return result;
+}
+function _mergeQueries(queries) {
+  const result = {
+    sql: "",
+    params: []
+  };
+  const sqls = [];
+  for (const query of queries) {
+    sqls.push(query.sql);
+    result.params.push(...query.params);
+  }
+  result._sql = Object.assign(sqls, { raw: sqls });
+  return result;
+}
+var StringChunk = class {
+  static [entityKind] = "StringChunk";
+  value;
+  constructor(value) {
+    this.value = Array.isArray(value) ? value : [value];
+  }
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+var SQL = class SQL2 {
+  static [entityKind] = "SQL";
+  /** @internal */
+  decoder = noopDecoder;
+  /** @internal */
+  shouldInlineParams = false;
+  /** @internal */
+  usedTables = [];
+  constructor(queryChunks) {
+    this.queryChunks = queryChunks;
+    for (const chunk of queryChunks) if (is(chunk, Table)) {
+      const schemaName = chunk[Table.Symbol.Schema];
+      this.usedTables.push(schemaName === void 0 ? chunk[Table.Symbol.Name] : schemaName + "." + chunk[Table.Symbol.Name]);
+    }
+  }
+  append(query) {
+    this.queryChunks.push(...query.queryChunks);
+    return this;
+  }
+  toQuery(config2) {
+    return tracer.startActiveSpan("drizzle.buildSQL", (span) => {
+      const query = this.buildQueryFromSourceParams(this.queryChunks, config2);
+      span?.setAttributes({
+        "drizzle.query.text": query.sql,
+        "drizzle.query.params": JSON.stringify(query.params)
+      });
+      return query;
+    });
+  }
+  buildQueryFromSourceParams(chunks2, _config) {
+    const config2 = Object.assign({}, _config, {
+      inlineParams: _config.inlineParams || this.shouldInlineParams,
+      paramStartIndex: _config.paramStartIndex || { value: 0 }
+    });
+    const { escapeName, escapeParam, codecs, inlineParams, paramStartIndex, invokeSource } = config2;
+    const mappedChunks = chunks2.map((chunk) => {
+      if (is(chunk, StringChunk)) return {
+        sql: chunk.value.join(""),
+        params: []
+      };
+      if (is(chunk, Name)) return {
+        sql: escapeName(chunk.value),
+        params: []
+      };
+      if (chunk === void 0) return {
+        sql: "",
+        params: []
+      };
+      if (Array.isArray(chunk)) {
+        const result = [new StringChunk("(")];
+        for (const [i, p] of chunk.entries()) {
+          result.push(p);
+          if (i < chunk.length - 1) result.push(new StringChunk(", "));
+        }
+        result.push(new StringChunk(")"));
+        return this.buildQueryFromSourceParams(result, config2);
+      }
+      if (is(chunk, SQL2)) return this.buildQueryFromSourceParams(chunk.queryChunks, {
+        ...config2,
+        inlineParams: inlineParams || chunk.shouldInlineParams
+      });
+      if (is(chunk, Table)) {
+        const schemaName = chunk[Table.Symbol.Schema];
+        const tableName = chunk[Table.Symbol.Name];
+        if (invokeSource === "mssql-view-with-schemabinding") return {
+          sql: (schemaName === void 0 ? escapeName("dbo") : escapeName(schemaName)) + "." + escapeName(tableName),
+          params: []
+        };
+        return {
+          sql: schemaName === void 0 || chunk[IsAlias] ? escapeName(tableName) : escapeName(schemaName) + "." + escapeName(tableName),
+          params: []
+        };
+      }
+      if (is(chunk, Column)) {
+        const columnName = chunk.name;
+        if (_config.invokeSource === "indexes") return {
+          sql: escapeName(columnName),
+          params: []
+        };
+        const schemaName = invokeSource === "mssql-check" ? void 0 : chunk.table[Table.Symbol.Schema];
+        return {
+          sql: chunk.isAlias ? escapeName(chunk.name) : chunk.table[IsAlias] || schemaName === void 0 ? escapeName(chunk.table[Table.Symbol.Name]) + "." + escapeName(columnName) : escapeName(schemaName) + "." + escapeName(chunk.table[Table.Symbol.Name]) + "." + escapeName(columnName),
+          params: []
+        };
+      }
+      if (is(chunk, View)) {
+        const schemaName = chunk[ViewBaseConfig].schema;
+        const viewName = chunk[ViewBaseConfig].name;
+        return {
+          sql: schemaName === void 0 || chunk[ViewBaseConfig].isAlias ? escapeName(viewName) : escapeName(schemaName) + "." + escapeName(viewName),
+          params: []
+        };
+      }
+      if (is(chunk, Param)) {
+        if (is(chunk.value, SQL2)) return this.buildQueryFromSourceParams([chunk.value], config2);
+        const useCodecs = codecs && is(chunk.encoder, Column);
+        if (is(chunk.value, Placeholder)) {
+          const escaped2 = escapeParam(paramStartIndex.value++, chunk);
+          chunk.codec = useCodecs ? (value) => codecs.apply(chunk.encoder, "normalizeParam", value) : void 0;
+          return {
+            sql: useCodecs ? codecs.apply(chunk.encoder, "castParam", escaped2) : escaped2,
+            params: [chunk]
+          };
+        }
+        let mappedValue;
+        if (chunk.value === null) mappedValue = chunk.value;
+        else {
+          mappedValue = chunk.encoder.mapToDriverValue.isNoop ? chunk.value : chunk.encoder.mapToDriverValue(chunk.value);
+          if (is(mappedValue, SQL2)) return this.buildQueryFromSourceParams([mappedValue], config2);
+          if (useCodecs) mappedValue = codecs.apply(chunk.encoder, "normalizeParam", mappedValue);
+        }
+        if (inlineParams) return {
+          sql: this.mapInlineParam(mappedValue, config2),
+          params: []
+        };
+        const escaped = escapeParam(paramStartIndex.value++, mappedValue);
+        return {
+          sql: useCodecs ? codecs.apply(chunk.encoder, "castParam", escaped) : escaped,
+          params: [mappedValue]
+        };
+      }
+      if (is(chunk, Placeholder)) return {
+        sql: escapeParam(paramStartIndex.value++, chunk),
+        params: [chunk]
+      };
+      if (is(chunk, SQL2.Aliased) && chunk.fieldAlias !== void 0) return {
+        sql: (chunk.origin !== void 0 ? escapeName(chunk.origin) + "." : "") + escapeName(chunk.fieldAlias),
+        params: []
+      };
+      if (is(chunk, Subquery)) {
+        if (chunk._.isWith) return {
+          sql: escapeName(chunk._.alias),
+          params: []
+        };
+        return this.buildQueryFromSourceParams([
+          new StringChunk("("),
+          chunk._.sql,
+          new StringChunk(") "),
+          new Name(chunk._.alias)
+        ], config2);
+      }
+      if (typeof chunk === "function" && "enumName" in chunk) {
+        if ("schema" in chunk && chunk.schema) return {
+          sql: escapeName(chunk.schema) + "." + escapeName(chunk.enumName),
+          params: []
+        };
+        return {
+          sql: escapeName(chunk.enumName),
+          params: []
+        };
+      }
+      if (isSQLWrapper(chunk)) {
+        if (chunk.shouldOmitSQLParens?.()) return this.buildQueryFromSourceParams([chunk.getSQL()], config2);
+        return this.buildQueryFromSourceParams([
+          new StringChunk("("),
+          chunk.getSQL(),
+          new StringChunk(")")
+        ], config2);
+      }
+      if (inlineParams) return {
+        sql: this.mapInlineParam(chunk, config2),
+        params: []
+      };
+      return {
+        sql: escapeParam(paramStartIndex.value++, chunk),
+        params: [chunk]
+      };
+    });
+    if (_config.tagged) return _mergeQueries(mappedChunks);
+    return mergeQueries(mappedChunks);
+  }
+  mapInlineParam(chunk, { escapeString }) {
+    if (chunk === null) return "null";
+    if (typeof chunk === "number" || typeof chunk === "boolean" || typeof chunk === "bigint") return chunk.toString();
+    if (typeof chunk === "string") return escapeString(chunk);
+    if (typeof chunk === "object") {
+      const mappedValueAsString = chunk.toString();
+      if (mappedValueAsString === "[object Object]") return escapeString(JSON.stringify(chunk));
+      return escapeString(mappedValueAsString);
+    }
+    throw new Error("Unexpected param value: " + chunk);
+  }
+  getSQL() {
+    return this;
+  }
+  as(alias) {
+    if (alias === void 0) return this;
+    return new SQL2.Aliased(this, alias);
+  }
+  mapWith(decoder) {
+    this.decoder = typeof decoder === "function" ? { mapFromDriverValue: decoder } : decoder;
+    return this;
+  }
+  nullable() {
+    return this;
+  }
+  inlineParams() {
+    this.shouldInlineParams = true;
+    return this;
+  }
+  /**
+  * This method is used to conditionally include a part of the query.
+  *
+  * @param condition - Condition to check
+  * @returns itself if the condition is `true`, otherwise `undefined`
+  */
+  if(condition) {
+    return condition ? this : void 0;
+  }
+};
+var Name = class {
+  static [entityKind] = "Name";
+  brand;
+  constructor(value) {
+    this.value = value;
+  }
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+function isDriverValueEncoder(value) {
+  return typeof value === "object" && value !== null && "mapToDriverValue" in value && typeof value.mapToDriverValue === "function";
+}
+var noopDecoder = { mapFromDriverValue: (value) => value };
+noopDecoder.mapFromDriverValue.isNoop = true;
+var noopEncoder = { mapToDriverValue: (value) => value };
+noopEncoder.mapToDriverValue.isNoop = true;
+var noopMapper = {
+  ...noopDecoder,
+  ...noopEncoder
+};
+var Param = class {
+  static [entityKind] = "Param";
+  brand;
+  /**
+  * @param value - Parameter value
+  * @param encoder - Encoder to convert the value to a driver parameter
+  */
+  constructor(value, encoder = noopEncoder, codec2) {
+    this.value = value;
+    this.encoder = encoder;
+    this.codec = codec2;
+  }
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+function sql(strings, ...params) {
+  const queryChunks = [];
+  if (params.length > 0 || strings.length > 0 && strings[0] !== "") queryChunks.push(new StringChunk(strings[0]));
+  for (const [paramIndex, param2] of params.entries()) queryChunks.push(param2, new StringChunk(strings[paramIndex + 1]));
+  return new SQL(queryChunks);
+}
+(function(_sql) {
+  function empty() {
+    return new SQL([]);
+  }
+  _sql.empty = empty;
+  function fromList(list) {
+    return new SQL(list);
+  }
+  _sql.fromList = fromList;
+  function raw(str) {
+    return new SQL([new StringChunk(str)]);
+  }
+  _sql.raw = raw;
+  function join(chunks2, separator) {
+    const result = [];
+    for (const [i, chunk] of chunks2.entries()) {
+      if (i > 0 && separator !== void 0) result.push(separator);
+      result.push(chunk);
+    }
+    return new SQL(result);
+  }
+  _sql.join = join;
+  function identifier6(value) {
+    return new Name(value);
+  }
+  _sql.identifier = identifier6;
+  function placeholder2(name2) {
+    return new Placeholder(name2);
+  }
+  _sql.placeholder = placeholder2;
+  function param2(value, encoder) {
+    return new Param(value, encoder);
+  }
+  _sql.param = param2;
+  function comment(input2) {
+    const encoded = sqlCommenter(input2);
+    if (!encoded.length) return void 0;
+    return sql.raw(encoded);
+  }
+  _sql.comment = comment;
+})(sql || (sql = {}));
+function sqlCommenter(input2) {
+  const encoded = sqlCommenter.encodeInput(input2);
+  if (!encoded.length) return "";
+  return `/*${encoded}*/`;
+}
+(function(_sqlCommenter) {
+  function merge2(input1, input2) {
+    let encoded;
+    if (typeof input1 === "object" && typeof input2 === "object") encoded = encodeInput({
+      ...input1,
+      ...input2
+    });
+    else if (input1 && input2) encoded = [encodeInput(input1), encodeInput(input2)].filter((i) => i.length).join(",");
+    else if (input2) encoded = encodeInput(input2);
+    else if (input1) encoded = encodeInput(input1);
+    else return "";
+    if (!encoded.length) return "";
+    return `/*${encoded}*/`;
+  }
+  _sqlCommenter.merge = merge2;
+  function encodeInput(input2) {
+    if (typeof input2 === "string") {
+      if (!input2.length) return input2;
+      return sanitizeStringInput(input2);
+    }
+    const parts = [];
+    for (const [key, value] of Object.entries(input2)) {
+      if (value === null || value === void 0 || value === "") continue;
+      const encodedKey = sanitizeObjectElement(key);
+      const encodedValue = sanitizeObjectElement(String(value));
+      parts.push(`${encodedKey}='${encodedValue}'`);
+    }
+    if (!parts.length) return "";
+    return parts.sort().join(",");
+  }
+  _sqlCommenter.encodeInput = encodeInput;
+  function sanitizeObjectElement(key) {
+    return encodeURIComponent(key).replace(/'/g, `\\'`);
+  }
+  _sqlCommenter.sanitizeObjectElement = sanitizeObjectElement;
+  function sanitizeStringInput(input2) {
+    return input2.replace(/\/\*/g, "/ *").replace(/\*\//g, "* /");
+  }
+  _sqlCommenter.sanitizeStringInput = sanitizeStringInput;
+})(sqlCommenter || (sqlCommenter = {}));
+(function(_SQL) {
+  class Aliased {
+    static [entityKind] = "SQL.Aliased";
+    /** @internal */
+    isSelectionField = false;
+    /** @internal */
+    origin;
+    constructor(sql2, fieldAlias) {
+      this.sql = sql2;
+      this.fieldAlias = fieldAlias;
+    }
+    getSQL() {
+      return this.sql;
+    }
+    /** @internal */
+    clone() {
+      return new Aliased(this.sql, this.fieldAlias);
+    }
+  }
+  _SQL.Aliased = Aliased;
+})(SQL || (SQL = {}));
+var Placeholder = class {
+  static [entityKind] = "Placeholder";
+  constructor(name2) {
+    this.name = name2;
+  }
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+function fillPlaceholders(params, values) {
+  return params.map((p) => {
+    if (is(p, Placeholder)) {
+      if (!(p.name in values)) throw new Error(`No value for placeholder "${p.name}" was provided`);
+      return values[p.name];
+    }
+    if (is(p, Param) && is(p.value, Placeholder)) {
+      if (!(p.value.name in values)) throw new Error(`No value for placeholder "${p.value.name}" was provided`);
+      const value = values[p.value.name];
+      if (value === null) return value;
+      const mapped = p.encoder.mapToDriverValue.isNoop ? value : p.encoder.mapToDriverValue(value);
+      return p.codec ? p.codec(mapped) : mapped;
+    }
+    return p;
+  });
+}
+var IsDrizzleView = /* @__PURE__ */ Symbol.for("drizzle:IsDrizzleView");
+var View = class {
+  static [entityKind] = "View";
+  /** @internal */
+  [ViewBaseConfig];
+  /** @internal */
+  [IsDrizzleView] = true;
+  /** @internal */
+  get [TableName]() {
+    return this[ViewBaseConfig].name;
+  }
+  /** @internal */
+  get [TableSchema]() {
+    return this[ViewBaseConfig].schema;
+  }
+  /** @internal */
+  get [IsAlias]() {
+    return this[ViewBaseConfig].isAlias;
+  }
+  /** @internal */
+  get [OriginalName]() {
+    return this[ViewBaseConfig].originalName;
+  }
+  /** @internal */
+  get [TableColumns]() {
+    return this[ViewBaseConfig].selectedFields;
+  }
+  constructor({ name: name2, schema, selectedFields, query }) {
+    this[ViewBaseConfig] = {
+      name: name2,
+      originalName: name2,
+      schema,
+      selectedFields,
+      query,
+      isExisting: !query,
+      isAlias: false
+    };
+  }
+};
+Column.prototype.getSQL = function() {
+  return new SQL([this]);
+};
+Subquery.prototype.getSQL = function() {
+  return new SQL([this]);
+};
+
+// node_modules/drizzle-orm/errors.js
+var DrizzleError = class extends Error {
+  static [entityKind] = "DrizzleError";
+  constructor({ message, cause }) {
+    super(message);
+    this.name = "DrizzleError";
+    this.cause = cause;
+  }
+};
+var DrizzleQueryError = class DrizzleQueryError2 extends Error {
+  static [entityKind] = "DrizzleQueryError";
+  constructor(query, params, cause) {
+    super(`Failed query: ${query}
+params: ${params}`);
+    this.query = query;
+    this.params = params;
+    this.cause = cause;
+    this.name = "DrizzleQueryError";
+    Error.captureStackTrace(this, DrizzleQueryError2);
+    if (cause) this.cause = cause;
+  }
+};
+var TransactionRollbackError = class extends DrizzleError {
+  static [entityKind] = "TransactionRollbackError";
+  constructor() {
+    super({ message: "Rollback" });
+    this.name = "TransactionRollbackError";
+  }
+};
+
+// node_modules/drizzle-orm/sql/expressions/conditions.js
+function bindIfParam(value, column) {
+  if (isDriverValueEncoder(column) && !isSQLWrapper(value) && !is(value, Param) && !is(value, Placeholder) && !is(value, Column) && !is(value, Table) && !is(value, View)) return new Param(value, column);
+  return value;
+}
+var eq = (left, right) => {
+  return sql`${left} = ${bindIfParam(right, left)}`;
+};
+var ne = (left, right) => {
+  return sql`${left} <> ${bindIfParam(right, left)}`;
+};
+function and(...unfilteredConditions) {
+  const conditions = unfilteredConditions.filter((c) => c !== void 0);
+  if (conditions.length === 0) return;
+  if (conditions.length === 1) return new SQL(conditions);
+  return new SQL([
+    new StringChunk("("),
+    sql.join(conditions.map((c) => sql`(${c})`), new StringChunk(" and ")),
+    new StringChunk(")")
+  ]);
+}
+function or(...unfilteredConditions) {
+  const conditions = unfilteredConditions.filter((c) => c !== void 0);
+  if (conditions.length === 0) return;
+  if (conditions.length === 1) return new SQL(conditions);
+  return new SQL([
+    new StringChunk("("),
+    sql.join(conditions.map((c) => sql`(${c})`), new StringChunk(" or ")),
+    new StringChunk(")")
+  ]);
+}
+function not(condition) {
+  return is(condition, SQL) ? sql`not (${condition})` : sql`not ${condition}`;
+}
+var gt = (left, right) => {
+  return sql`${left} > ${bindIfParam(right, left)}`;
+};
+var gte = (left, right) => {
+  return sql`${left} >= ${bindIfParam(right, left)}`;
+};
+var lt = (left, right) => {
+  return sql`${left} < ${bindIfParam(right, left)}`;
+};
+var lte = (left, right) => {
+  return sql`${left} <= ${bindIfParam(right, left)}`;
+};
+function inArray(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) return sql`false`;
+    return sql`${column} in ${values.map((v) => bindIfParam(v, column))}`;
+  }
+  return sql`${column} in ${bindIfParam(values, column)}`;
+}
+function notInArray(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) return sql`true`;
+    return sql`${column} not in ${values.map((v) => bindIfParam(v, column))}`;
+  }
+  return sql`${column} not in ${bindIfParam(values, column)}`;
+}
+function isNull(value) {
+  return sql`(${value} is null)`;
+}
+function isNotNull(value) {
+  return sql`(${value} is not null)`;
+}
+function exists(subquery) {
+  return sql`exists ${subquery}`;
+}
+function notExists(subquery) {
+  return sql`not exists ${subquery}`;
+}
+function between(column, min, max) {
+  return sql`${column} between ${bindIfParam(min, column)} and ${bindIfParam(max, column)}`;
+}
+function notBetween(column, min, max) {
+  return sql`${column} not between ${bindIfParam(min, column)} and ${bindIfParam(max, column)}`;
+}
+function like(column, value) {
+  return sql`${column} like ${value}`;
+}
+function notLike(column, value) {
+  return sql`${column} not like ${value}`;
+}
+function ilike(column, value) {
+  return sql`${column} ilike ${value}`;
+}
+function notIlike(column, value) {
+  return sql`${column} not ilike ${value}`;
+}
+function arrayContains(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) throw new Error("arrayContains requires at least one value");
+    const par = bindIfParam(values, column);
+    return sql`${column} @> ${sql`${Array.isArray(par) ? new Param(par) : par}`}`;
+  }
+  return sql`${column} @> ${bindIfParam(values, column)}`;
+}
+function arrayContained(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) throw new Error("arrayContained requires at least one value");
+    const par = bindIfParam(values, column);
+    return sql`${column} <@ ${sql`${Array.isArray(par) ? new Param(par) : par}`}`;
+  }
+  return sql`${column} <@ ${bindIfParam(values, column)}`;
+}
+function arrayOverlaps(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) throw new Error("arrayOverlaps requires at least one value");
+    const par = bindIfParam(values, column);
+    return sql`${column} && ${sql`${Array.isArray(par) ? new Param(par) : par}`}`;
+  }
+  return sql`${column} && ${bindIfParam(values, column)}`;
+}
+
+// node_modules/drizzle-orm/sql/expressions/select.js
+function asc(column) {
+  return sql`${column} asc`;
+}
+function desc(column) {
+  return sql`${column} desc`;
+}
+
+// node_modules/drizzle-orm/alias.js
+var ColumnTableAliasProxyHandler = class {
+  static [entityKind] = "ColumnTableAliasProxyHandler";
+  constructor(table, ignoreColumnAlias) {
+    this.table = table;
+    this.ignoreColumnAlias = ignoreColumnAlias;
+  }
+  get(columnObj, prop) {
+    if (prop === "table") return this.table;
+    if (prop === "isAlias" && this.ignoreColumnAlias) return false;
+    return columnObj[prop];
+  }
+};
+var ViewSelectionAliasProxyHandler = class {
+  static [entityKind] = "ViewSelectionAliasProxyHandler";
+  constructor(view, selection, ignoreColumnAlias) {
+    this.view = view;
+    this.selection = selection;
+    this.ignoreColumnAlias = ignoreColumnAlias;
+  }
+  get(selection, prop) {
+    const value = selection[prop];
+    if (is(value, Column)) return new Proxy(value, new ColumnTableAliasProxyHandler(this.view, this.ignoreColumnAlias));
+    if (is(value, Subquery) || is(value, SQL) || is(value, SQL.Aliased) || isSQLWrapper(value) || typeof value !== "object" || value === null) return value;
+    return new Proxy(value, this);
+  }
+};
+var TableAliasProxyHandler = class {
+  static [entityKind] = "TableAliasProxyHandler";
+  constructor(alias, replaceOriginalName, ignoreColumnAlias) {
+    this.alias = alias;
+    this.replaceOriginalName = replaceOriginalName;
+    this.ignoreColumnAlias = ignoreColumnAlias;
+  }
+  get(target, prop) {
+    if (prop === Table.Symbol.IsAlias) return true;
+    if (prop === Table.Symbol.Name) return this.alias;
+    if (this.replaceOriginalName && prop === Table.Symbol.OriginalName) return this.alias;
+    if (prop === ViewBaseConfig) return {
+      ...target[ViewBaseConfig],
+      name: this.alias,
+      isAlias: true,
+      selectedFields: new Proxy(target[ViewBaseConfig].selectedFields, new ViewSelectionAliasProxyHandler(new Proxy(target, this), target[ViewBaseConfig].selectedFields, this.ignoreColumnAlias))
+    };
+    if (prop === Table.Symbol.Columns) {
+      const columns = target[Table.Symbol.Columns];
+      if (!columns) return columns;
+      if (is(target, View)) return new Proxy(target[Table.Symbol.Columns], new ViewSelectionAliasProxyHandler(new Proxy(target, this), target[Table.Symbol.Columns], this.ignoreColumnAlias));
+      const proxiedColumns = {};
+      Object.keys(columns).map((key) => {
+        proxiedColumns[key] = new Proxy(columns[key], new ColumnTableAliasProxyHandler(new Proxy(target, this), this.ignoreColumnAlias));
+      });
+      return proxiedColumns;
+    }
+    const value = target[prop];
+    if (is(value, Column)) return new Proxy(value, new ColumnTableAliasProxyHandler(new Proxy(target, this), this.ignoreColumnAlias));
+    return value;
+  }
+};
+var ColumnAliasProxyHandler = class {
+  static [entityKind] = "ColumnAliasProxyHandler";
+  constructor(alias) {
+    this.alias = alias;
+  }
+  get(target, prop) {
+    if (prop === "isAlias") return true;
+    if (prop === "name") return this.alias;
+    if (prop === "keyAsName") return false;
+    if (prop === OriginalColumn) return () => target;
+    return target[prop];
+  }
+};
+var RelationTableAliasProxyHandler = class {
+  static [entityKind] = "RelationTableAliasProxyHandler";
+  constructor(alias) {
+    this.alias = alias;
+  }
+  get(target, prop) {
+    if (prop === "sourceTable") return aliasedTable(target.sourceTable, this.alias);
+    return target[prop];
+  }
+};
+function aliasedTable(table, tableAlias) {
+  return new Proxy(table, new TableAliasProxyHandler(tableAlias, false, false));
+}
+function aliasedColumn(column, alias) {
+  return new Proxy(column, new ColumnAliasProxyHandler(alias));
+}
+Column.prototype.as = function(alias) {
+  return aliasedColumn(this, alias);
+};
+function getOriginalColumnFromAlias(column) {
+  return column[OriginalColumn]();
+}
+
+// node_modules/drizzle-orm/utils.js
+var FnConstructor = Object.getPrototypeOf(() => null).constructor;
+function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
+  const preFn = [];
+  const fn = [];
+  fn.push(`const [ ${columns.map((_, i) => `c${i}`).join(", ")} ] = rows[i];`);
+  const nullifyMap = {};
+  const objectIds = {};
+  const decodes = Array.from({ length: columns.length });
+  for (let idx = 0; idx < columns.length; ++idx) {
+    const { field, path: path14, codec: codec2, arrayDimensions } = columns[idx];
+    let decoder;
+    let decoderStr;
+    let decoderFieldDestructure;
+    let isColumn = false;
+    if (is(field, Column)) {
+      isColumn = true;
+      decoder = field;
+      decoderFieldDestructure = `field: decoder${idx}`;
+    } else if (is(field, SQL)) {
+      decoder = field.decoder;
+      decoderFieldDestructure = `field: { decoder: decoder${idx} }`;
+    } else if (is(field, Subquery)) {
+      decoder = field._.sql.decoder;
+      decoderFieldDestructure = `field: { _: { sql: { decoder: decoder${idx} } } }`;
+    } else {
+      decoder = field.sql.decoder;
+      decoderFieldDestructure = `field: { sql: { decoder: decoder${idx} } }`;
+    }
+    decoderStr = `decoder${idx}.mapFromDriverValue`;
+    if (decoder.mapFromDriverValue.isNoop) decoderStr = "";
+    if (decoderStr) preFn.push(`const { ${decoderFieldDestructure}${codec2 ? `, codec: codec${idx}` : ""} } = columns[${idx}];`);
+    else if (codec2) preFn.push(`const { codec: codec${idx} } = columns[${idx}];`);
+    const colStr = `c${idx}`;
+    let decodedValue = colStr;
+    if (codec2) decodedValue = `codec${idx}(${decodedValue}, ${arrayDimensions})`;
+    if (decoderStr) decodedValue = `${decoderStr}(${decodedValue})`;
+    decodes[idx] = colStr === decodedValue ? `${colStr}` : `${colStr} === null ? ${colStr} : ${decodedValue}`;
+    if (path14.length !== 2 || !isColumn) continue;
+    if (objectIds[path14[0]] === void 0) objectIds[path14[0]] = [`c${idx}`];
+    else objectIds[path14[0]]?.push(`c${idx}`);
+    const [objectName] = path14;
+    const tableName = getTableName(field.table);
+    nullifyMap[objectName] = joinsNotNullableMap[tableName] ? false : typeof nullifyMap[objectName] === "string" ? nullifyMap[objectName] === tableName ? tableName : false : tableName;
+  }
+  fn.push(`mapped[i] = {`);
+  let currentObjectPath = [];
+  for (let idx = 0; idx < columns.length; ++idx) {
+    const { path: path14 } = columns[idx];
+    const jsonPath = path14.map((e) => JSON.stringify(e));
+    const decodedValue = decodes[idx];
+    const objectPath = path14.slice(0, -1);
+    let commonLen = 0;
+    while (commonLen < currentObjectPath.length && commonLen < objectPath.length && currentObjectPath[commonLen] === objectPath[commonLen]) commonLen++;
+    for (let d = currentObjectPath.length - 1; d >= commonLen; --d) fn.push(`${"	".repeat(d + 1)}},`);
+    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path14[0]] === "string" ? `${objectIds[path14[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
+    currentObjectPath = objectPath;
+    fn.push(`${"	".repeat(path14.length)}${jsonPath[path14.length - 1]}: ${decodedValue},`);
+  }
+  for (let d = currentObjectPath.length - 1; d >= 0; --d) fn.push(`${"	".repeat(d + 1)}},`);
+  fn.push(`};`);
+  return `${preFn.length ? `${preFn.join("\n	")}
+	` : ""}for (let i = 0; i < length; ++i) {
+		${fn.join("\n		")}
+	}`;
+}
+function makeJitQueryMapper(columns, joinsNotNullableMap) {
+  const internals = `	"use strict";
+	const { columns } = this;
+	const { length } = rows;
+	const mapped = Array.from({ length });
+	${makeJitQueryMapperInner(columns, joinsNotNullableMap)}
+	return mapped;
+	//# sourceURL=drizzle:jit-query-mapper`;
+  return Object.assign(new FnConstructor("rows", internals).bind({ columns }), { body: `function jitQueryMapper (rows) {
+${internals}
+}` });
+}
+function jitCompatCheck(isEnabled) {
+  if (!isEnabled) return false;
+  try {
+    const res = new FnConstructor("input", '"use strict"; return input;')(true);
+    if (res !== true) {
+      console.warn("Unable to use jit mappers due to incompatibility: corrupted jit function output.\nFalling back to premade mappers.\nError details:");
+      console.error(`Expected to receive \`true\`, got: ${res}`);
+    }
+    return true;
+  } catch (e) {
+    console.warn("Unable to use jit mappers due to incompatibility.\nFalling back to premade mappers.\nError details:");
+    console.error(e);
+    return false;
+  }
+}
+function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
+  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path14 }) => {
+    let processNullifyMap;
+    let decoderSrc;
+    if (is(field, Column)) {
+      decoderSrc = field;
+      if (joinsNotNullableMap && path14.length === 2) {
+        const objectName = path14[0];
+        processNullifyMap = (nullifyMap, value) => {
+          if (!(objectName in nullifyMap)) nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
+          else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) nullifyMap[objectName] = false;
+        };
+      }
+    } else if (is(field, SQL)) decoderSrc = field.decoder;
+    else if (is(field, Subquery)) decoderSrc = field._.sql.decoder;
+    else decoderSrc = field.sql.decoder;
+    let decoder;
+    if (decoderSrc.mapFromDriverValue.isNoop) decoder = codec2 ? (v) => codec2(v, arrayDimensions) : void 0;
+    else decoder = codec2 ? (v) => decoderSrc.mapFromDriverValue(codec2(v, arrayDimensions)) : (v) => decoderSrc.mapFromDriverValue(v);
+    return [decoder, processNullifyMap];
+  });
+  return ((rows) => rows.map((row) => {
+    const nullifyMap = {};
+    const result = columns.reduce((result2, { path: path14 }, columnIndex) => {
+      let node2 = result2;
+      for (const [pathChunkIndex, pathChunk] of path14.entries()) if (pathChunkIndex < path14.length - 1) {
+        if (!(pathChunk in node2)) node2[pathChunk] = {};
+        node2 = node2[pathChunk];
+      } else {
+        const [decoder, processNullifyMap] = interpretedData[columnIndex];
+        const rawValue = row[columnIndex];
+        const value = node2[pathChunk] = rawValue === null ? null : decoder ? decoder(rawValue) : rawValue;
+        processNullifyMap?.(nullifyMap, value);
+      }
+      return result2;
+    }, {});
+    if (joinsNotNullableMap && Object.keys(nullifyMap).length > 0) {
+      for (const [objectName, tableName] of Object.entries(nullifyMap)) if (typeof tableName === "string" && !joinsNotNullableMap[tableName]) result[objectName] = null;
+    }
+    return result;
+  }));
+}
+function orderSelectedFields(fields, pathPrefix, codecs) {
+  return Object.entries(fields).reduce((result, [name2, field]) => {
+    if (typeof name2 !== "string") return result;
+    const newPath = pathPrefix ? [...pathPrefix, name2] : [name2];
+    if (is(field, Column)) result.push({
+      path: newPath,
+      field,
+      codec: codecs?.get(field, "normalize"),
+      arrayDimensions: field.dimensions,
+      column: field
+    });
+    else if (is(field, SQL) || is(field, SQL.Aliased)) {
+      const col = getColumnFromDecoder(field);
+      result.push(col ? {
+        path: newPath,
+        field,
+        codec: codecs?.get(col, "normalize"),
+        arrayDimensions: col.dimensions,
+        column: col
+      } : {
+        path: newPath,
+        field
+      });
+    } else if (is(field, Subquery)) {
+      let column;
+      const entry = Object.values(field._.selectedFields)[0];
+      let fieldDecoder;
+      if (is(entry, Column)) {
+        column = entry;
+        fieldDecoder = entry;
+      } else if (is(entry, SQL)) {
+        column = getColumnFromDecoder(entry);
+        fieldDecoder = entry.decoder;
+      } else {
+        column = getColumnFromDecoder(entry);
+        fieldDecoder = entry.sql.decoder;
+      }
+      if (fieldDecoder) field._.sql.decoder = fieldDecoder;
+      result.push(column ? {
+        path: newPath,
+        field,
+        codec: codecs?.get(column, "normalize"),
+        arrayDimensions: column.dimensions,
+        column
+      } : {
+        path: newPath,
+        field
+      });
+    } else if (is(field, Table)) result.push(...orderSelectedFields(field[Table.Symbol.Columns], newPath, codecs));
+    else result.push(...orderSelectedFields(field, newPath, codecs));
+    return result;
+  }, []);
+}
+function getColumnFromDecoder(source) {
+  const query = source.getSQL();
+  if (is(query.decoder, Column)) return query.decoder;
+}
+function haveSameKeys(left, right) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const [index2, key] of leftKeys.entries()) if (key !== rightKeys[index2]) return false;
+  return true;
+}
+function mapUpdateSet(table, values) {
+  const entries = Object.entries(values).filter(([, value]) => value !== void 0).map(([key, value]) => {
+    if (is(value, SQL) || is(value, Column)) return [key, value];
+    else return [key, new Param(value, table[Table.Symbol.Columns][key])];
+  });
+  if (entries.length === 0) throw new Error("No values to set");
+  return Object.fromEntries(entries);
+}
+function applyMixins(baseClass, extendedClasses) {
+  for (const extendedClass of extendedClasses) for (const name2 of Object.getOwnPropertyNames(extendedClass.prototype)) {
+    if (name2 === "constructor") continue;
+    Object.defineProperty(baseClass.prototype, name2, Object.getOwnPropertyDescriptor(extendedClass.prototype, name2) || /* @__PURE__ */ Object.create(null));
+  }
+}
+function getTableColumns(table) {
+  return table[Table.Symbol.Columns];
+}
+function getTableLikeName(table) {
+  return is(table, Subquery) ? table._.alias : is(table, View) ? table[ViewBaseConfig].name : is(table, SQL) ? void 0 : table[Table.Symbol.IsAlias] ? table[Table.Symbol.Name] : table[Table.Symbol.BaseName];
+}
+function getColumnNameAndConfig(a, b) {
+  return {
+    name: typeof a === "string" && a.length > 0 ? a : "",
+    config: typeof a === "object" ? a : b
+  };
+}
+var textDecoder = typeof TextDecoder === "undefined" ? null : new TextDecoder();
+function assertUnreachable(_x) {
+  throw new Error("Didn't expect to get here");
+}
+
+// node_modules/drizzle-orm/relations.js
+var Relation = class {
+  static [entityKind] = "RelationV2";
+  fieldName;
+  sourceColumns;
+  targetColumns;
+  alias;
+  where;
+  sourceTable;
+  targetTable;
+  through;
+  throughTable;
+  isReversed;
+  /** @internal */
+  sourceColumnTableNames = [];
+  /** @internal */
+  targetColumnTableNames = [];
+  constructor(targetTable, targetTableName) {
+    this.targetTableName = targetTableName;
+    this.targetTable = targetTable;
+  }
+};
+var One = class extends Relation {
+  static [entityKind] = "OneV2";
+  relationType = "one";
+  optional;
+  constructor(tables, targetTable, targetTableName, config2) {
+    super(targetTable, targetTableName);
+    this.alias = config2?.alias;
+    this.where = config2?.where;
+    if (config2?.from) this.sourceColumns = (Array.isArray(config2.from) ? config2.from : [config2.from]).map((it) => {
+      this.throughTable ??= it._.through ? tables[it._.through._.tableName] : void 0;
+      this.sourceColumnTableNames.push(it._.tableName);
+      return it._.column;
+    });
+    if (config2?.to) this.targetColumns = (Array.isArray(config2.to) ? config2.to : [config2.to]).map((it) => {
+      this.throughTable ??= it._.through ? tables[it._.through._.tableName] : void 0;
+      this.targetColumnTableNames.push(it._.tableName);
+      return it._.column;
+    });
+    if (this.throughTable) this.through = {
+      source: (Array.isArray(config2?.from) ? config2.from : config2?.from ? [config2.from] : []).map((c) => c._.through),
+      target: (Array.isArray(config2?.to) ? config2.to : config2?.to ? [config2.to] : []).map((c) => c._.through)
+    };
+    this.optional = config2?.optional ?? true;
+  }
+};
+var Many = class extends Relation {
+  static [entityKind] = "ManyV2";
+  relationType = "many";
+  constructor(tables, targetTable, targetTableName, config2) {
+    super(targetTable, targetTableName);
+    this.config = config2;
+    this.alias = config2?.alias;
+    this.where = config2?.where;
+    if (config2?.from) this.sourceColumns = (Array.isArray(config2.from) ? config2.from : [config2.from]).map((it) => {
+      this.throughTable ??= it._.through ? tables[it._.through._.tableName] : void 0;
+      this.sourceColumnTableNames.push(it._.tableName);
+      return it._.column;
+    });
+    if (config2?.to) this.targetColumns = (Array.isArray(config2.to) ? config2.to : [config2.to]).map((it) => {
+      this.throughTable ??= it._.through ? tables[it._.through._.tableName] : void 0;
+      this.targetColumnTableNames.push(it._.tableName);
+      return it._.column;
+    });
+    if (this.throughTable) this.through = {
+      source: (Array.isArray(config2?.from) ? config2.from : config2?.from ? [config2.from] : []).map((c) => c._.through),
+      target: (Array.isArray(config2?.to) ? config2.to : config2?.to ? [config2.to] : []).map((c) => c._.through)
+    };
+  }
+};
+var AggregatedField = class {
+  static [entityKind] = "AggregatedField";
+  table;
+  onTable(table) {
+    this.table = table;
+    return this;
+  }
+};
+var Count = class extends AggregatedField {
+  static [entityKind] = "AggregatedFieldCount";
+  query;
+  getSQL() {
+    if (!this.query) {
+      if (!this.table) throw new Error("Table must be set before building aggregate field");
+      this.query = sql`select count(*) as ${sql.identifier("r")} from ${getTableAsAliasSQL(this.table)}`.mapWith(Number);
+    }
+    return this.query;
+  }
+};
+var operators = {
+  and,
+  between,
+  eq,
+  exists,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  arrayContains,
+  arrayContained,
+  arrayOverlaps,
+  isNull,
+  isNotNull,
+  like,
+  lt,
+  lte,
+  ne,
+  not,
+  notBetween,
+  notExists,
+  notLike,
+  notIlike,
+  notInArray,
+  or,
+  sql
+};
+var orderByOperators = {
+  sql,
+  asc,
+  desc
+};
+function mapRelationalRow(rows, isOne, buildQueryResultSelection, parseJson2 = false, parseJsonIfString = false, useJsonMappers = true) {
+  const maxIdx = isOne ? 1 : rows.length;
+  const decoders = buildQueryResultSelection.map(({ field, codec: codec2, arrayDimensions }) => {
+    let decoder;
+    if (is(field, Column)) decoder = field;
+    else if (is(field, SQL)) decoder = field.decoder;
+    else if (is(field, SQL.Aliased)) decoder = field.sql.decoder;
+    else if (is(field, Table) || is(field, View)) decoder = noopDecoder;
+    else decoder = field.getSQL().decoder;
+    if (useJsonMappers && field.mapFromJsonValue) return (v) => field.mapFromJsonValue(v);
+    return decoder.mapFromDriverValue.isNoop ? codec2 ? (value) => codec2(value, arrayDimensions) : void 0 : codec2 ? (value) => decoder.mapFromDriverValue(codec2(value, arrayDimensions)) : (value) => decoder.mapFromDriverValue(value);
+  });
+  for (let i = 0; i < maxIdx; ++i) {
+    const row = isOne ? rows : rows[i];
+    for (let selectionItemIdx = 0; selectionItemIdx < buildQueryResultSelection.length; ++selectionItemIdx) {
+      const selectionItem = buildQueryResultSelection[selectionItemIdx];
+      if (selectionItem.selection) {
+        if (row[selectionItem.key] === null) continue;
+        if (parseJson2) {
+          row[selectionItem.key] = JSON.parse(row[selectionItem.key]);
+          if (row[selectionItem.key] === null) continue;
+        } else if (parseJsonIfString && typeof row[selectionItem.key] === "string") row[selectionItem.key] = JSON.parse(row[selectionItem.key]);
+        if (selectionItem.isArray) {
+          mapRelationalRow(row[selectionItem.key], false, selectionItem.selection, false, parseJsonIfString);
+          continue;
+        }
+        mapRelationalRow(row[selectionItem.key], true, selectionItem.selection, false, parseJsonIfString);
+        continue;
+      }
+      if (row[selectionItem.key] === null) continue;
+      const decoder = decoders[selectionItemIdx];
+      if (!decoder) continue;
+      row[selectionItem.key] = decoder(row[selectionItem.key]);
+    }
+  }
+  return rows;
+}
+function mapRelationalRowFromArrays(rows, isOne, buildQueryResultSelection, parseJson2 = false, parseJsonIfString = false) {
+  const maxIdx = isOne ? 1 : rows.length;
+  const decoders = buildQueryResultSelection.map(({ field, codec: codec2, arrayDimensions }) => {
+    let decoder;
+    if (is(field, Column)) decoder = field;
+    else if (is(field, SQL)) decoder = field.decoder;
+    else if (is(field, SQL.Aliased)) decoder = field.sql.decoder;
+    else if (is(field, Table) || is(field, View)) decoder = noopDecoder;
+    else decoder = field.getSQL().decoder;
+    return decoder.mapFromDriverValue.isNoop ? codec2 ? (value) => codec2(value, arrayDimensions) : void 0 : codec2 ? (value) => decoder.mapFromDriverValue(codec2(value, arrayDimensions)) : (value) => decoder.mapFromDriverValue(value);
+  });
+  const results = Array.from({ length: maxIdx });
+  for (let i = 0; i < maxIdx; ++i) {
+    const row = isOne ? rows : rows[i];
+    const result = {};
+    for (let selectionItemIdx = 0; selectionItemIdx < buildQueryResultSelection.length; ++selectionItemIdx) {
+      const selectionItem = buildQueryResultSelection[selectionItemIdx];
+      let value = row[selectionItemIdx];
+      if (selectionItem.selection) {
+        if (value === null) {
+          result[selectionItem.key] = null;
+          continue;
+        }
+        if (parseJson2) {
+          value = JSON.parse(value);
+          if (value === null) {
+            result[selectionItem.key] = null;
+            continue;
+          }
+        } else if (parseJsonIfString && typeof value === "string") value = JSON.parse(value);
+        if (selectionItem.isArray) mapRelationalRow(value, false, selectionItem.selection, false, parseJsonIfString);
+        else mapRelationalRow(value, true, selectionItem.selection, false, parseJsonIfString);
+        result[selectionItem.key] = value;
+        continue;
+      }
+      if (value === null) {
+        result[selectionItem.key] = null;
+        continue;
+      }
+      const decoder = decoders[selectionItemIdx];
+      result[selectionItem.key] = decoder ? decoder(value) : value;
+    }
+    results[i] = result;
+  }
+  return isOne ? results[0] : results;
+}
+function makeDefaultRqbMapper({ selection, isFirst, parseJson: parseJson2, parseJsonIfString, rootJsonMappers, arrayModeRoot }) {
+  return ((rows) => {
+    if (isFirst && !rows[0]) return rows[0];
+    return arrayModeRoot ? mapRelationalRowFromArrays(isFirst ? rows[0] : rows, isFirst, selection, parseJson2, parseJsonIfString) : mapRelationalRow(isFirst ? rows[0] : rows, isFirst, selection, parseJson2, parseJsonIfString, rootJsonMappers);
+  });
+}
+function makeJitRqbMapperInner(selection, rowExpr, selectionVar, parseJson2, parseJsonIfString, useJsonMappers, preFn, counter, accessByIdx) {
+  const bodyStmts = [];
+  const literalEntries = [];
+  let hasWork = false;
+  const fieldVars = selection.map(() => `c${counter.n++}`);
+  const destructurePieces = selection.map((item, idx) => accessByIdx ? fieldVars[idx] : `${JSON.stringify(item.key)}: ${fieldVars[idx]}`);
+  bodyStmts.push(accessByIdx ? `let [ ${destructurePieces.join(", ")} ] = ${rowExpr};` : `let { ${destructurePieces.join(", ")} } = ${rowExpr};`);
+  for (const [idx, { field, key, codec: codec2, isArray, selection: innerSelection, arrayDimensions }] of selection.entries()) {
+    const sel = `${selectionVar}[${idx}]`;
+    const keyStr = JSON.stringify(key);
+    const slot = fieldVars[idx];
+    if (innerSelection) {
+      if (parseJson2) {
+        bodyStmts.push(`if (${slot} !== null) ${slot} = JSON.parse(${slot});`);
+        hasWork = true;
+      } else if (parseJsonIfString) {
+        bodyStmts.push(`if (typeof ${slot} === 'string') ${slot} = JSON.parse(${slot});`);
+        hasWork = true;
+      }
+      const nestedSelVar = `s${counter.n++}`;
+      const savedPreFnLen = preFn.length;
+      preFn.push(`const { selection: ${nestedSelVar} } = ${sel};`);
+      if (isArray) {
+        const j = `j${counter.n++}`;
+        const inner = makeJitRqbMapperInner(innerSelection, `${slot}[${j}]`, nestedSelVar, false, parseJsonIfString, true, preFn, counter, false);
+        if (inner.hasWork) {
+          hasWork = true;
+          bodyStmts.push(`if (${slot} !== null) {`);
+          bodyStmts.push(`	for (let ${j} = 0; ${j} < ${slot}.length; ++${j}) {`);
+          for (const s of inner.bodyStmts) bodyStmts.push(`		${s}`);
+          bodyStmts.push(`		${slot}[${j}] = ${inner.literal};`);
+          bodyStmts.push(`	}`);
+          bodyStmts.push(`}`);
+        } else preFn.splice(savedPreFnLen, 1);
+      } else {
+        const inner = makeJitRqbMapperInner(innerSelection, slot, nestedSelVar, false, parseJsonIfString, true, preFn, counter, false);
+        if (inner.hasWork) {
+          hasWork = true;
+          bodyStmts.push(`if (${slot} !== null) {`);
+          for (const s of inner.bodyStmts) bodyStmts.push(`	${s}`);
+          bodyStmts.push(`	${slot} = ${inner.literal};`);
+          bodyStmts.push(`}`);
+        } else preFn.splice(savedPreFnLen, 1);
+      }
+      literalEntries.push(`${keyStr}: ${slot}`);
+      continue;
+    }
+    let decoderExpr = "";
+    let destructure = "";
+    let bypassCodecs = false;
+    if (is(field, Column)) {
+      if (useJsonMappers && field.mapFromJsonValue) {
+        bypassCodecs = true;
+        const id = counter.n++;
+        destructure = `field: dec${id}`;
+        decoderExpr = `dec${id}.mapFromJsonValue`;
+      } else if (!field.mapFromDriverValue.isNoop) {
+        const id = counter.n++;
+        destructure = `field: dec${id}`;
+        decoderExpr = `dec${id}.mapFromDriverValue`;
+      }
+    } else if (is(field, SQL)) {
+      if (useJsonMappers && field.decoder.mapFromJsonValue) {
+        bypassCodecs = true;
+        const id = counter.n++;
+        destructure = `field: { decoder: dec${id} }`;
+        decoderExpr = `dec${id}.mapFromJsonValue`;
+      } else if (!field.decoder.mapFromDriverValue.isNoop) {
+        const id = counter.n++;
+        destructure = `field: { decoder: dec${id} }`;
+        decoderExpr = `dec${id}.mapFromDriverValue`;
+      }
+    } else if (is(field, SQL.Aliased)) {
+      if (useJsonMappers && field.sql.decoder.mapFromJsonValue) {
+        bypassCodecs = true;
+        const id = counter.n++;
+        destructure = `field: { sql: { decoder: dec${id} } }`;
+        decoderExpr = `dec${id}.mapFromJsonValue`;
+      } else if (!field.sql.decoder.mapFromDriverValue.isNoop) {
+        const id = counter.n++;
+        destructure = `field: { sql: { decoder: dec${id} } }`;
+        decoderExpr = `dec${id}.mapFromDriverValue`;
+      }
+    } else if (is(field, Table) || is(field, View)) {
+    } else {
+      const sqlExpr = field.getSQL();
+      if (useJsonMappers && sqlExpr.decoder.mapFromJsonValue) {
+        bypassCodecs = true;
+        const id = counter.n++;
+        preFn.push(`const dec${id} = ${sel}.field.getSQL().decoder;`);
+        decoderExpr = `dec${id}.mapFromJsonValue`;
+      } else if (!sqlExpr.decoder.mapFromDriverValue.isNoop) {
+        const id = counter.n++;
+        preFn.push(`const dec${id} = ${sel}.field.getSQL().decoder;`);
+        decoderExpr = `dec${id}.mapFromDriverValue`;
+      }
+    }
+    let codecVar = "";
+    if (!bypassCodecs && codec2) codecVar = `codec${counter.n++}`;
+    if (destructure || codecVar) {
+      const parts = [];
+      if (destructure) parts.push(destructure);
+      if (codecVar) parts.push(`codec: ${codecVar}`);
+      preFn.push(`const { ${parts.join(", ")} } = ${sel};`);
+    }
+    if (decoderExpr || codecVar) {
+      hasWork = true;
+      let decoded = slot;
+      if (codecVar) decoded = `${codecVar}(${decoded}, ${arrayDimensions})`;
+      if (decoderExpr) decoded = `${decoderExpr}(${decoded})`;
+      literalEntries.push(`${keyStr}: ${slot} === null ? null : ${decoded}`);
+    } else literalEntries.push(`${keyStr}: ${slot}`);
+  }
+  return {
+    bodyStmts,
+    literal: `{ ${literalEntries.join(", ")} }`,
+    hasWork
+  };
+}
+function makeJitRqbMapper({ selection, isFirst, parseJson: parseJson2, parseJsonIfString, rootJsonMappers, arrayModeRoot }) {
+  const preFn = [];
+  const inner = makeJitRqbMapperInner(selection, "row", "selection", parseJson2, parseJsonIfString, arrayModeRoot ? false : rootJsonMappers, preFn, { n: 0 }, !!arrayModeRoot);
+  const lines = [];
+  lines.push(`	"use strict";
+	const { selection } = this;`);
+  for (const p of preFn) lines.push(`	${p}`);
+  if (arrayModeRoot) if (isFirst) {
+    lines.push(`	const row = rows[0];`);
+    lines.push(`	if (!row) return undefined;`);
+    for (const s of inner.bodyStmts) lines.push(`	${s}`);
+    lines.push(`	return ${inner.literal};`);
+  } else {
+    lines.push(`	const { length } = rows;`);
+    lines.push(`	const mapped = Array.from({ length });`);
+    lines.push(`	for (let i = 0; i < length; ++i) {`);
+    lines.push(`		const row = rows[i];`);
+    for (const s of inner.bodyStmts) lines.push(`		${s}`);
+    lines.push(`		mapped[i] = ${inner.literal};`);
+    lines.push(`	}`);
+    lines.push(`	return mapped;`);
+  }
+  else if (!inner.hasWork) lines.push(isFirst ? `	return rows[0];` : `	return rows;`);
+  else if (isFirst) {
+    lines.push(`	const row = rows[0];`);
+    lines.push(`	if (!row) return undefined;`);
+    for (const s of inner.bodyStmts) lines.push(`	${s}`);
+    lines.push(`	rows[0] = ${inner.literal};`);
+    lines.push(`	return rows[0];`);
+  } else {
+    lines.push(`	for (let i = 0; i < rows.length; ++i) {`);
+    lines.push(`		const row = rows[i];`);
+    for (const s of inner.bodyStmts) lines.push(`		${s}`);
+    lines.push(`		rows[i] = ${inner.literal};`);
+    lines.push(`	}`);
+    lines.push(`	return rows;`);
+  }
+  lines.push("	//# sourceURL=drizzle:jit-relational-query-mapper");
+  const compiled = lines.join("\n");
+  return Object.assign(new FnConstructor("rows", compiled).bind({ selection }), { body: `function jitRqbMapper (rows) {
+${compiled}
+}` });
+}
+var RelationsBuilderTable = class {
+  static [entityKind] = "RelationsBuilderTable";
+  _;
+  constructor(table, name2) {
+    this._ = {
+      name: name2,
+      table
+    };
+  }
+};
+var RelationsBuilderColumn = class {
+  static [entityKind] = "RelationsBuilderColumn";
+  _;
+  constructor(column, tableName, key) {
+    this._ = {
+      tableName,
+      column,
+      key
+    };
+  }
+  through(column) {
+    return new RelationsBuilderJunctionColumn(this._.column, this._.tableName, this._.key, column);
+  }
+};
+var RelationsBuilderJunctionColumn = class {
+  static [entityKind] = "RelationsBuilderColumn";
+  _;
+  constructor(column, tableName, key, through) {
+    this._ = {
+      tableName,
+      column,
+      through,
+      key
+    };
+  }
+};
+var RelationsHelperStatic = class {
+  static [entityKind] = "RelationsHelperStatic";
+  _;
+  constructor(tables) {
+    this._ = { tables };
+    const one = {};
+    const many = {};
+    for (const [tableName, table] of Object.entries(tables)) {
+      one[tableName] = (config2) => {
+        return new One(tables, table, tableName, config2);
+      };
+      many[tableName] = (config2) => {
+        return new Many(tables, table, tableName, config2);
+      };
+    }
+    this.one = one;
+    this.many = many;
+  }
+  one;
+  many;
+  /** @internal - to be reworked */
+  aggs = { count() {
+    return new Count();
+  } };
+};
+function fieldSelectionToSQL(table, target) {
+  const field = table[TableColumns][target];
+  return field ? is(field, Column) ? field : is(field, SQL.Aliased) ? sql`${table}.${sql.identifier(field.fieldAlias)}` : sql`${table}.${sql.identifier(target)}` : sql`${table}.${sql.identifier(target)}`;
+}
+function relationsFieldFilterToSQL(column, filter) {
+  if (typeof filter !== "object" || is(filter, Placeholder)) return eq(column, filter);
+  const entries = Object.entries(filter);
+  if (!entries.length) return void 0;
+  const parts = [];
+  for (const [target, value] of entries) {
+    if (value === void 0) continue;
+    switch (target) {
+      case "NOT": {
+        const res = relationsFieldFilterToSQL(column, value);
+        if (!res) continue;
+        parts.push(not(res));
+        continue;
+      }
+      case "OR":
+        if (!value.length) continue;
+        parts.push(or(...value.map((subFilter) => relationsFieldFilterToSQL(column, subFilter))));
+        continue;
+      case "AND":
+        if (!value.length) continue;
+        parts.push(and(...value.map((subFilter) => relationsFieldFilterToSQL(column, subFilter))));
+        continue;
+      case "isNotNull":
+      case "isNull":
+        if (!value) continue;
+        parts.push(operators[target](column));
+        continue;
+      case "in":
+        parts.push(operators.inArray(column, value));
+        continue;
+      case "notIn":
+        parts.push(operators.notInArray(column, value));
+        continue;
+      default:
+        parts.push(operators[target](column, value));
+        continue;
+    }
+  }
+  if (!parts.length) return void 0;
+  return and(...parts);
+}
+function relationsFilterToSQL(table, filter, tableRelations = {}, tablesRelations = {}, depth = 0) {
+  const entries = Object.entries(filter);
+  if (!entries.length) return void 0;
+  const parts = [];
+  for (const [target, value] of entries) {
+    if (value === void 0) continue;
+    switch (target) {
+      case "RAW": {
+        const processed = typeof value === "function" ? value(table, operators) : value.getSQL();
+        parts.push(processed);
+        continue;
+      }
+      case "OR":
+        if (!value?.length) continue;
+        parts.push(or(...value.map((subFilter) => relationsFilterToSQL(table, subFilter, tableRelations, tablesRelations, depth))));
+        continue;
+      case "AND":
+        if (!value?.length) continue;
+        parts.push(and(...value.map((subFilter) => relationsFilterToSQL(table, subFilter, tableRelations, tablesRelations, depth))));
+        continue;
+      case "NOT": {
+        if (value === void 0) continue;
+        const built = relationsFilterToSQL(table, value, tableRelations, tablesRelations, depth);
+        if (!built) continue;
+        parts.push(not(built));
+        continue;
+      }
+      default: {
+        if (table[TableColumns][target]) {
+          const colFilter = relationsFieldFilterToSQL(fieldSelectionToSQL(table, target), value);
+          if (colFilter) parts.push(colFilter);
+          continue;
+        }
+        const relation = tableRelations[target];
+        if (!relation) throw new DrizzleError({ message: `Unknown relational filter field: "${target}"` });
+        const targetTable = aliasedTable(relation.targetTable, `f${depth}`);
+        const throughTable = relation.throughTable ? aliasedTable(relation.throughTable, `ft${depth}`) : void 0;
+        const targetConfig = tablesRelations[relation.targetTableName];
+        const { filter: relationFilter, joinCondition } = relationToSQL(relation, table, targetTable, throughTable);
+        const filter2 = and(relationFilter, typeof value === "boolean" ? void 0 : relationsFilterToSQL(targetTable, value, targetConfig.relations, tablesRelations, depth + 1));
+        const subquery = throughTable ? sql`(select * from ${getTableAsAliasSQL(targetTable)} inner join ${getTableAsAliasSQL(throughTable)} on ${joinCondition}${sql` where ${filter2}`.if(filter2)} limit 1)` : sql`(select * from ${getTableAsAliasSQL(targetTable)}${sql` where ${filter2}`.if(filter2)} limit 1)`;
+        if (filter2) parts.push((value ? exists : notExists)(subquery));
+      }
+    }
+  }
+  return and(...parts);
+}
+function relationsOrderToSQL(table, orders) {
+  if (typeof orders === "function") {
+    const data = orders(table, orderByOperators);
+    return is(data, SQL) ? data : Array.isArray(data) ? data.length ? sql.join(data.map((o) => is(o, SQL) ? o : asc(o)), sql`, `) : void 0 : is(data, Column) ? asc(data) : void 0;
+  }
+  const entries = Object.entries(orders).filter(([_, value]) => value);
+  if (!entries.length) return void 0;
+  return sql.join(entries.map(([target, value]) => (value === "asc" ? asc : desc)(fieldSelectionToSQL(table, target))), sql`, `);
+}
+function relationExtrasToSQL(table, extras, codecs, inJson) {
+  const subqueries = [];
+  const selection = [];
+  for (const [key, field] of Object.entries(extras)) {
+    if (!field) continue;
+    const subq = (typeof field === "function" ? field(table, { sql: operators.sql }) : field).getSQL();
+    const column = codecs ? getColumnFromDecoder(subq) : void 0;
+    const query = column && (!inJson || !column.jsonSelectIdentifier) ? sql`${codecs.apply(column, inJson ? "castInJson" : "cast", sql`(${subq})`)} as ${sql.identifier(key)}` : sql`(${subq}) as ${sql.identifier(key)}`;
+    query.decoder = subq.decoder;
+    subqueries.push(query);
+    selection.push(column && (!inJson || !column.mapFromJsonValue) ? {
+      key,
+      field: query,
+      codec: codecs.get(column, inJson ? "normalizeInJson" : "normalize"),
+      arrayDimensions: column.dimensions
+    } : {
+      key,
+      field: query
+    });
+  }
+  return {
+    sql: subqueries.length ? sql.join(subqueries, sql`, `) : void 0,
+    selection
+  };
+}
+function relationToSQL(relation, sourceTable, targetTable, throughTable) {
+  if (relation.through) {
+    const outerColumnWhere = relation.sourceColumns.map((s, i) => {
+      const t = relation.through.source[i];
+      return eq(sql`${sourceTable}.${sql.identifier(s.name)}`, sql`${throughTable}.${sql.identifier(is(t._.column, Column) ? t._.column.name : t._.key)}`);
+    });
+    const innerColumnWhere = relation.targetColumns.map((s, i) => {
+      const t = relation.through.target[i];
+      return eq(sql`${throughTable}.${sql.identifier(is(t._.column, Column) ? t._.column.name : t._.key)}`, sql`${targetTable}.${sql.identifier(s.name)}`);
+    });
+    return {
+      filter: and(relation.where ? relationsFilterToSQL(relation.isReversed ? sourceTable : targetTable, relation.where) : void 0, ...outerColumnWhere),
+      joinCondition: and(...innerColumnWhere)
+    };
+  }
+  return { filter: and(...relation.sourceColumns.map((s, i) => {
+    const t = relation.targetColumns[i];
+    return eq(sql`${sourceTable}.${sql.identifier(s.name)}`, sql`${targetTable}.${sql.identifier(t.name)}`);
+  }), relation.where ? relationsFilterToSQL(relation.isReversed ? sourceTable : targetTable, relation.where) : void 0) };
+}
+function getTableAsAliasSQL(table) {
+  return sql`${table[IsAlias] ? sql`${sql`${sql.identifier(table[TableSchema] ?? "")}.`.if(table[TableSchema])}${sql.identifier(table[OriginalName])} as ${table}` : table}`;
+}
+
+// node_modules/drizzle-orm/column-builder.js
+var ColumnBuilder = class {
+  static [entityKind] = "ColumnBuilder";
+  /** @internal */
+  config;
+  constructor(name2, dataType, columnType) {
+    this.config = {
+      name: name2,
+      keyAsName: name2 === "",
+      notNull: false,
+      default: void 0,
+      hasDefault: false,
+      primaryKey: false,
+      isUnique: false,
+      uniqueName: void 0,
+      uniqueType: void 0,
+      dataType,
+      columnType,
+      generated: void 0
+    };
+  }
+  /**
+  * Changes the data type of the column. Commonly used with `json` columns. Also, useful for branded types.
+  *
+  * @example
+  * ```ts
+  * const users = pgTable('users', {
+  * 	id: integer('id').$type<UserId>().primaryKey(),
+  * 	details: json('details').$type<UserDetails>().notNull(),
+  * });
+  * ```
+  */
+  $type() {
+    return this;
+  }
+  /**
+  * Adds a `not null` clause to the column definition.
+  *
+  * Affects the `select` model of the table - columns *without* `not null` will be nullable on select.
+  */
+  notNull() {
+    this.config.notNull = true;
+    return this;
+  }
+  /**
+  * Adds a `default <value>` clause to the column definition.
+  *
+  * Affects the `insert` model of the table - columns *with* `default` are optional on insert.
+  *
+  * If you need to set a dynamic default value, use {@link $defaultFn} instead.
+  */
+  default(value) {
+    this.config.default = value;
+    this.config.hasDefault = true;
+    return this;
+  }
+  /**
+  * Adds a dynamic default value to the column.
+  * The function will be called when the row is inserted, and the returned value will be used as the column value.
+  *
+  * **Note:** This value does not affect the `drizzle-kit` behavior, it is only used at runtime in `drizzle-orm`.
+  */
+  $defaultFn(fn) {
+    this.config.defaultFn = fn;
+    this.config.hasDefault = true;
+    return this;
+  }
+  /**
+  * Alias for {@link $defaultFn}.
+  */
+  $default = this.$defaultFn;
+  /**
+  * Adds a dynamic update value to the column.
+  * The function will be called when the row is updated, and the returned value will be used as the column value if none is provided.
+  * If no `default` (or `$defaultFn`) value is provided, the function will be called when the row is inserted as well, and the returned value will be used as the column value.
+  *
+  * **Note:** This value does not affect the `drizzle-kit` behavior, it is only used at runtime in `drizzle-orm`.
+  */
+  $onUpdateFn(fn) {
+    this.config.onUpdateFn = fn;
+    this.config.hasDefault = true;
+    return this;
+  }
+  /**
+  * Alias for {@link $onUpdateFn}.
+  */
+  $onUpdate = this.$onUpdateFn;
+  /**
+  * Adds a `primary key` clause to the column definition. This implicitly makes the column `not null`.
+  *
+  * In SQLite, `integer primary key` implicitly makes the column auto-incrementing.
+  */
+  primaryKey() {
+    this.config.primaryKey = true;
+    this.config.notNull = true;
+    return this;
+  }
+  /** @internal Sets the name of the column to the key within the table definition if a name was not given. */
+  setName(name2, casingFn) {
+    if (this.config.name !== "") return;
+    this.config.name = casingFn(name2);
+  }
+};
+
+// node_modules/drizzle-orm/logger.js
+var ConsoleLogWriter = class {
+  static [entityKind] = "ConsoleLogWriter";
+  write(message) {
+    console.log(message);
+  }
+};
+var DefaultLogger = class {
+  static [entityKind] = "DefaultLogger";
+  writer;
+  constructor(config2) {
+    this.writer = config2?.writer ?? new ConsoleLogWriter();
+  }
+  logQuery(query, params) {
+    const stringifiedParams = params.map((p) => {
+      try {
+        return JSON.stringify(p);
+      } catch {
+        return String(p);
+      }
+    });
+    const paramsStr = stringifiedParams.length ? ` -- params: [${stringifiedParams.join(", ")}]` : "";
+    this.writer.write(`Query: ${query}${paramsStr}`);
+  }
+};
+var NoopLogger = class {
+  static [entityKind] = "NoopLogger";
+  logQuery() {
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/foreign-keys.js
+var ForeignKeyBuilder = class {
+  static [entityKind] = "SQLiteForeignKeyBuilder";
+  /** @internal */
+  reference;
+  /** @internal */
+  _onUpdate;
+  /** @internal */
+  _onDelete;
+  constructor(config2, actions) {
+    this.reference = () => {
+      const { name: name2, columns, foreignColumns } = config2();
+      return {
+        name: name2,
+        columns,
+        foreignTable: foreignColumns[0].table,
+        foreignColumns
+      };
+    };
+    if (actions) {
+      this._onUpdate = actions.onUpdate;
+      this._onDelete = actions.onDelete;
+    }
+  }
+  onUpdate(action) {
+    this._onUpdate = action;
+    return this;
+  }
+  onDelete(action) {
+    this._onDelete = action;
+    return this;
+  }
+  /** @internal */
+  build(table) {
+    return new ForeignKey(table, this);
+  }
+};
+var ForeignKey = class {
+  static [entityKind] = "SQLiteForeignKey";
+  reference;
+  onUpdate;
+  onDelete;
+  constructor(table, builder) {
+    this.table = table;
+    this.reference = builder.reference;
+    this.onUpdate = builder._onUpdate;
+    this.onDelete = builder._onDelete;
+  }
+  getName() {
+    const { name: name2, columns, foreignColumns } = this.reference();
+    const columnNames = columns.map((column) => column.name);
+    const foreignColumnNames = foreignColumns.map((column) => column.name);
+    const chunks2 = [
+      this.table[TableName],
+      ...columnNames,
+      foreignColumns[0].table[TableName],
+      ...foreignColumnNames
+    ];
+    return name2 ?? `${chunks2.join("_")}_fk`;
+  }
+  isNameExplicit() {
+    return !!this.reference().name;
+  }
+};
+function foreignKey(config2) {
+  function mappedConfig() {
+    if (typeof config2 === "function") {
+      const { name: name2, columns, foreignColumns } = config2();
+      return {
+        name: name2,
+        columns,
+        foreignColumns
+      };
+    }
+    return config2;
+  }
+  return new ForeignKeyBuilder(mappedConfig);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/common.js
+var SQLiteColumnBuilder = class extends ColumnBuilder {
+  static [entityKind] = "SQLiteColumnBuilder";
+  foreignKeyConfigs = [];
+  references(ref, actions = {}) {
+    this.foreignKeyConfigs.push({
+      ref,
+      actions
+    });
+    return this;
+  }
+  unique(name2) {
+    this.config.isUnique = true;
+    this.config.uniqueName = name2;
+    return this;
+  }
+  generatedAlwaysAs(as, config2) {
+    this.config.generated = {
+      as,
+      type: "always",
+      mode: config2?.mode ?? "virtual"
+    };
+    return this;
+  }
+  /** @internal */
+  buildForeignKeys(column, table) {
+    return this.foreignKeyConfigs.map(({ ref, actions }) => {
+      return ((ref2, actions2) => {
+        const builder = new ForeignKeyBuilder(() => {
+          const foreignColumn = ref2();
+          return {
+            columns: [column],
+            foreignColumns: [foreignColumn]
+          };
+        });
+        if (actions2.onUpdate) builder.onUpdate(actions2.onUpdate);
+        if (actions2.onDelete) builder.onDelete(actions2.onDelete);
+        return builder.build(table);
+      })(ref, actions);
+    });
+  }
+};
+var SQLiteColumn = class extends Column {
+  static [entityKind] = "SQLiteColumn";
+  /** @internal */
+  table;
+  constructor(table, config2) {
+    super(table, config2);
+    this.table = table;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/columns/blob.js
+function hexToText(hexString) {
+  let result = "";
+  for (let i = 0; i < hexString.length; i += 2) {
+    const hexPair = hexString.slice(i, i + 2);
+    const decimalValue = Number.parseInt(hexPair, 16);
+    result += String.fromCodePoint(decimalValue);
+  }
+  return result;
+}
+var SQLiteBigIntBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBigIntBuilder";
+  constructor(name2) {
+    super(name2, "bigint int64", "SQLiteBigInt");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteBigInt(table, this.config);
+  }
+};
+var SQLiteBigInt = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBigInt";
+  getSQLType() {
+    return "blob";
+  }
+  mapFromDriverValue = (value) => {
+    if (typeof value === "string") return BigInt(hexToText(value));
+    if (typeof Buffer !== "undefined" && Buffer.from) {
+      const buf = Buffer.isBuffer(value) ? value : value instanceof ArrayBuffer ? Buffer.from(value) : value.buffer ? Buffer.from(value.buffer, value.byteOffset, value.byteLength) : Buffer.from(value);
+      return BigInt(buf.toString("utf8"));
+    }
+    return BigInt(textDecoder.decode(value));
+  };
+  mapToDriverValue = (value) => {
+    return Buffer.from(value.toString());
+  };
+};
+var SQLiteBlobJsonBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBlobJsonBuilder";
+  constructor(name2) {
+    super(name2, "object json", "SQLiteBlobJson");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteBlobJson(table, this.config);
+  }
+};
+var SQLiteBlobJson = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBlobJson";
+  getSQLType() {
+    return "blob";
+  }
+  mapFromDriverValue = (value) => {
+    if (typeof value === "string") return JSON.parse(hexToText(value));
+    if (typeof Buffer !== "undefined" && Buffer.from) {
+      const buf = Buffer.isBuffer(value) ? value : value instanceof ArrayBuffer ? Buffer.from(value) : value.buffer ? Buffer.from(value.buffer, value.byteOffset, value.byteLength) : Buffer.from(value);
+      return JSON.parse(buf.toString("utf8"));
+    }
+    return JSON.parse(textDecoder.decode(value));
+  };
+  mapToDriverValue = (value) => {
+    return Buffer.from(JSON.stringify(value));
+  };
+};
+var SQLiteBlobBufferBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBlobBufferBuilder";
+  constructor(name2) {
+    super(name2, "object buffer", "SQLiteBlobBuffer");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteBlobBuffer(table, this.config);
+  }
+};
+var SQLiteBlobBuffer = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBlobBuffer";
+  mapFromDriverValue = (value) => {
+    if (Buffer.isBuffer(value)) return value;
+    if (typeof value === "string") return Buffer.from(value, "hex");
+    return Buffer.from(value);
+  };
+  getSQLType() {
+    return "blob";
+  }
+};
+function blob(a, b) {
+  const { name: name2, config: config2 } = getColumnNameAndConfig(a, b);
+  if (config2?.mode === "bigint") return new SQLiteBigIntBuilder(name2);
+  if (config2?.mode === "buffer") return new SQLiteBlobBufferBuilder(name2);
+  return new SQLiteBlobJsonBuilder(name2);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/custom.js
+var SQLiteCustomColumnBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteCustomColumnBuilder";
+  constructor(name2, fieldConfig, customTypeParams) {
+    super(name2, "custom", "SQLiteCustomColumn");
+    this.config.fieldConfig = fieldConfig;
+    this.config.customTypeParams = customTypeParams;
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteCustomColumn(table, this.config);
+  }
+};
+var SQLiteCustomColumn = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteCustomColumn";
+  sqlName;
+  mapTo;
+  mapFrom;
+  mapJson;
+  forJsonSelect;
+  constructor(table, config2) {
+    super(table, config2);
+    this.sqlName = config2.customTypeParams.dataType(config2.fieldConfig);
+    this.mapTo = config2.customTypeParams.toDriver;
+    this.mapFrom = config2.customTypeParams.fromDriver;
+    this.mapJson = config2.customTypeParams.fromJson;
+    this.forJsonSelect = config2.customTypeParams.forJsonSelect;
+  }
+  getSQLType() {
+    return this.sqlName;
+  }
+  mapFromDriverValue = (value) => {
+    return typeof this.mapFrom === "function" ? this.mapFrom(value) : value;
+  };
+  mapFromJsonValue(value) {
+    return typeof this.mapJson === "function" ? this.mapJson(value) : this.mapFromDriverValue(value);
+  }
+  jsonSelectIdentifier(identifier6, sql2) {
+    if (typeof this.forJsonSelect === "function") return this.forJsonSelect(identifier6, sql2);
+    const rawType = this.getSQLType().toLowerCase();
+    const parenPos = rawType.indexOf("(");
+    switch (parenPos + 1 ? rawType.slice(0, parenPos) : rawType) {
+      case "numeric":
+      case "decimal":
+      case "bigint":
+        return sql2`cast(${identifier6} as text)`;
+      case "blob":
+        return sql2`hex(${identifier6})`;
+      default:
+        return identifier6;
+    }
+  }
+  mapToDriverValue = (value) => {
+    return typeof this.mapTo === "function" ? this.mapTo(value) : value;
+  };
+};
+function customType(customTypeParams) {
+  return (a, b) => {
+    const { name: name2, config: config2 } = getColumnNameAndConfig(a, b);
+    return new SQLiteCustomColumnBuilder(name2, config2, customTypeParams);
+  };
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/integer.js
+var SQLiteBaseIntegerBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBaseIntegerBuilder";
+  constructor(name2, dataType, columnType) {
+    super(name2, dataType, columnType);
+    this.config.autoIncrement = false;
+  }
+  primaryKey(config2) {
+    if (config2?.autoIncrement) this.config.autoIncrement = true;
+    this.config.hasDefault = true;
+    return super.primaryKey();
+  }
+};
+var SQLiteBaseInteger = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBaseInteger";
+  autoIncrement = this.config.autoIncrement;
+  getSQLType() {
+    return "integer";
+  }
+};
+var SQLiteIntegerBuilder = class extends SQLiteBaseIntegerBuilder {
+  static [entityKind] = "SQLiteIntegerBuilder";
+  constructor(name2) {
+    super(name2, "number int53", "SQLiteInteger");
+  }
+  build(table) {
+    return new SQLiteInteger(table, this.config);
+  }
+};
+var SQLiteInteger = class extends SQLiteBaseInteger {
+  static [entityKind] = "SQLiteInteger";
+};
+var SQLiteTimestampBuilder = class extends SQLiteBaseIntegerBuilder {
+  static [entityKind] = "SQLiteTimestampBuilder";
+  constructor(name2, mode) {
+    super(name2, "object date", "SQLiteTimestamp");
+    this.config.mode = mode;
+  }
+  /**
+  * @deprecated Use `default()` with your own expression instead.
+  *
+  * Adds `DEFAULT (cast((julianday('now') - 2440587.5)*86400000 as integer))` to the column, which is the current epoch timestamp in milliseconds.
+  */
+  defaultNow() {
+    return this.default(sql`(cast((julianday('now') - 2440587.5)*86400000 as integer))`);
+  }
+  build(table) {
+    return new SQLiteTimestamp(table, this.config);
+  }
+};
+var SQLiteTimestamp = class extends SQLiteBaseInteger {
+  static [entityKind] = "SQLiteTimestamp";
+  mode = this.config.mode;
+  mapFromDriverValue = (value) => {
+    if (typeof value === "string") return new Date(value.replaceAll('"', ""));
+    if (this.config.mode === "timestamp") return /* @__PURE__ */ new Date(value * 1e3);
+    return new Date(value);
+  };
+  mapToDriverValue = (value) => {
+    if (typeof value === "number") return value;
+    const unix = value.getTime();
+    if (this.config.mode === "timestamp") return Math.floor(unix / 1e3);
+    return unix;
+  };
+};
+var SQLiteBooleanBuilder = class extends SQLiteBaseIntegerBuilder {
+  static [entityKind] = "SQLiteBooleanBuilder";
+  constructor(name2, mode) {
+    super(name2, "boolean", "SQLiteBoolean");
+    this.config.mode = mode;
+  }
+  build(table) {
+    return new SQLiteBoolean(table, this.config);
+  }
+};
+var SQLiteBoolean = class extends SQLiteBaseInteger {
+  static [entityKind] = "SQLiteBoolean";
+  mode = this.config.mode;
+  mapFromDriverValue = (value) => {
+    return Number(value) === 1;
+  };
+  mapToDriverValue = (value) => {
+    return value ? 1 : 0;
+  };
+};
+function integer2(a, b) {
+  const { name: name2, config: config2 } = getColumnNameAndConfig(a, b);
+  if (config2?.mode === "timestamp" || config2?.mode === "timestamp_ms") return new SQLiteTimestampBuilder(name2, config2.mode);
+  if (config2?.mode === "boolean") return new SQLiteBooleanBuilder(name2, config2.mode);
+  return new SQLiteIntegerBuilder(name2);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/numeric.js
+var SQLiteNumericBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteNumericBuilder";
+  constructor(name2) {
+    super(name2, "string numeric", "SQLiteNumeric");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteNumeric(table, this.config);
+  }
+};
+var SQLiteNumeric = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteNumeric";
+  mapFromDriverValue = (value) => {
+    if (typeof value === "string") return value;
+    return String(value);
+  };
+  getSQLType() {
+    return "numeric";
+  }
+};
+var SQLiteNumericNumberBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteNumericNumberBuilder";
+  constructor(name2) {
+    super(name2, "number", "SQLiteNumericNumber");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteNumericNumber(table, this.config);
+  }
+};
+var SQLiteNumericNumber = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteNumericNumber";
+  mapFromDriverValue = (value) => {
+    if (typeof value === "number") return value;
+    return Number(value);
+  };
+  mapToDriverValue = String;
+  getSQLType() {
+    return "numeric";
+  }
+};
+var SQLiteNumericBigIntBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteNumericBigIntBuilder";
+  constructor(name2) {
+    super(name2, "bigint int64", "SQLiteNumericBigInt");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteNumericBigInt(table, this.config);
+  }
+};
+var SQLiteNumericBigInt = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteNumericBigInt";
+  mapFromDriverValue = BigInt;
+  mapToDriverValue = String;
+  getSQLType() {
+    return "numeric";
+  }
+};
+function numeric(a, b) {
+  const { name: name2, config: config2 } = getColumnNameAndConfig(a, b);
+  const mode = config2?.mode;
+  return mode === "number" ? new SQLiteNumericNumberBuilder(name2) : mode === "bigint" ? new SQLiteNumericBigIntBuilder(name2) : new SQLiteNumericBuilder(name2);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/real.js
+var SQLiteRealBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteRealBuilder";
+  constructor(name2) {
+    super(name2, "number double", "SQLiteReal");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteReal(table, this.config);
+  }
+};
+var SQLiteReal = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteReal";
+  getSQLType() {
+    return "real";
+  }
+};
+function real(name2) {
+  return new SQLiteRealBuilder(name2 ?? "");
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/text.js
+var SQLiteTextBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteTextBuilder";
+  constructor(name2, config2) {
+    super(name2, config2.enum?.length ? "string enum" : "string", "SQLiteText");
+    this.config.enumValues = config2.enum;
+    this.config.length = config2.length;
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteText(table, this.config);
+  }
+};
+var SQLiteText = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteText";
+  enumValues = this.config.enumValues;
+  constructor(table, config2) {
+    super(table, config2);
+  }
+  getSQLType() {
+    return `text${this.config.length ? `(${this.config.length})` : ""}`;
+  }
+};
+var SQLiteTextJsonBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteTextJsonBuilder";
+  constructor(name2) {
+    super(name2, "object json", "SQLiteTextJson");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteTextJson(table, this.config);
+  }
+};
+var SQLiteTextJson = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteTextJson";
+  getSQLType() {
+    return "text";
+  }
+  mapFromDriverValue = (value) => {
+    return JSON.parse(value);
+  };
+  mapToDriverValue = (value) => {
+    return JSON.stringify(value);
+  };
+};
+function text(a, b = {}) {
+  const { name: name2, config: config2 } = getColumnNameAndConfig(a, b);
+  if (config2.mode === "json") return new SQLiteTextJsonBuilder(name2);
+  return new SQLiteTextBuilder(name2, config2);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/all.js
+function getSQLiteColumnBuilders() {
+  return {
+    blob,
+    customType,
+    integer: integer2,
+    numeric,
+    real,
+    text
+  };
+}
+
+// node_modules/drizzle-orm/casing.js
+function toSnakeCase(input2) {
+  return (input2.replace(/['\u2019]/g, "").match(/[\da-z]+|[A-Z]+(?![a-z])|[A-Z][\da-z]+/g) ?? []).map((word) => word.toLowerCase()).join("_");
+}
+function toCamelCase(input2) {
+  return (input2.replace(/['\u2019]/g, "").match(/[\da-z]+|[A-Z]+(?![a-z])|[A-Z][\da-z]+/g) ?? []).reduce((acc, word, i) => {
+    return acc + (i === 0 ? word.toLowerCase() : `${word[0].toUpperCase()}${word.slice(1)}`);
+  }, "");
+}
+function getCasingFn(casing) {
+  if (casing === "snake_case") return toSnakeCase;
+  if (casing === "camelCase") return toCamelCase;
+  return (name2) => name2;
+}
+
+// node_modules/drizzle-orm/sqlite-core/table.js
+var InlineForeignKeys = /* @__PURE__ */ Symbol.for("drizzle:SQLiteInlineForeignKeys");
+var SQLiteTable = class extends Table {
+  static [entityKind] = "SQLiteTable";
+  /** @internal */
+  static Symbol = Object.assign({}, Table.Symbol, { InlineForeignKeys });
+  /** @internal */
+  [Table.Symbol.Columns];
+  /** @internal */
+  [InlineForeignKeys] = [];
+  /** @internal */
+  [Table.Symbol.ExtraConfigBuilder] = void 0;
+};
+function sqliteTableBase(name2, columns, extraConfig, schema, casing, baseName = name2) {
+  const casingFn = getCasingFn(casing);
+  const rawTable = new SQLiteTable(name2, schema, baseName);
+  const parsedColumns = typeof columns === "function" ? columns(getSQLiteColumnBuilders()) : columns;
+  const builtColumns = Object.fromEntries(Object.entries(parsedColumns).map(([name3, colBuilderBase]) => {
+    const colBuilder = colBuilderBase;
+    colBuilder.setName(name3, casingFn);
+    const column = colBuilder.build(rawTable).postBuild();
+    rawTable[InlineForeignKeys].push(...colBuilder.buildForeignKeys(column, rawTable));
+    return [name3, column];
+  }));
+  const table = Object.assign(rawTable, builtColumns);
+  table[Table.Symbol.Columns] = builtColumns;
+  table[Table.Symbol.ExtraConfigColumns] = builtColumns;
+  if (extraConfig) table[SQLiteTable.Symbol.ExtraConfigBuilder] = extraConfig;
+  return table;
+}
+function sqliteTableWithCasing(casing) {
+  return (name2, columns, extraConfig) => sqliteTableBase(name2, columns, extraConfig, void 0, casing);
+}
+var sqliteTable = sqliteTableWithCasing(void 0);
+
+// node_modules/drizzle-orm/sqlite-core/checks.js
+var CheckBuilder = class {
+  static [entityKind] = "SQLiteCheckBuilder";
+  brand;
+  constructor(name2, value) {
+    this.name = name2;
+    this.value = value;
+  }
+  build(table) {
+    return new Check(table, this);
+  }
+};
+var Check = class {
+  static [entityKind] = "SQLiteCheck";
+  name;
+  value;
+  constructor(table, builder) {
+    this.table = table;
+    this.name = builder.name;
+    this.value = builder.value;
+  }
+};
+function check2(name2, value) {
+  return new CheckBuilder(name2, value);
+}
+
+// node_modules/drizzle-orm/sqlite-core/indexes.js
+var IndexBuilderOn = class {
+  static [entityKind] = "SQLiteIndexBuilderOn";
+  constructor(name2, unique2) {
+    this.name = name2;
+    this.unique = unique2;
+  }
+  on(...columns) {
+    return new IndexBuilder(this.name, columns, this.unique);
+  }
+};
+var IndexBuilder = class {
+  static [entityKind] = "SQLiteIndexBuilder";
+  /** @internal */
+  config;
+  constructor(name2, columns, unique2) {
+    this.config = {
+      name: name2,
+      columns,
+      unique: unique2,
+      where: void 0
+    };
+  }
+  /**
+  * Condition for partial index.
+  */
+  where(condition) {
+    this.config.where = condition;
+    return this;
+  }
+  /** @internal */
+  build(table) {
+    return new Index(this.config, table);
+  }
+};
+var Index = class {
+  static [entityKind] = "SQLiteIndex";
+  config;
+  isNameExplicit;
+  constructor(config2, table) {
+    this.config = {
+      ...config2,
+      table
+    };
+    this.isNameExplicit = !!config2.name;
+  }
+};
+function index(name2) {
+  return new IndexBuilderOn(name2, false);
+}
+
+// node_modules/drizzle-orm/sqlite-core/primary-keys.js
+function primaryKey(...config2) {
+  if (config2[0].columns) return new PrimaryKeyBuilder(config2[0].columns, config2[0].name);
+  return new PrimaryKeyBuilder(config2);
+}
+var PrimaryKeyBuilder = class {
+  static [entityKind] = "SQLitePrimaryKeyBuilder";
+  /** @internal */
+  columns;
+  /** @internal */
+  name;
+  constructor(columns, name2) {
+    this.columns = columns;
+    this.name = name2;
+  }
+  /** @internal */
+  build(table) {
+    return new PrimaryKey(table, this.columns, this.name);
+  }
+};
+var PrimaryKey = class {
+  static [entityKind] = "SQLitePrimaryKey";
+  columns;
+  name;
+  isNameExplicit;
+  constructor(table, columns, name2) {
+    this.table = table;
+    this.columns = columns;
+    this.name = name2;
+    this.isNameExplicit = !!name2;
+  }
+  getName() {
+    return this.name ?? `${this.table[SQLiteTable.Symbol.Name]}_${this.columns.map((column) => column.name).join("_")}_pk`;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/unique-constraint.js
+function uniqueKeyName(table, columns) {
+  return `${table[TableName]}_${columns.join("_")}_unique`;
+}
+function unique(name2) {
+  return new UniqueOnConstraintBuilder(name2);
+}
+var UniqueConstraintBuilder = class {
+  static [entityKind] = "SQLiteUniqueConstraintBuilder";
+  /** @internal */
+  columns;
+  constructor(columns, name2) {
+    this.name = name2;
+    this.columns = columns;
+  }
+  /** @internal */
+  build(table) {
+    return new UniqueConstraint(table, this.columns, this.name);
+  }
+};
+var UniqueOnConstraintBuilder = class {
+  static [entityKind] = "SQLiteUniqueOnConstraintBuilder";
+  /** @internal */
+  name;
+  constructor(name2) {
+    this.name = name2;
+  }
+  on(...columns) {
+    return new UniqueConstraintBuilder(columns, this.name);
+  }
+};
+var UniqueConstraint = class {
+  static [entityKind] = "SQLiteUniqueConstraint";
+  columns;
+  name;
+  isNameExplicit;
+  constructor(table, columns, name2) {
+    this.table = table;
+    this.columns = columns;
+    this.isNameExplicit = !!name2;
+    this.name = name2 ?? uniqueKeyName(this.table, this.columns.map((column) => column.name));
+  }
+  getName() {
+    return this.name;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/utils.js
+function getTableConfig(table) {
+  const columns = Object.values(table[SQLiteTable.Symbol.Columns]);
+  const indexes = [];
+  const checks = [];
+  const primaryKeys = [];
+  const uniqueConstraints = [];
+  const foreignKeys = Object.values(table[SQLiteTable.Symbol.InlineForeignKeys]);
+  const name2 = table[Table.Symbol.Name];
+  const extraConfigBuilder = table[SQLiteTable.Symbol.ExtraConfigBuilder];
+  if (extraConfigBuilder !== void 0) {
+    const extraConfig = extraConfigBuilder(table[SQLiteTable.Symbol.Columns]);
+    const extraValues = Array.isArray(extraConfig) ? extraConfig.flat(1) : Object.values(extraConfig);
+    for (const builder of Object.values(extraValues)) if (is(builder, IndexBuilder)) indexes.push(builder.build(table));
+    else if (is(builder, CheckBuilder)) checks.push(builder.build(table));
+    else if (is(builder, UniqueConstraintBuilder)) uniqueConstraints.push(builder.build(table));
+    else if (is(builder, PrimaryKeyBuilder)) primaryKeys.push(builder.build(table));
+    else if (is(builder, ForeignKeyBuilder)) foreignKeys.push(builder.build(table));
+  }
+  return {
+    columns,
+    indexes,
+    foreignKeys,
+    checks,
+    primaryKeys,
+    uniqueConstraints,
+    name: name2
+  };
+}
+function extractUsedTable(table) {
+  if (is(table, SQLiteTable)) return [`${table[Table.Symbol.BaseName]}`];
+  if (is(table, Subquery)) return table._.usedTables ?? [];
+  if (is(table, SQL)) return table.usedTables ?? [];
+  return [];
+}
+
+// node_modules/drizzle-orm/sqlite-core/view-base.js
+var SQLiteViewBase = class extends View {
+  static [entityKind] = "SQLiteViewBase";
+};
+
+// node_modules/drizzle-orm/selection-proxy.js
+var SelectionProxyHandler = class SelectionProxyHandler2 {
+  static [entityKind] = "SelectionProxyHandler";
+  config;
+  constructor(config2) {
+    this.config = { ...config2 };
+  }
+  get(subquery, prop) {
+    if (prop === "_") return {
+      ...subquery["_"],
+      selectedFields: new Proxy(subquery._.selectedFields, this)
+    };
+    if (prop === ViewBaseConfig) return {
+      ...subquery[ViewBaseConfig],
+      selectedFields: new Proxy(subquery[ViewBaseConfig].selectedFields, this)
+    };
+    if (typeof prop === "symbol") return subquery[prop];
+    const value = (is(subquery, Subquery) ? subquery._.selectedFields : is(subquery, View) ? subquery[ViewBaseConfig].selectedFields : subquery)[prop];
+    if (is(value, SQL.Aliased)) {
+      if (this.config.sqlAliasedBehavior === "sql" && !value.isSelectionField) return value.sql;
+      const newValue = value.clone();
+      newValue.isSelectionField = true;
+      newValue.origin = this.config.alias;
+      return newValue;
+    }
+    if (is(value, SQL)) {
+      if (this.config.sqlBehavior === "sql") return value;
+      throw new Error(`You tried to reference "${prop}" field from a subquery, which is a raw SQL field, but it doesn't have an alias declared. Please add an alias to the field using ".as('alias')" method.`);
+    }
+    if (is(value, Column)) {
+      if (this.config.alias) return new Proxy(value, new ColumnTableAliasProxyHandler(new Proxy(value.table, new TableAliasProxyHandler(this.config.alias, this.config.replaceOriginalName ?? false, true)), true));
+      return value;
+    }
+    if (typeof value !== "object" || value === null) return value;
+    return new Proxy(value, new SelectionProxyHandler2(this.config));
+  }
+};
+
+// node_modules/drizzle-orm/query-builders/query-builder.js
+var TypedQueryBuilder = class {
+  static [entityKind] = "TypedQueryBuilder";
+  /** @internal */
+  getSelectedFields() {
+    return this._.selectedFields;
+  }
+  /** @internal */
+  withoutSelectionCastCodecs() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/select.js
+var SQLiteSelectBuilder = class {
+  static [entityKind] = "SQLiteSelectBuilder";
+  fields;
+  session;
+  dialect;
+  withList;
+  distinct;
+  constructor(config2, builder = SQLiteSelectBase) {
+    this.builder = builder;
+    this.fields = config2.fields;
+    this.session = config2.session;
+    this.dialect = config2.dialect;
+    this.withList = config2.withList;
+    this.distinct = config2.distinct;
+  }
+  from(source) {
+    const isPartialSelect = !!this.fields;
+    let fields;
+    if (this.fields) fields = this.fields;
+    else if (is(source, Subquery)) fields = Object.fromEntries(Object.keys(source._.selectedFields).map((key) => [key, source[key]]));
+    else if (is(source, SQLiteViewBase)) fields = source[ViewBaseConfig].selectedFields;
+    else if (is(source, SQL)) fields = {};
+    else fields = getTableColumns(source);
+    return new this.builder({
+      table: source,
+      fields,
+      isPartialSelect,
+      session: this.session,
+      dialect: this.dialect,
+      withList: this.withList ?? [],
+      distinct: this.distinct
+    });
+  }
+};
+var SQLiteSelectBase = class extends TypedQueryBuilder {
+  static [entityKind] = "SQLiteSelectQueryBuilder";
+  _;
+  /** @internal */
+  config;
+  joinsNotNullableMap;
+  tableName;
+  isPartialSelect;
+  session;
+  dialect;
+  cacheConfig = void 0;
+  usedTables = /* @__PURE__ */ new Set();
+  constructor({ table, fields, isPartialSelect, session, dialect, withList, distinct }) {
+    super();
+    this.config = {
+      withList,
+      table,
+      fields: { ...fields },
+      distinct,
+      setOperators: []
+    };
+    this.isPartialSelect = isPartialSelect;
+    this.session = session;
+    this.dialect = dialect;
+    this._ = {
+      selectedFields: fields,
+      config: this.config
+    };
+    this.tableName = getTableLikeName(table);
+    this.joinsNotNullableMap = typeof this.tableName === "string" ? { [this.tableName]: true } : {};
+    for (const item of extractUsedTable(table)) this.usedTables.add(item);
+  }
+  /** @internal */
+  getUsedTables() {
+    return [...this.usedTables];
+  }
+  createJoin(joinType) {
+    return (table, on) => {
+      const baseTableName = this.tableName;
+      const tableName = getTableLikeName(table);
+      for (const item of extractUsedTable(table)) this.usedTables.add(item);
+      if (typeof tableName === "string" && this.config.joins?.some((join) => join.alias === tableName)) throw new Error(`Alias "${tableName}" is already used in this query`);
+      if (!this.isPartialSelect) {
+        if (Object.keys(this.joinsNotNullableMap).length === 1 && typeof baseTableName === "string") this.config.fields = { [baseTableName]: this.config.fields };
+        if (typeof tableName === "string" && !is(table, SQL)) {
+          const selection = is(table, Subquery) ? table._.selectedFields : is(table, View) ? table[ViewBaseConfig].selectedFields : table[Table.Symbol.Columns];
+          this.config.fields[tableName] = selection;
+        }
+      }
+      if (typeof on === "function") on = on(new Proxy(this.config.fields, new SelectionProxyHandler({
+        sqlAliasedBehavior: "sql",
+        sqlBehavior: "sql"
+      })));
+      if (!this.config.joins) this.config.joins = [];
+      this.config.joins.push({
+        on,
+        table,
+        joinType,
+        alias: tableName
+      });
+      if (typeof tableName === "string") switch (joinType) {
+        case "left":
+          this.joinsNotNullableMap[tableName] = false;
+          break;
+        case "right":
+          this.joinsNotNullableMap = Object.fromEntries(Object.entries(this.joinsNotNullableMap).map(([key]) => [key, false]));
+          this.joinsNotNullableMap[tableName] = true;
+          break;
+        case "cross":
+        case "inner":
+          this.joinsNotNullableMap[tableName] = true;
+          break;
+        case "full":
+          this.joinsNotNullableMap = Object.fromEntries(Object.entries(this.joinsNotNullableMap).map(([key]) => [key, false]));
+          this.joinsNotNullableMap[tableName] = false;
+          break;
+      }
+      return this;
+    };
+  }
+  /**
+  * Executes a `left join` operation by adding another table to the current query.
+  *
+  * Calling this method associates each row of the table with the corresponding row from the joined table, if a match is found. If no matching row exists, it sets all columns of the joined table to null.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/joins#left-join}
+  *
+  * @param table the table to join.
+  * @param on the `on` clause.
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all users and their pets
+  * const usersWithPets: { user: User; pets: Pet | null; }[] = await db.select()
+  *   .from(users)
+  *   .leftJoin(pets, eq(users.id, pets.ownerId))
+  *
+  * // Select userId and petId
+  * const usersIdsAndPetIds: { userId: number; petId: number | null; }[] = await db.select({
+  *   userId: users.id,
+  *   petId: pets.id,
+  * })
+  *   .from(users)
+  *   .leftJoin(pets, eq(users.id, pets.ownerId))
+  * ```
+  */
+  leftJoin = this.createJoin("left");
+  /**
+  * Executes a `right join` operation by adding another table to the current query.
+  *
+  * Calling this method associates each row of the joined table with the corresponding row from the main table, if a match is found. If no matching row exists, it sets all columns of the main table to null.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/joins#right-join}
+  *
+  * @param table the table to join.
+  * @param on the `on` clause.
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all users and their pets
+  * const usersWithPets: { user: User | null; pets: Pet; }[] = await db.select()
+  *   .from(users)
+  *   .rightJoin(pets, eq(users.id, pets.ownerId))
+  *
+  * // Select userId and petId
+  * const usersIdsAndPetIds: { userId: number | null; petId: number; }[] = await db.select({
+  *   userId: users.id,
+  *   petId: pets.id,
+  * })
+  *   .from(users)
+  *   .rightJoin(pets, eq(users.id, pets.ownerId))
+  * ```
+  */
+  rightJoin = this.createJoin("right");
+  /**
+  * Executes an `inner join` operation, creating a new table by combining rows from two tables that have matching values.
+  *
+  * Calling this method retrieves rows that have corresponding entries in both joined tables. Rows without matching entries in either table are excluded, resulting in a table that includes only matching pairs.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/joins#inner-join}
+  *
+  * @param table the table to join.
+  * @param on the `on` clause.
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all users and their pets
+  * const usersWithPets: { user: User; pets: Pet; }[] = await db.select()
+  *   .from(users)
+  *   .innerJoin(pets, eq(users.id, pets.ownerId))
+  *
+  * // Select userId and petId
+  * const usersIdsAndPetIds: { userId: number; petId: number; }[] = await db.select({
+  *   userId: users.id,
+  *   petId: pets.id,
+  * })
+  *   .from(users)
+  *   .innerJoin(pets, eq(users.id, pets.ownerId))
+  * ```
+  */
+  innerJoin = this.createJoin("inner");
+  /**
+  * Executes a `full join` operation by combining rows from two tables into a new table.
+  *
+  * Calling this method retrieves all rows from both main and joined tables, merging rows with matching values and filling in `null` for non-matching columns.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/joins#full-join}
+  *
+  * @param table the table to join.
+  * @param on the `on` clause.
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all users and their pets
+  * const usersWithPets: { user: User | null; pets: Pet | null; }[] = await db.select()
+  *   .from(users)
+  *   .fullJoin(pets, eq(users.id, pets.ownerId))
+  *
+  * // Select userId and petId
+  * const usersIdsAndPetIds: { userId: number | null; petId: number | null; }[] = await db.select({
+  *   userId: users.id,
+  *   petId: pets.id,
+  * })
+  *   .from(users)
+  *   .fullJoin(pets, eq(users.id, pets.ownerId))
+  * ```
+  */
+  fullJoin = this.createJoin("full");
+  /**
+  * Executes a `cross join` operation by combining rows from two tables into a new table.
+  *
+  * Calling this method retrieves all rows from both main and joined tables, merging all rows from each table.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/joins#cross-join}
+  *
+  * @param table the table to join.
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all users, each user with every pet
+  * const usersWithPets: { user: User; pets: Pet; }[] = await db.select()
+  *   .from(users)
+  *   .crossJoin(pets)
+  *
+  * // Select userId and petId
+  * const usersIdsAndPetIds: { userId: number; petId: number; }[] = await db.select({
+  *   userId: users.id,
+  *   petId: pets.id,
+  * })
+  *   .from(users)
+  *   .crossJoin(pets)
+  * ```
+  */
+  crossJoin = this.createJoin("cross");
+  createSetOperator(type, isAll) {
+    return (rightSelection) => {
+      const rightSelect = typeof rightSelection === "function" ? rightSelection(getSQLiteSetOperators()) : rightSelection;
+      if (!haveSameKeys(this.getSelectedFields(), rightSelect.getSelectedFields())) throw new Error("Set operator error (union / intersect / except): selected fields are not the same or are in a different order");
+      this.config.setOperators.push({
+        type,
+        isAll,
+        rightSelect
+      });
+      return this;
+    };
+  }
+  /**
+  * Adds `union` set operator to the query.
+  *
+  * Calling this method will combine the result sets of the `select` statements and remove any duplicate rows that appear across them.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/set-operations#union}
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all unique names from customers and users tables
+  * await db.select({ name: users.name })
+  *   .from(users)
+  *   .union(
+  *     db.select({ name: customers.name }).from(customers)
+  *   );
+  * // or
+  * import { union } from 'drizzle-orm/sqlite-core'
+  *
+  * await union(
+  *   db.select({ name: users.name }).from(users),
+  *   db.select({ name: customers.name }).from(customers)
+  * );
+  * ```
+  */
+  union = this.createSetOperator("union", false);
+  /**
+  * Adds `union all` set operator to the query.
+  *
+  * Calling this method will combine the result-set of the `select` statements and keep all duplicate rows that appear across them.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/set-operations#union-all}
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all transaction ids from both online and in-store sales
+  * await db.select({ transaction: onlineSales.transactionId })
+  *   .from(onlineSales)
+  *   .unionAll(
+  *     db.select({ transaction: inStoreSales.transactionId }).from(inStoreSales)
+  *   );
+  * // or
+  * import { unionAll } from 'drizzle-orm/sqlite-core'
+  *
+  * await unionAll(
+  *   db.select({ transaction: onlineSales.transactionId }).from(onlineSales),
+  *   db.select({ transaction: inStoreSales.transactionId }).from(inStoreSales)
+  * );
+  * ```
+  */
+  unionAll = this.createSetOperator("union", true);
+  /**
+  * Adds `intersect` set operator to the query.
+  *
+  * Calling this method will retain only the rows that are present in both result sets and eliminate duplicates.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/set-operations#intersect}
+  *
+  * @example
+  *
+  * ```ts
+  * // Select course names that are offered in both departments A and B
+  * await db.select({ courseName: depA.courseName })
+  *   .from(depA)
+  *   .intersect(
+  *     db.select({ courseName: depB.courseName }).from(depB)
+  *   );
+  * // or
+  * import { intersect } from 'drizzle-orm/sqlite-core'
+  *
+  * await intersect(
+  *   db.select({ courseName: depA.courseName }).from(depA),
+  *   db.select({ courseName: depB.courseName }).from(depB)
+  * );
+  * ```
+  */
+  intersect = this.createSetOperator("intersect", false);
+  /**
+  * Adds `except` set operator to the query.
+  *
+  * Calling this method will retrieve all unique rows from the left query, except for the rows that are present in the result set of the right query.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/set-operations#except}
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all courses offered in department A but not in department B
+  * await db.select({ courseName: depA.courseName })
+  *   .from(depA)
+  *   .except(
+  *     db.select({ courseName: depB.courseName }).from(depB)
+  *   );
+  * // or
+  * import { except } from 'drizzle-orm/sqlite-core'
+  *
+  * await except(
+  *   db.select({ courseName: depA.courseName }).from(depA),
+  *   db.select({ courseName: depB.courseName }).from(depB)
+  * );
+  * ```
+  */
+  except = this.createSetOperator("except", false);
+  /** @internal */
+  addSetOperators(setOperators) {
+    this.config.setOperators.push(...setOperators);
+    return this;
+  }
+  /**
+  * Adds a `where` clause to the query.
+  *
+  * Calling this method will select only those rows that fulfill a specified condition.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/select#filtering}
+  *
+  * @param where the `where` clause.
+  *
+  * @example
+  * You can use conditional operators and `sql function` to filter the rows to be selected.
+  *
+  * ```ts
+  * // Select all cars with green color
+  * await db.select().from(cars).where(eq(cars.color, 'green'));
+  * // or
+  * await db.select().from(cars).where(sql`${cars.color} = 'green'`)
+  * ```
+  *
+  * You can logically combine conditional operators with `and()` and `or()` operators:
+  *
+  * ```ts
+  * // Select all BMW cars with a green color
+  * await db.select().from(cars).where(and(eq(cars.color, 'green'), eq(cars.brand, 'BMW')));
+  *
+  * // Select all cars with the green or blue color
+  * await db.select().from(cars).where(or(eq(cars.color, 'green'), eq(cars.color, 'blue')));
+  * ```
+  */
+  where(where) {
+    if (typeof where === "function") where = where(new Proxy(this.config.fields, new SelectionProxyHandler({
+      sqlAliasedBehavior: "sql",
+      sqlBehavior: "sql"
+    })));
+    this.config.where = where;
+    return this;
+  }
+  /**
+  * Adds a `having` clause to the query.
+  *
+  * Calling this method will select only those rows that fulfill a specified condition. It is typically used with aggregate functions to filter the aggregated data based on a specified condition.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/select#aggregations}
+  *
+  * @param having the `having` clause.
+  *
+  * @example
+  *
+  * ```ts
+  * // Select all brands with more than one car
+  * await db.select({
+  * 	brand: cars.brand,
+  * 	count: sql<number>`cast(count(${cars.id}) as int)`,
+  * })
+  *   .from(cars)
+  *   .groupBy(cars.brand)
+  *   .having(({ count }) => gt(count, 1));
+  * ```
+  */
+  having(having) {
+    if (typeof having === "function") having = having(new Proxy(this.config.fields, new SelectionProxyHandler({
+      sqlAliasedBehavior: "sql",
+      sqlBehavior: "sql"
+    })));
+    this.config.having = having;
+    return this;
+  }
+  groupBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const groupBy = columns[0](new Proxy(this.config.fields, new SelectionProxyHandler({
+        sqlAliasedBehavior: "alias",
+        sqlBehavior: "sql"
+      })));
+      this.config.groupBy = Array.isArray(groupBy) ? groupBy : [groupBy];
+    } else this.config.groupBy = columns;
+    return this;
+  }
+  orderBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const orderBy = columns[0](new Proxy(this.config.fields, new SelectionProxyHandler({
+        sqlAliasedBehavior: "alias",
+        sqlBehavior: "sql"
+      })));
+      const orderByArray = Array.isArray(orderBy) ? orderBy : [orderBy];
+      if (this.config.setOperators.length > 0) this.config.setOperators.at(-1).orderBy = orderByArray;
+      else this.config.orderBy = orderByArray;
+    } else {
+      const orderByArray = columns;
+      if (this.config.setOperators.length > 0) this.config.setOperators.at(-1).orderBy = orderByArray;
+      else this.config.orderBy = orderByArray;
+    }
+    return this;
+  }
+  /**
+  * Adds a `limit` clause to the query.
+  *
+  * Calling this method will set the maximum number of rows that will be returned by this query.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/select#limit--offset}
+  *
+  * @param limit the `limit` clause.
+  *
+  * @example
+  *
+  * ```ts
+  * // Get the first 10 people from this query.
+  * await db.select().from(people).limit(10);
+  * ```
+  */
+  limit(limit) {
+    if (this.config.setOperators.length > 0) this.config.setOperators.at(-1).limit = limit;
+    else this.config.limit = limit;
+    return this;
+  }
+  /**
+  * Adds an `offset` clause to the query.
+  *
+  * Calling this method will skip a number of rows when returning results from this query.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/select#limit--offset}
+  *
+  * @param offset the `offset` clause.
+  *
+  * @example
+  *
+  * ```ts
+  * // Get the 10th-20th people from this query.
+  * await db.select().from(people).offset(10).limit(10);
+  * ```
+  */
+  offset(offset) {
+    if (this.config.setOperators.length > 0) this.config.setOperators.at(-1).offset = offset;
+    else this.config.offset = offset;
+    return this;
+  }
+  $withCache(config2) {
+    this.cacheConfig = config2 === void 0 ? {
+      config: {},
+      enabled: true,
+      autoInvalidate: true
+    } : config2 === false ? { enabled: false } : {
+      enabled: true,
+      autoInvalidate: true,
+      ...config2
+    };
+    return this;
+  }
+  getSQL() {
+    this.config.fieldsFlat = orderSelectedFields(this.config.fields);
+    return this.dialect.buildSelectQuery(this.config);
+  }
+  toSQL() {
+    return this.dialect.sqlToQuery(this.getSQL());
+  }
+  as(alias) {
+    const usedTables = [];
+    usedTables.push(...extractUsedTable(this.config.table));
+    if (this.config.joins) for (const it of this.config.joins) usedTables.push(...extractUsedTable(it.table));
+    return new Proxy(new Subquery(this.getSQL(), this.config.fields, alias, false, [...new Set(usedTables)]), new SelectionProxyHandler({
+      alias,
+      sqlAliasedBehavior: "alias",
+      sqlBehavior: "error"
+    }));
+  }
+  /** @internal */
+  getSelectedFields() {
+    return new Proxy(this.config.fields, new SelectionProxyHandler({
+      alias: this.tableName,
+      sqlAliasedBehavior: "alias",
+      sqlBehavior: "error"
+    }));
+  }
+  /** @internal */
+  withoutSelectionCastCodecs() {
+    return this;
+  }
+  $dynamic() {
+    return this;
+  }
+};
+function createSetOperator(type, isAll) {
+  return (leftSelect, rightSelect, ...restSelects) => {
+    const setOperators = [rightSelect, ...restSelects].map((select) => ({
+      type,
+      isAll,
+      rightSelect: select
+    }));
+    for (const setOperator of setOperators) if (!haveSameKeys(leftSelect.getSelectedFields(), setOperator.rightSelect.getSelectedFields())) throw new Error("Set operator error (union / intersect / except): selected fields are not the same or are in a different order");
+    return leftSelect.addSetOperators(setOperators);
+  };
+}
+var getSQLiteSetOperators = () => ({
+  union: union2,
+  unionAll,
+  intersect,
+  except
+});
+var union2 = createSetOperator("union", false);
+var unionAll = createSetOperator("union", true);
+var intersect = createSetOperator("intersect", false);
+var except = createSetOperator("except", false);
+
+// node_modules/drizzle-orm/sqlite-core/dialect.js
+var SQLiteDialect = class {
+  static [entityKind] = "SQLiteDialect";
+  mapperGenerators;
+  constructor(config2) {
+    this.mapperGenerators = config2?.useJitMappers ? {
+      rows: makeJitQueryMapper,
+      relationalRows: makeJitRqbMapper
+    } : {
+      rows: makeDefaultQueryMapper,
+      relationalRows: makeDefaultRqbMapper
+    };
+  }
+  escapeName(name2) {
+    return `"${name2.replace(/"/g, '""')}"`;
+  }
+  escapeParam(_num) {
+    return "?";
+  }
+  escapeString(str) {
+    return `'${str.replace(/'/g, "''")}'`;
+  }
+  buildWithCTE(queries) {
+    if (!queries?.length) return void 0;
+    const withSqlChunks = [sql`with `];
+    for (const [i, w] of queries.entries()) {
+      withSqlChunks.push(sql`${sql.identifier(w._.alias)} as (${w._.sql})`);
+      if (i < queries.length - 1) withSqlChunks.push(sql`, `);
+    }
+    withSqlChunks.push(sql` `);
+    return sql.join(withSqlChunks);
+  }
+  buildDeleteQuery({ table, where, returning, withList, limit, orderBy }) {
+    const withSql = this.buildWithCTE(withList);
+    const returningSql = returning ? sql` returning ${this.buildSelection(returning, { isSingleTable: true })}` : void 0;
+    return sql`${withSql}delete from ${table}${where ? sql` where ${where}` : void 0}${returningSql}${this.buildOrderBy(orderBy)}${this.buildLimit(limit)}`;
+  }
+  buildUpdateSet(table, set2) {
+    const tableColumns = table[Table.Symbol.Columns];
+    const columnNames = Object.keys(tableColumns).filter((colName) => set2[colName] !== void 0 || tableColumns[colName]?.onUpdateFn !== void 0);
+    const setLength = columnNames.length;
+    return sql.join(columnNames.flatMap((colName, i) => {
+      const col = tableColumns[colName];
+      const onUpdateFnResult = col.onUpdateFn?.();
+      const value = set2[colName] ?? (is(onUpdateFnResult, SQL) ? onUpdateFnResult : sql.param(onUpdateFnResult, col));
+      const res = sql`${sql.identifier(col.name)} = ${value}`;
+      if (i < setLength - 1) return [res, sql.raw(", ")];
+      return [res];
+    }));
+  }
+  buildUpdateQuery({ table, set: set2, where, returning, withList, joins, from, limit, orderBy }) {
+    const withSql = this.buildWithCTE(withList);
+    const setSql = this.buildUpdateSet(table, set2);
+    const fromSql = from && sql.join([sql.raw(" from "), this.buildFromTable(from)]);
+    const joinsSql = this.buildJoins(joins);
+    const returningSql = returning ? sql` returning ${this.buildSelection(returning, { isSingleTable: true })}` : void 0;
+    return sql`${withSql}update ${table} set ${setSql}${fromSql}${joinsSql}${where ? sql` where ${where}` : void 0}${returningSql}${this.buildOrderBy(orderBy)}${this.buildLimit(limit)}`;
+  }
+  /**
+  * Builds selection SQL with provided fields/expressions
+  *
+  * Examples:
+  *
+  * `select <selection> from`
+  *
+  * `insert ... returning <selection>`
+  *
+  * If `isSingleTable` is true, then columns won't be prefixed with table name
+  */
+  buildSelection(fields, { isSingleTable = false } = {}) {
+    const columnsLen = fields.length;
+    const chunks2 = fields.flatMap(({ field }, i) => {
+      const chunk = [];
+      if (is(field, SQL.Aliased)) if (field.isSelectionField) {
+        if (!isSingleTable && field.origin !== void 0) chunk.push(sql.identifier(field.origin), sql.raw("."));
+        chunk.push(sql.identifier(field.fieldAlias));
+      } else {
+        const query = field.sql;
+        if (isSingleTable) {
+          const newSql = new SQL(query.queryChunks.map((c) => {
+            if (is(c, Column)) return sql.identifier(c.name);
+            return c;
+          }));
+          chunk.push(query.shouldInlineParams ? newSql.inlineParams() : newSql);
+        } else chunk.push(query);
+        chunk.push(sql` as ${sql.identifier(field.fieldAlias)}`);
+      }
+      else if (is(field, SQL)) {
+        const query = field;
+        if (isSingleTable) {
+          const newSql = new SQL(query.queryChunks.map((c) => {
+            if (is(c, Column)) return sql.identifier(c.name);
+            return c;
+          }));
+          chunk.push(query.shouldInlineParams ? newSql.inlineParams() : newSql);
+        } else chunk.push(query);
+      } else if (is(field, Column)) if (field.columnType === "SQLiteNumericBigInt" || field.columnType === "SQLiteNumeric") if (isSingleTable) chunk.push(field.isAlias ? sql`cast(${sql.identifier(getOriginalColumnFromAlias(field).name)} as text) as ${field}` : sql`cast(${sql.identifier(field.name)} as text)`);
+      else chunk.push(field.isAlias ? sql`cast(${getOriginalColumnFromAlias(field)} as text) as ${field}` : sql`cast(${field} as text)`);
+      else if (isSingleTable) chunk.push(field.isAlias ? sql`${sql.identifier(getOriginalColumnFromAlias(field).name)} as ${field}` : sql.identifier(field.name));
+      else chunk.push(field.isAlias ? sql`${getOriginalColumnFromAlias(field)} as ${field}` : field);
+      else if (is(field, Subquery)) if (!field._.isWith) chunk.push(sql`(${field._.sql}) ${sql.identifier(field._.alias)}`);
+      else chunk.push(field);
+      if (i < columnsLen - 1) chunk.push(sql`, `);
+      return chunk;
+    });
+    return sql.join(chunks2);
+  }
+  buildJoins(joins) {
+    if (!joins || joins.length === 0) return;
+    const joinsArray = [];
+    if (joins) for (const [index2, joinMeta] of joins.entries()) {
+      if (index2 === 0) joinsArray.push(sql` `);
+      const table = joinMeta.table;
+      const onSql = joinMeta.on ? sql` on ${joinMeta.on}` : void 0;
+      if (is(table, SQLiteTable)) {
+        const tableName = table[SQLiteTable.Symbol.Name];
+        const tableSchema = table[SQLiteTable.Symbol.Schema];
+        const origTableName = table[SQLiteTable.Symbol.OriginalName];
+        const alias = tableName === origTableName ? void 0 : joinMeta.alias;
+        joinsArray.push(sql`${sql.raw(joinMeta.joinType)} join ${tableSchema ? sql`${sql.identifier(tableSchema)}.` : void 0}${sql.identifier(origTableName)}${alias && sql` ${sql.identifier(alias)}`}${onSql}`);
+      } else joinsArray.push(sql`${sql.raw(joinMeta.joinType)} join ${table}${onSql}`);
+      if (index2 < joins.length - 1) joinsArray.push(sql` `);
+    }
+    return sql.join(joinsArray);
+  }
+  buildLimit(limit) {
+    return typeof limit === "object" || typeof limit === "number" && limit >= 0 ? sql` limit ${limit}` : void 0;
+  }
+  buildOrderBy(orderBy) {
+    const orderByList = [];
+    if (orderBy) for (const [index2, orderByValue] of orderBy.entries()) {
+      orderByList.push(orderByValue);
+      if (index2 < orderBy.length - 1) orderByList.push(sql`, `);
+    }
+    return orderByList.length > 0 ? sql` order by ${sql.join(orderByList)}` : void 0;
+  }
+  buildFromTable(table) {
+    if (is(table, Table) && table[Table.Symbol.IsAlias]) return sql`${sql`${sql.identifier(table[Table.Symbol.Schema] ?? "")}.`.if(table[Table.Symbol.Schema])}${sql.identifier(table[Table.Symbol.OriginalName])} ${sql.identifier(table[Table.Symbol.Name])}`;
+    if (is(table, View) && table[ViewBaseConfig].isAlias) {
+      let fullName = sql`${sql.identifier(table[ViewBaseConfig].originalName)}`;
+      if (table[ViewBaseConfig].schema) fullName = sql`${sql.identifier(table[ViewBaseConfig].schema)}.${fullName}`;
+      return sql`${fullName} ${sql.identifier(table[ViewBaseConfig].name)}`;
+    }
+    return table;
+  }
+  buildSelectQuery({ withList, fields, fieldsFlat, where, having, table, joins, orderBy, groupBy, limit, offset, distinct, setOperators }) {
+    const fieldsList = fieldsFlat ?? orderSelectedFields(fields);
+    for (const f of fieldsList) if (is(f.field, Column) && getTableName(f.field.table) !== (is(table, Subquery) ? table._.alias : is(table, SQLiteViewBase) ? table[ViewBaseConfig].name : is(table, SQL) ? void 0 : getTableName(table)) && !((table2) => joins?.some(({ alias }) => alias === (table2[Table.Symbol.IsAlias] ? getTableName(table2) : table2[Table.Symbol.BaseName])))(f.field.table)) {
+      const tableName = getTableName(f.field.table);
+      throw new Error(`Your "${f.path.join("->")}" field references a column "${tableName}"."${f.field.name}", but the table "${tableName}" is not part of the query! Did you forget to join it?`);
+    }
+    const isSingleTable = !joins || joins.length === 0;
+    const withSql = this.buildWithCTE(withList);
+    const distinctSql = distinct ? sql` distinct` : void 0;
+    const selection = this.buildSelection(fieldsList, { isSingleTable });
+    const tableSql = this.buildFromTable(table);
+    const joinsSql = this.buildJoins(joins);
+    const whereSql = where ? sql` where ${where}` : void 0;
+    const havingSql = having ? sql` having ${having}` : void 0;
+    const groupByList = [];
+    if (groupBy) for (const [index2, groupByValue] of groupBy.entries()) {
+      groupByList.push(groupByValue);
+      if (index2 < groupBy.length - 1) groupByList.push(sql`, `);
+    }
+    const finalQuery = sql`${withSql}select${distinctSql} ${selection} from ${tableSql}${joinsSql}${whereSql}${groupByList.length > 0 ? sql` group by ${sql.join(groupByList)}` : void 0}${havingSql}${this.buildOrderBy(orderBy)}${this.buildLimit(limit)}${offset ? sql` offset ${offset}` : void 0}`;
+    if (setOperators.length > 0) return this.buildSetOperations(finalQuery, setOperators);
+    return finalQuery;
+  }
+  buildSetOperations(leftSelect, setOperators) {
+    const [setOperator, ...rest] = setOperators;
+    if (!setOperator) throw new Error("Cannot pass undefined values to any set operator");
+    if (rest.length === 0) return this.buildSetOperationQuery({
+      leftSelect,
+      setOperator
+    });
+    return this.buildSetOperations(this.buildSetOperationQuery({
+      leftSelect,
+      setOperator
+    }), rest);
+  }
+  buildSetOperationQuery({ leftSelect, setOperator: { type, isAll, rightSelect, limit, orderBy, offset } }) {
+    const leftChunk = sql`${leftSelect.getSQL()} `;
+    const rightChunk = sql`${rightSelect.getSQL()}`;
+    let orderBySql;
+    if (orderBy && orderBy.length > 0) {
+      const orderByValues = [];
+      for (const singleOrderBy of orderBy) if (is(singleOrderBy, SQLiteColumn)) orderByValues.push(sql.identifier(singleOrderBy.name));
+      else if (is(singleOrderBy, SQL)) {
+        for (let i = 0; i < singleOrderBy.queryChunks.length; i++) {
+          const chunk = singleOrderBy.queryChunks[i];
+          if (is(chunk, SQLiteColumn)) singleOrderBy.queryChunks[i] = sql.identifier(chunk.name);
+        }
+        orderByValues.push(sql`${singleOrderBy}`);
+      } else orderByValues.push(sql`${singleOrderBy}`);
+      orderBySql = sql` order by ${sql.join(orderByValues, sql`, `)}`;
+    }
+    const limitSql = typeof limit === "object" || typeof limit === "number" && limit >= 0 ? sql` limit ${limit}` : void 0;
+    const operatorChunk = sql.raw(`${type} ${isAll ? "all " : ""}`);
+    const offsetSql = offset ? sql` offset ${offset}` : void 0;
+    return sql`${leftChunk}${operatorChunk}${rightChunk}${orderBySql}${limitSql}${offsetSql}`;
+  }
+  buildInsertQuery({ table, values: valuesOrSelect, onConflict, returning, withList, select }) {
+    const valuesSqlList = [];
+    const columns = table[Table.Symbol.Columns];
+    const colEntries = Object.entries(columns);
+    const colEntriesFiltered = select && !is(valuesOrSelect, SQL) ? Object.keys(valuesOrSelect.getSelectedFields()).map((key) => [key, columns[key]]) : colEntries.filter(([_, col]) => !col.shouldDisableInsert());
+    const insertOrder = colEntriesFiltered.map(([, column]) => sql.identifier(column.name));
+    if (select) {
+      const select2 = valuesOrSelect;
+      if (is(select2, SQL)) valuesSqlList.push(select2);
+      else valuesSqlList.push(select2.getSQL());
+    } else {
+      const values = valuesOrSelect;
+      valuesSqlList.push(sql.raw("values "));
+      for (const [valueIndex, value] of values.entries()) {
+        const valueList = [];
+        for (const [fieldName, col] of colEntriesFiltered) {
+          const colValue = value[fieldName];
+          if (colValue === void 0 || is(colValue, Param) && colValue.value === void 0) {
+            let defaultValue;
+            if (col.default !== null && col.default !== void 0) defaultValue = is(col.default, SQL) ? col.default : sql.param(col.default, col);
+            else if (col.defaultFn !== void 0) {
+              const defaultFnResult = col.defaultFn();
+              defaultValue = is(defaultFnResult, SQL) ? defaultFnResult : sql.param(defaultFnResult, col);
+            } else if (!col.default && col.onUpdateFn !== void 0) {
+              const onUpdateFnResult = col.onUpdateFn();
+              defaultValue = is(onUpdateFnResult, SQL) ? onUpdateFnResult : sql.param(onUpdateFnResult, col);
+            } else defaultValue = sql`null`;
+            valueList.push(defaultValue);
+          } else valueList.push(colValue);
+        }
+        valuesSqlList.push(valueList);
+        if (valueIndex < values.length - 1) valuesSqlList.push(sql`, `);
+      }
+    }
+    const withSql = this.buildWithCTE(withList);
+    const valuesSql = sql.join(valuesSqlList);
+    const returningSql = returning ? sql` returning ${this.buildSelection(returning, { isSingleTable: true })}` : void 0;
+    return sql`${withSql}insert into ${table} ${insertOrder} ${valuesSql}${onConflict?.length ? sql.join(onConflict) : void 0}${returningSql}`;
+  }
+  sqlToQuery(sql2, invokeSource) {
+    return sql2.toQuery({
+      escapeName: this.escapeName,
+      escapeParam: this.escapeParam,
+      escapeString: this.escapeString,
+      invokeSource
+    });
+  }
+  nestedSelectionerror() {
+    throw new DrizzleError({ message: `Views with nested selections are not supported by the relational query builder` });
+  }
+  buildRqbColumn(table, column, key, inJson) {
+    if (is(column, Column)) {
+      const name2 = sql`${table}.${sql.identifier(column.name)}`;
+      switch (column.columnType) {
+        case "SQLiteBigInt":
+        case "SQLiteBlobJson":
+        case "SQLiteBlobBuffer":
+          if (!inJson) return sql`${name2} as ${sql.identifier(key)}`;
+          return sql`hex(${name2}) as ${sql.identifier(key)}`;
+        case "SQLiteNumeric":
+        case "SQLiteNumericNumber":
+        case "SQLiteNumericBigInt":
+          return sql`cast(${name2} as text) as ${sql.identifier(key)}`;
+        case "SQLiteCustomColumn":
+          if (!inJson) return sql`${name2} as ${sql.identifier(key)}`;
+          return sql`${column.jsonSelectIdentifier(name2, sql)} as ${sql.identifier(key)}`;
+        default:
+          return sql`${name2} as ${sql.identifier(key)}`;
+      }
+    }
+    return sql`${table}.${is(column, SQL.Aliased) ? sql.identifier(column.fieldAlias) : isSQLWrapper(column) ? sql.identifier(key) : this.nestedSelectionerror()} as ${sql.identifier(key)}`;
+  }
+  unwrapAllColumns = (table, selection, inJson) => {
+    return sql.join(Object.entries(table[TableColumns]).map(([k, v]) => {
+      selection.push({
+        key: k,
+        field: v
+      });
+      return this.buildRqbColumn(table, v, k, inJson);
+    }), sql`, `);
+  };
+  getSelectedTableColumns = (table, columns) => {
+    const selectedColumns = [];
+    const columnContainer = table[TableColumns];
+    const entries = Object.entries(columns);
+    let colSelectionMode;
+    for (const [k, v] of entries) {
+      if (v === void 0) continue;
+      colSelectionMode = colSelectionMode || v;
+      if (v) {
+        const column = columnContainer[k];
+        selectedColumns.push({
+          column,
+          tsName: k
+        });
+      }
+    }
+    if (colSelectionMode === false) for (const [k, v] of Object.entries(columnContainer)) {
+      if (columns[k] === false) continue;
+      selectedColumns.push({
+        column: v,
+        tsName: k
+      });
+    }
+    return selectedColumns;
+  };
+  buildColumns = (table, selection, inJson, params) => params?.columns ? (() => {
+    const columnIdentifiers = [];
+    const selectedColumns = this.getSelectedTableColumns(table, params?.columns);
+    for (const { column, tsName } of selectedColumns) {
+      columnIdentifiers.push(this.buildRqbColumn(table, column, tsName, inJson));
+      selection.push({
+        key: tsName,
+        field: column
+      });
+    }
+    return columnIdentifiers.length ? sql.join(columnIdentifiers, sql`, `) : void 0;
+  })() : this.unwrapAllColumns(table, selection, inJson);
+  buildRelationalQuery({ schema, table, tableConfig, queryConfig: config2, relationWhere, mode, isNested, errorPath, depth, throughJoin, jsonb }) {
+    const selection = [];
+    const isSingle = mode === "first";
+    const params = config2 === true ? void 0 : config2;
+    const currentPath = errorPath ?? "";
+    const currentDepth = depth ?? 0;
+    if (!currentDepth) table = aliasedTable(table, `d${currentDepth}`);
+    const limit = isSingle ? 1 : params?.limit;
+    const offset = params?.offset;
+    const columns = this.buildColumns(table, selection, !!isNested, params);
+    const where = params?.where && relationWhere ? and(relationsFilterToSQL(table, params.where, tableConfig.relations, schema), relationWhere) : params?.where ? relationsFilterToSQL(table, params.where, tableConfig.relations, schema) : relationWhere;
+    const order = params?.orderBy ? relationsOrderToSQL(table, params.orderBy) : void 0;
+    const extras = params?.extras ? relationExtrasToSQL(table, params.extras) : void 0;
+    if (extras) selection.push(...extras.selection);
+    const joins = params ? (() => {
+      const { with: joins2 } = params;
+      if (!joins2) return;
+      const withEntries = Object.entries(joins2).filter(([_, v]) => v);
+      if (!withEntries.length) return;
+      return sql.join(withEntries.map(([k, join]) => {
+        const relation = tableConfig.relations[k];
+        const isSingle2 = is(relation, One);
+        const targetTable = aliasedTable(relation.targetTable, `d${currentDepth + 1}`);
+        const throughTable = relation.throughTable ? aliasedTable(relation.throughTable, `tr${currentDepth}`) : void 0;
+        const { filter, joinCondition } = relationToSQL(relation, table, targetTable, throughTable);
+        const throughJoin2 = throughTable ? sql` inner join ${getTableAsAliasSQL(throughTable)} on ${joinCondition}` : void 0;
+        const innerQuery = this.buildRelationalQuery({
+          table: targetTable,
+          mode: isSingle2 ? "first" : "many",
+          schema,
+          queryConfig: join,
+          tableConfig: schema[relation.targetTableName],
+          relationWhere: filter,
+          isNested: true,
+          errorPath: `${currentPath.length ? `${currentPath}.` : ""}${k}`,
+          depth: currentDepth + 1,
+          throughJoin: throughJoin2,
+          jsonb
+        });
+        selection.push({
+          field: targetTable,
+          key: k,
+          selection: innerQuery.selection,
+          isArray: !isSingle2,
+          isOptional: (relation.optional ?? false) || join !== true && !!join.where
+        });
+        const jsonColumns = sql.join(innerQuery.selection.map((s) => {
+          return sql`${sql.raw(this.escapeString(s.key))}, ${s.selection ? sql`${jsonb}(${sql.identifier(s.key)})` : sql.identifier(s.key)}`;
+        }), sql`, `);
+        const json2 = isNested ? jsonb : sql`json`;
+        return isSingle2 ? sql`(select ${json2}_object(${jsonColumns}) as ${sql.identifier("r")} from (${innerQuery.sql}) as ${sql.identifier("t")}) as ${sql.identifier(k)}` : sql`coalesce((select ${json2}_group_array(json_object(${jsonColumns})) as ${sql.identifier("r")} from (${innerQuery.sql}) as ${sql.identifier("t")}), ${jsonb}_array()) as ${sql.identifier(k)}`;
+      }), sql`, `);
+    })() : void 0;
+    const selectionArr = [
+      columns,
+      extras?.sql,
+      joins
+    ].filter((e) => e !== void 0);
+    if (!selectionArr.length) throw new DrizzleError({ message: `No fields selected for table "${tableConfig.name}"${currentPath ? ` ("${currentPath}")` : ""}` });
+    return {
+      sql: sql`select ${sql.join(selectionArr, sql`, `)} from ${getTableAsAliasSQL(table)}${throughJoin}${sql` where ${where}`.if(where)}${sql` order by ${order}`.if(order)}${sql` limit ${limit}`.if(limit !== void 0)}${sql` offset ${offset}`.if(offset !== void 0)}`,
+      selection
+    };
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/query-builder.js
+var QueryBuilder = class {
+  static [entityKind] = "SQLiteQueryBuilder";
+  dialect;
+  dialectConfig;
+  constructor(dialect) {
+    this.dialect = is(dialect, SQLiteDialect) ? dialect : void 0;
+    this.dialectConfig = is(dialect, SQLiteDialect) ? void 0 : dialect;
+  }
+  $with = (alias, selection) => {
+    const queryBuilder = this;
+    const as = (qb) => {
+      if (typeof qb === "function") qb = qb(queryBuilder);
+      return new Proxy(new WithSubquery(qb.getSQL(), selection ?? ("getSelectedFields" in qb ? qb.getSelectedFields() ?? {} : {}), alias, true), new SelectionProxyHandler({
+        alias,
+        sqlAliasedBehavior: "alias",
+        sqlBehavior: "error"
+      }));
+    };
+    return { as };
+  };
+  with(...queries) {
+    const self = this;
+    function select(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: void 0,
+        dialect: self.getDialect(),
+        withList: queries
+      });
+    }
+    function selectDistinct(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: void 0,
+        dialect: self.getDialect(),
+        withList: queries,
+        distinct: true
+      });
+    }
+    return {
+      select,
+      selectDistinct
+    };
+  }
+  select(fields) {
+    return new SQLiteSelectBuilder({
+      fields: fields ?? void 0,
+      session: void 0,
+      dialect: this.getDialect()
+    });
+  }
+  selectDistinct(fields) {
+    return new SQLiteSelectBuilder({
+      fields: fields ?? void 0,
+      session: void 0,
+      dialect: this.getDialect(),
+      distinct: true
+    });
+  }
+  getDialect() {
+    if (!this.dialect) this.dialect = new SQLiteDialect(this.dialectConfig);
+    return this.dialect;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/count.js
+var SQLiteCountBuilder = class SQLiteCountBuilder2 extends SQL {
+  static [entityKind] = "SQLiteCountBuilder";
+  dialect;
+  session;
+  static buildCount(source, filters, parens) {
+    const query = sql`select count(*) from ${source}${sql` where ${filters}`.if(filters)}`;
+    return parens ? sql`(${query})` : query;
+  }
+  constructor(countConfig) {
+    super(SQLiteCountBuilder2.buildCount(countConfig.source, countConfig.filters, true).queryChunks);
+    this.countConfig = countConfig;
+    this.dialect = countConfig.dialect;
+    this.session = countConfig.session;
+    this.mapWith((e) => {
+      if (typeof e === "number") return e;
+      return Number(e ?? 0);
+    });
+  }
+  executableSql;
+  build() {
+    if (!this.executableSql) {
+      const { source, filters } = this.countConfig;
+      this.executableSql = SQLiteCountBuilder2.buildCount(source, filters);
+    }
+    return this.dialect.sqlToQuery(this.executableSql);
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/async/count.js
+var SQLiteAsyncCountBuilder = class extends SQLiteCountBuilder {
+  static [entityKind] = "SQLiteAsyncCountBuilder";
+  constructor(countConfig) {
+    super(countConfig);
+  }
+  /** @internal */
+  executeRaw(placeholderValues) {
+    return this.session.prepareQuery(this.build(), "arrays", false, "all", (rows) => {
+      const v = rows[0]?.[0];
+      if (typeof v === "number") return v;
+      return v ? Number(v) : 0;
+    }).execute(placeholderValues);
+  }
+  async execute(placeholderValues) {
+    return await this.executeRaw(placeholderValues);
+  }
+};
+applyMixins(SQLiteAsyncCountBuilder, [QueryPromise]);
+var SQLiteSyncCountBuilder = class extends SQLiteAsyncCountBuilder {
+  static [entityKind] = "SQLiteSyncCountBuilder";
+  sync(placeholderValues) {
+    return this.executeRaw(placeholderValues).sync();
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/query.js
+var RelationalQueryBuilder = class {
+  static [entityKind] = "SQLiteRelationalQueryBuilderV2";
+  constructor(mode, schema, table, tableConfig, dialect, session, forbidJsonb, builder = SQLiteRelationalQuery) {
+    this.mode = mode;
+    this.schema = schema;
+    this.table = table;
+    this.tableConfig = tableConfig;
+    this.dialect = dialect;
+    this.session = session;
+    this.forbidJsonb = forbidJsonb;
+    this.builder = builder;
+  }
+  findMany(config2) {
+    return new this.builder(this.mode, this.schema, this.table, this.tableConfig, this.dialect, this.session, config2 ?? true, "many", this.forbidJsonb);
+  }
+  findFirst(config2) {
+    return new this.builder(this.mode, this.schema, this.table, this.tableConfig, this.dialect, this.session, config2 ?? true, "first", this.forbidJsonb);
+  }
+};
+var SQLiteRelationalQuery = class {
+  static [entityKind] = "SQLiteRelationalQueryV2";
+  /** @internal */
+  mode;
+  /** @internal */
+  table;
+  /** @internal */
+  resultKind;
+  constructor(resultKind, schema, table, tableConfig, dialect, session, config2, mode, forbidJsonb) {
+    this.schema = schema;
+    this.tableConfig = tableConfig;
+    this.dialect = dialect;
+    this.session = session;
+    this.config = config2;
+    this.forbidJsonb = forbidJsonb;
+    this.resultKind = resultKind;
+    this.mode = mode;
+    this.table = table;
+  }
+  getSQL() {
+    return this._getQuery().sql;
+  }
+  _getQuery() {
+    const jsonb = this.forbidJsonb ? sql`json` : sql`jsonb`;
+    return this.dialect.buildRelationalQuery({
+      schema: this.schema,
+      table: this.table,
+      tableConfig: this.tableConfig,
+      queryConfig: this.config,
+      mode: this.mode,
+      jsonb
+    });
+  }
+  _toSQL() {
+    const query = this._getQuery();
+    return {
+      query,
+      builtQuery: this.dialect.sqlToQuery(query.sql)
+    };
+  }
+  toSQL() {
+    return this._toSQL().builtQuery;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/async/query.js
+var SQLiteAsyncRelationalQuery = class extends SQLiteRelationalQuery {
+  static [entityKind] = "SQLiteAsyncRelationalQueryV2";
+  /** @internal */
+  _prepare(prepare = false) {
+    const { query, builtQuery } = this._toSQL();
+    const mapper = this.dialect.mapperGenerators.relationalRows({
+      isFirst: this.mode === "first",
+      parseJson: true,
+      parseJsonIfString: false,
+      rootJsonMappers: false,
+      selection: query.selection,
+      arrayModeRoot: true
+    });
+    return this.session.prepareQuery(builtQuery, "arrays", prepare, "all", mapper);
+  }
+  prepare() {
+    return this._prepare(true);
+  }
+  async execute(placeholderValues) {
+    return this._prepare().execute(placeholderValues);
+  }
+};
+var SQLiteSyncRelationalQuery = class extends SQLiteAsyncRelationalQuery {
+  static [entityKind] = "SQLiteSyncRelationalQueryV2";
+  sync(placeholderValues) {
+    return this._prepare().execute(placeholderValues).sync();
+  }
+};
+applyMixins(SQLiteAsyncRelationalQuery, [QueryPromise]);
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/delete.js
+var SQLiteDeleteBase = class {
+  static [entityKind] = "SQLiteDelete";
+  /** @internal */
+  config;
+  constructor(table, session, dialect, withList) {
+    this.table = table;
+    this.session = session;
+    this.dialect = dialect;
+    this.config = {
+      table,
+      withList
+    };
+  }
+  /**
+  * Adds a `where` clause to the query.
+  *
+  * Calling this method will delete only those rows that fulfill a specified condition.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/delete}
+  *
+  * @param where the `where` clause.
+  *
+  * @example
+  * You can use conditional operators and `sql function` to filter the rows to be deleted.
+  *
+  * ```ts
+  * // Delete all cars with green color
+  * db.delete(cars).where(eq(cars.color, 'green'));
+  * // or
+  * db.delete(cars).where(sql`${cars.color} = 'green'`)
+  * ```
+  *
+  * You can logically combine conditional operators with `and()` and `or()` operators:
+  *
+  * ```ts
+  * // Delete all BMW cars with a green color
+  * db.delete(cars).where(and(eq(cars.color, 'green'), eq(cars.brand, 'BMW')));
+  *
+  * // Delete all cars with the green or blue color
+  * db.delete(cars).where(or(eq(cars.color, 'green'), eq(cars.color, 'blue')));
+  * ```
+  */
+  where(where) {
+    this.config.where = where;
+    return this;
+  }
+  orderBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const orderBy = columns[0](new Proxy(this.config.table[Table.Symbol.Columns], new SelectionProxyHandler({
+        sqlAliasedBehavior: "alias",
+        sqlBehavior: "sql"
+      })));
+      const orderByArray = Array.isArray(orderBy) ? orderBy : [orderBy];
+      this.config.orderBy = orderByArray;
+    } else {
+      const orderByArray = columns;
+      this.config.orderBy = orderByArray;
+    }
+    return this;
+  }
+  limit(limit) {
+    this.config.limit = limit;
+    return this;
+  }
+  returning(fields = this.table[SQLiteTable.Symbol.Columns]) {
+    this.config.returning = orderSelectedFields(fields);
+    return this;
+  }
+  getSQL() {
+    return this.dialect.buildDeleteQuery(this.config);
+  }
+  toSQL() {
+    return this.dialect.sqlToQuery(this.getSQL());
+  }
+  $dynamic() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/async/delete.js
+var SQLiteAsyncDeleteBase = class extends SQLiteDeleteBase {
+  static [entityKind] = "SQLiteAsyncDelete";
+  /** @internal */
+  _prepare(prepare = false) {
+    return this.session.prepareQuery(this.dialect.sqlToQuery(this.getSQL()), "arrays", prepare, this.config.returning ? "all" : "run", this.config.returning ? this.dialect.mapperGenerators.rows(this.config.returning, void 0) : void 0, {
+      type: "delete",
+      tables: extractUsedTable(this.config.table)
+    });
+  }
+  prepare() {
+    return this._prepare(true);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute(placeholderValues) {
+    return this._prepare().execute(placeholderValues);
+  }
+};
+applyMixins(SQLiteAsyncDeleteBase, [QueryPromise]);
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/insert.js
+var SQLiteInsertBuilder = class {
+  static [entityKind] = "SQLiteInsertBuilder";
+  constructor(table, session, dialect, withList, builder = SQLiteInsertBase) {
+    this.table = table;
+    this.session = session;
+    this.dialect = dialect;
+    this.withList = withList;
+    this.builder = builder;
+  }
+  values(values) {
+    values = Array.isArray(values) ? values : [values];
+    if (values.length === 0) throw new Error("values() must be called with at least one value");
+    const mappedValues = values.map((entry) => {
+      const result = {};
+      const cols = this.table[Table.Symbol.Columns];
+      for (const colKey of Object.keys(entry)) {
+        const colValue = entry[colKey];
+        result[colKey] = is(colValue, SQL) ? colValue : new Param(colValue, cols[colKey]);
+      }
+      return result;
+    });
+    return new this.builder(this.table, mappedValues, this.session, this.dialect, this.withList);
+  }
+  select(selectQuery) {
+    const select = typeof selectQuery === "function" ? selectQuery(new QueryBuilder()) : selectQuery;
+    if (!is(select, SQL)) {
+      const insertCols = Object.keys(this.table[Table.Symbol.Columns]);
+      const selected = Object.keys(select._.selectedFields);
+      for (const col of selected) if (!insertCols.includes(col)) throw new Error(`Insert select error: column "${col}" does not exist in table "${this.table[Table.Symbol.Name]}"`);
+    }
+    return new this.builder(this.table, select, this.session, this.dialect, this.withList, true);
+  }
+};
+var SQLiteInsertBase = class {
+  static [entityKind] = "SQLiteInsert";
+  /** @internal */
+  config;
+  constructor(table, values, session, dialect, withList, select) {
+    this.session = session;
+    this.dialect = dialect;
+    this.config = {
+      table,
+      values,
+      withList,
+      select
+    };
+  }
+  returning(fields = this.config.table[SQLiteTable.Symbol.Columns]) {
+    this.config.returning = orderSelectedFields(fields);
+    return this;
+  }
+  /**
+  * Adds an `on conflict do nothing` clause to the query.
+  *
+  * Calling this method simply avoids inserting a row as its alternative action.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/insert#on-conflict-do-nothing}
+  *
+  * @param config The `target` and `where` clauses.
+  *
+  * @example
+  * ```ts
+  * // Insert one row and cancel the insert if there's a conflict
+  * await db.insert(cars)
+  *   .values({ id: 1, brand: 'BMW' })
+  *   .onConflictDoNothing();
+  *
+  * // Explicitly specify conflict target
+  * await db.insert(cars)
+  *   .values({ id: 1, brand: 'BMW' })
+  *   .onConflictDoNothing({ target: cars.id });
+  * ```
+  */
+  onConflictDoNothing(config2 = {}) {
+    if (!this.config.onConflict) this.config.onConflict = [];
+    if (config2.target === void 0) this.config.onConflict.push(sql` on conflict do nothing`);
+    else {
+      const targetSql = Array.isArray(config2.target) ? sql`${config2.target}` : sql`${[config2.target]}`;
+      const whereSql = config2.where ? sql` where ${config2.where}` : sql``;
+      this.config.onConflict.push(sql` on conflict ${targetSql} do nothing${whereSql}`);
+    }
+    return this;
+  }
+  /**
+  * Adds an `on conflict do update` clause to the query.
+  *
+  * Calling this method will update the existing row that conflicts with the row proposed for insertion as its alternative action.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/insert#upserts-and-conflicts}
+  *
+  * @param config The `target`, `set` and `where` clauses.
+  *
+  * @example
+  * ```ts
+  * // Update the row if there's a conflict
+  * await db.insert(cars)
+  *   .values({ id: 1, brand: 'BMW' })
+  *   .onConflictDoUpdate({
+  *     target: cars.id,
+  *     set: { brand: 'Porsche' }
+  *   });
+  *
+  * // Upsert with 'where' clause
+  * await db.insert(cars)
+  *   .values({ id: 1, brand: 'BMW' })
+  *   .onConflictDoUpdate({
+  *     target: cars.id,
+  *     set: { brand: 'newBMW' },
+  *     where: sql`${cars.createdAt} > '2023-01-01'::date`,
+  *   });
+  * ```
+  */
+  onConflictDoUpdate(config2) {
+    if (config2.where && (config2.targetWhere || config2.setWhere)) throw new Error('You cannot use both "where" and "targetWhere"/"setWhere" at the same time - "where" is deprecated, use "targetWhere" or "setWhere" instead.');
+    if (!this.config.onConflict) this.config.onConflict = [];
+    const whereSql = config2.where ? sql` where ${config2.where}` : void 0;
+    const targetWhereSql = config2.targetWhere ? sql` where ${config2.targetWhere}` : void 0;
+    const setWhereSql = config2.setWhere ? sql` where ${config2.setWhere}` : void 0;
+    const targetSql = Array.isArray(config2.target) ? sql`${config2.target}` : sql`${[config2.target]}`;
+    const setSql = this.dialect.buildUpdateSet(this.config.table, mapUpdateSet(this.config.table, config2.set));
+    this.config.onConflict.push(sql` on conflict ${targetSql}${targetWhereSql} do update set ${setSql}${whereSql}${setWhereSql}`);
+    return this;
+  }
+  getSQL() {
+    return this.dialect.buildInsertQuery(this.config);
+  }
+  toSQL() {
+    return this.dialect.sqlToQuery(this.getSQL());
+  }
+  $dynamic() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/async/insert.js
+var SQLiteAsyncInsertBase = class extends SQLiteInsertBase {
+  static [entityKind] = "SQLiteAsyncInsert";
+  /** @internal */
+  _prepare(prepare = false) {
+    return this.session.prepareQuery(this.dialect.sqlToQuery(this.getSQL()), "arrays", prepare, this.config.returning ? "all" : "run", this.config.returning ? this.dialect.mapperGenerators.rows(this.config.returning, void 0) : void 0, {
+      type: "insert",
+      tables: extractUsedTable(this.config.table)
+    });
+  }
+  prepare() {
+    return this._prepare(true);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute() {
+    return this._prepare().execute();
+  }
+};
+applyMixins(SQLiteAsyncInsertBase, [QueryPromise]);
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/raw.js
+var SQLiteRaw = class {
+  static [entityKind] = "SQLiteRaw";
+  constructor(prepared, sql2, query) {
+    this.prepared = prepared;
+    this.sql = sql2;
+    this.query = query;
+  }
+  getSQL() {
+    return this.sql;
+  }
+  getQuery() {
+    return this.query;
+  }
+  _prepare() {
+    return this.prepared;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/async/raw.js
+var SQLiteAsyncRaw = class extends SQLiteRaw {
+  static [entityKind] = "SQLiteAsyncRaw";
+  constructor(prepared, sql2, query) {
+    super(prepared, sql2, query);
+  }
+  execute(placeholderValues) {
+    return this.prepared.execute(placeholderValues);
+  }
+};
+applyMixins(SQLiteAsyncRaw, [QueryPromise]);
+
+// node_modules/drizzle-orm/sqlite-core/async/select.js
+var SQLiteAsyncSelectBase = class extends SQLiteSelectBase {
+  static [entityKind] = "SQLiteAsyncSelect";
+  /** @internal */
+  _prepare(prepare = false) {
+    const query = this.dialect.sqlToQuery(this.getSQL());
+    const fieldsList = this.config.fieldsFlat;
+    const mapper = this.dialect.mapperGenerators.rows(fieldsList, this.joinsNotNullableMap);
+    return this.session.prepareQuery(query, "arrays", prepare, "all", mapper, {
+      type: "select",
+      tables: [...this.usedTables]
+    }, this.cacheConfig);
+  }
+  prepare() {
+    return this._prepare(true);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute() {
+    return this._prepare().execute();
+  }
+};
+applyMixins(SQLiteAsyncSelectBase, [QueryPromise]);
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/update.js
+var SQLiteUpdateBuilder = class {
+  static [entityKind] = "SQLiteUpdateBuilder";
+  constructor(table, session, dialect, withList, builder = SQLiteUpdateBase) {
+    this.table = table;
+    this.session = session;
+    this.dialect = dialect;
+    this.withList = withList;
+    this.builder = builder;
+  }
+  set(values) {
+    return new this.builder(this.table, mapUpdateSet(this.table, values), this.session, this.dialect, this.withList);
+  }
+};
+var SQLiteUpdateBase = class {
+  static [entityKind] = "SQLiteUpdate";
+  /** @internal */
+  config;
+  constructor(table, set2, session, dialect, withList) {
+    this.session = session;
+    this.dialect = dialect;
+    this.config = {
+      set: set2,
+      table,
+      withList,
+      joins: []
+    };
+  }
+  from(source) {
+    this.config.from = source;
+    return this;
+  }
+  createJoin(joinType) {
+    return ((table, on) => {
+      const tableName = getTableLikeName(table);
+      if (typeof tableName === "string" && this.config.joins.some((join) => join.alias === tableName)) throw new Error(`Alias "${tableName}" is already used in this query`);
+      if (typeof on === "function") {
+        const from = this.config.from ? is(table, SQLiteTable) ? table[Table.Symbol.Columns] : is(table, Subquery) ? table._.selectedFields : is(table, SQLiteViewBase) ? table[ViewBaseConfig].selectedFields : void 0 : void 0;
+        on = on(new Proxy(this.config.table[Table.Symbol.Columns], new SelectionProxyHandler({
+          sqlAliasedBehavior: "sql",
+          sqlBehavior: "sql"
+        })), from && new Proxy(from, new SelectionProxyHandler({
+          sqlAliasedBehavior: "sql",
+          sqlBehavior: "sql"
+        })));
+      }
+      this.config.joins.push({
+        on,
+        table,
+        joinType,
+        alias: tableName
+      });
+      return this;
+    });
+  }
+  leftJoin = this.createJoin("left");
+  rightJoin = this.createJoin("right");
+  innerJoin = this.createJoin("inner");
+  fullJoin = this.createJoin("full");
+  /**
+  * Adds a 'where' clause to the query.
+  *
+  * Calling this method will update only those rows that fulfill a specified condition.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/update}
+  *
+  * @param where the 'where' clause.
+  *
+  * @example
+  * You can use conditional operators and `sql function` to filter the rows to be updated.
+  *
+  * ```ts
+  * // Update all cars with green color
+  * db.update(cars).set({ color: 'red' })
+  *   .where(eq(cars.color, 'green'));
+  * // or
+  * db.update(cars).set({ color: 'red' })
+  *   .where(sql`${cars.color} = 'green'`)
+  * ```
+  *
+  * You can logically combine conditional operators with `and()` and `or()` operators:
+  *
+  * ```ts
+  * // Update all BMW cars with a green color
+  * db.update(cars).set({ color: 'red' })
+  *   .where(and(eq(cars.color, 'green'), eq(cars.brand, 'BMW')));
+  *
+  * // Update all cars with the green or blue color
+  * db.update(cars).set({ color: 'red' })
+  *   .where(or(eq(cars.color, 'green'), eq(cars.color, 'blue')));
+  * ```
+  */
+  where(where) {
+    this.config.where = where;
+    return this;
+  }
+  orderBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const orderBy = columns[0](new Proxy(this.config.table[Table.Symbol.Columns], new SelectionProxyHandler({
+        sqlAliasedBehavior: "alias",
+        sqlBehavior: "sql"
+      })));
+      const orderByArray = Array.isArray(orderBy) ? orderBy : [orderBy];
+      this.config.orderBy = orderByArray;
+    } else {
+      const orderByArray = columns;
+      this.config.orderBy = orderByArray;
+    }
+    return this;
+  }
+  limit(limit) {
+    this.config.limit = limit;
+    return this;
+  }
+  returning(fields = this.config.table[SQLiteTable.Symbol.Columns]) {
+    this.config.returning = orderSelectedFields(fields);
+    return this;
+  }
+  getSQL() {
+    return this.dialect.buildUpdateQuery(this.config);
+  }
+  toSQL() {
+    return this.dialect.sqlToQuery(this.getSQL());
+  }
+  $dynamic() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/async/update.js
+var SQLiteAsyncUpdateBase = class extends SQLiteUpdateBase {
+  static [entityKind] = "SQLiteAsyncUpdate";
+  /** @internal */
+  _prepare(prepare = false) {
+    return this.session.prepareQuery(this.dialect.sqlToQuery(this.getSQL()), "arrays", prepare, this.config.returning ? "all" : "run", this.config.returning ? this.dialect.mapperGenerators.rows(this.config.returning, void 0) : void 0, {
+      type: "update",
+      tables: extractUsedTable(this.config.table)
+    });
+  }
+  prepare() {
+    return this._prepare(true);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute() {
+    return this.config.returning ? this.all() : this.run();
+  }
+};
+applyMixins(SQLiteAsyncUpdateBase, [QueryPromise]);
+
+// node_modules/drizzle-orm/sqlite-core/async/db.js
+var SQLiteAsyncDatabase = class {
+  static [entityKind] = "BaseSQLiteDatabase";
+  query;
+  constructor(resultKind, dialect, session, relations, forbidJsonb) {
+    this.resultKind = resultKind;
+    this.dialect = dialect;
+    this.session = session;
+    this.forbidJsonb = forbidJsonb;
+    this._ = {
+      relations,
+      session,
+      resultKind
+    };
+    this.query = {};
+    for (const [tableName, relation] of Object.entries(relations)) this.query[tableName] = new RelationalQueryBuilder(resultKind, relations, relations[relation.name].table, relation, dialect, session, forbidJsonb, resultKind === "sync" ? SQLiteSyncRelationalQuery : SQLiteAsyncRelationalQuery);
+    this.$cache = { invalidate: async (_params) => {
+    } };
+  }
+  /**
+  * Creates a subquery that defines a temporary named result set as a CTE.
+  *
+  * It is useful for breaking down complex queries into simpler parts and for reusing the result set in subsequent parts of the query.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/select#with-clause}
+  *
+  * @param alias The alias for the subquery.
+  *
+  * Failure to provide an alias will result in a DrizzleTypeError, preventing the subquery from being referenced in other queries.
+  *
+  * @example
+  *
+  * ```ts
+  * // Create a subquery with alias 'sq' and use it in the select query
+  * const sq = db.$with('sq').as(db.select().from(users).where(eq(users.id, 42)));
+  *
+  * const result = await db.with(sq).select().from(sq);
+  * ```
+  *
+  * To select arbitrary SQL values as fields in a CTE and reference them in other CTEs or in the main query, you need to add aliases to them:
+  *
+  * ```ts
+  * // Select an arbitrary SQL value as a field in a CTE and reference it in the main query
+  * const sq = db.$with('sq').as(db.select({
+  *   name: sql<string>`upper(${users.name})`.as('name'),
+  * })
+  * .from(users));
+  *
+  * const result = await db.with(sq).select({ name: sq.name }).from(sq);
+  * ```
+  */
+  $with = (alias, selection) => {
+    const self = this;
+    const as = (qb) => {
+      if (typeof qb === "function") qb = qb(new QueryBuilder(self.dialect));
+      return new Proxy(new WithSubquery(qb.getSQL(), selection ?? ("getSelectedFields" in qb ? qb.getSelectedFields() ?? {} : {}), alias, true), new SelectionProxyHandler({
+        alias,
+        sqlAliasedBehavior: "alias",
+        sqlBehavior: "error"
+      }));
+    };
+    return { as };
+  };
+  $count(source, filters) {
+    return this.resultKind === "async" ? new SQLiteAsyncCountBuilder({
+      source,
+      filters,
+      session: this.session,
+      dialect: this.dialect
+    }) : new SQLiteSyncCountBuilder({
+      source,
+      filters,
+      session: this.session,
+      dialect: this.dialect
+    });
+  }
+  /**
+  * Incorporates a previously defined CTE (using `$with`) into the main query.
+  *
+  * This method allows the main query to reference a temporary named result set.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/select#with-clause}
+  *
+  * @param queries The CTEs to incorporate into the main query.
+  *
+  * @example
+  *
+  * ```ts
+  * // Define a subquery 'sq' as a CTE using $with
+  * const sq = db.$with('sq').as(db.select().from(users).where(eq(users.id, 42)));
+  *
+  * // Incorporate the CTE 'sq' into the main query and select from it
+  * const result = await db.with(sq).select().from(sq);
+  * ```
+  */
+  with(...queries) {
+    const self = this;
+    function select(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: self.session,
+        dialect: self.dialect,
+        withList: queries
+      }, SQLiteAsyncSelectBase);
+    }
+    function selectDistinct(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: self.session,
+        dialect: self.dialect,
+        withList: queries,
+        distinct: true
+      }, SQLiteAsyncSelectBase);
+    }
+    function update(table) {
+      return new SQLiteUpdateBuilder(table, self.session, self.dialect, queries, SQLiteAsyncUpdateBase);
+    }
+    function insert(into) {
+      return new SQLiteInsertBuilder(into, self.session, self.dialect, queries, SQLiteAsyncInsertBase);
+    }
+    function delete_(from) {
+      return new SQLiteAsyncDeleteBase(from, self.session, self.dialect, queries);
+    }
+    return {
+      select,
+      selectDistinct,
+      update,
+      insert,
+      delete: delete_
+    };
+  }
+  select(fields) {
+    return new SQLiteSelectBuilder({
+      fields: fields ?? void 0,
+      session: this.session,
+      dialect: this.dialect
+    }, SQLiteAsyncSelectBase);
+  }
+  selectDistinct(fields) {
+    return new SQLiteSelectBuilder({
+      fields: fields ?? void 0,
+      session: this.session,
+      dialect: this.dialect,
+      distinct: true
+    }, SQLiteAsyncSelectBase);
+  }
+  /**
+  * Creates an update query.
+  *
+  * Calling this method without `.where()` clause will update all rows in a table. The `.where()` clause specifies which rows should be updated.
+  *
+  * Use `.set()` method to specify which values to update.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/update}
+  *
+  * @param table The table to update.
+  *
+  * @example
+  *
+  * ```ts
+  * // Update all rows in the 'cars' table
+  * await db.update(cars).set({ color: 'red' });
+  *
+  * // Update rows with filters and conditions
+  * await db.update(cars).set({ color: 'red' }).where(eq(cars.brand, 'BMW'));
+  *
+  * // Update with returning clause
+  * const updatedCar: Car[] = await db.update(cars)
+  *   .set({ color: 'red' })
+  *   .where(eq(cars.id, 1))
+  *   .returning();
+  * ```
+  */
+  update(table) {
+    return new SQLiteUpdateBuilder(table, this.session, this.dialect, void 0, SQLiteAsyncUpdateBase);
+  }
+  $cache;
+  /**
+  * Creates an insert query.
+  *
+  * Calling this method will create new rows in a table. Use `.values()` method to specify which values to insert.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/insert}
+  *
+  * @param table The table to insert into.
+  *
+  * @example
+  *
+  * ```ts
+  * // Insert one row
+  * await db.insert(cars).values({ brand: 'BMW' });
+  *
+  * // Insert multiple rows
+  * await db.insert(cars).values([{ brand: 'BMW' }, { brand: 'Porsche' }]);
+  *
+  * // Insert with returning clause
+  * const insertedCar: Car[] = await db.insert(cars)
+  *   .values({ brand: 'BMW' })
+  *   .returning();
+  * ```
+  */
+  insert(into) {
+    return new SQLiteInsertBuilder(into, this.session, this.dialect, void 0, SQLiteAsyncInsertBase);
+  }
+  /**
+  * Creates a delete query.
+  *
+  * Calling this method without `.where()` clause will delete all rows in a table. The `.where()` clause specifies which rows should be deleted.
+  *
+  * See docs: {@link https://orm.drizzle.team/docs/delete}
+  *
+  * @param table The table to delete from.
+  *
+  * @example
+  *
+  * ```ts
+  * // Delete all rows in the 'cars' table
+  * await db.delete(cars);
+  *
+  * // Delete rows with filters and conditions
+  * await db.delete(cars).where(eq(cars.color, 'green'));
+  *
+  * // Delete with returning clause
+  * const deletedCar: Car[] = await db.delete(cars)
+  *   .where(eq(cars.id, 1))
+  *   .returning();
+  * ```
+  */
+  delete(from) {
+    return new SQLiteAsyncDeleteBase(from, this.session, this.dialect);
+  }
+  run(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    const builtQuery = this.dialect.sqlToQuery(sequel);
+    const prepared = this.session.prepareQuery(builtQuery, "raw", false, "run");
+    if (this.resultKind === "async") return new SQLiteAsyncRaw(prepared, sequel, builtQuery);
+    return this.session.run(sequel);
+  }
+  all(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    const builtQuery = this.dialect.sqlToQuery(sequel);
+    const prepared = this.session.prepareQuery(builtQuery, "objects", false, "all");
+    if (this.resultKind === "async") return new SQLiteAsyncRaw(prepared, sequel, builtQuery);
+    return this.session.objects(sequel);
+  }
+  get(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    const builtQuery = this.dialect.sqlToQuery(sequel);
+    const prepared = this.session.prepareQuery(builtQuery, "objects", false, "get");
+    if (this.resultKind === "async") return new SQLiteAsyncRaw(prepared, sequel, builtQuery);
+    return this.session.object(sequel);
+  }
+  values(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    const builtQuery = this.dialect.sqlToQuery(sequel);
+    const prepared = this.session.prepareQuery(builtQuery, "objects", false, "values");
+    if (this.resultKind === "async") return new SQLiteAsyncRaw(prepared, sequel, builtQuery);
+    return this.session.arrays(sequel);
+  }
+  transaction(transaction, config2) {
+    return this.session.transaction(transaction, config2);
+  }
+};
+
+// node_modules/drizzle-orm/cache/core/cache.js
+var Cache = class {
+  static [entityKind] = "Cache";
+};
+var NoopCache = class extends Cache {
+  static [entityKind] = "NoopCache";
+  strategy() {
+    return "all";
+  }
+  async get(_key) {
+  }
+  async put(_hashedQuery, _response, _tables, _config) {
+  }
+  async onMutate(_params) {
+  }
+};
+var strategyFor = async (query, params, queryMetadata, withCacheConfig) => {
+  if (!queryMetadata) return { type: "skip" };
+  const { type, tables } = queryMetadata;
+  if ((type === "insert" || type === "update" || type === "delete") && tables.length > 0) return {
+    type: "invalidate",
+    tables
+  };
+  if (!withCacheConfig) return { type: "skip" };
+  if (!withCacheConfig.enabled) return { type: "skip" };
+  if (type === "select") return {
+    type: "try",
+    key: withCacheConfig.tag ?? await hashQuery(query, params),
+    isTag: typeof withCacheConfig.tag !== "undefined",
+    autoInvalidate: withCacheConfig.autoInvalidate,
+    tables: queryMetadata.tables,
+    config: withCacheConfig.config
+  };
+  return { type: "skip" };
+};
+async function hashQuery(sql2, params) {
+  const dataToHash = `${sql2}-${JSON.stringify(params, (_, v) => typeof v === "bigint" ? `${v}n` : v)}`;
+  const data = new TextEncoder().encode(dataToHash);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// node_modules/drizzle-orm/sqlite-core/session.js
+var SQLitePreparedQuery = class {
+  static [entityKind] = "SQLiteBasePreparedQuery";
+  /** @internal */
+  mapper;
+  /** @internal */
+  executeMethod;
+  constructor(executeMethod, query, mapper, mode) {
+    this.query = query;
+    this.mode = mode;
+    this.mapper = mapper;
+    this.executeMethod = executeMethod;
+  }
+  getQuery() {
+    return this.query;
+  }
+};
+var SQLiteSession = class {
+  static [entityKind] = "SQLiteSession";
+  constructor(dialect) {
+    this.dialect = dialect;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/async/session.js
+var ExecuteResultSync = class extends QueryPromise {
+  static [entityKind] = "ExecuteResultSync";
+  constructor(resultCb) {
+    super();
+    this.resultCb = resultCb;
+  }
+  async execute() {
+    return this.resultCb();
+  }
+  sync() {
+    return this.resultCb();
+  }
+};
+var SQLiteAsyncPreparedQuery = class extends SQLitePreparedQuery {
+  static [entityKind] = "SQLiteAsyncPreparedQuery";
+  fastPath;
+  constructor(resultKind, executeMethod = "all", executors, query, mapper, mode, logger, cache, queryMetadata, cacheConfig) {
+    super(executeMethod, query, mapper, mode);
+    this.resultKind = resultKind;
+    this.executors = executors;
+    this.logger = logger;
+    this.cache = cache;
+    this.queryMetadata = queryMetadata;
+    this.cacheConfig = cacheConfig;
+    if (cache && cache.strategy() === "all" && cacheConfig === void 0) this.cacheConfig = {
+      enabled: true,
+      autoInvalidate: true
+    };
+    if (!this.cacheConfig?.enabled) this.cacheConfig = void 0;
+    this.fastPath = cacheConfig === void 0 && (cache === void 0 || is(cache, NoopCache));
+  }
+  /** @internal */
+  async queryWithCache(queryString, params, executeMethod, query) {
+    const cacheStrat = this.cache !== void 0 && !is(this.cache, NoopCache) ? await strategyFor(queryString, params, this.queryMetadata, this.cacheConfig) : { type: "skip" };
+    if (cacheStrat.type === "skip") return query().catch((e) => {
+      throw new DrizzleQueryError(queryString, params, e);
+    });
+    const cache = this.cache;
+    if (cacheStrat.type === "invalidate") return Promise.all([query(), cache.onMutate({ tables: cacheStrat.tables })]).then((res) => res[0]).catch((e) => {
+      throw new DrizzleQueryError(queryString, params, e);
+    });
+    if (cacheStrat.type === "try") {
+      const { tables, key: _key, isTag, autoInvalidate, config: config2 } = cacheStrat;
+      const key = `${executeMethod}_${_key}`;
+      const fromCache = await cache.get(key, tables, isTag, autoInvalidate);
+      if (fromCache === void 0) {
+        const result = await query().catch((e) => {
+          throw new DrizzleQueryError(queryString, params, e);
+        });
+        await cache.put(key, result, autoInvalidate ? tables : [], isTag, config2);
+        return result;
+      }
+      return fromCache;
+    }
+    assertUnreachable(cacheStrat);
+  }
+  run(placeholderValues = {}) {
+    const { query, logger, executors, fastPath, resultKind } = this;
+    const sql2 = query._sql ? query._sql.join(" ") : query.sql;
+    const params = query.params.length === 0 ? query.params : fillPlaceholders(query.params, placeholderValues);
+    logger.logQuery(sql2, params);
+    if (resultKind === "sync") try {
+      return executors.run(params);
+    } catch (e) {
+      throw new DrizzleQueryError(sql2, params, e);
+    }
+    return fastPath ? executors.run(params).catch((e) => {
+      throw new DrizzleQueryError(sql2, params, e);
+    }) : this.queryWithCache(sql2, params, "run", () => executors.run(params));
+  }
+  all(placeholderValues = {}) {
+    const { query, logger, executors, mapper, fastPath, resultKind } = this;
+    const sql2 = query._sql ? query._sql.join(" ") : query.sql;
+    const params = query.params.length === 0 ? query.params : fillPlaceholders(query.params, placeholderValues);
+    logger.logQuery(sql2, params);
+    if (resultKind === "sync") {
+      let res2;
+      try {
+        res2 = executors.all(params);
+      } catch (e) {
+        throw new DrizzleQueryError(sql2, params, e);
+      }
+      if (!mapper) return res2;
+      return mapper(res2);
+    }
+    const res = fastPath ? executors.all(params).catch((e) => {
+      throw new DrizzleQueryError(sql2, params, e);
+    }) : this.queryWithCache(sql2, params, "all", () => executors.all(params));
+    if (!mapper) return res;
+    return res.then((rows) => mapper(rows));
+  }
+  get(placeholderValues = {}) {
+    const { query, logger, executors, mapper, fastPath, resultKind } = this;
+    const sql2 = query._sql ? query._sql.join(" ") : query.sql;
+    const params = query.params.length === 0 ? query.params : fillPlaceholders(query.params, placeholderValues);
+    logger.logQuery(sql2, params);
+    if (resultKind === "sync") {
+      let res2;
+      try {
+        res2 = executors.get(params);
+      } catch (e) {
+        throw new DrizzleQueryError(sql2, params, e);
+      }
+      if (!res2) return void 0;
+      if (!mapper) return res2;
+      return mapper([res2])[0];
+    }
+    const res = fastPath ? executors.get(params).catch((e) => {
+      throw new DrizzleQueryError(sql2, params, e);
+    }) : this.queryWithCache(sql2, params, "get", () => executors.get(params));
+    if (!mapper) return res.then((row) => row ? row : void 0);
+    return res.then((row) => row ? mapper([row])[0] : void 0);
+  }
+  values(placeholderValues = {}) {
+    const { query, logger, executors, fastPath, resultKind } = this;
+    const sql2 = query._sql ? query._sql.join(" ") : query.sql;
+    const params = query.params.length === 0 ? query.params : fillPlaceholders(query.params, placeholderValues);
+    logger.logQuery(sql2, params);
+    if (resultKind === "sync") try {
+      return executors.values(params);
+    } catch (e) {
+      throw new DrizzleQueryError(sql2, params, e);
+    }
+    return fastPath ? executors.values(params).catch((e) => {
+      throw new DrizzleQueryError(sql2, params, e);
+    }) : this.queryWithCache(sql2, params, "values", () => executors.values(params));
+  }
+  execute(placeholderValues) {
+    if (this.resultKind === "async") return this[this.executeMethod](placeholderValues);
+    return new ExecuteResultSync(() => this[this.executeMethod](placeholderValues));
+  }
+};
+var SQLiteAsyncSession = class extends SQLiteSession {
+  static [entityKind] = "SQLiteAsyncSession";
+  constructor(dialect, resultKind) {
+    super(dialect);
+    this.resultKind = resultKind;
+  }
+  run(query) {
+    return this.prepareQuery(this.dialect.sqlToQuery(query), "raw", false).run();
+  }
+  objects(query) {
+    return this.prepareQuery(this.dialect.sqlToQuery(query), "objects", false).all();
+  }
+  object(query) {
+    return this.prepareQuery(this.dialect.sqlToQuery(query), "objects", false).get();
+  }
+  arrays(query) {
+    return this.prepareQuery(this.dialect.sqlToQuery(query), "arrays", false).all();
+  }
+  array(query) {
+    return this.prepareQuery(this.dialect.sqlToQuery(query), "arrays", false).get();
+  }
+};
+var SQLiteAsyncTransaction = class extends SQLiteAsyncDatabase {
+  static [entityKind] = "SQLiteAsyncTransaction";
+  constructor(resultType, dialect, session, relations, nestedIndex = 0, forbidJsonb) {
+    super(resultType, dialect, session, relations, forbidJsonb);
+    this.nestedIndex = nestedIndex;
+  }
+  rollback() {
+    throw new TransactionRollbackError();
+  }
+};
+
+// src/infrastructure/sqlite/tables.ts
+var runs = sqliteTable("runs", {
+  runId: text("run_id").notNull(),
+  submissionId: text("submission_id").notNull(),
+  requestFingerprint: text("request_fingerprint").notNull(),
+  createdAt: text("created_at").notNull(),
+  createdMs: integer2("created_ms").notNull(),
+  label: text("label"),
+  status: text("status", { enum: ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"] }).notNull(),
+  requestJson: text("request_json").notNull(),
+  evaluationCount: integer2("evaluation_count").notNull(),
+  maxCalls: integer2("max_calls").notNull(),
+  usedCalls: integer2("used_calls").notNull().default(0),
+  reservedCalls: integer2("reserved_calls").notNull().default(0),
+  cancelRequested: integer2("cancel_requested", { mode: "boolean" }).notNull().default(false),
+  ownerToken: text("owner_token"),
+  ownerPid: integer2("owner_pid"),
+  leaseExpiresMs: integer2("lease_expires_ms"),
+  failureScope: text("failure_scope", { enum: ["evaluation", "run"] }),
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message")
+}, (table) => [
+  primaryKey({ name: "runs_pk", columns: [table.runId] }),
+  unique("runs_submission_id_uq").on(table.submissionId),
+  unique("runs_run_submission_uq").on(table.runId, table.submissionId),
+  check2("runs_status_ck", sql`${table.status} IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')`),
+  check2("runs_count_ck", sql`${table.evaluationCount} > 0 AND ${table.maxCalls} > 0 AND ${table.usedCalls} >= 0 AND ${table.reservedCalls} >= 0 AND ${table.usedCalls} + ${table.reservedCalls} <= ${table.maxCalls}`),
+  check2("runs_owner_ck", sql`(${table.status} = 'running' AND ${table.ownerToken} IS NOT NULL AND ${table.ownerPid} IS NOT NULL AND ${table.leaseExpiresMs} IS NOT NULL) OR (${table.status} <> 'running' AND ${table.ownerToken} IS NULL AND ${table.ownerPid} IS NULL)`),
+  check2("runs_cancel_ck", sql`${table.cancelRequested} IN (0, 1)`),
+  check2("runs_failure_scope_ck", sql`${table.failureScope} IS NULL OR ${table.failureScope} IN ('evaluation', 'run')`),
+  index("runs_created_identity").on(table.createdMs, table.runId),
+  index("runs_expired_lease").on(table.leaseExpiresMs, table.runId)
+]);
+var questionGroups = sqliteTable("question_groups", {
+  groupId: text("group_id").notNull(),
+  runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
+  ordinal: integer2("ordinal").notNull(),
+  contextId: text("context_id").notNull(),
+  respondentId: text("respondent_id").notNull(),
+  stateJson: text("state_json").notNull(),
+  questionIdsJson: text("question_ids_json").notNull()
+}, (table) => [
+  primaryKey({ name: "question_groups_pk", columns: [table.groupId] }),
+  unique("question_groups_run_ordinal_uq").on(table.runId, table.ordinal),
+  unique("question_groups_run_group_uq").on(table.runId, table.groupId),
+  check2("question_groups_ordinal_ck", sql`${table.ordinal} >= 0`)
+]);
+var evaluations = sqliteTable("evaluations", {
+  evaluationId: text("evaluation_id").notNull(),
+  runId: text("run_id").notNull(),
+  ordinal: integer2("ordinal").notNull(),
+  contextId: text("context_id").notNull(),
+  respondentId: text("respondent_id").notNull(),
+  questionId: text("question_id").notNull(),
+  groupId: text("group_id").notNull(),
+  turnId: text("turn_id"),
+  nodeId: text("node_id"),
+  pathId: text("path_id"),
+  occurrence: integer2("occurrence"),
+  packetJson: text("packet_json").notNull(),
+  packetFingerprint: text("packet_fingerprint").notNull(),
+  status: text("status", { enum: ["pending", "answered", "failed", "unreached"] }).notNull(),
+  resultJson: text("result_json"),
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message"),
+  failureDetailJson: text("failure_detail_json")
+}, (table) => [
+  primaryKey({ name: "evaluations_pk", columns: [table.evaluationId] }),
+  foreignKey({ name: "evaluations_run_fk", columns: [table.runId], foreignColumns: [runs.runId] }).onDelete("cascade"),
+  foreignKey({ name: "evaluations_group_fk", columns: [table.runId, table.groupId], foreignColumns: [questionGroups.runId, questionGroups.groupId] }).onDelete("cascade"),
+  unique("evaluations_run_ordinal_uq").on(table.runId, table.ordinal),
+  unique("evaluations_run_eval_uq").on(table.runId, table.evaluationId),
+  unique("evaluations_run_eval_group_uq").on(table.runId, table.evaluationId, table.groupId),
+  unique("evaluations_run_turn_uq").on(table.runId, table.turnId),
+  unique("evaluations_run_respondent_node_occurrence_uq").on(table.runId, table.respondentId, table.nodeId, table.occurrence),
+  check2("evaluations_status_ck", sql`${table.status} IN ('pending', 'answered', 'failed', 'unreached')`),
+  check2("evaluations_ordinal_ck", sql`${table.ordinal} >= 0`),
+  check2("evaluations_journey_identity_ck", sql`(${table.turnId} IS NULL AND ${table.nodeId} IS NULL AND ${table.pathId} IS NULL AND ${table.occurrence} IS NULL) OR (${table.turnId} IS NOT NULL AND ${table.nodeId} IS NOT NULL AND ${table.pathId} IS NOT NULL AND ${table.occurrence} >= 1)`),
+  check2("evaluations_answer_ck", sql`(${table.status} = 'answered' AND ${table.resultJson} IS NOT NULL AND ${table.failureCode} IS NULL) OR (${table.status} <> 'answered' AND ${table.resultJson} IS NULL)`),
+  index("evaluations_pending_turn").on(table.runId, table.status, table.respondentId, table.ordinal)
+]);
+var journeyRespondents = sqliteTable("journey_respondents", {
+  runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
+  respondentId: text("respondent_id").notNull(),
+  status: text("status", { enum: ["active", "completed", "failed", "unreached"] }).notNull(),
+  currentNodeId: text("current_node_id"),
+  currentTurnId: text("current_turn_id"),
+  currentContextId: text("current_context_id"),
+  revision: integer2("revision").notNull(),
+  eventsJson: text("events_json").notNull(),
+  routeJson: text("route_json").notNull(),
+  outcome: text("outcome")
+}, (table) => [
+  primaryKey({ name: "journey_respondents_pk", columns: [table.runId, table.respondentId] }),
+  check2("journey_respondents_status_ck", sql`${table.status} IN ('active', 'completed', 'failed', 'unreached')`),
+  check2("journey_respondents_revision_ck", sql`${table.revision} >= 0`),
+  check2("journey_respondents_checkpoint_ck", sql`(${table.status} = 'active' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NOT NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} <> 'active' AND ${table.currentNodeId} IS NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NULL)`)
+]);
+var attempts = sqliteTable("attempts", {
+  attemptSequence: integer2("attempt_sequence").primaryKey({ autoIncrement: true }),
+  attemptId: text("attempt_id").notNull(),
+  runId: text("run_id").notNull(),
+  groupId: text("group_id").notNull(),
+  evaluationId: text("evaluation_id").notNull(),
+  packetFingerprint: text("packet_fingerprint").notNull(),
+  ownerToken: text("owner_token").notNull(),
+  status: text("status", { enum: ["reserved", "answered", "failed", "uncertain"] }).notNull(),
+  startedMs: integer2("started_ms").notNull(),
+  settledMs: integer2("settled_ms"),
+  chargedCalls: integer2("charged_calls").notNull().default(0),
+  resultJson: text("result_json"),
+  executionJson: text("execution_json"),
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message"),
+  failureScope: text("failure_scope", { enum: ["evaluation", "run"] })
+}, (table) => [
+  unique("attempts_attempt_id_uq").on(table.attemptId),
+  unique("attempts_run_attempt_uq").on(table.runId, table.attemptId),
+  foreignKey({ name: "attempts_run_evaluation_group_fk", columns: [table.runId, table.evaluationId, table.groupId], foreignColumns: [evaluations.runId, evaluations.evaluationId, evaluations.groupId] }).onDelete("cascade"),
+  foreignKey({ name: "attempts_run_group_fk", columns: [table.runId, table.groupId], foreignColumns: [questionGroups.runId, questionGroups.groupId] }).onDelete("cascade"),
+  check2("attempts_status_ck", sql`${table.status} IN ('reserved', 'answered', 'failed', 'uncertain')`),
+  check2("attempts_call_ledger_ck", sql`${table.chargedCalls} >= 0 AND (${table.status} = 'reserved' OR ${table.settledMs} IS NOT NULL)`),
+  check2("attempts_settlement_ck", sql`(${table.status} = 'answered' AND ${table.executionJson} IS NOT NULL AND ${table.chargedCalls} >= 1) OR (${table.status} = 'failed' AND ${table.failureCode} IS NOT NULL) OR (${table.status} = 'uncertain' AND ${table.chargedCalls} >= 1) OR (${table.status} = 'reserved' AND ${table.settledMs} IS NULL AND ${table.chargedCalls} = 0)`),
+  check2("attempts_failure_scope_ck", sql`${table.failureScope} IS NULL OR ${table.failureScope} IN ('evaluation', 'run')`),
+  index("attempts_run_sequence").on(table.runId, table.attemptSequence),
+  index("attempts_run_status_sequence").on(table.runId, table.status, table.attemptSequence)
+]);
+var attemptEvaluations = sqliteTable("attempt_evaluations", {
+  runId: text("run_id").notNull(),
+  attemptId: text("attempt_id").notNull(),
+  evaluationId: text("evaluation_id").notNull(),
+  failureJson: text("failure_json")
+}, (table) => [
+  primaryKey({ name: "attempt_evaluations_pk", columns: [table.runId, table.attemptId, table.evaluationId] }),
+  foreignKey({ name: "attempt_evaluations_attempt_fk", columns: [table.runId, table.attemptId], foreignColumns: [attempts.runId, attempts.attemptId] }).onDelete("cascade"),
+  foreignKey({ name: "attempt_evaluations_evaluation_fk", columns: [table.runId, table.evaluationId], foreignColumns: [evaluations.runId, evaluations.evaluationId] }).onDelete("cascade")
+]);
+var evaluationAnswerAttempts = sqliteTable("evaluation_answer_attempts", {
+  runId: text("run_id").notNull(),
+  evaluationId: text("evaluation_id").notNull(),
+  attemptId: text("attempt_id").notNull()
+}, (table) => [
+  primaryKey({ name: "evaluation_answer_attempts_pk", columns: [table.runId, table.evaluationId] }),
+  foreignKey({ name: "evaluation_answer_attempts_membership_fk", columns: [table.runId, table.attemptId, table.evaluationId], foreignColumns: [attemptEvaluations.runId, attemptEvaluations.attemptId, attemptEvaluations.evaluationId] }).onDelete("cascade")
+]);
+var schemaMigrations = sqliteTable("schema_migrations", {
+  version: integer2("version").notNull(),
+  migrationId: text("migration_id").notNull(),
+  checksum: text("checksum").notNull(),
+  appliedAt: text("applied_at").notNull()
+}, (table) => [
+  primaryKey({ name: "schema_migrations_pk", columns: [table.migrationId] }),
+  unique("schema_migrations_version_uq").on(table.version),
+  check2("schema_migrations_version_ck", sql`${table.version} > 0`)
+]);
+var sqliteTables = {
+  runs,
+  questionGroups,
+  evaluations,
+  journeyRespondents,
+  attempts,
+  attemptEvaluations,
+  evaluationAnswerAttempts,
+  schemaMigrations
+};
+
+// src/infrastructure/sqlite/run-identity-queries.ts
+function findRunBySubmission(database, submissionId) {
+  return database.select({ runId: runs.runId, requestFingerprint: runs.requestFingerprint }).from(runs).where(eq(runs.submissionId, submissionId)).limit(1).all()[0];
+}
+function loadEvaluationStatuses(database, runId) {
+  return database.select({ evaluationId: evaluations.evaluationId, status: evaluations.status }).from(evaluations).where(eq(evaluations.runId, runId)).orderBy(asc(evaluations.ordinal)).all();
+}
+function runExists(database, runId) {
+  return database.select({ runId: runs.runId }).from(runs).where(eq(runs.runId, runId)).limit(1).all().length > 0;
+}
+function loadAcceptedRequest(database, runId) {
+  return database.select({ requestJson: runs.requestJson, requestFingerprint: runs.requestFingerprint }).from(runs).where(eq(runs.runId, runId)).limit(1).all()[0];
+}
+function loadPreparedEvaluations(database, runId) {
+  return database.select({
+    evaluationId: evaluations.evaluationId,
+    groupId: evaluations.groupId,
+    contextId: evaluations.contextId,
+    respondentId: evaluations.respondentId,
+    questionId: evaluations.questionId,
+    packetJson: evaluations.packetJson,
+    packetFingerprint: evaluations.packetFingerprint
+  }).from(evaluations).where(eq(evaluations.runId, runId)).orderBy(asc(evaluations.ordinal)).all();
+}
+function loadQuestionGroups(database, runId) {
+  return database.select({
+    groupId: questionGroups.groupId,
+    contextId: questionGroups.contextId,
+    respondentId: questionGroups.respondentId,
+    stateJson: questionGroups.stateJson,
+    questionIdsJson: questionGroups.questionIdsJson
+  }).from(questionGroups).where(eq(questionGroups.runId, runId)).orderBy(asc(questionGroups.ordinal)).all();
+}
+
+// src/infrastructure/sqlite/journey-request.ts
+function storedJourneyIdentity(row) {
+  const stored = parseJson(row.request_json, "request");
+  if (typeof stored !== "object" || stored === null || !("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) {
+    throw new RunStoreError("data_integrity_error", "Stored journey request has an invalid shape.");
+  }
+  const parsedRequest = runRequestSchema.safeParse(stored.request);
+  const requestFingerprint = asText(stored.requestFingerprint, "request fingerprint");
+  const compilerFingerprint = asText(stored.compilerFingerprint, "compiler fingerprint");
+  if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || requestFingerprint !== asText(row.request_fingerprint, "request fingerprint") || hashCanonical({ request: parsedRequest.data, compilerFingerprint }) !== requestFingerprint) {
+    throw new RunStoreError("data_integrity_error", "Stored journey request or fingerprint is invalid.");
+  }
+  return { request: parsedRequest.data, compilerFingerprint, requestFingerprint };
+}
+
+// src/infrastructure/sqlite/commands/acceptance.ts
+var SQLITE_INSERT_BATCH_SIZE = 250;
+function chunks(values, size) {
+  const result = [];
+  for (let index2 = 0; index2 < values.length; index2 += size) result.push(values.slice(index2, index2 + size));
+  return result;
+}
+function insertAcceptedRun(database, identity, prepared) {
+  database.insert(runs).values({
+    ...identity,
+    label: prepared.request.label ?? null,
+    status: "prepared",
+    requestJson: JSON.stringify({
+      request: prepared.request,
+      requestFingerprint: prepared.requestFingerprint,
+      compilerFingerprint: prepared.compilerFingerprint,
+      ..."lineage" in prepared && prepared.lineage ? { lineage: prepared.lineage } : {}
+    }),
+    evaluationCount: prepared.evaluations.length,
+    maxCalls: prepared.request.maxCalls
+  }).run();
+}
+function insertPreparedRunData(database, runId, prepared) {
+  const groups = prepared.groups ?? [];
+  const groupRows = groups.map((group, ordinal) => ({
+    groupId: group.groupId,
+    runId,
+    ordinal,
+    contextId: group.contextId,
+    respondentId: group.respondentId,
+    stateJson: JSON.stringify(group.state),
+    questionIdsJson: JSON.stringify(group.questionIds)
+  }));
+  for (const batch of chunks(groupRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(questionGroups).values(batch).run();
+  const evaluationRows = prepared.evaluations.map((evaluation, ordinal) => ({
+    evaluationId: evaluation.evaluationId,
+    runId,
+    ordinal,
+    contextId: evaluation.contextId,
+    respondentId: evaluation.respondentId,
+    questionId: evaluation.questionId,
+    groupId: evaluation.groupId,
+    packetJson: JSON.stringify(evaluation.packet),
+    packetFingerprint: evaluation.packetFingerprint,
+    status: "pending"
+  }));
+  for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
+}
+function insertPreparedJourneyData(database, runId, prepared) {
+  const groups = new Map(prepared.evaluations.map((evaluation) => [evaluation.contextId, {
+    groupId: evaluation.contextId,
+    runId,
+    ordinal: evaluation.ordinal,
+    contextId: evaluation.contextId,
+    respondentId: evaluation.respondentId,
+    stateJson: JSON.stringify(evaluation.packet.state),
+    questionIdsJson: JSON.stringify([evaluation.questionId])
+  }]));
+  for (const batch of chunks([...groups.values()], SQLITE_INSERT_BATCH_SIZE)) database.insert(questionGroups).values(batch).onConflictDoNothing().run();
+  const evaluationRows = prepared.evaluations.map((evaluation) => ({
+    evaluationId: evaluation.evaluationId,
+    runId,
+    ordinal: evaluation.ordinal,
+    contextId: evaluation.contextId,
+    respondentId: evaluation.respondentId,
+    questionId: evaluation.questionId,
+    groupId: evaluation.contextId,
+    turnId: evaluation.turnId,
+    nodeId: evaluation.nodeId,
+    pathId: evaluation.pathId,
+    occurrence: evaluation.occurrence,
+    packetJson: JSON.stringify(evaluation.packet),
+    packetFingerprint: evaluation.packetFingerprint,
+    status: "pending"
+  }));
+  for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
+  const respondentRows = prepared.respondents.map((respondent) => ({
+    runId,
+    respondentId: respondent.respondentId,
+    status: respondent.status,
+    currentNodeId: respondent.currentNodeId,
+    currentTurnId: respondent.currentTurnId,
+    currentContextId: respondent.currentContextId,
+    revision: respondent.revision,
+    eventsJson: JSON.stringify(respondent.events),
+    routeJson: JSON.stringify(respondent.route),
+    outcome: respondent.outcome ?? null
+  }));
+  for (const batch of chunks(respondentRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(journeyRespondents).values(batch).run();
+}
+
+// node_modules/drizzle-orm/node-sqlite/session.js
+var NodeSQLiteSession = class extends SQLiteAsyncSession {
+  static [entityKind] = "SQLJsSession";
+  logger;
+  constructor(client, dialect, relations, options2 = {}) {
+    super(dialect, "sync");
+    this.client = client;
+    this.relations = relations;
+    this.options = options2;
+    this.logger = options2.logger ?? new NoopLogger();
+  }
+  prepareQuery(query, mode, _prepare, executeMethod, mapper, queryMetadata) {
+    let stmt;
+    try {
+      stmt = this.client.prepare(query.sql);
+    } catch (e) {
+      throw new DrizzleQueryError(query.sql, query.params, e);
+    }
+    return new SQLiteAsyncPreparedQuery("sync", executeMethod, {
+      all: (params) => {
+        stmt.setReturnArrays(mode === "arrays");
+        const res = stmt.all(...params);
+        if (mode === "objects") return res.map((row) => ({ ...row }));
+        return res;
+      },
+      get: (params) => {
+        stmt.setReturnArrays(mode === "arrays");
+        const res = stmt.get(...params);
+        if (res && mode === "objects") return { ...res };
+        return res;
+      },
+      run: (params) => {
+        stmt.setReturnArrays(false);
+        return stmt.run(...params);
+      },
+      values: (params) => {
+        stmt.setReturnArrays(true);
+        return stmt.all(...params);
+      }
+    }, query, mapper, mode, this.logger, void 0, queryMetadata, void 0);
+  }
+  transaction(transaction, config2 = {}) {
+    const tx = new NodeSQLiteTransaction("sync", this.dialect, this, this.relations);
+    this.run(sql.raw(`begin${config2.behavior ? ` ${config2.behavior}` : ""}`));
+    try {
+      const result = transaction(tx);
+      this.run(sql`commit`);
+      return result;
+    } catch (err) {
+      this.run(sql`rollback`);
+      throw err;
+    }
+  }
+};
+var NodeSQLiteTransaction = class NodeSQLiteTransaction2 extends SQLiteAsyncTransaction {
+  static [entityKind] = "SQLJsTransaction";
+  transaction(transaction) {
+    const savepointName = `sp${this.nestedIndex + 1}`;
+    const tx = new NodeSQLiteTransaction2("sync", this.dialect, this.session, this._.relations, this.nestedIndex + 1);
+    tx.run(sql.raw(`savepoint ${savepointName}`));
+    try {
+      const result = transaction(tx);
+      tx.run(sql.raw(`release savepoint ${savepointName}`));
+      return result;
+    } catch (err) {
+      tx.run(sql.raw(`rollback to savepoint ${savepointName}`));
+      throw err;
+    }
+  }
+};
+
+// node_modules/drizzle-orm/node-sqlite/driver.js
+import { DatabaseSync } from "node:sqlite";
+var NodeSQLiteDatabase = class extends SQLiteAsyncDatabase {
+  static [entityKind] = "NodeSQLiteDatabase";
+};
+function construct(client, config2 = {}) {
+  const dialect = new SQLiteDialect({ useJitMappers: jitCompatCheck(config2.jit) });
+  let logger;
+  if (config2.logger === true) logger = new DefaultLogger();
+  else if (config2.logger !== false) logger = config2.logger;
+  const relations = config2.relations ?? {};
+  const db = new NodeSQLiteDatabase("sync", dialect, new NodeSQLiteSession(client, dialect, relations, { logger }), relations);
+  db.$client = client;
+  return db;
+}
+function drizzle(...params) {
+  if (params[0] === void 0 || typeof params[0] === "string") return construct(params[0] === void 0 ? new DatabaseSync(":memory:") : new DatabaseSync(params[0]), params[1]);
+  const { connection, client, ...config2 } = params[0];
+  if (client) return construct(client, config2);
+  if (typeof connection === "object") {
+    const { path: path14, ...options2 } = connection;
+    return construct(new DatabaseSync(path14 ?? ":memory:", options2), config2);
+  }
+  return construct(new DatabaseSync(connection ?? ":memory:"), config2);
+}
+(function(_drizzle) {
+  function mock(config2) {
+    return construct({}, config2);
+  }
+  _drizzle.mock = mock;
+})(drizzle || (drizzle = {}));
+
+// src/infrastructure/sqlite/schema.ts
+import { createHash as createHash8, randomUUID as randomUUID3 } from "node:crypto";
+import { existsSync as existsSync2, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import path9 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
+var BASELINE_SCHEMA_VERSION = 9;
+var SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
+var BASELINE_MIGRATION_ID = "baseline-v9";
+var MIGRATION_BACKUP_RETRIES = 3;
+var PREPARED_LAUNCH_WINDOW_MS = 3e4;
+var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
+var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
+function baselineSqlPath() {
+  const candidates = [
+    fileURLToPath2(new URL("../../../migrations/0000_baseline_v9/migration.sql", import.meta.url)),
+    fileURLToPath2(new URL("./migrations/0000_baseline_v9/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync2);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 9 migration asset is missing from this Sheg installation.");
+  return match;
+}
+function baselineMigration() {
+  return {
+    id: BASELINE_MIGRATION_ID,
+    fromVersion: 0,
+    toVersion: BASELINE_SCHEMA_VERSION,
+    sql: readFileSync(baselineSqlPath(), "utf8")
+  };
+}
+function registeredMigrations() {
+  return [baselineMigration()];
+}
+function migrationChecksum(migration) {
+  return createHash8("sha256").update(migration.sql).digest("hex");
+}
+function isTransientSqliteLock(error62) {
+  return typeof error62 === "object" && error62 !== null && "errcode" in error62 && typeof error62.errcode === "number" && SQLITE_TRANSIENT_LOCK_CODES.has(error62.errcode);
+}
+function enableWriteAheadLogging(database) {
+  for (const delayMs of SQLITE_WAL_RETRY_DELAYS_MS) {
     try {
       database.exec("PRAGMA journal_mode = WAL");
       return;
     } catch (error62) {
-      if (!isTransientSqliteLock(error62) || Date.now() >= deadline) throw error62;
-      Atomics.wait(waitCell, 0, 0, Math.min(25, deadline - Date.now()));
+      if (!isTransientSqliteLock(error62)) throw error62;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
     }
   }
+  database.exec("PRAGMA journal_mode = WAL");
 }
-var SCHEMA_MIGRATIONS = [{
-  fromVersion: 7,
-  toVersion: 8,
-  id: "schema-v7-to-v8-ledger",
-  apply(database) {
-    database.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL)");
-    database.prepare("INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (?, ?, ?)").run(8, "schema-v7-to-v8-ledger", (/* @__PURE__ */ new Date()).toISOString());
-  }
-}];
-function hasMigrationPath(fromVersion, targetVersion = SCHEMA_VERSION) {
-  return hasSequentialMigrationPath(fromVersion, targetVersion, SCHEMA_MIGRATIONS);
+function runMigrationSql(database, migrationSql) {
+  const statements = migrationSql.split("--> statement-breakpoint").map((statement) => statement.trim()).filter(Boolean);
+  if (statements.length === 0) throw new RunStoreError("datastore_schema_invalid", "A schema migration contained no SQL statements.");
+  for (const statement of statements) database.exec(statement);
 }
-var REQUIRED_SCHEMA_COLUMNS = {
-  runs: ["run_id", "submission_id", "request_fingerprint", "created_at", "created_ms", "label", "status", "request_json", "evaluation_count", "max_calls", "used_calls", "reserved_calls", "cancel_requested", "owner_token", "owner_pid", "lease_expires_ms", "failure_scope", "failure_code", "failure_message"],
-  question_groups: ["group_id", "run_id", "ordinal", "context_id", "respondent_id", "state_json", "question_ids_json"],
-  evaluations: ["evaluation_id", "run_id", "ordinal", "context_id", "respondent_id", "question_id", "group_id", "turn_id", "node_id", "path_id", "occurrence", "packet_json", "packet_fingerprint", "status", "result_json", "failure_code", "failure_message", "failure_detail_json"],
-  journey_respondents: ["run_id", "respondent_id", "status", "current_node_id", "current_turn_id", "current_context_id", "revision", "events_json", "route_json", "outcome"],
-  attempts: ["attempt_sequence", "attempt_id", "run_id", "group_id", "evaluation_id", "packet_fingerprint", "owner_token", "status", "started_ms", "settled_ms", "result_json", "execution_json", "failure_code", "failure_message", "failure_scope"],
-  attempt_evaluations: ["attempt_id", "evaluation_id", "failure_json"],
-  evaluation_answer_attempts: ["evaluation_id", "attempt_id"],
-  schema_migrations: ["version", "migration_id", "applied_at"]
-};
-function validateSchemaShape(database) {
-  const rows = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
-  const actual = new Set(rows.map((row) => asText(row.name, "schema table name")));
-  for (const [table, requiredColumns] of Object.entries(REQUIRED_SCHEMA_COLUMNS)) {
-    if (!actual.has(table)) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.");
-    const columns = database.prepare(`PRAGMA table_info("${table}")`).all();
-    const columnNames = new Set(columns.map((column) => asText(column.name, `${table} column name`)));
-    if (requiredColumns.some((column) => !columnNames.has(column))) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.");
+function pragmaNumber(database, name2) {
+  const row = database.prepare(`PRAGMA ${name2}`).get();
+  return asNumber(row?.[name2], `SQLite ${name2}`);
+}
+function applicationTableCount(database) {
+  const row = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
+  return asNumber(row?.count, "application table count");
+}
+function validateSchemaShape(database, migrations = registeredMigrations()) {
+  const existingTables = new Set(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all().map((row) => asText(row.name, "schema table name")));
+  for (const table of Object.values(sqliteTables)) {
+    const definition = getTableConfig(table);
+    if (!existingTables.has(definition.name)) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.");
+    const actualColumns = new Map(database.prepare(`PRAGMA table_info("${definition.name}")`).all().map((column) => [asText(column.name, `${definition.name} column name`), column]));
+    const primaryKeyColumnCount = [...actualColumns.values()].filter((column) => asNumber(column.pk, `${definition.name} primary key position`) > 0).length;
+    for (const expected of definition.columns) {
+      const actual = actualColumns.get(expected.name);
+      const implicitIntegerPrimaryKey = actual !== void 0 && primaryKeyColumnCount === 1 && asNumber(actual.pk, `${definition.name}.${expected.name} primary key position`) === 1 && actual.type === "INTEGER";
+      if (!actual || expected.notNull && asNumber(actual.notnull, `${definition.name}.${expected.name} nullability`) !== 1 && !implicitIntegerPrimaryKey) {
+        throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore is missing required schema objects. Preserve its original files and use run_storage to inspect recovery options.");
+      }
+    }
   }
-  const migration = database.prepare("SELECT migration_id FROM schema_migrations WHERE version = ?").get(SCHEMA_VERSION);
-  const migrationId = migration?.migration_id;
-  const validMigrationIds = [`baseline-v${SCHEMA_VERSION}`, ...SCHEMA_MIGRATIONS.filter(({ toVersion }) => toVersion === SCHEMA_VERSION).map(({ id }) => id)];
-  if (typeof migrationId !== "string" || !validMigrationIds.includes(migrationId)) throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore has no recognized applied-migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.");
+  const applied = database.prepare("SELECT version, migration_id, checksum FROM schema_migrations ORDER BY version").all();
+  const expectedChain = [...migrations].sort((left, right) => left.toVersion - right.toVersion);
+  let expectedFromVersion = 0;
+  const historyMatches = expectedChain.length === applied.length && expectedChain.every((migration, index2) => {
+    const row = applied[index2];
+    const sequential = migration.fromVersion === expectedFromVersion && migration.toVersion === expectedFromVersion + (expectedFromVersion === 0 ? migration.toVersion : 1);
+    expectedFromVersion = migration.toVersion;
+    return sequential && asNumber(row?.version, "migration version") === migration.toVersion && row?.migration_id === migration.id && row.checksum === migrationChecksum(migration);
+  });
+  if (!historyMatches || pragmaNumber(database, "user_version") !== SCHEMA_VERSION || expectedChain.at(-1)?.toVersion !== SCHEMA_VERSION) {
+    throw new RunStoreError("datastore_schema_invalid", "The Sheg datastore has no recognized migration record for its current schema. Preserve its original files and use run_storage to inspect recovery options.");
+  }
 }
 function checkDatabaseIntegrity(database, checkForeignKeys = true) {
   const integrity = database.prepare("PRAGMA integrity_check").all();
@@ -24453,12 +29824,9 @@ function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `b
   const escapedPath = backupPath.replaceAll("'", "''");
   try {
     database.exec(`VACUUM INTO '${escapedPath}'`);
-    const backup = new DatabaseSync(backupPath, { readOnly: true });
+    const backup = new DatabaseSync2(backupPath, { readOnly: true });
     try {
-      const versionRow = backup.prepare("PRAGMA user_version").get();
-      if (asNumber(versionRow?.user_version, "backup schema version") !== fromVersion) {
-        throw new RunStoreError("migration_backup_failed", "The datastore backup does not match the source schema version.");
-      }
+      if (pragmaNumber(backup, "user_version") !== fromVersion) throw new RunStoreError("migration_backup_failed", "The datastore backup does not match the source schema version.");
       checkDatabaseIntegrity(backup, checkForeignKeys);
     } finally {
       backup.close();
@@ -24473,215 +29841,144 @@ function verifiedBackup(database, dataRoot, fromVersion, toVersion, purpose = `b
     throw new RunStoreError("migration_backup_failed", "Sheg could not verify a recoverable datastore backup; the source database was not migrated.", { cause: error62 });
   }
 }
-function migrate(database, dataRoot, startingVersion) {
-  let version2 = startingVersion;
-  while (version2 < SCHEMA_VERSION) {
-    const step = SCHEMA_MIGRATIONS.find(({ fromVersion }) => fromVersion === version2);
-    if (!step || step.toVersion !== step.fromVersion + 1 || step.toVersion > SCHEMA_VERSION) {
-      throw new RunStoreError("unsupported_schema_version", `The Sheg datastore schema ${version2} has no supported migration path to ${SCHEMA_VERSION}. Preserve the database and use run_storage to inspect recovery options.`);
-    }
-    const liveVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
-    if (liveVersion === step.toVersion) {
-      version2 = liveVersion;
-      continue;
-    }
-    if (liveVersion !== step.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${liveVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
+function liveWorkExists(database, nowMs) {
+  const row = database.prepare(`SELECT 1 AS found FROM runs
+    WHERE (status = 'prepared' AND COALESCE(lease_expires_ms, created_ms + ?) > ?)
+       OR (status = 'running' AND lease_expires_ms > ?)
+    LIMIT 1`).get(PREPARED_LAUNCH_WINDOW_MS, nowMs, nowMs);
+  return row !== void 0;
+}
+function applyUpgrade(database, dataRoot, migration, now) {
+  for (let retry = 0; retry < MIGRATION_BACKUP_RETRIES; retry += 1) {
+    const observedVersion = pragmaNumber(database, "user_version");
+    if (observedVersion === migration.toVersion) return;
+    if (observedVersion !== migration.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${observedVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
+    if (observedVersion === SCHEMA_VERSION) validateSchemaShape(database);
+    if (liveWorkExists(database, now())) throw new RunStoreError("migration_deferred", "A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.");
+    const beforeBackupDataVersion = pragmaNumber(database, "data_version");
+    const backupPath = verifiedBackup(database, dataRoot, migration.fromVersion, migration.toVersion);
+    let transactionOpen = false;
+    let foreignKeysDisabled = false;
     try {
-      verifiedBackup(database, dataRoot, step.fromVersion, step.toVersion);
-    } catch (error62) {
-      const updatedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
-      if (updatedVersion === step.toVersion) {
-        version2 = updatedVersion;
-        continue;
-      }
-      throw error62;
-    }
-    database.exec("BEGIN IMMEDIATE");
-    try {
-      const lockedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
-      if (lockedVersion === step.toVersion) {
-        database.exec("COMMIT");
-        version2 = lockedVersion;
-        continue;
-      }
-      if (lockedVersion !== step.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
-      step.apply(database);
-      database.exec(`PRAGMA user_version = ${step.toVersion}`);
-      checkDatabaseIntegrity(database);
-      if (step.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
-      database.exec("COMMIT");
-      version2 = step.toVersion;
-    } catch (error62) {
-      try {
+      database.exec("PRAGMA foreign_keys = OFF");
+      foreignKeysDisabled = Number(database.prepare("PRAGMA foreign_keys").get().foreign_keys) === 0;
+      if (!foreignKeysDisabled) throw new RunStoreError("migration_failed", "Sheg could not safely disable foreign keys for a schema rebuild.");
+      database.exec("BEGIN IMMEDIATE");
+      transactionOpen = true;
+      const lockedVersion = pragmaNumber(database, "user_version");
+      if (lockedVersion === migration.toVersion) {
         database.exec("ROLLBACK");
-      } catch {
+        transactionOpen = false;
+        unlinkSync(backupPath);
+        return;
+      }
+      if (lockedVersion !== migration.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
+      if (pragmaNumber(database, "data_version") !== beforeBackupDataVersion) {
+        database.exec("ROLLBACK");
+        transactionOpen = false;
+        unlinkSync(backupPath);
+        continue;
+      }
+      if (liveWorkExists(database, now())) throw new RunStoreError("migration_deferred", "A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.");
+      runMigrationSql(database, migration.sql);
+      const checksum = migrationChecksum(migration);
+      database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, applied_at) VALUES (?, ?, ?, ?)").run(migration.toVersion, migration.id, checksum, new Date(now()).toISOString());
+      database.exec(`PRAGMA user_version = ${migration.toVersion}`);
+      checkDatabaseIntegrity(database);
+      if (migration.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
+      database.exec("COMMIT");
+      transactionOpen = false;
+      return;
+    } catch (error62) {
+      if (transactionOpen) {
+        try {
+          database.exec("ROLLBACK");
+        } catch {
+        }
+      }
+      if (isTransientSqliteLock(error62) && retry + 1 < MIGRATION_BACKUP_RETRIES) {
+        try {
+          unlinkSync(backupPath);
+        } catch {
+        }
+        continue;
       }
       if (error62 instanceof RunStoreError) throw error62;
-      throw new RunStoreError("migration_failed", `Sheg could not migrate the datastore from schema ${step.fromVersion} to ${step.toVersion}. A verified backup was retained; use run_storage to inspect recovery options.`, { cause: error62 });
+      throw new RunStoreError("migration_failed", `Sheg could not migrate the datastore from schema ${migration.fromVersion} to ${migration.toVersion}. A verified backup was retained; use run_storage to inspect recovery options.`, { cause: error62 });
+    } finally {
+      if (foreignKeysDisabled) database.exec("PRAGMA foreign_keys = ON");
     }
   }
+  throw new RunStoreError("migration_backup_stale", "The datastore changed while Sheg prepared its migration backup. No migration was applied; retry when other writers are idle.");
+}
+function applySchemaMigrations(database, dataRoot, migrations, targetVersion, now = Date.now) {
+  let currentVersion = pragmaNumber(database, "user_version");
+  while (currentVersion < targetVersion) {
+    const migration = migrations.find(({ fromVersion }) => fromVersion === currentVersion);
+    if (!migration || migration.toVersion !== currentVersion + 1 && currentVersion !== 0) {
+      throw new RunStoreError("unsupported_schema_version", `The Sheg datastore schema ${currentVersion} has no supported sequential migration path to ${targetVersion}. Preserve it and use run_storage to inspect recovery options.`);
+    }
+    if (currentVersion === 0) {
+      if (applicationTableCount(database) !== 0) throw new RunStoreError("unsupported_schema_version", "The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.");
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const lockedVersion = pragmaNumber(database, "user_version");
+        const lockedTables = applicationTableCount(database);
+        if (lockedVersion === SCHEMA_VERSION && lockedTables > 0) {
+          database.exec("COMMIT");
+          validateSchemaShape(database);
+          return;
+        }
+        if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError("unsupported_schema_version", "The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.");
+        runMigrationSql(database, migration.sql);
+        database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, applied_at) VALUES (?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), new Date(now()).toISOString());
+        database.exec(`PRAGMA user_version = ${migration.toVersion}`);
+        checkDatabaseIntegrity(database);
+        validateSchemaShape(database);
+        database.exec("COMMIT");
+      } catch (error62) {
+        try {
+          database.exec("ROLLBACK");
+        } catch {
+        }
+        if (error62 instanceof RunStoreError) throw error62;
+        throw new RunStoreError("migration_failed", "Sheg could not initialize its schema; no partial schema was retained.", { cause: error62 });
+      }
+    } else {
+      applyUpgrade(database, dataRoot, migration, now);
+    }
+    currentVersion = pragmaNumber(database, "user_version");
+  }
+  if (currentVersion !== targetVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore schema ${currentVersion} is newer than this migration target ${targetVersion}. Preserve it and use run_storage to inspect compatibility.`);
+}
+function hasMigrationPath(fromVersion, targetVersion = SCHEMA_VERSION) {
+  if (!Number.isSafeInteger(fromVersion) || !Number.isSafeInteger(targetVersion) || fromVersion < 0 || targetVersion < fromVersion) return false;
+  const migrations = registeredMigrations();
+  let current = fromVersion;
+  while (current < targetVersion) {
+    const next = migrations.find(({ fromVersion: migrationStart }) => migrationStart === current);
+    if (!next) return false;
+    current = next.toVersion;
+  }
+  return current === targetVersion;
 }
 function initialize(database, dataRoot) {
-  const versionRow = database.prepare("PRAGMA user_version").get();
-  const version2 = asNumber(versionRow?.user_version, "schema version");
-  const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
-  const tableCount = asNumber(existing?.count, "table count");
-  if (version2 === 0 && tableCount !== 0) {
-    throw new RunStoreError("unsupported_schema_version", "The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.");
-  }
-  if (version2 > SCHEMA_VERSION) {
-    throw new RunStoreError("unsupported_schema_version", `The Sheg database schema version ${version2} is newer than this build. Preserve it and use run_storage to inspect recovery options.`);
-  }
-  if (version2 !== 0 && version2 < 7) {
-    throw new RunStoreError("unsupported_schema_version", `The Sheg database schema version ${version2} is not supported. Export or reset this pre-v1 datastore only through explicit run_storage recovery.`);
+  const version2 = pragmaNumber(database, "user_version");
+  if (version2 > SCHEMA_VERSION) throw new RunStoreError("unsupported_schema_version", `The Sheg database schema version ${version2} is newer than this build. Preserve it and use run_storage to inspect recovery options.`);
+  if (version2 === 0 && applicationTableCount(database) !== 0) throw new RunStoreError("unsupported_schema_version", "The datastore contains unversioned tables and cannot be opened safely. Preserve it and use run_storage to inspect recovery options.");
+  if (version2 !== 0 && version2 !== SCHEMA_VERSION && !hasMigrationPath(version2, SCHEMA_VERSION)) {
+    throw new RunStoreError("unsupported_schema_version", `The Sheg datastore schema version ${version2} predates the v0.3.0 release baseline or has no supported migration path to ${SCHEMA_VERSION}. Preserve it and use run_storage to inspect options.`);
   }
   database.exec("PRAGMA foreign_keys = ON;");
   database.exec("PRAGMA synchronous = FULL;");
-  if (version2 === SCHEMA_VERSION) {
-    checkDatabaseIntegrity(database);
+  enableWriteAheadLogging(database);
+  if (version2 < SCHEMA_VERSION) applySchemaMigrations(database, dataRoot, registeredMigrations(), SCHEMA_VERSION);
+  else {
     validateSchemaShape(database);
-    setWriteAheadLogMode(database);
-    return;
-  }
-  if (version2 >= 7 && version2 < SCHEMA_VERSION) {
-    migrate(database, dataRoot, version2);
-    setWriteAheadLogMode(database);
-    return;
-  }
-  setWriteAheadLogMode(database);
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    const lockedVersion = asNumber(database.prepare("PRAGMA user_version").get().user_version, "schema version");
-    const lockedTables = asNumber(database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get().count, "table count");
-    if (lockedVersion === SCHEMA_VERSION && lockedTables > 0) {
-      database.exec("COMMIT");
-      checkDatabaseIntegrity(database);
-      return;
-    }
-    if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError("unsupported_schema_version", "The Sheg datastore changed while being initialized; preserve it and use run_storage to inspect compatibility.");
-    database.exec(`
-    CREATE TABLE runs (
-      run_id TEXT PRIMARY KEY,
-      submission_id TEXT NOT NULL UNIQUE,
-      request_fingerprint TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      created_ms INTEGER NOT NULL,
-      label TEXT,
-      status TEXT NOT NULL CHECK (status IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')),
-      request_json TEXT NOT NULL,
-      evaluation_count INTEGER NOT NULL CHECK (evaluation_count > 0),
-      max_calls INTEGER NOT NULL CHECK (max_calls > 0),
-      used_calls INTEGER NOT NULL DEFAULT 0 CHECK (used_calls >= 0),
-      reserved_calls INTEGER NOT NULL DEFAULT 0 CHECK (reserved_calls >= 0),
-      cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
-      owner_token TEXT,
-      owner_pid INTEGER,
-      lease_expires_ms INTEGER,
-      failure_scope TEXT CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run')),
-      failure_code TEXT,
-      failure_message TEXT,
-      CHECK (used_calls + reserved_calls <= max_calls)
-    );
-    CREATE TABLE evaluations (
-      evaluation_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-      context_id TEXT NOT NULL,
-      respondent_id TEXT NOT NULL,
-      question_id TEXT NOT NULL,
-      group_id TEXT NOT NULL,
-      turn_id TEXT,
-      node_id TEXT,
-      path_id TEXT,
-      occurrence INTEGER,
-      packet_json TEXT NOT NULL,
-      packet_fingerprint TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'failed', 'unreached')),
-      result_json TEXT,
-      failure_code TEXT,
-      failure_message TEXT,
-      failure_detail_json TEXT,
-      UNIQUE (run_id, ordinal),
-      UNIQUE (run_id, evaluation_id),
-      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE,
-      UNIQUE (run_id, turn_id),
-      UNIQUE (run_id, respondent_id, node_id, occurrence),
-      CHECK ((turn_id IS NULL AND node_id IS NULL AND path_id IS NULL AND occurrence IS NULL) OR
-             (turn_id IS NOT NULL AND node_id IS NOT NULL AND path_id IS NOT NULL AND occurrence IS NOT NULL AND occurrence >= 1))
-    );
-    CREATE TABLE journey_respondents (
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      respondent_id TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed', 'unreached')),
-      current_node_id TEXT,
-      current_turn_id TEXT,
-      current_context_id TEXT,
-      revision INTEGER NOT NULL CHECK (revision >= 0),
-      events_json TEXT NOT NULL,
-      route_json TEXT NOT NULL,
-      outcome TEXT,
-      PRIMARY KEY (run_id, respondent_id),
-      CHECK ((status = 'active' AND current_node_id IS NOT NULL AND current_turn_id IS NOT NULL AND current_context_id IS NOT NULL) OR
-             (status <> 'active' AND current_node_id IS NULL AND current_turn_id IS NULL AND current_context_id IS NULL))
-    );
-    CREATE TABLE attempts (
-      attempt_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-      attempt_id TEXT NOT NULL UNIQUE,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      group_id TEXT NOT NULL,
-      evaluation_id TEXT NOT NULL,
-      packet_fingerprint TEXT NOT NULL,
-      owner_token TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('reserved', 'answered', 'failed', 'uncertain')),
-      started_ms INTEGER NOT NULL,
-      settled_ms INTEGER,
-      result_json TEXT,
-      execution_json TEXT,
-      failure_code TEXT,
-      failure_message TEXT,
-      failure_scope TEXT CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run')),
-      FOREIGN KEY (run_id, evaluation_id) REFERENCES evaluations(run_id, evaluation_id) ON DELETE CASCADE,
-      FOREIGN KEY (run_id, group_id) REFERENCES question_groups(run_id, group_id) ON DELETE CASCADE
-    );
-    CREATE TABLE question_groups (
-      group_id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      ordinal INTEGER NOT NULL,
-      context_id TEXT NOT NULL,
-      respondent_id TEXT NOT NULL,
-      state_json TEXT NOT NULL,
-      question_ids_json TEXT NOT NULL,
-      UNIQUE (run_id, ordinal),
-      UNIQUE (run_id, group_id)
-    );
-    CREATE TABLE attempt_evaluations (
-      attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE CASCADE,
-      evaluation_id TEXT NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
-      failure_json TEXT,
-      PRIMARY KEY (attempt_id, evaluation_id)
-    );
-    CREATE TABLE evaluation_answer_attempts (
-      evaluation_id TEXT PRIMARY KEY REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
-      attempt_id TEXT NOT NULL,
-      FOREIGN KEY (attempt_id, evaluation_id) REFERENCES attempt_evaluations(attempt_id, evaluation_id) ON DELETE CASCADE
-    );
-    CREATE INDEX evaluations_run_ordinal ON evaluations(run_id, ordinal);
-    CREATE INDEX runs_created_identity ON runs(created_ms, run_id);
-    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL);
-    INSERT INTO schema_migrations (version, migration_id, applied_at) VALUES (${SCHEMA_VERSION}, 'baseline-v${SCHEMA_VERSION}', '${(/* @__PURE__ */ new Date()).toISOString()}');
-    PRAGMA user_version = ${SCHEMA_VERSION};
-  `);
-    database.exec("COMMIT");
-  } catch (error62) {
-    try {
-      database.exec("ROLLBACK");
-    } catch {
-    }
-    throw error62;
   }
 }
 function openInitializedDatabase(databasePath, dataRoot) {
-  const database = new DatabaseSync(databasePath, { timeout: 5e3, enableForeignKeyConstraints: true });
+  const database = new DatabaseSync2(databasePath, { timeout: 5e3, enableForeignKeyConstraints: true });
   try {
     initialize(database, dataRoot);
   } catch (error62) {
@@ -24691,18 +29988,34 @@ function openInitializedDatabase(databasePath, dataRoot) {
   return database;
 }
 
+// src/infrastructure/sqlite/connection.ts
+function openSqliteConnection(databasePath, dataRoot) {
+  const client = openInitializedDatabase(databasePath, dataRoot);
+  const orm = drizzle({ client });
+  let closed = false;
+  return {
+    client,
+    orm,
+    close() {
+      if (closed) return;
+      client.close();
+      closed = true;
+    }
+  };
+}
+
 // src/infrastructure/sqlite/recovery.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync, renameSync, statSync, unlinkSync as unlinkSync2 } from "node:fs";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync, renameSync, statSync, unlinkSync as unlinkSync2 } from "node:fs";
 import path10 from "node:path";
-import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
+import { DatabaseSync as DatabaseSync3 } from "node:sqlite";
 function inspectRunStoreCompatibility(dataRoot) {
   if (!path10.isAbsolute(dataRoot)) return { status: "unreadable", schemaVersion: null, targetSchemaVersion: SCHEMA_VERSION };
   const databasePath = path10.join(dataRoot, "runs.sqlite");
-  if (!existsSync2(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
+  if (!existsSync3(databasePath)) return { status: "uninitialized", schemaVersion: 0, targetSchemaVersion: SCHEMA_VERSION };
   let database;
   try {
-    database = new DatabaseSync2(databasePath, { readOnly: true, timeout: 5e3 });
+    database = new DatabaseSync3(databasePath, { readOnly: true, timeout: 5e3 });
     const versionRow = database.prepare("PRAGMA user_version").get();
     const version2 = asNumber(versionRow?.user_version, "schema version");
     const existing = database.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
@@ -24723,9 +30036,9 @@ function inspectRunStoreCompatibility(dataRoot) {
 }
 function runStoreBackupAvailable(dataRoot) {
   const backupRoot = path10.join(dataRoot, "backups");
-  if (!existsSync2(backupRoot)) return false;
+  if (!existsSync3(backupRoot)) return false;
   try {
-    return readdirSync(backupRoot).some((name) => name.startsWith("runs-schema-") && name.endsWith(".sqlite"));
+    return readdirSync(backupRoot).some((name2) => name2.startsWith("runs-schema-") && name2.endsWith(".sqlite"));
   } catch {
     return false;
   }
@@ -24736,7 +30049,7 @@ function resetRunStore(dataRoot, openFreshStore) {
   let inspectionDatabase;
   let version2;
   try {
-    inspectionDatabase = new DatabaseSync2(databasePath, { readOnly: true, timeout: 5e3 });
+    inspectionDatabase = new DatabaseSync3(databasePath, { readOnly: true, timeout: 5e3 });
     const versionRow = inspectionDatabase.prepare("PRAGMA user_version").get();
     version2 = asNumber(versionRow?.user_version, "schema version");
     checkDatabaseIntegrity(inspectionDatabase, false);
@@ -24745,7 +30058,7 @@ function resetRunStore(dataRoot, openFreshStore) {
     return resetUnreadableRunStore(dataRoot, databasePath, openFreshStore);
   }
   inspectionDatabase.close();
-  const database = new DatabaseSync2(databasePath, { timeout: 5e3 });
+  const database = new DatabaseSync3(databasePath, { timeout: 5e3 });
   try {
     verifiedBackup(database, dataRoot, version2, version2, "before-reset", false);
   } catch (error62) {
@@ -24760,7 +30073,7 @@ function resetRunStore(dataRoot, openFreshStore) {
   const moved = [];
   try {
     for (const original of files) {
-      if (!existsSync2(original)) continue;
+      if (!existsSync3(original)) continue;
       const archived = path10.join(recoveryRoot, path10.basename(original));
       renameSync(original, archived);
       moved.push({ original, archived });
@@ -24785,14 +30098,14 @@ function resetRunStore(dataRoot, openFreshStore) {
   }
 }
 function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore) {
-  if (!existsSync2(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
+  if (!existsSync3(databasePath)) throw new RunStoreError("recovery_backup_failed", "Sheg could not find the original datastore files to preserve; no reset was performed.");
   const recoveryRoot = path10.join(dataRoot, "recovery", randomUUID4());
   mkdirSync2(recoveryRoot, { recursive: true });
   const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`];
   const moved = [];
   try {
     for (const original of files) {
-      if (!existsSync2(original)) continue;
+      if (!existsSync3(original)) continue;
       const size = statSync(original).size;
       const archived = path10.join(recoveryRoot, path10.basename(original));
       renameSync(original, archived);
@@ -24906,8 +30219,8 @@ function validatePrepared(prepared) {
         const selected = mappings[0]?.selectedMaterial;
         const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
-        const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text }) => id === selected.materialId && text === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash8("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+        const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text: text2 }) => id === selected.materialId && text2 === selected.text);
+        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash9("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
         }
       }
@@ -25000,7 +30313,7 @@ function validatePreparedJourney(prepared) {
     }
   }
   const ordered = prepared.evaluations.toSorted((left, right) => left.ordinal - right.ordinal);
-  if (ordered.some((evaluation, index) => evaluation.ordinal !== index)) {
+  if (ordered.some((evaluation, index2) => evaluation.ordinal !== index2)) {
     throw new RunStoreError("invalid_prepared_run", "Prepared journey turn ordinals must be contiguous from zero.");
   }
   return { ...prepared, request: parsedRequest.data };
@@ -25008,27 +30321,76 @@ function validatePreparedJourney(prepared) {
 function openRunStore(dataRoot, options2 = {}) {
   if (!path11.isAbsolute(dataRoot)) throw new RunStoreError("invalid_data_root", "Sheg data directory must be an absolute path.");
   mkdirSync3(dataRoot, { recursive: true });
-  const database = openInitializedDatabase(path11.join(dataRoot, "runs.sqlite"), dataRoot);
-  return new SQLiteRunStore(database, path11.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+  const connection = openSqliteConnection(path11.join(dataRoot, "runs.sqlite"), dataRoot);
+  return new SQLiteRunStore(connection, path11.join(dataRoot, "runs.sqlite"), options2.now ?? Date.now);
+}
+function openRunPersistence(dataRoot, options2 = {}) {
+  return splitRunStore(openRunStore(dataRoot, options2));
+}
+function splitRunStore(store) {
+  const reads = {
+    findSubmission: store.findSubmission.bind(store),
+    getStatus: store.getStatus.bind(store),
+    evaluationStatuses: store.evaluationStatuses.bind(store),
+    getRequestKind: store.getRequestKind.bind(store),
+    getRequest: store.getRequest.bind(store),
+    getJourneyRun: store.getJourneyRun.bind(store),
+    getJourneyWorkerTurn: store.getJourneyWorkerTurn.bind(store),
+    list: store.list.bind(store),
+    queryEvidence: store.queryEvidence.bind(store),
+    getContext: store.getContext.bind(store),
+    resolveFollowOnSources: store.resolveFollowOnSources.bind(store),
+    answers: store.answers.bind(store),
+    attempts: store.attempts.bind(store),
+    previewDelete: store.previewDelete.bind(store),
+    storageInfo: store.storageInfo.bind(store),
+    close: store.close.bind(store)
+  };
+  const commands = {
+    accept: store.accept.bind(store),
+    acceptJourney: store.acceptJourney.bind(store),
+    requestCancel: store.requestCancel.bind(store),
+    resume: store.resume.bind(store),
+    deleteRuns: store.deleteRuns.bind(store),
+    optimizeStorage: store.optimizeStorage.bind(store),
+    claim: store.claim.bind(store),
+    heartbeat: store.heartbeat.bind(store),
+    reserveNext: store.reserveNext.bind(store),
+    reserveBatch: store.reserveBatch.bind(store),
+    settleBatch: store.settleBatch.bind(store),
+    settle: store.settle.bind(store),
+    settleJourney: store.settleJourney.bind(store),
+    finish: store.finish.bind(store),
+    failLaunch: store.failLaunch.bind(store),
+    failRun: store.failRun.bind(store),
+    reconcile: store.reconcile.bind(store),
+    reconcileMany: store.reconcileMany.bind(store),
+    reconcileActive: store.reconcileActive.bind(store)
+  };
+  return { reads, commands, close: store.close.bind(store) };
 }
 var SQLiteRunStore = class {
-  constructor(database, databasePath, now) {
-    this.database = database;
+  constructor(connection, databasePath, now) {
+    this.connection = connection;
     this.databasePath = databasePath;
     this.now = now;
+    this.database = connection.client;
   }
-  database;
+  connection;
   databasePath;
   now;
   isClosed = false;
+  database;
   findSubmission(submissionId, requestFingerprint) {
     this.ensureOpen();
-    const row = this.database.prepare("SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?").get(submissionId);
-    if (!row) return null;
-    if (asText(row.request_fingerprint, "request fingerprint") !== requestFingerprint) {
-      throw new RunStoreError("submission_conflict", "This submission ID has already been used with different request contents.");
-    }
-    return this.getStatus(asText(row.run_id, "run ID"));
+    return this.readTransaction(() => {
+      const row = findRunBySubmission(this.connection.orm, submissionId);
+      if (!row) return null;
+      if (row.requestFingerprint !== requestFingerprint) {
+        throw new RunStoreError("submission_conflict", "This submission ID has already been used with different request contents.");
+      }
+      return this.statusInside(row.runId);
+    });
   }
   accept(submissionId, preparedInput) {
     this.ensureOpen();
@@ -25059,38 +30421,8 @@ var SQLiteRunStore = class {
       const runId = randomUUID5();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
-      this.database.prepare(`INSERT INTO runs
-        (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls)
-        VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?)`).run(
-        runId,
-        submissionId,
-        prepared.requestFingerprint,
-        createdAt,
-        nowMs,
-        prepared.request.label ?? null,
-        JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint, ...prepared.lineage ? { lineage: prepared.lineage } : {} }),
-        prepared.evaluations.length,
-        prepared.request.maxCalls
-      );
-      const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
-        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, packet_json, packet_fingerprint, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
-      const insertGroup = this.database.prepare(`INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`);
-      for (const [ordinal, group] of (prepared.groups ?? []).entries()) insertGroup.run(group.groupId, runId, ordinal, group.contextId, group.respondentId, JSON.stringify(group.state), JSON.stringify(group.questionIds));
-      for (const [ordinal, evaluation] of prepared.evaluations.entries()) {
-        insertEvaluation.run(
-          evaluation.evaluationId,
-          runId,
-          ordinal,
-          evaluation.contextId,
-          evaluation.respondentId,
-          evaluation.questionId,
-          evaluation.groupId ?? null,
-          JSON.stringify(evaluation.packet),
-          evaluation.packetFingerprint
-        );
-      }
+      insertAcceptedRun(this.connection.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
+      insertPreparedRunData(this.connection.orm, runId, prepared);
       return { created: true, run: this.statusInside(runId) };
     });
   }
@@ -25110,227 +30442,254 @@ var SQLiteRunStore = class {
       const runId = randomUUID5();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
-      this.database.prepare(`INSERT INTO runs
-        (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls)
-        VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?)`).run(
-        runId,
-        submissionId,
-        prepared.requestFingerprint,
-        createdAt,
-        nowMs,
-        prepared.request.label ?? null,
-        JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint }),
-        prepared.evaluations.length,
-        prepared.request.maxCalls
-      );
-      const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
-        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
-      for (const evaluation of prepared.evaluations) {
-        const groupId = evaluation.contextId;
-        this.database.prepare(`INSERT OR IGNORE INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(groupId, runId, evaluation.ordinal, evaluation.contextId, evaluation.respondentId, JSON.stringify(evaluation.packet.state), JSON.stringify([evaluation.questionId]));
-        insertEvaluation.run(
-          evaluation.evaluationId,
-          runId,
-          evaluation.ordinal,
-          evaluation.contextId,
-          evaluation.respondentId,
-          evaluation.questionId,
-          groupId,
-          evaluation.turnId,
-          evaluation.nodeId,
-          evaluation.pathId,
-          evaluation.occurrence,
-          JSON.stringify(evaluation.packet),
-          evaluation.packetFingerprint
-        );
-      }
-      const insertState = this.database.prepare(`INSERT INTO journey_respondents
-        (run_id, respondent_id, status, current_node_id, current_turn_id, current_context_id, revision, events_json, route_json, outcome)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-      for (const state of prepared.respondents) {
-        insertState.run(
-          runId,
-          state.respondentId,
-          state.status,
-          state.currentNodeId,
-          state.currentTurnId,
-          state.currentContextId,
-          state.revision,
-          JSON.stringify(state.events),
-          JSON.stringify(state.route),
-          state.outcome ?? null
-        );
-      }
+      insertAcceptedRun(this.connection.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
+      insertPreparedJourneyData(this.connection.orm, runId, prepared);
       return { created: true, run: this.statusInside(runId) };
     });
   }
   getStatus(runId) {
     this.ensureOpen();
-    return this.transaction(() => {
-      this.reconcileInside(runId, this.now());
-      return this.statusInside(runId);
-    });
+    return this.readTransaction(() => this.statusInside(runId));
   }
   evaluationStatuses(runId) {
     this.ensureOpen();
-    this.getStatus(runId);
-    const rows = this.database.prepare("SELECT evaluation_id, status FROM evaluations WHERE run_id = ? ORDER BY ordinal").all(runId);
-    return rows.map((row) => ({
-      evaluationId: asText(row.evaluation_id, "evaluation ID"),
-      status: asText(row.status, "evaluation status")
-    }));
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      return loadEvaluationStatuses(this.connection.orm, runId).map((row) => ({
+        evaluationId: row.evaluationId,
+        status: row.status
+      }));
+    });
   }
   getRequestKind(runId) {
-    this.getStatus(runId);
-    const row = this.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(runId);
-    if (!row) throw this.notFound();
-    const stored = parseJson(row.request_json, "request");
-    if (typeof stored !== "object" || stored === null || !("request" in stored)) {
-      throw new RunStoreError("data_integrity_error", "Stored run request has an invalid shape.");
-    }
-    const request = runRequestSchema.safeParse(stored.request);
-    if (!request.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
-    return request.data.kind;
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      const row = loadAcceptedRequest(this.connection.orm, runId);
+      if (!row) throw this.notFound();
+      const stored = parseJson(row.requestJson, "request");
+      if (typeof stored !== "object" || stored === null || !("request" in stored)) {
+        throw new RunStoreError("data_integrity_error", "Stored run request has an invalid shape.");
+      }
+      const request = runRequestSchema.safeParse(stored.request);
+      if (!request.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+      return request.data.kind;
+    });
   }
   getRequest(runId) {
-    this.getStatus(runId);
-    const row = this.database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId);
-    if (!row) throw this.notFound();
-    const stored = parseJson(row.request_json, "request");
-    if (typeof stored !== "object" || stored === null || !("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) {
-      throw new RunStoreError("data_integrity_error", "Stored run request has an invalid shape.");
-    }
-    const evaluations = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? ORDER BY ordinal").all(runId);
-    const groups = this.database.prepare("SELECT * FROM question_groups WHERE run_id = ? ORDER BY ordinal").all(runId);
-    const prepared = stored;
-    const parsed = validatePrepared({ ...prepared, groups: groups.map((row2) => ({
-      groupId: asText(row2.group_id, "group ID"),
-      contextId: asText(row2.context_id, "context ID"),
-      respondentId: asText(row2.respondent_id, "respondent ID"),
-      state: parseJson(row2.state_json, "group state"),
-      questionIds: parseJson(row2.question_ids_json, "group question IDs")
-    })), evaluations: evaluations.map((row2) => ({
-      groupId: asText(row2.group_id, "group ID"),
-      evaluationId: asText(row2.evaluation_id, "evaluation ID"),
-      contextId: asText(row2.context_id, "context ID"),
-      respondentId: asText(row2.respondent_id, "respondent ID"),
-      questionId: asText(row2.question_id, "question ID"),
-      packet: parseJson(row2.packet_json, "frozen packet"),
-      packetFingerprint: asText(row2.packet_fingerprint, "packet fingerprint")
-    })) });
-    if (parsed.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint")) {
-      throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
-    }
-    if (parsed.request.kind === "follow-on" && parsed.lineage) {
-      const sourceAvailable = Boolean(this.database.prepare("SELECT 1 AS found FROM runs WHERE run_id = ?").get(parsed.lineage.sourceRunId));
-      return { ...parsed, lineage: { ...parsed.lineage, sourceAvailable, sourceRecordState: sourceAvailable ? "live" : "historical" } };
-    }
-    return parsed;
-  }
-  getJourneyRun(runId) {
-    this.getStatus(runId);
-    const row = this.database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId);
-    if (!row) throw this.notFound();
-    const stored = parseJson(row.request_json, "request");
-    if (typeof stored !== "object" || stored === null || !("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) {
-      throw new RunStoreError("data_integrity_error", "Stored journey request has an invalid shape.");
-    }
-    const parsedRequest = runRequestSchema.safeParse(stored.request);
-    if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || typeof stored.compilerFingerprint !== "string" || typeof stored.requestFingerprint !== "string" || stored.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint") || hashCanonical({ request: parsedRequest.data, compilerFingerprint: stored.compilerFingerprint }) !== stored.requestFingerprint) {
-      throw new RunStoreError("data_integrity_error", "Stored journey request or fingerprint is invalid.");
-    }
-    const evaluationRows = this.database.prepare("SELECT * FROM evaluations WHERE run_id = ? ORDER BY ordinal").all(runId);
-    const evaluations = evaluationRows.map((evaluation) => {
-      const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
-      const base = {
-        evaluationId: asText(evaluation.evaluation_id, "evaluation ID"),
-        contextId: asText(evaluation.context_id, "context ID"),
-        respondentId: asText(evaluation.respondent_id, "respondent ID"),
-        questionId: asText(evaluation.question_id, "question ID"),
-        packet,
-        packetFingerprint: asText(evaluation.packet_fingerprint, "packet fingerprint"),
-        turnId: asText(evaluation.turn_id, "turn ID"),
-        nodeId: asText(evaluation.node_id, "node ID"),
-        pathId: asText(evaluation.path_id, "path ID"),
-        occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
-        ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
-        status: asText(evaluation.status, "evaluation status")
-      };
-      if (!["pending", "answered", "failed", "unreached"].includes(base.status) || base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
-        throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      const row = loadAcceptedRequest(this.connection.orm, runId);
+      if (!row) throw this.notFound();
+      const stored = parseJson(row.requestJson, "request");
+      if (typeof stored !== "object" || stored === null || !("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) {
+        throw new RunStoreError("data_integrity_error", "Stored run request has an invalid shape.");
       }
-      if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
-        throw new RunStoreError("data_integrity_error", "Stored journey packet does not match its context identity.");
+      const evaluations2 = loadPreparedEvaluations(this.connection.orm, runId);
+      const groups = loadQuestionGroups(this.connection.orm, runId);
+      const prepared = stored;
+      const parsed = validatePrepared({ ...prepared, groups: groups.map((row2) => ({
+        groupId: row2.groupId,
+        contextId: row2.contextId,
+        respondentId: row2.respondentId,
+        state: parseJson(row2.stateJson, "group state"),
+        questionIds: parseJson(row2.questionIdsJson, "group question IDs")
+      })), evaluations: evaluations2.map((row2) => ({
+        groupId: row2.groupId,
+        evaluationId: row2.evaluationId,
+        contextId: row2.contextId,
+        respondentId: row2.respondentId,
+        questionId: row2.questionId,
+        packet: parseJson(row2.packetJson, "frozen packet"),
+        packetFingerprint: row2.packetFingerprint
+      })) });
+      if (parsed.requestFingerprint !== row.requestFingerprint) {
+        throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
       }
-      if (evaluation.result_json !== null) base.result = validateDecision(packet, parseJson(evaluation.result_json, "decision result"), { maxAttempts: 1 });
-      const evaluationFailure = storedEvaluationFailure(evaluation);
-      if (evaluationFailure) base.failure = evaluationFailure;
-      return base;
+      if (parsed.request.kind === "follow-on" && parsed.lineage) {
+        const sourceAvailable = runExists(this.connection.orm, parsed.lineage.sourceRunId);
+        return { ...parsed, lineage: { ...parsed.lineage, sourceAvailable, sourceRecordState: sourceAvailable ? "live" : "historical" } };
+      }
+      return parsed;
     });
-    const stateRows = this.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id").all(runId);
-    const respondents = stateRows.map((state) => {
-      const status = asText(state.status, "journey respondent status");
-      const events = parseJson(state.events_json, "journey history");
-      const route = parseJson(state.route_json, "journey route");
-      if (!["active", "completed", "failed", "unreached"].includes(status) || !Array.isArray(events) || !Array.isArray(route)) {
+  }
+  getJourneyWorkerTurn(runId, evaluationId, respondentId) {
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      const rows = this.database.prepare(`WITH next_ordinal AS (
+          SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
+        ), node_occurrences AS (
+          SELECT node_id, COUNT(*) AS count FROM evaluations WHERE run_id = ? AND respondent_id = ? GROUP BY node_id
+        )
+        SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
+          jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
+          jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
+          jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
+          next_ordinal.value AS next_ordinal, node_occurrences.node_id AS occurrence_node_id, node_occurrences.count AS occurrence_count
+        FROM runs r JOIN evaluations e ON e.run_id = r.run_id
+        JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        CROSS JOIN next_ordinal LEFT JOIN node_occurrences ON 1 = 1
+        WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
+        ORDER BY node_occurrences.node_id`).all(runId, runId, respondentId, runId, evaluationId, respondentId);
+      const first = rows[0];
+      if (!first) throw this.notFound();
+      const identity = storedJourneyIdentity(first);
+      const profile = identity.request.respondents.find(({ id }) => id === respondentId);
+      if (!profile) throw new RunStoreError("data_integrity_error", "The journey turn references a respondent outside its frozen cohort.");
+      const packet = decisionRequestSchema.parse(parseJson(first.packet_json, "frozen packet"));
+      const evaluation = {
+        evaluationId: asText(first.evaluation_id, "evaluation ID"),
+        contextId: asText(first.context_id, "context ID"),
+        respondentId: asText(first.respondent_id, "respondent ID"),
+        questionId: asText(first.question_id, "question ID"),
+        packet,
+        packetFingerprint: asText(first.packet_fingerprint, "packet fingerprint"),
+        turnId: asText(first.turn_id, "turn ID"),
+        nodeId: asText(first.node_id, "node ID"),
+        pathId: asText(first.path_id, "path ID"),
+        occurrence: asNumber(first.occurrence, "turn occurrence"),
+        ordinal: asNumber(first.ordinal, "evaluation ordinal"),
+        status: asText(first.status, "evaluation status")
+      };
+      if (evaluation.status !== "pending" || evaluation.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {
+        throw new RunStoreError("data_integrity_error", "The reserved journey packet does not match its pending turn identity.");
+      }
+      const respondentStatus = asText(first.respondent_status, "journey respondent status");
+      const events = parseJson(first.respondent_events_json, "journey history");
+      const route = parseJson(first.respondent_route_json, "journey route");
+      if (!["active", "completed", "failed", "unreached"].includes(respondentStatus) || !Array.isArray(events) || !Array.isArray(route)) {
         throw new RunStoreError("data_integrity_error", "Stored journey respondent state has an invalid shape.");
       }
-      return {
-        respondentId: asText(state.respondent_id, "respondent ID"),
-        status,
-        currentNodeId: asNullableText(state.current_node_id, "current node ID"),
-        currentTurnId: asNullableText(state.current_turn_id, "current turn ID"),
-        currentContextId: asNullableText(state.current_context_id, "current context ID"),
-        revision: asNumber(state.revision, "journey state revision"),
+      const respondent = {
+        respondentId: asText(first.respondent_id, "respondent ID"),
+        status: respondentStatus,
+        currentNodeId: asNullableText(first.respondent_current_node_id, "current node ID"),
+        currentTurnId: asNullableText(first.respondent_current_turn_id, "current turn ID"),
+        currentContextId: asNullableText(first.respondent_current_context_id, "current context ID"),
+        revision: asNumber(first.respondent_revision, "journey state revision"),
         events,
         route,
-        ...state.outcome === null ? {} : { outcome: asText(state.outcome, "journey outcome") }
+        ...first.respondent_outcome === null ? {} : { outcome: asText(first.respondent_outcome, "journey outcome") }
+      };
+      if (respondent.status !== "active" || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
+        throw new RunStoreError("data_integrity_error", "The reserved journey turn does not match the active respondent checkpoint.");
+      }
+      return {
+        evaluation,
+        respondent,
+        profile,
+        nextOrdinal: asNumber(first.next_ordinal, "next evaluation ordinal"),
+        nodeOccurrences: rows.flatMap((row) => row.occurrence_node_id === null ? [] : [{ nodeId: asText(row.occurrence_node_id, "occurrence node ID"), count: asNumber(row.occurrence_count, "node occurrence count") }])
       };
     });
-    const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-    if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some((state) => !respondentIds.has(state.respondentId)) || respondents.some((state) => state.status === "active" && evaluations.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) || respondents.some((state) => state.status !== "active" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
-      throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
-    }
-    return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations, respondents };
+  }
+  getJourneyRun(runId) {
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      const row = this.database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId);
+      if (!row) throw this.notFound();
+      const stored = parseJson(row.request_json, "request");
+      if (typeof stored !== "object" || stored === null || !("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) {
+        throw new RunStoreError("data_integrity_error", "Stored journey request has an invalid shape.");
+      }
+      const parsedRequest = runRequestSchema.safeParse(stored.request);
+      if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || typeof stored.compilerFingerprint !== "string" || typeof stored.requestFingerprint !== "string" || stored.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint") || hashCanonical({ request: parsedRequest.data, compilerFingerprint: stored.compilerFingerprint }) !== stored.requestFingerprint) {
+        throw new RunStoreError("data_integrity_error", "Stored journey request or fingerprint is invalid.");
+      }
+      const evaluationRows = this.database.prepare(`SELECT e.*,
+      (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id) WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+      FROM evaluations e WHERE e.run_id = ? ORDER BY e.ordinal`).all(runId);
+      const evaluations2 = evaluationRows.map((evaluation) => {
+        const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
+        const base = {
+          evaluationId: asText(evaluation.evaluation_id, "evaluation ID"),
+          contextId: asText(evaluation.context_id, "context ID"),
+          respondentId: asText(evaluation.respondent_id, "respondent ID"),
+          questionId: asText(evaluation.question_id, "question ID"),
+          packet,
+          packetFingerprint: asText(evaluation.packet_fingerprint, "packet fingerprint"),
+          turnId: asText(evaluation.turn_id, "turn ID"),
+          nodeId: asText(evaluation.node_id, "node ID"),
+          pathId: asText(evaluation.path_id, "path ID"),
+          occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
+          ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
+          status: asText(evaluation.status, "evaluation status")
+        };
+        if (!["pending", "answered", "failed", "unreached"].includes(base.status) || base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
+          throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
+        }
+        if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
+          throw new RunStoreError("data_integrity_error", "Stored journey packet does not match its context identity.");
+        }
+        if (evaluation.result_json !== null) {
+          const result = resultFromStorage(parseJson(evaluation.result_json, "decision value"), evaluation.execution_json === null ? void 0 : parseJson(evaluation.execution_json, "provider execution"));
+          base.result = validateDecision(packet, result, { maxAttempts: result.attempts });
+        }
+        const evaluationFailure = storedEvaluationFailure(evaluation);
+        if (evaluationFailure) base.failure = evaluationFailure;
+        return base;
+      });
+      const stateRows = this.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id").all(runId);
+      const respondents = stateRows.map((state) => {
+        const status = asText(state.status, "journey respondent status");
+        const events = parseJson(state.events_json, "journey history");
+        const route = parseJson(state.route_json, "journey route");
+        if (!["active", "completed", "failed", "unreached"].includes(status) || !Array.isArray(events) || !Array.isArray(route)) {
+          throw new RunStoreError("data_integrity_error", "Stored journey respondent state has an invalid shape.");
+        }
+        return {
+          respondentId: asText(state.respondent_id, "respondent ID"),
+          status,
+          currentNodeId: asNullableText(state.current_node_id, "current node ID"),
+          currentTurnId: asNullableText(state.current_turn_id, "current turn ID"),
+          currentContextId: asNullableText(state.current_context_id, "current context ID"),
+          revision: asNumber(state.revision, "journey state revision"),
+          events,
+          route,
+          ...state.outcome === null ? {} : { outcome: asText(state.outcome, "journey outcome") }
+        };
+      });
+      const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
+      if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some((state) => !respondentIds.has(state.respondentId)) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) || respondents.some((state) => state.status !== "active" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
+        throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
+      }
+      return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations: evaluations2, respondents };
+    });
   }
   list(query) {
     this.ensureOpen();
-    const limit = pageSize(query.limit);
-    const nowMs = this.now();
-    this.transaction(() => {
-      const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all();
-      for (const row of active) this.reconcileInside(asText(row.run_id, "run ID"), nowMs);
-    });
-    const filtersFingerprint = hashCanonical({ status: query.status ?? null, label: query.label ?? null, createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null, materialId: query.materialId ?? null });
-    let cursor;
-    if (query.cursor) {
-      cursor = decodeCursor(query.cursor, "run list");
-      if (cursor.kind !== "runs" || !Number.isSafeInteger(cursor.createdMs) || cursor.createdMs < 0 || typeof cursor.runId !== "string" || cursor.runId.length === 0 || cursor.filtersFingerprint !== filtersFingerprint) {
-        throw new RunStoreError("invalid_cursor", "The run list cursor does not match the requested filters.");
+    return this.readTransaction(() => {
+      const limit = pageSize(query.limit);
+      const filtersFingerprint = hashCanonical({ status: query.status ?? null, label: query.label ?? null, createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null, materialId: query.materialId ?? null });
+      let cursor;
+      if (query.cursor) {
+        cursor = decodeCursor(query.cursor, "run list");
+        if (cursor.kind !== "runs" || !Number.isSafeInteger(cursor.createdMs) || cursor.createdMs < 0 || typeof cursor.runId !== "string" || cursor.runId.length === 0 || cursor.filtersFingerprint !== filtersFingerprint) {
+          throw new RunStoreError("invalid_cursor", "The run list cursor does not match the requested filters.");
+        }
       }
-    }
-    const clauses = [];
-    const params = [];
-    if (query.status !== void 0) {
-      clauses.push("status = ?");
-      params.push(query.status);
-    }
-    if (query.label !== void 0) {
-      clauses.push("label = ?");
-      params.push(query.label);
-    }
-    if (query.createdAfter !== void 0) {
-      clauses.push("created_ms >= ?");
-      params.push(Date.parse(query.createdAfter));
-    }
-    if (query.createdBefore !== void 0) {
-      clauses.push("created_ms <= ?");
-      params.push(Date.parse(query.createdBefore));
-    }
-    if (query.materialId !== void 0) {
-      clauses.push(`(EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
+      const clauses = [];
+      const params = [];
+      if (query.status !== void 0) {
+        clauses.push("status = ?");
+        params.push(query.status);
+      }
+      if (query.label !== void 0) {
+        clauses.push("label = ?");
+        params.push(query.label);
+      }
+      if (query.createdAfter !== void 0) {
+        clauses.push("created_ms >= ?");
+        params.push(Date.parse(query.createdAfter));
+      }
+      if (query.createdBefore !== void 0) {
+        clauses.push("created_ms <= ?");
+        params.push(Date.parse(query.createdBefore));
+      }
+      if (query.materialId !== void 0) {
+        clauses.push(`(EXISTS (SELECT 1 FROM json_each(CASE WHEN json_extract(runs.request_json, '$.request.kind') = 'poll'
         THEN json_extract(runs.request_json, '$.request.material') WHEN json_extract(runs.request_json, '$.request.kind') = 'journey'
         THEN json_extract(runs.request_json, '$.request.journey.items') ELSE json_extract(runs.request_json, '$.request.material') END) AS source_material
         WHERE json_extract(source_material.value, '$.id') = ?) OR EXISTS (SELECT 1 FROM evaluations AS material_evaluation, json_each(material_evaluation.packet_json, '$.state.encounteredItems') AS encountered
@@ -25338,28 +30697,28 @@ var SQLiteRunStore = class {
         SELECT 1 FROM json_each(runs.request_json, '$.lineage.materialSnapshots') AS retained_snapshot,
           json_each(retained_snapshot.value, '$.materials') AS retained_material
         WHERE json_extract(retained_material.value, '$.id') = ?))`);
-      params.push(query.materialId, query.materialId, query.materialId);
-    }
-    if (cursor) {
-      clauses.push("(created_ms > ? OR (created_ms = ? AND run_id > ?))");
-      params.push(cursor.createdMs, cursor.createdMs, cursor.runId);
-    }
-    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const rows = this.database.prepare(`SELECT run_id, created_ms FROM runs ${where} ORDER BY created_ms, run_id LIMIT ?`).all(...params, limit + 1);
-    const hasMore = rows.length > limit;
-    const pageRows = rows.slice(0, limit);
-    const items = pageRows.map((row) => this.getStatus(asText(row.run_id, "run ID")));
-    const last = pageRows.at(-1);
-    return {
-      items,
-      ...hasMore && last ? { nextCursor: encodeCursor({ kind: "runs", createdMs: asNumber(last.created_ms, "created time"), runId: asText(last.run_id, "run ID"), filtersFingerprint }) } : {}
-    };
+        params.push(query.materialId, query.materialId, query.materialId);
+      }
+      if (cursor) {
+        clauses.push("(created_ms > ? OR (created_ms = ? AND run_id > ?))");
+        params.push(cursor.createdMs, cursor.createdMs, cursor.runId);
+      }
+      const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+      const rows = this.database.prepare(`SELECT run_id, created_ms FROM runs ${where} ORDER BY created_ms, run_id LIMIT ?`).all(...params, limit + 1);
+      const hasMore = rows.length > limit;
+      const pageRows = rows.slice(0, limit);
+      const items = this.statusesInside(pageRows.map((row) => asText(row.run_id, "run ID")));
+      const last = pageRows.at(-1);
+      return {
+        items,
+        ...hasMore && last ? { nextCursor: encodeCursor({ kind: "runs", createdMs: asNumber(last.created_ms, "created time"), runId: asText(last.run_id, "run ID"), filtersFingerprint }) } : {}
+      };
+    });
   }
   resolveFollowOnSources(input2) {
     this.ensureOpen();
     const request = followOnRunRequestSchema.parse(input2);
-    return this.transaction(() => {
-      this.reconcileInside(request.sourceRunId, this.now());
+    return this.readTransaction(() => {
       const run = this.database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
       if (!run) throw this.notFound();
       const stored = parseJson(run.request_json, "source run request");
@@ -25403,12 +30762,12 @@ var SQLiteRunStore = class {
           parameters.push(criteria.materialId);
         }
         if (criteria.answer?.type === "choice") {
-          where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
+          where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
           parameters.push(criteria.answer.choiceId);
         } else if (criteria.answer?.type === "score" || criteria.answer?.type === "noul") {
           const field = criteria.answer.type === "score" ? "score" : "noul";
           const operator = criteria.answer.operator === "eq" ? "=" : criteria.answer.operator === "lt" ? "<" : criteria.answer.operator === "lte" ? "<=" : criteria.answer.operator === "gt" ? ">" : ">=";
-          where.push(`json_extract(e.result_json, '$.type') = '${field}' AND json_extract(e.result_json, '$.${field}') ${operator} ?`);
+          where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND json_extract(e.result_json, '$.value.${field}') ${operator} ?`);
           parameters.push(criteria.answer.value);
         }
         if (criteria.outcome !== void 0) {
@@ -25443,7 +30802,7 @@ var SQLiteRunStore = class {
             const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
             const candidate = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems).find(({ id }) => id === materialId);
             if (!candidate?.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash8("sha256").update(candidate.text, "utf8").digest("hex") } };
+            return { selectedMaterial: { materialId: candidate.id, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256, textSha256: createHash9("sha256").update(candidate.text, "utf8").digest("hex") } };
           })() : {}
         };
       });
@@ -25461,8 +30820,7 @@ var SQLiteRunStore = class {
       database: this.database,
       now: this.now,
       ensureOpen: () => this.ensureOpen(),
-      transaction: (operation) => this.transaction(operation),
-      reconcileInside: (runId, nowMs) => this.reconcileInside(runId, nowMs),
+      readTransaction: (operation) => this.readTransaction(operation),
       statusInside: (runId) => this.statusInside(runId),
       notFound: () => this.notFound()
     }, input2);
@@ -25495,83 +30853,100 @@ var SQLiteRunStore = class {
     });
   }
   answers(runId, cursorText, requestedLimit) {
-    this.getStatus(runId);
-    const limit = pageSize(requestedLimit);
-    let cursor;
-    if (cursorText) {
-      cursor = decodeCursor(cursorText, "answer");
-      if (cursor.kind !== "answers" || cursor.runId !== runId || !Number.isInteger(cursor.ordinal) || cursor.ordinal < 0) {
-        throw new RunStoreError("invalid_cursor", "The answer cursor does not match this run.");
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      const limit = pageSize(requestedLimit);
+      let cursor;
+      if (cursorText) {
+        cursor = decodeCursor(cursorText, "answer");
+        if (cursor.kind !== "answers" || cursor.runId !== runId || !Number.isInteger(cursor.ordinal) || cursor.ordinal < 0) {
+          throw new RunStoreError("invalid_cursor", "The answer cursor does not match this run.");
+        }
       }
-    }
-    const rows = this.database.prepare(`SELECT e.*,
+      const rows = this.database.prepare(`SELECT e.*,
       (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
         WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
       FROM evaluations e WHERE run_id = ? ${cursor ? "AND ordinal > ?" : ""} ORDER BY ordinal LIMIT ?`).all(...cursor ? [runId, cursor.ordinal, limit + 1] : [runId, limit + 1]);
-    const hasMore = rows.length > limit;
-    const pageRows = rows.slice(0, limit);
-    const items = pageRows.map((row) => {
-      const failure2 = storedEvaluationFailure(row);
-      return {
-        evaluationId: asText(row.evaluation_id, "evaluation ID"),
-        contextId: asText(row.context_id, "context ID"),
-        respondentId: asText(row.respondent_id, "respondent ID"),
-        questionId: asText(row.question_id, "question ID"),
-        status: asText(row.status, "evaluation status"),
-        ...row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution")) },
-        ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
-        ...failure2 === void 0 ? {} : { failure: failure2 }
-      };
+      const hasMore = rows.length > limit;
+      const pageRows = rows.slice(0, limit);
+      const items = pageRows.map((row) => {
+        const failure2 = storedEvaluationFailure(row);
+        return {
+          evaluationId: asText(row.evaluation_id, "evaluation ID"),
+          contextId: asText(row.context_id, "context ID"),
+          respondentId: asText(row.respondent_id, "respondent ID"),
+          questionId: asText(row.question_id, "question ID"),
+          status: asText(row.status, "evaluation status"),
+          ...row.result_json === null ? {} : { result: resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution")) },
+          ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
+          ...failure2 === void 0 ? {} : { failure: failure2 }
+        };
+      });
+      const last = pageRows.at(-1);
+      return { items, ...hasMore && last ? { nextCursor: encodeCursor({ kind: "answers", runId, ordinal: asNumber(last.ordinal, "evaluation ordinal") }) } : {} };
     });
-    const last = pageRows.at(-1);
-    return { items, ...hasMore && last ? { nextCursor: encodeCursor({ kind: "answers", runId, ordinal: asNumber(last.ordinal, "evaluation ordinal") }) } : {} };
   }
   attempts(runId, cursorText, requestedLimit) {
-    this.getStatus(runId);
-    const limit = pageSize(requestedLimit);
-    let cursor;
-    if (cursorText) {
-      cursor = decodeCursor(cursorText, "attempts");
-      if (cursor.kind !== "attempts" || cursor.runId !== runId || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 1) {
-        throw new RunStoreError("invalid_cursor", "The attempt cursor does not match this run.");
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      const limit = pageSize(requestedLimit);
+      let cursor;
+      if (cursorText) {
+        cursor = decodeCursor(cursorText, "attempts");
+        if (cursor.kind !== "attempts" || cursor.runId !== runId || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 1) {
+          throw new RunStoreError("invalid_cursor", "The attempt cursor does not match this run.");
+        }
       }
-    }
-    const rows = this.database.prepare(`SELECT a.*, GROUP_CONCAT(ae.evaluation_id) AS evaluation_ids
-      FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
+      const rows = this.database.prepare(`SELECT a.* FROM attempts a
       WHERE a.run_id = ? ${cursor ? "AND a.attempt_sequence > ?" : ""}
-      GROUP BY a.attempt_id ORDER BY a.attempt_sequence LIMIT ?`).all(...cursor ? [runId, cursor.sequence, limit + 1] : [runId, limit + 1]);
-    const hasMore = rows.length > limit;
-    const pageRows = rows.slice(0, limit);
-    const items = pageRows.map((row) => {
-      const attemptId = asText(row.attempt_id, "attempt ID");
-      const evaluationFailures = this.database.prepare(`SELECT ae.evaluation_id, e.question_id, ae.failure_json
-        FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id)
-        WHERE ae.attempt_id = ? AND ae.failure_json IS NOT NULL ORDER BY e.ordinal`).all(attemptId).flatMap((failureRow) => {
-        const failure2 = evaluationFailureFromJson(failureRow.failure_json);
-        return failure2 ? [{ evaluationId: asText(failureRow.evaluation_id, "attempt evaluation ID"), questionId: asText(failureRow.question_id, "attempt question ID"), failure: failure2 }] : [];
+      ORDER BY a.attempt_sequence LIMIT ?`).all(...cursor ? [runId, cursor.sequence, limit + 1] : [runId, limit + 1]);
+      const hasMore = rows.length > limit;
+      const pageRows = rows.slice(0, limit);
+      const attemptIds = pageRows.map((row) => asText(row.attempt_id, "attempt ID"));
+      const memberships = attemptIds.length === 0 ? [] : this.database.prepare(`SELECT ae.attempt_id, ae.evaluation_id, e.question_id, ae.failure_json
+      FROM attempt_evaluations ae JOIN evaluations e ON e.run_id = ae.run_id AND e.evaluation_id = ae.evaluation_id
+      WHERE ae.run_id = ? AND ae.attempt_id IN (${attemptIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(runId, ...attemptIds);
+      const membershipsByAttempt = /* @__PURE__ */ new Map();
+      const failuresByAttempt = /* @__PURE__ */ new Map();
+      for (const membership of memberships) {
+        const attemptId = asText(membership.attempt_id, "attempt ID");
+        const evaluationId = asText(membership.evaluation_id, "attempt evaluation ID");
+        membershipsByAttempt.set(attemptId, [...membershipsByAttempt.get(attemptId) ?? [], evaluationId]);
+        const failure2 = evaluationFailureFromJson(membership.failure_json);
+        if (failure2) failuresByAttempt.set(attemptId, [...failuresByAttempt.get(attemptId) ?? [], {
+          evaluationId,
+          questionId: asText(membership.question_id, "attempt question ID"),
+          failure: failure2
+        }]);
+      }
+      const items = pageRows.map((row) => {
+        const attemptId = asText(row.attempt_id, "attempt ID");
+        const evaluationFailures = failuresByAttempt.get(attemptId) ?? [];
+        return {
+          attemptId,
+          groupId: asText(row.group_id, "question group ID"),
+          evaluationIds: membershipsByAttempt.get(attemptId) ?? [],
+          status: asText(row.status, "attempt status"),
+          startedAt: new Date(asNumber(row.started_ms, "attempt start time")).toISOString(),
+          ...row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, "attempt settlement time")).toISOString() },
+          ...row.failure_code === null ? {} : { failure: {
+            code: asText(row.failure_code, "attempt failure code"),
+            message: asText(row.failure_message, "attempt failure message"),
+            ...row.failure_scope === null ? {} : { scope: asText(row.failure_scope, "attempt failure scope") }
+          } },
+          ...evaluationFailures.length === 0 ? {} : { evaluationFailures },
+          ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "attempt execution")) }
+        };
       });
-      return {
-        attemptId,
-        groupId: asText(row.group_id, "question group ID"),
-        evaluationIds: asText(row.evaluation_ids, "attempt evaluation IDs").split(","),
-        status: asText(row.status, "attempt status"),
-        startedAt: new Date(asNumber(row.started_ms, "attempt start time")).toISOString(),
-        ...row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, "attempt settlement time")).toISOString() },
-        ...row.failure_code === null ? {} : { failure: {
-          code: asText(row.failure_code, "attempt failure code"),
-          message: asText(row.failure_message, "attempt failure message"),
-          ...row.failure_scope === null ? {} : { scope: asText(row.failure_scope, "attempt failure scope") }
-        } },
-        ...evaluationFailures.length === 0 ? {} : { evaluationFailures },
-        ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "attempt execution")) }
-      };
+      const last = pageRows.at(-1);
+      return { items, ...hasMore && last ? { nextCursor: encodeCursor({
+        kind: "attempts",
+        runId,
+        sequence: asNumber(last.attempt_sequence, "attempt sequence")
+      }) } : {} };
     });
-    const last = pageRows.at(-1);
-    return { items, ...hasMore && last ? { nextCursor: encodeCursor({
-      kind: "attempts",
-      runId,
-      sequence: asNumber(last.attempt_sequence, "attempt sequence")
-    }) } : {} };
   }
   requestCancel(runId) {
     this.ensureOpen();
@@ -25648,7 +31023,7 @@ var SQLiteRunStore = class {
     validateRunIds(runIds);
     return this.transaction(() => {
       const nowMs = this.now();
-      const runs = runIds.map((runId) => {
+      const runs2 = runIds.map((runId) => {
         const row = this.database.prepare("SELECT status, created_ms, lease_expires_ms FROM runs WHERE run_id = ?").get(runId);
         if (!row) throw this.notFound();
         const storedStatus = asText(row.status, "run status");
@@ -25661,7 +31036,7 @@ var SQLiteRunStore = class {
         const retainedFollowOnRunIds = dependentRows.map((row2) => asText(row2.run_id, "dependent follow-on run ID")).filter((dependentId) => !runIds.includes(dependentId));
         return { runId, status, evaluationCount, attemptCount, blockedByActiveWork: status === "prepared" || status === "running", retainedFollowOnRunIds };
       });
-      return { runs, blockedByActiveWork: runs.some(({ blockedByActiveWork }) => blockedByActiveWork) };
+      return { runs: runs2, blockedByActiveWork: runs2.some(({ blockedByActiveWork }) => blockedByActiveWork) };
     });
   }
   deleteRuns(runIds) {
@@ -25701,14 +31076,10 @@ var SQLiteRunStore = class {
   storageInfo() {
     this.ensureOpen();
     try {
-      return this.transaction(() => {
+      return this.readTransaction(() => {
         const integrityRows = this.database.prepare("PRAGMA integrity_check").all();
         const foreignKeyViolations = this.database.prepare("PRAGMA foreign_key_check").all();
         const integrity = integrityRows.length === 1 && integrityRows[0]?.integrity_check === "ok" && foreignKeyViolations.length === 0 ? "ok" : "failed";
-        if (integrity === "ok") {
-          const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all();
-          for (const row of active) this.reconcileInside(asText(row.run_id, "run ID"), this.now());
-        }
         const count = (table, where = "") => asNumber(this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count, `${table} count`);
         return {
           integrity,
@@ -25766,7 +31137,7 @@ var SQLiteRunStore = class {
       const attemptId = randomUUID5();
       const evaluationId = asText(row.evaluation_id, "evaluation ID");
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)").run(attemptId, claim2.runId, asText(row.group_id, "group ID"), evaluationId, asText(row.packet_fingerprint, "packet fingerprint"), claim2.ownerToken, nowMs);
-      this.database.prepare("INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)").run(attemptId, evaluationId);
+      this.database.prepare("INSERT INTO attempt_evaluations (run_id, attempt_id, evaluation_id) VALUES (?, ?, ?)").run(claim2.runId, attemptId, evaluationId);
       this.database.prepare("UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?").run(claim2.runId);
       return { attemptId, evaluation: this.evaluationFromRow(row) };
     });
@@ -25792,8 +31163,8 @@ var SQLiteRunStore = class {
       const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")).question);
       const packetFingerprint = hashCanonical({ state, questions: packetQuestions });
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)").run(attemptId, claim2.runId, groupId, anchorId, packetFingerprint, claim2.ownerToken, nowMs);
-      const link2 = this.database.prepare("INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)");
-      for (const row of sorted) link2.run(attemptId, asText(row.evaluation_id, "evaluation ID"));
+      const link2 = this.database.prepare("INSERT INTO attempt_evaluations (run_id, attempt_id, evaluation_id) VALUES (?, ?, ?)");
+      for (const row of sorted) link2.run(claim2.runId, attemptId, asText(row.evaluation_id, "evaluation ID"));
       this.database.prepare("UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?").run(claim2.runId);
       return { attemptId, evaluations: sorted.map((row) => this.evaluationFromRow(row)) };
     });
@@ -25807,8 +31178,9 @@ var SQLiteRunStore = class {
       if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
       const rows = this.database.prepare(`SELECT e.* FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id) WHERE ae.attempt_id = ? ORDER BY e.ordinal`).all(attemptId);
       if (!rows.length) throw new RunStoreError("data_integrity_error", "The provider attempt has no linked evaluations.");
+      const chargedCalls = outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.execution.attempts;
       if (outcome.kind === "failed") {
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, "evaluation ID");
           this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
@@ -25820,7 +31192,7 @@ var SQLiteRunStore = class {
         if (!result.success) throw new RunStoreError("invalid_batch_result", "The batch result envelope is invalid.");
         const expected = new Map(rows.map((row) => [asText(row.question_id, "question ID"), row]));
         if (result.data.answers.some(({ questionId }) => !expected.has(questionId))) throw new RunStoreError("invalid_batch_result", "The batch result contains an unknown question ID.");
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result.data.execution), attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, result.data.execution.attempts, JSON.stringify(result.data.execution), attemptId);
         for (const [questionId, row] of expected) {
           const answer = result.data.answers.find((item) => item.questionId === questionId);
           const evaluationId = asText(row.evaluation_id, "evaluation ID");
@@ -25829,7 +31201,7 @@ var SQLiteRunStore = class {
             this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson({ code: "missing_batch_answer", message: "Provider returned no answer for this question." }), attemptId, evaluationId);
           } else if ("failure" in answer) {
             const failure2 = { code: answer.failure.code, message: answer.failure.message, ...answer.failure.detail ? { detail: answer.failure.detail } : {} };
-            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(failure2.code, failure2.message, failure2.detail ? JSON.stringify(failure2.detail) : null, evaluationId);
+            this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(failure2.code, failure2.message, failureEvidenceJson(failure2), evaluationId);
             this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
           } else {
             const packet = decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet"));
@@ -25839,17 +31211,17 @@ var SQLiteRunStore = class {
               validated = validateDecision(packet, typed, { maxAttempts: 1 });
             } catch {
               const failure2 = { code: "invalid_decision", message: "The stored answer did not satisfy this question contract.", detail: decisionFailureDetailForReason("invalid_answer") };
-              this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(failure2.code, failure2.message, JSON.stringify(failure2.detail), evaluationId);
+              this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(failure2.code, failure2.message, failureEvidenceJson(failure2), evaluationId);
               this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
             }
             if (validated) {
-              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
-              this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
+              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(encodeStoredPayload("decision-value", answer.value, decisionValueSchema), evaluationId);
+              this.database.prepare("INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)").run(claim2.runId, evaluationId, attemptId);
             }
           }
         }
       }
-      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : 1, claim2.runId);
+      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(chargedCalls, claim2.runId);
     });
   }
   settle(claim2, attemptId, outcome) {
@@ -25865,11 +31237,12 @@ var SQLiteRunStore = class {
       const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, "frozen packet"));
       if (outcome.kind === "answered") {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
-        this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, result.attempts, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
+        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(encodeStoredPayload("decision-value", decisionValueFromResult(result), decisionValueSchema), evaluationId);
+        this.database.prepare("INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)").run(claim2.runId, evaluationId, attemptId);
       } else {
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        const chargedCalls = outcome.providerAttempts ?? 1;
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
         const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
@@ -25877,7 +31250,7 @@ var SQLiteRunStore = class {
           this.database.prepare("UPDATE runs SET failure_scope = ?, failure_code = ?, failure_message = ? WHERE run_id = ?").run(outcome.scope, outcome.code, outcome.message, claim2.runId);
         }
       }
-      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : 1, claim2.runId);
+      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.attempts, claim2.runId);
     });
   }
   settleJourney(claim2, attemptId, outcome, transition) {
@@ -25932,15 +31305,16 @@ var SQLiteRunStore = class {
         } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
           throw new RunStoreError("journey_transition_conflict", "A terminal respondent state cannot have a next reached turn.");
         }
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
-        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(JSON.stringify(result), evaluationId);
-        this.database.prepare("INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)").run(evaluationId, attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?").run(nowMs, result.attempts, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...result.checkpoint ? { checkpoint: result.checkpoint } : {}, latencyMs: result.latencyMs, usage: result.usage, ...result.cost ? { cost: result.cost } : {} }), attemptId);
+        this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(encodeStoredPayload("decision-value", decisionValueFromResult(result), decisionValueSchema), evaluationId);
+        this.database.prepare("INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)").run(claim2.runId, evaluationId, attemptId);
       } else {
         const sharedFailure = outcome.scope === "run";
         if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
           throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
         }
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        const chargedCalls = outcome.providerAttempts ?? 1;
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?").run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?").run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
         const failure2 = { code: outcome.code, message: outcome.message, ...outcome.detail ? { detail: outcome.detail } : {}, ...outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {} };
         this.database.prepare("UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?").run(evaluationFailureJson(failure2), attemptId, evaluationId);
@@ -25992,7 +31366,7 @@ var SQLiteRunStore = class {
         transition.expectedRevision
       );
       if (updatedState.changes !== 1) throw new RunStoreError("journey_transition_conflict", "Journey respondent state changed before its transition committed.");
-      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : 1, claim2.runId);
+      this.database.prepare("UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.attempts, claim2.runId);
     });
   }
   finish(claim2) {
@@ -26039,7 +31413,7 @@ var SQLiteRunStore = class {
       this.ownedRun(claim2, this.now());
       const reserved = this.database.prepare("SELECT attempt_id FROM attempts WHERE run_id = ? AND owner_token = ? AND status = 'reserved'").get(claim2.runId, claim2.ownerToken);
       if (reserved) {
-        this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, failure_code = 'worker_interrupted', failure_message = 'The provider outcome could not be confirmed' WHERE attempt_id = ?").run(this.now(), asText(reserved.attempt_id, "attempt ID"));
+        this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, charged_calls = 1, failure_code = 'worker_interrupted', failure_message = 'The provider outcome could not be confirmed' WHERE attempt_id = ?").run(this.now(), asText(reserved.attempt_id, "attempt ID"));
         this.database.prepare("UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0").run(claim2.runId);
       }
       this.database.prepare("UPDATE runs SET status = 'failed', failure_scope = 'run', failure_code = ?, failure_message = ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL WHERE run_id = ? AND owner_token = ?").run(code, message, claim2.runId, claim2.ownerToken);
@@ -26054,11 +31428,29 @@ var SQLiteRunStore = class {
   }
   close() {
     if (this.isClosed) return;
-    this.database.close();
+    this.connection.close();
     this.isClosed = true;
   }
   ensureOpen() {
     if (this.isClosed) throw new RunStoreError("store_closed", "This run store connection is closed.");
+    const version2 = this.database.prepare("PRAGMA user_version").get().user_version;
+    if (asNumber(version2, "schema version") !== SCHEMA_VERSION) {
+      throw new RunStoreError("datastore_schema_changed", "The datastore schema changed while this process was open. Close and reopen Sheg before continuing.");
+    }
+  }
+  reconcileMany(runIds, nowMs) {
+    this.ensureOpen();
+    const uniqueRunIds = [...new Set(runIds)];
+    this.transaction(() => {
+      for (const runId of uniqueRunIds) this.reconcileInside(runId, nowMs);
+    });
+  }
+  reconcileActive(nowMs) {
+    this.ensureOpen();
+    this.transaction(() => {
+      const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all();
+      for (const row of active) this.reconcileInside(asText(row.run_id, "run ID"), nowMs);
+    });
   }
   transaction(operation) {
     this.database.exec("BEGIN IMMEDIATE");
@@ -26092,7 +31484,13 @@ var SQLiteRunStore = class {
     return new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
   }
   statusInside(runId) {
-    const row = this.database.prepare(`SELECT r.*,
+    const result = this.statusesInside([runId])[0];
+    if (!result) throw this.notFound();
+    return result;
+  }
+  statusesInside(runIds) {
+    if (runIds.length === 0) return [];
+    const rows = this.database.prepare(`SELECT r.*,
       (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'answered') AS completed_evaluations,
       (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed') AS failed_evaluations,
       (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'pending') AS pending_evaluations,
@@ -26111,41 +31509,42 @@ var SQLiteRunStore = class {
           GROUP BY e.respondent_id HAVING COUNT(*) <> 1) AND
        NOT EXISTS (SELECT 1 FROM journey_respondents jr WHERE jr.run_id = r.run_id AND jr.status = 'failed' AND
           (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = jr.run_id AND e.respondent_id = jr.respondent_id AND e.status = 'failed') <> 1)) AS retryable_journey_failure
-      FROM runs r WHERE r.run_id = ?`).get(runId);
-    if (!row) throw this.notFound();
-    const stored = parseJson(row.request_json, "run request");
-    const request = runRequestSchema.safeParse(stored.request);
-    if (!request.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
-    const status = asText(row.status, "run status");
-    const usedCalls = asNumber(row.used_calls, "used calls");
-    const reservedCalls = asNumber(row.reserved_calls, "reserved calls");
-    const maxCalls = asNumber(row.max_calls, "maximum calls");
-    return {
-      runId: asText(row.run_id, "run ID"),
-      status,
-      createdAt: asText(row.created_at, "created time"),
-      completedEvaluations: asNumber(row.completed_evaluations, "completed evaluation count"),
-      failedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count"),
-      totalEvaluations: asNumber(row.evaluation_count, "evaluation count"),
-      usedCalls,
-      reservedCalls,
-      maxCalls,
-      cancelRequested: asNumber(row.cancel_requested, "cancel flag") === 1,
-      lifecycle: deriveRunLifecycle({
+      FROM runs r WHERE r.run_id IN (${runIds.map(() => "?").join(", ")}) ORDER BY r.created_ms, r.run_id`).all(...runIds);
+    return rows.map((row) => {
+      const stored = parseJson(row.request_json, "run request");
+      const request = runRequestSchema.safeParse(stored.request);
+      if (!request.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
+      const status = asText(row.status, "run status");
+      const usedCalls = asNumber(row.used_calls, "used calls");
+      const reservedCalls = asNumber(row.reserved_calls, "reserved calls");
+      const maxCalls = asNumber(row.max_calls, "maximum calls");
+      return {
+        runId: asText(row.run_id, "run ID"),
         status,
-        kind: request.data.kind,
-        cancelRequested: asNumber(row.cancel_requested, "cancel flag") === 1,
-        ...row.failure_scope === null ? {} : { failureScope: asText(row.failure_scope, "failure scope") },
+        createdAt: asText(row.created_at, "created time"),
+        completedEvaluations: asNumber(row.completed_evaluations, "completed evaluation count"),
+        failedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count"),
+        totalEvaluations: asNumber(row.evaluation_count, "evaluation count"),
         usedCalls,
         reservedCalls,
         maxCalls,
-        hasPendingEvaluations: asNumber(row.pending_evaluations, "pending evaluation count") > 0,
-        hasFailedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count") > 0,
-        canRetrySharedFailure: asNumber(row.retryable_shared_failure, "retryable shared failure") === 1,
-        hasRetryableJourneyFailure: asNumber(row.retryable_journey_failure, "retryable journey failure") === 1
-      }),
-      ...row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, "failure code"), message: asText(row.failure_message, "failure message") } }
-    };
+        cancelRequested: asNumber(row.cancel_requested, "cancel flag") === 1,
+        lifecycle: deriveRunLifecycle({
+          status,
+          kind: request.data.kind,
+          cancelRequested: asNumber(row.cancel_requested, "cancel flag") === 1,
+          ...row.failure_scope === null ? {} : { failureScope: asText(row.failure_scope, "failure scope") },
+          usedCalls,
+          reservedCalls,
+          maxCalls,
+          hasPendingEvaluations: asNumber(row.pending_evaluations, "pending evaluation count") > 0,
+          hasFailedEvaluations: asNumber(row.failed_evaluations, "failed evaluation count") > 0,
+          canRetrySharedFailure: asNumber(row.retryable_shared_failure, "retryable shared failure") === 1,
+          hasRetryableJourneyFailure: asNumber(row.retryable_journey_failure, "retryable journey failure") === 1
+        }),
+        ...row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, "failure code"), message: asText(row.failure_message, "failure message") } }
+      };
+    });
   }
   evaluationFromRow(row) {
     return {
@@ -26170,12 +31569,12 @@ var SQLiteRunStore = class {
     if (status === "prepared" && nowMs >= launchDeadline) {
       this.database.prepare("UPDATE runs SET status = 'interrupted', failure_scope = 'run', failure_code = 'worker_not_claimed', failure_message = 'No worker claimed the accepted run before its launch window expired' WHERE run_id = ? AND status = 'prepared'").run(runId);
     } else if (status === "running" && run.lease_expires_ms !== null && asNumber(run.lease_expires_ms, "worker lease") <= nowMs) {
-      const attempts = this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ? AND status = 'reserved'").get(runId);
-      const uncertain = asNumber(attempts.count, "uncertain attempt count");
+      const attempts2 = this.database.prepare("SELECT COUNT(*) AS count FROM attempts WHERE run_id = ? AND status = 'reserved'").get(runId);
+      const uncertain = asNumber(attempts2.count, "uncertain attempt count");
       if (uncertain !== asNumber(run.reserved_calls, "reserved calls")) {
         throw new RunStoreError("data_integrity_error", "Reserved call counters do not match reserved attempts.");
       }
-      this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, failure_code = 'worker_interrupted', failure_message = 'Provider completion is unknown' WHERE run_id = ? AND status = 'reserved'").run(nowMs, runId);
+      this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, charged_calls = 1, failure_code = 'worker_interrupted', failure_message = 'Provider completion is unknown' WHERE run_id = ? AND status = 'reserved'").run(nowMs, runId);
       this.database.prepare(`UPDATE runs SET status = 'interrupted', used_calls = used_calls + ?,
         reserved_calls = reserved_calls - ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL,
         failure_scope = 'run', failure_code = 'worker_interrupted', failure_message = 'Worker ownership expired; unfinished work requires explicit resume'
@@ -26319,7 +31718,7 @@ function compatibilityStatus(observed, startupFailure) {
   return { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
 }
 function createDefaultRunService(dataRoot) {
-  const store = openRunStore(dataRoot);
+  const store = openRunPersistence(dataRoot);
   return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
 }
 function unavailableRunService() {
@@ -26444,12 +31843,12 @@ async function legacyReport(command, options2) {
 }
 function parseArgs(args) {
   const options2 = {};
-  for (let index = 0; index < args.length; index += 1) {
-    const flag = args[index];
+  for (let index2 = 0; index2 < args.length; index2 += 1) {
+    const flag = args[index2];
     if (!flag?.startsWith("--")) throw new CliInputError(`Expected an option, got ${flag ?? "end of input"}.`);
     const key = flag.slice(2);
     if (Object.hasOwn(options2, key)) throw new CliInputError(`Option --${key} was supplied more than once.`);
-    const value = args[++index];
+    const value = args[++index2];
     if (!value || value.startsWith("--")) throw new CliInputError(`Option --${key} requires a value.`);
     options2[key] = value;
   }
@@ -26490,9 +31889,9 @@ function parseResponses(value) {
     throw new CliInputError("--responses must be a JSON array of typed response values.");
   }
   if (!Array.isArray(parsed)) throw new CliInputError("--responses must be a JSON array of typed response values.");
-  return parsed.map((response, index) => {
+  return parsed.map((response, index2) => {
     const result = decisionValueSchema.safeParse(response);
-    if (!result.success) throw new CliInputError(`--responses[${index}] is not a valid typed response.`);
+    if (!result.success) throw new CliInputError(`--responses[${index2}] is not a valid typed response.`);
     return result.data;
   });
 }

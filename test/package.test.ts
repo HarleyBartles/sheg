@@ -41,6 +41,9 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   await assertSkillLinksResolve(path.join(plugin, 'skills/stimulus-response-polling'), plugin);
   await assertSkillLinksResolve(path.join(plugin, 'skills/study-design'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
+  assert.equal(await exists(path.join(plugin, 'dist/migrations/0000_baseline_v9/migration.sql')), true);
+  assert.equal(await exists(path.join(plugin, 'dist/licenses/drizzle-orm-Apache-2.0.txt')), true);
+  assert.equal(await exists(path.join(plugin, 'dist/licenses/THIRD-PARTY-NOTICES.md')), true);
   const credentialHelper = path.join(plugin, 'dist/credentials/windows-credential.ps1');
   assert.equal(await exists(credentialHelper), true);
   if (process.platform === 'win32') {
@@ -98,6 +101,9 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal((result.structuredContent as { valid?: boolean }).valid, true);
   assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), true);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
+  const initialized = new DatabaseSync(path.join(pluginData, 'runs.sqlite'), { readOnly: true });
+  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9); }
+  finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
 

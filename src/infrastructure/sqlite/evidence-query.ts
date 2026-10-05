@@ -8,6 +8,9 @@ import { decisionRequestSchema, providerExecutionEvidenceSchema } from '../../do
 import { hashCanonical } from '../identity.js';
 import { type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView } from '../../domain/run/lifecycle.js';
 import { followOnLineageSchema, runEvidenceQuerySchema, runLifecycleSchema, runRequestSchema, type FollowOnLineage } from '../../domain/run/request.js';
+import { decisionValueSchema } from '../../domain/decision/decision.js';
+import { decodeStoredPayload } from './payload-codecs.js';
+import { z } from 'zod';
 
 type EvidenceCursorPayload = {
   kind: 'evidence';
@@ -25,8 +28,7 @@ export type EvidenceQueryContext = {
   database: DatabaseSync;
   now(): number;
   ensureOpen(): void;
-  transaction<T>(operation: () => T): T;
-  reconcileInside(runId: string, nowMs: number): void;
+  readTransaction<T>(operation: () => T): T;
   statusInside(runId: string): RunStatusView;
   notFound(): RunStoreError;
 };
@@ -38,9 +40,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
     const query = parsed.data;
     const limit = pageSize(query.limit);
     const criteriaFingerprint = hashCanonical(query.criteria);
-    return context.transaction(() => {
-      const nowMs = context.now();
-      context.reconcileInside(query.sourceRunId, nowMs);
+    return context.readTransaction(() => {
       const run = context.database.prepare('SELECT * FROM runs WHERE run_id = ?').get(query.sourceRunId) as DatabaseRow | undefined;
       if (!run) throw context.notFound();
       const sourceStatus = asText(run.status, 'run status') as RunStatus;
@@ -92,18 +92,17 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         parameters.push(criteria.materialId);
       }
       if (criteria.answer?.type === 'choice') {
-        where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?");
+        where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
         parameters.push(criteria.answer.choiceId);
       } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
         const field = criteria.answer.type === 'score' ? 'score' : 'noul';
-        const valueExpression = criteria.answer.type === 'score' ? "json_extract(e.result_json, '$.score')" : "json_extract(e.result_json, '$.noul')";
-        where.push(`json_extract(e.result_json, '$.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>='} ?`);
+        const valueExpression = criteria.answer.type === 'score' ? "json_extract(e.result_json, '$.value.score')" : "json_extract(e.result_json, '$.value.noul')";
+        where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND ${valueExpression} ${criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>='} ?`);
         parameters.push(criteria.answer.value);
       }
       if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
       const whereSql = where.join(' AND ');
       const join = 'LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id';
-      const snapshotCount = asNumber((context.database.prepare(`SELECT COUNT(*) AS count FROM evaluations AS e ${join} WHERE ${whereSql}`).get(...parameters) as DatabaseRow).count, 'query match count');
       const evaluationCoverage = {
         totalEvaluations: asNumber((context.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'evaluation denominator'),
         completedEvaluations: asNumber((context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'completed evaluation denominator'),
@@ -134,10 +133,9 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       }
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
       const lifecycle = currentLifecycle;
-      const matchedCoverage = (() => {
-        const matchedRows = context.database.prepare(`SELECT e.status, e.respondent_id, e.packet_json, e.result_json,
-          (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
-            WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+      const matched = (() => {
+        const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id,
+          json_extract(e.packet_json, '$.question') AS question_json, e.result_json
           FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters) as DatabaseRow[];
         const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
         const respondents = new Set<string>();
@@ -146,31 +144,41 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         let selectedMaterialEvaluations = 0;
         for (const row of matchedRows) {
           const status = asText(row.status, 'matched evaluation status') as keyof typeof counts;
+          if (!Object.hasOwn(counts, status)) throw new RunStoreError('data_integrity_error', 'A matched evaluation has an unsupported status.');
           counts.total += 1;
           counts[status] += 1;
           const respondentId = asText(row.respondent_id, 'matched respondent ID');
           respondents.add(respondentId);
           if (status !== 'answered' || row.result_json === null) continue;
-          const result = resultFromStorage(parseJson(row.result_json, 'matched result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'matched execution'));
-          if (result.type !== 'choice') continue;
-          const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'matched packet'));
-          if (packet.question.type !== 'choice') continue;
-          const materialId = packet.question.materialOptions?.[result.choice];
+          if (typeof row.result_json !== 'string') throw new RunStoreError('data_integrity_error', 'A matched answer is not valid stored text.');
+          const value = decodeStoredPayload(row.result_json, 'decision-value', decisionValueSchema);
+          const question = z.object({ type: z.string(), materialOptions: z.record(z.string(), z.string()).optional() }).safeParse(parseJson(row.question_json, 'matched question'));
+          if (!question.success) throw new RunStoreError('data_integrity_error', 'A matched question has invalid material mapping evidence.');
+          if (value.type !== 'choice' || question.data.type !== 'choice') continue;
+          const materialId = question.data.materialOptions?.[value.choice];
           if (materialId) {
             selectedMaterialEvaluations += 1;
             selectedMaterialIds.add(materialId);
             selectedMaterialRespondents.add(respondentId);
           }
         }
-        return { evaluations: counts, representedRespondents: respondents.size,
-          selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size } };
+        return { count: counts.total, evaluations: counts, representedRespondents: respondents.size,
+          selectedMaterialIds: [...selectedMaterialIds],
+          selectedMaterialRespondents, selectedMaterialEvaluations,
+          selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size },
+          ordinals: matchedRows.map((row) => asNumber(row.ordinal, 'matched evaluation ordinal')),
+          evaluationIds: matchedRows.map((row) => asText(row.evaluation_id, 'matched evaluation ID')) };
       })();
-      const rows = context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
+      const matchedCoverage = { evaluations: matched.evaluations, representedRespondents: matched.representedRespondents, selectedMaterials: matched.selectedMaterials };
+      const matchingOrdinalPairs = matched.ordinals.map((ordinal, index) => ({ ordinal, evaluationId: matched.evaluationIds[index]! }))
+        .filter(({ ordinal }) => !cursor || ordinal > cursor.lastOrdinal);
+      const pageIds = matchingOrdinalPairs.slice(0, limit + 1).map(({ evaluationId }) => evaluationId);
+      const rows = pageIds.length === 0 ? [] : context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
         (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
           WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
         FROM evaluations AS e ${join}
-        WHERE ${whereSql} ${cursor ? 'AND e.ordinal > ?' : ''} ORDER BY e.ordinal LIMIT ?`)
-        .all(...parameters, ...(cursor ? [cursor.lastOrdinal, limit + 1] : [limit + 1])) as DatabaseRow[];
+        WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => '?').join(', ')}) ORDER BY e.ordinal`)
+        .all(query.sourceRunId, ...pageIds) as DatabaseRow[];
       const hasMore = rows.length > limit;
       const pageRows = rows.slice(0, limit);
       const endpoint = parsedRequest.data.provider.kind === 'jev'
@@ -223,7 +231,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       const sourceComplete = sourceStatus === 'completed';
       return {
         items,
-        totalMatches: snapshotCount,
+        totalMatches: matched.count,
         sourceRunId: query.sourceRunId,
         sourceStatus,
         sourceComplete,

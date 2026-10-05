@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { decisionRequestSchema } from '../domain/decision/decision.js';
+import { decisionRequestSchema, decisionValueFromResult, decisionValueSchema } from '../domain/decision/decision.js';
 import { validateDecision } from '../domain/decision/validate.js';
 import { compileDecisionPacketForCompiler } from '../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../domain/study/arm.js';
-import { deriveRunLifecycle, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
+import { deriveRunLifecycle, resumeRefusalMessage, type AttemptReservation, type AnswerRow, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord, type JourneyWorkerTurn, type Page, type RunAttempt, type RunContextDetail, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView, type WorkerClaim } from '../domain/run/lifecycle.js';
 import { decisionFailureDetailForReason, decisionResultSchema, decisionBatchResultSchema, providerExecutionEvidenceSchema, type DecisionBatchResult } from '../domain/decision/decision.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type FrozenEvaluation, type ParsedFollowOnRunRequest, type PreparedJourneyRun, type PreparedRun } from '../domain/run/request.js';
 import { hashCanonical } from './identity.js';
@@ -14,12 +14,17 @@ import { journeyTopology } from '../domain/journey/topology.js';
 import { asNumber, asNullableText, asText, parseJson, type DatabaseRow } from './sqlite/rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './sqlite/cursors.js';
 import { queryEvidencePage } from './sqlite/evidence-query.js';
+import { findRunBySubmission, loadAcceptedRequest, loadEvaluationStatuses, loadPreparedEvaluations, loadQuestionGroups, runExists } from './sqlite/run-identity-queries.js';
+import { encodeStoredPayload } from './sqlite/payload-codecs.js';
+import { storedJourneyIdentity } from './sqlite/journey-request.js';
+import { insertAcceptedRun, insertPreparedJourneyData, insertPreparedRunData } from './sqlite/commands/acceptance.js';
 import { encounteredMaterialsFromState, evaluationFailureFromJson, evaluationFailureJson, failureEvidenceJson, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './sqlite/evidence-records.js';
-import { openInitializedDatabase } from './sqlite/schema.js';
+import { openSqliteConnection, type SqliteConnection } from './sqlite/connection.js';
+import { SCHEMA_VERSION } from './sqlite/schema.js';
 import { RunStoreError } from '../application/run-store.js';
-import type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, RunListQuery, RunStore, StorageInfo } from '../application/run-store.js';
+import type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, RunCommandRepository, RunListQuery, RunPersistence, RunReadRepository, RunStore, StorageInfo } from '../application/run-store.js';
 export { SCHEMA_VERSION } from './sqlite/schema.js';
-export type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, RunListQuery, RunStore, StorageInfo } from '../application/run-store.js';
+export type { AttemptOutcome, DeletePreview, DeleteResult, JourneyTransition, RunListQuery, RunPersistence, RunReadRepository, RunCommandRepository, RunStore, StorageInfo } from '../application/run-store.js';
 export { RunStoreError } from '../application/run-store.js';
 export { inspectRunStoreCompatibility, runStoreBackupAvailable, type StoreCompatibility } from './sqlite/recovery.js';
 import { resetRunStore as resetRunStoreInternal } from './sqlite/recovery.js';
@@ -248,23 +253,56 @@ function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJourneyR
 export function openRunStore(dataRoot: string, options: { now?: () => number } = {}): RunStore {
   if (!path.isAbsolute(dataRoot)) throw new RunStoreError('invalid_data_root', 'Sheg data directory must be an absolute path.');
   mkdirSync(dataRoot, { recursive: true });
-  const database = openInitializedDatabase(path.join(dataRoot, 'runs.sqlite'), dataRoot);
-  return new SQLiteRunStore(database, path.join(dataRoot, 'runs.sqlite'), options.now ?? Date.now);
+  const connection = openSqliteConnection(path.join(dataRoot, 'runs.sqlite'), dataRoot);
+  return new SQLiteRunStore(connection, path.join(dataRoot, 'runs.sqlite'), options.now ?? Date.now);
+}
+
+export function openRunPersistence(dataRoot: string, options: { now?: () => number } = {}): RunPersistence {
+  return splitRunStore(openRunStore(dataRoot, options));
+}
+
+export function splitRunStore(store: RunStore): RunPersistence {
+  const reads: RunReadRepository = {
+    findSubmission: store.findSubmission.bind(store), getStatus: store.getStatus.bind(store),
+    evaluationStatuses: store.evaluationStatuses.bind(store), getRequestKind: store.getRequestKind.bind(store),
+    getRequest: store.getRequest.bind(store), getJourneyRun: store.getJourneyRun.bind(store),
+    getJourneyWorkerTurn: store.getJourneyWorkerTurn.bind(store), list: store.list.bind(store),
+    queryEvidence: store.queryEvidence.bind(store), getContext: store.getContext.bind(store),
+    resolveFollowOnSources: store.resolveFollowOnSources.bind(store), answers: store.answers.bind(store),
+    attempts: store.attempts.bind(store), previewDelete: store.previewDelete.bind(store),
+    storageInfo: store.storageInfo.bind(store), close: store.close.bind(store),
+  };
+  const commands: RunCommandRepository = {
+    accept: store.accept.bind(store), acceptJourney: store.acceptJourney.bind(store),
+    requestCancel: store.requestCancel.bind(store), resume: store.resume.bind(store),
+    deleteRuns: store.deleteRuns.bind(store), optimizeStorage: store.optimizeStorage.bind(store),
+    claim: store.claim.bind(store), heartbeat: store.heartbeat.bind(store), reserveNext: store.reserveNext.bind(store),
+    reserveBatch: store.reserveBatch.bind(store), settleBatch: store.settleBatch.bind(store),
+    settle: store.settle.bind(store), settleJourney: store.settleJourney.bind(store), finish: store.finish.bind(store),
+    failLaunch: store.failLaunch.bind(store), failRun: store.failRun.bind(store),
+    reconcile: store.reconcile.bind(store), reconcileMany: store.reconcileMany.bind(store), reconcileActive: store.reconcileActive.bind(store),
+  };
+  return { reads, commands, close: store.close.bind(store) };
 }
 
 class SQLiteRunStore implements RunStore {
   private isClosed = false;
+  private readonly database: DatabaseSync;
 
-  constructor(private readonly database: DatabaseSync, private readonly databasePath: string, private readonly now: () => number) {}
+  constructor(private readonly connection: SqliteConnection, private readonly databasePath: string, private readonly now: () => number) {
+    this.database = connection.client;
+  }
 
   findSubmission(submissionId: string, requestFingerprint: string): RunStatusView | null {
     this.ensureOpen();
-    const row = this.database.prepare('SELECT run_id, request_fingerprint FROM runs WHERE submission_id = ?').get(submissionId) as DatabaseRow | undefined;
-    if (!row) return null;
-    if (asText(row.request_fingerprint, 'request fingerprint') !== requestFingerprint) {
-      throw new RunStoreError('submission_conflict', 'This submission ID has already been used with different request contents.');
-    }
-    return this.getStatus(asText(row.run_id, 'run ID'));
+    return this.readTransaction(() => {
+      const row = findRunBySubmission(this.connection.orm, submissionId);
+      if (!row) return null;
+      if (row.requestFingerprint !== requestFingerprint) {
+        throw new RunStoreError('submission_conflict', 'This submission ID has already been used with different request contents.');
+      }
+      return this.statusInside(row.runId);
+    });
   }
 
   accept(submissionId: string, preparedInput: PreparedRun): { created: boolean; run: RunStatusView } {
@@ -299,21 +337,8 @@ class SQLiteRunStore implements RunStore {
       const runId = randomUUID();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
-      this.database.prepare(`INSERT INTO runs
-        (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls)
-        VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?)`)
-        .run(runId, submissionId, prepared.requestFingerprint, createdAt, nowMs, prepared.request.label ?? null,
-          JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint, ...(prepared.lineage ? { lineage: prepared.lineage } : {}) }), prepared.evaluations.length, prepared.request.maxCalls);
-      const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
-        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, packet_json, packet_fingerprint, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
-      const insertGroup = this.database.prepare(`INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`);
-      for (const [ordinal, group] of (prepared.groups ?? []).entries()) insertGroup.run(group.groupId, runId, ordinal, group.contextId, group.respondentId, JSON.stringify(group.state), JSON.stringify(group.questionIds));
-      for (const [ordinal, evaluation] of prepared.evaluations.entries()) {
-        insertEvaluation.run(evaluation.evaluationId, runId, ordinal, evaluation.contextId, evaluation.respondentId,
-          evaluation.questionId, evaluation.groupId ?? null, JSON.stringify(evaluation.packet), evaluation.packetFingerprint);
-      }
+      insertAcceptedRun(this.connection.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
+      insertPreparedRunData(this.connection.orm, runId, prepared);
       return { created: true, run: this.statusInside(runId) };
     });
   }
@@ -335,100 +360,159 @@ class SQLiteRunStore implements RunStore {
       const runId = randomUUID();
       const nowMs = this.now();
       const createdAt = new Date(nowMs).toISOString();
-      this.database.prepare(`INSERT INTO runs
-        (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls)
-        VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?)`)
-        .run(runId, submissionId, prepared.requestFingerprint, createdAt, nowMs, prepared.request.label ?? null,
-          JSON.stringify({ request: prepared.request, requestFingerprint: prepared.requestFingerprint, compilerFingerprint: prepared.compilerFingerprint }), prepared.evaluations.length, prepared.request.maxCalls);
-      const insertEvaluation = this.database.prepare(`INSERT INTO evaluations
-        (evaluation_id, run_id, ordinal, context_id, respondent_id, question_id, group_id, turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`);
-      for (const evaluation of prepared.evaluations) {
-        const groupId = evaluation.contextId;
-        this.database.prepare(`INSERT OR IGNORE INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`)
-          .run(groupId, runId, evaluation.ordinal, evaluation.contextId, evaluation.respondentId, JSON.stringify(evaluation.packet.state), JSON.stringify([evaluation.questionId]));
-        insertEvaluation.run(evaluation.evaluationId, runId, evaluation.ordinal, evaluation.contextId, evaluation.respondentId,
-          evaluation.questionId, groupId, evaluation.turnId, evaluation.nodeId, evaluation.pathId, evaluation.occurrence,
-          JSON.stringify(evaluation.packet), evaluation.packetFingerprint);
-      }
-      const insertState = this.database.prepare(`INSERT INTO journey_respondents
-        (run_id, respondent_id, status, current_node_id, current_turn_id, current_context_id, revision, events_json, route_json, outcome)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-      for (const state of prepared.respondents) {
-        insertState.run(runId, state.respondentId, state.status, state.currentNodeId, state.currentTurnId,
-          state.currentContextId, state.revision, JSON.stringify(state.events), JSON.stringify(state.route), state.outcome ?? null);
-      }
+      insertAcceptedRun(this.connection.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt, createdMs: nowMs }, prepared);
+      insertPreparedJourneyData(this.connection.orm, runId, prepared);
       return { created: true, run: this.statusInside(runId) };
     });
   }
 
   getStatus(runId: string): RunStatusView {
     this.ensureOpen();
-    return this.transaction(() => {
-      this.reconcileInside(runId, this.now());
-      return this.statusInside(runId);
-    });
+    return this.readTransaction(() => this.statusInside(runId));
   }
 
   evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }> {
     this.ensureOpen();
-    this.getStatus(runId);
-    const rows = this.database.prepare('SELECT evaluation_id, status FROM evaluations WHERE run_id = ? ORDER BY ordinal').all(runId) as DatabaseRow[];
-    return rows.map((row) => ({
-      evaluationId: asText(row.evaluation_id, 'evaluation ID'),
-      status: asText(row.status, 'evaluation status') as AnswerRow['status'],
-    }));
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      return loadEvaluationStatuses(this.connection.orm, runId).map((row) => ({
+        evaluationId: row.evaluationId,
+        status: row.status as AnswerRow['status'],
+      }));
+    });
   }
 
   getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on' {
-    this.getStatus(runId);
-    const row = this.database.prepare('SELECT request_json FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
-    if (!row) throw this.notFound();
-    const stored = parseJson<unknown>(row.request_json, 'request');
-    if (typeof stored !== 'object' || stored === null || !('request' in stored)) {
-      throw new RunStoreError('data_integrity_error', 'Stored run request has an invalid shape.');
-    }
-    const request = runRequestSchema.safeParse(stored.request);
-    if (!request.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
-    return request.data.kind;
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      this.statusInside(runId);
+      const row = loadAcceptedRequest(this.connection.orm, runId);
+      if (!row) throw this.notFound();
+      const stored = parseJson<unknown>(row.requestJson, 'request');
+      if (typeof stored !== 'object' || stored === null || !('request' in stored)) {
+        throw new RunStoreError('data_integrity_error', 'Stored run request has an invalid shape.');
+      }
+      const request = runRequestSchema.safeParse(stored.request);
+      if (!request.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
+      return request.data.kind;
+    });
   }
 
   getRequest(runId: string): PreparedRun {
-    this.getStatus(runId);
-    const row = this.database.prepare('SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
+    this.ensureOpen();
+    return this.readTransaction(() => {
+    this.statusInside(runId);
+    const row = loadAcceptedRequest(this.connection.orm, runId);
     if (!row) throw this.notFound();
-    const stored = parseJson<unknown>(row.request_json, 'request');
+    const stored = parseJson<unknown>(row.requestJson, 'request');
     if (typeof stored !== 'object' || stored === null || !('request' in stored) || !('requestFingerprint' in stored) || !('compilerFingerprint' in stored)) {
       throw new RunStoreError('data_integrity_error', 'Stored run request has an invalid shape.');
     }
-    const evaluations = this.database.prepare('SELECT * FROM evaluations WHERE run_id = ? ORDER BY ordinal').all(runId) as DatabaseRow[];
-    const groups = this.database.prepare('SELECT * FROM question_groups WHERE run_id = ? ORDER BY ordinal').all(runId) as DatabaseRow[];
+    const evaluations = loadPreparedEvaluations(this.connection.orm, runId);
+    const groups = loadQuestionGroups(this.connection.orm, runId);
     const prepared = stored as Omit<PreparedRun, 'evaluations'>;
     const parsed = validatePrepared({ ...prepared, groups: groups.map((row) => ({
-      groupId: asText(row.group_id, 'group ID'), contextId: asText(row.context_id, 'context ID'), respondentId: asText(row.respondent_id, 'respondent ID'),
-      state: parseJson(row.state_json, 'group state'), questionIds: parseJson(row.question_ids_json, 'group question IDs'),
+      groupId: row.groupId, contextId: row.contextId, respondentId: row.respondentId,
+      state: parseJson(row.stateJson, 'group state'), questionIds: parseJson(row.questionIdsJson, 'group question IDs'),
     })), evaluations: evaluations.map((row) => ({
-      groupId: asText(row.group_id, 'group ID'),
-      evaluationId: asText(row.evaluation_id, 'evaluation ID'),
-      contextId: asText(row.context_id, 'context ID'),
-      respondentId: asText(row.respondent_id, 'respondent ID'),
-      questionId: asText(row.question_id, 'question ID'),
-      packet: parseJson(row.packet_json, 'frozen packet'),
-      packetFingerprint: asText(row.packet_fingerprint, 'packet fingerprint'),
+      groupId: row.groupId,
+      evaluationId: row.evaluationId,
+      contextId: row.contextId,
+      respondentId: row.respondentId,
+      questionId: row.questionId,
+      packet: parseJson(row.packetJson, 'frozen packet'),
+      packetFingerprint: row.packetFingerprint,
     })) });
-    if (parsed.requestFingerprint !== asText(row.request_fingerprint, 'request fingerprint')) {
+    if (parsed.requestFingerprint !== row.requestFingerprint) {
       throw new RunStoreError('data_integrity_error', 'Stored run and request fingerprints do not match.');
     }
     if (parsed.request.kind === 'follow-on' && parsed.lineage) {
-      const sourceAvailable = Boolean(this.database.prepare('SELECT 1 AS found FROM runs WHERE run_id = ?').get(parsed.lineage.sourceRunId));
+      const sourceAvailable = runExists(this.connection.orm, parsed.lineage.sourceRunId);
       return { ...parsed, lineage: { ...parsed.lineage, sourceAvailable, sourceRecordState: sourceAvailable ? 'live' : 'historical' } };
     }
     return parsed;
+    });
+  }
+
+  getJourneyWorkerTurn(runId: string, evaluationId: string, respondentId: string): JourneyWorkerTurn {
+    this.ensureOpen();
+    return this.readTransaction(() => {
+      const rows = this.database.prepare(`WITH next_ordinal AS (
+          SELECT COALESCE(MAX(ordinal), -1) + 1 AS value FROM evaluations WHERE run_id = ?
+        ), node_occurrences AS (
+          SELECT node_id, COUNT(*) AS count FROM evaluations WHERE run_id = ? AND respondent_id = ? GROUP BY node_id
+        )
+        SELECT r.request_json, r.request_fingerprint, e.*, jr.status AS respondent_status,
+          jr.current_node_id AS respondent_current_node_id, jr.current_turn_id AS respondent_current_turn_id,
+          jr.current_context_id AS respondent_current_context_id, jr.revision AS respondent_revision,
+          jr.events_json AS respondent_events_json, jr.route_json AS respondent_route_json, jr.outcome AS respondent_outcome,
+          next_ordinal.value AS next_ordinal, node_occurrences.node_id AS occurrence_node_id, node_occurrences.count AS occurrence_count
+        FROM runs r JOIN evaluations e ON e.run_id = r.run_id
+        JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        CROSS JOIN next_ordinal LEFT JOIN node_occurrences ON 1 = 1
+        WHERE r.run_id = ? AND e.evaluation_id = ? AND e.respondent_id = ?
+        ORDER BY node_occurrences.node_id`).all(runId, runId, respondentId, runId, evaluationId, respondentId) as DatabaseRow[];
+      const first = rows[0];
+      if (!first) throw this.notFound();
+      const identity = storedJourneyIdentity(first);
+      const profile = identity.request.respondents.find(({ id }) => id === respondentId);
+      if (!profile) throw new RunStoreError('data_integrity_error', 'The journey turn references a respondent outside its frozen cohort.');
+
+      const packet = decisionRequestSchema.parse(parseJson(first.packet_json, 'frozen packet')) as JourneyEvaluationRecord['packet'];
+      const evaluation: JourneyEvaluationRecord = {
+        evaluationId: asText(first.evaluation_id, 'evaluation ID'),
+        contextId: asText(first.context_id, 'context ID'),
+        respondentId: asText(first.respondent_id, 'respondent ID'),
+        questionId: asText(first.question_id, 'question ID'),
+        packet,
+        packetFingerprint: asText(first.packet_fingerprint, 'packet fingerprint'),
+        turnId: asText(first.turn_id, 'turn ID'),
+        nodeId: asText(first.node_id, 'node ID'),
+        pathId: asText(first.path_id, 'path ID'),
+        occurrence: asNumber(first.occurrence, 'turn occurrence'),
+        ordinal: asNumber(first.ordinal, 'evaluation ordinal'),
+        status: asText(first.status, 'evaluation status') as JourneyEvaluationRecord['status'],
+      };
+      if (evaluation.status !== 'pending' || evaluation.questionId !== packet.question.id ||
+          hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {
+        throw new RunStoreError('data_integrity_error', 'The reserved journey packet does not match its pending turn identity.');
+      }
+
+      const respondentStatus = asText(first.respondent_status, 'journey respondent status');
+      const events = parseJson<unknown>(first.respondent_events_json, 'journey history');
+      const route = parseJson<unknown>(first.respondent_route_json, 'journey route');
+      if (!['active', 'completed', 'failed', 'unreached'].includes(respondentStatus) || !Array.isArray(events) || !Array.isArray(route)) {
+        throw new RunStoreError('data_integrity_error', 'Stored journey respondent state has an invalid shape.');
+      }
+      const respondent: JourneyRespondentState = {
+        respondentId: asText(first.respondent_id, 'respondent ID'),
+        status: respondentStatus as JourneyRespondentState['status'],
+        currentNodeId: asNullableText(first.respondent_current_node_id, 'current node ID'),
+        currentTurnId: asNullableText(first.respondent_current_turn_id, 'current turn ID'),
+        currentContextId: asNullableText(first.respondent_current_context_id, 'current context ID'),
+        revision: asNumber(first.respondent_revision, 'journey state revision'),
+        events: events as JourneyRespondentState['events'],
+        route: route as JourneyRespondentState['route'],
+        ...(first.respondent_outcome === null ? {} : { outcome: asText(first.respondent_outcome, 'journey outcome') }),
+      };
+      if (respondent.status !== 'active' || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
+        throw new RunStoreError('data_integrity_error', 'The reserved journey turn does not match the active respondent checkpoint.');
+      }
+
+      return {
+        evaluation,
+        respondent,
+        profile,
+        nextOrdinal: asNumber(first.next_ordinal, 'next evaluation ordinal'),
+        nodeOccurrences: rows.flatMap((row) => row.occurrence_node_id === null ? [] : [{ nodeId: asText(row.occurrence_node_id, 'occurrence node ID'), count: asNumber(row.occurrence_count, 'node occurrence count') }]),
+      };
+    });
   }
 
   getJourneyRun(runId: string): JourneyRunRecord {
-    this.getStatus(runId);
+    this.ensureOpen();
+    return this.readTransaction(() => {
+    this.statusInside(runId);
     const row = this.database.prepare('SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?').get(runId) as DatabaseRow | undefined;
     if (!row) throw this.notFound();
     const stored = parseJson<unknown>(row.request_json, 'request');
@@ -441,7 +525,9 @@ class SQLiteRunStore implements RunStore {
         hashCanonical({ request: parsedRequest.data, compilerFingerprint: stored.compilerFingerprint }) !== stored.requestFingerprint) {
       throw new RunStoreError('data_integrity_error', 'Stored journey request or fingerprint is invalid.');
     }
-    const evaluationRows = this.database.prepare('SELECT * FROM evaluations WHERE run_id = ? ORDER BY ordinal').all(runId) as DatabaseRow[];
+    const evaluationRows = this.database.prepare(`SELECT e.*,
+      (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id) WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+      FROM evaluations e WHERE e.run_id = ? ORDER BY e.ordinal`).all(runId) as DatabaseRow[];
     const evaluations: JourneyEvaluationRecord[] = evaluationRows.map((evaluation) => {
       const packet = decisionRequestSchema.parse(parseJson(evaluation.packet_json, 'frozen packet')) as JourneyEvaluationRecord['packet'];
       const base: JourneyEvaluationRecord = {
@@ -465,7 +551,10 @@ class SQLiteRunStore implements RunStore {
       if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
         throw new RunStoreError('data_integrity_error', 'Stored journey packet does not match its context identity.');
       }
-      if (evaluation.result_json !== null) base.result = validateDecision(packet, parseJson(evaluation.result_json, 'decision result'), { maxAttempts: 1 });
+      if (evaluation.result_json !== null) {
+        const result = resultFromStorage(parseJson(evaluation.result_json, 'decision value'), evaluation.execution_json === null ? undefined : parseJson(evaluation.execution_json, 'provider execution'));
+        base.result = validateDecision(packet, result, { maxAttempts: result.attempts });
+      }
       const evaluationFailure = storedEvaluationFailure(evaluation);
       if (evaluationFailure) base.failure = evaluationFailure;
       return base;
@@ -498,16 +587,13 @@ class SQLiteRunStore implements RunStore {
       throw new RunStoreError('data_integrity_error', 'Stored journey respondent states do not match the reached turns.');
     }
     return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations, respondents };
+    });
   }
 
   list(query: RunListQuery): Page<RunStatusView> {
     this.ensureOpen();
+    return this.readTransaction(() => {
     const limit = pageSize(query.limit);
-    const nowMs = this.now();
-    this.transaction(() => {
-      const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all() as DatabaseRow[];
-      for (const row of active) this.reconcileInside(asText(row.run_id, 'run ID'), nowMs);
-    });
     const filtersFingerprint = hashCanonical({ status: query.status ?? null, label: query.label ?? null, createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null, materialId: query.materialId ?? null });
     let cursor: CursorPayload | undefined;
     if (query.cursor) {
@@ -542,19 +628,19 @@ class SQLiteRunStore implements RunStore {
     const rows = this.database.prepare(`SELECT run_id, created_ms FROM runs ${where} ORDER BY created_ms, run_id LIMIT ?`).all(...params, limit + 1) as DatabaseRow[];
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const items = pageRows.map((row) => this.getStatus(asText(row.run_id, 'run ID')));
+    const items = this.statusesInside(pageRows.map((row) => asText(row.run_id, 'run ID')));
     const last = pageRows.at(-1);
     return {
       items,
       ...(hasMore && last ? { nextCursor: encodeCursor({ kind: 'runs', createdMs: asNumber(last.created_ms, 'created time'), runId: asText(last.run_id, 'run ID'), filtersFingerprint } satisfies CursorPayload) } : {}),
     };
+    });
   }
 
   resolveFollowOnSources(input: ParsedFollowOnRunRequest): FollowOnSourceSet {
     this.ensureOpen();
     const request = followOnRunRequestSchema.parse(input);
-    return this.transaction(() => {
-      this.reconcileInside(request.sourceRunId, this.now());
+    return this.readTransaction(() => {
       const run = this.database.prepare('SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?').get(request.sourceRunId) as DatabaseRow | undefined;
       if (!run) throw this.notFound();
       const stored = parseJson<{ request?: unknown; lineage?: unknown }>(run.request_json, 'source run request');
@@ -589,11 +675,11 @@ class SQLiteRunStore implements RunStore {
           parameters.push(criteria.materialId);
         }
         if (criteria.answer?.type === 'choice') {
-          where.push("json_extract(e.result_json, '$.type') = 'choice' AND json_extract(e.result_json, '$.choice') = ?"); parameters.push(criteria.answer.choiceId);
+          where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?"); parameters.push(criteria.answer.choiceId);
         } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
           const field = criteria.answer.type === 'score' ? 'score' : 'noul';
           const operator = criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>=';
-          where.push(`json_extract(e.result_json, '$.type') = '${field}' AND json_extract(e.result_json, '$.${field}') ${operator} ?`); parameters.push(criteria.answer.value);
+          where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND json_extract(e.result_json, '$.value.${field}') ${operator} ?`); parameters.push(criteria.answer.value);
         }
         if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
       }
@@ -637,8 +723,7 @@ class SQLiteRunStore implements RunStore {
       database: this.database,
       now: this.now,
       ensureOpen: () => this.ensureOpen(),
-      transaction: (operation) => this.transaction(operation),
-      reconcileInside: (runId, nowMs) => this.reconcileInside(runId, nowMs),
+      readTransaction: (operation) => this.readTransaction(operation),
       statusInside: (runId) => this.statusInside(runId),
       notFound: () => this.notFound(),
     }, input);
@@ -673,7 +758,9 @@ class SQLiteRunStore implements RunStore {
   }
 
   answers(runId: string, cursorText?: string, requestedLimit?: number): Page<AnswerRow> {
-    this.getStatus(runId);
+    this.ensureOpen();
+    return this.readTransaction(() => {
+    this.statusInside(runId);
     const limit = pageSize(requestedLimit);
     let cursor: AnswerCursorPayload | undefined;
     if (cursorText) {
@@ -704,10 +791,13 @@ class SQLiteRunStore implements RunStore {
     });
     const last = pageRows.at(-1);
     return { items, ...(hasMore && last ? { nextCursor: encodeCursor({ kind: 'answers', runId, ordinal: asNumber(last.ordinal, 'evaluation ordinal') } satisfies AnswerCursorPayload) } : {}) };
+    });
   }
 
   attempts(runId: string, cursorText?: string, requestedLimit?: number): Page<RunAttempt> {
-    this.getStatus(runId);
+    this.ensureOpen();
+    return this.readTransaction(() => {
+    this.statusInside(runId);
     const limit = pageSize(requestedLimit);
     let cursor: AttemptCursorPayload | undefined;
     if (cursorText) {
@@ -716,25 +806,35 @@ class SQLiteRunStore implements RunStore {
         throw new RunStoreError('invalid_cursor', 'The attempt cursor does not match this run.');
       }
     }
-    const rows = this.database.prepare(`SELECT a.*, GROUP_CONCAT(ae.evaluation_id) AS evaluation_ids
-      FROM attempts a JOIN attempt_evaluations ae USING (attempt_id)
+    const rows = this.database.prepare(`SELECT a.* FROM attempts a
       WHERE a.run_id = ? ${cursor ? 'AND a.attempt_sequence > ?' : ''}
-      GROUP BY a.attempt_id ORDER BY a.attempt_sequence LIMIT ?`)
+      ORDER BY a.attempt_sequence LIMIT ?`)
       .all(...(cursor ? [runId, cursor.sequence, limit + 1] : [runId, limit + 1])) as DatabaseRow[];
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
+    const attemptIds = pageRows.map((row) => asText(row.attempt_id, 'attempt ID'));
+    const memberships = attemptIds.length === 0 ? [] : this.database.prepare(`SELECT ae.attempt_id, ae.evaluation_id, e.question_id, ae.failure_json
+      FROM attempt_evaluations ae JOIN evaluations e ON e.run_id = ae.run_id AND e.evaluation_id = ae.evaluation_id
+      WHERE ae.run_id = ? AND ae.attempt_id IN (${attemptIds.map(() => '?').join(', ')}) ORDER BY e.ordinal`)
+      .all(runId, ...attemptIds) as DatabaseRow[];
+    const membershipsByAttempt = new Map<string, string[]>();
+    const failuresByAttempt = new Map<string, RunAttempt['evaluationFailures']>();
+    for (const membership of memberships) {
+      const attemptId = asText(membership.attempt_id, 'attempt ID');
+      const evaluationId = asText(membership.evaluation_id, 'attempt evaluation ID');
+      membershipsByAttempt.set(attemptId, [...membershipsByAttempt.get(attemptId) ?? [], evaluationId]);
+      const failure = evaluationFailureFromJson(membership.failure_json);
+      if (failure) failuresByAttempt.set(attemptId, [...failuresByAttempt.get(attemptId) ?? [], {
+        evaluationId, questionId: asText(membership.question_id, 'attempt question ID'), failure,
+      }]);
+    }
     const items = pageRows.map((row): RunAttempt => {
       const attemptId = asText(row.attempt_id, 'attempt ID');
-      const evaluationFailures = (this.database.prepare(`SELECT ae.evaluation_id, e.question_id, ae.failure_json
-        FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id)
-        WHERE ae.attempt_id = ? AND ae.failure_json IS NOT NULL ORDER BY e.ordinal`).all(attemptId) as DatabaseRow[]).flatMap((failureRow) => {
-        const failure = evaluationFailureFromJson(failureRow.failure_json);
-        return failure ? [{ evaluationId: asText(failureRow.evaluation_id, 'attempt evaluation ID'), questionId: asText(failureRow.question_id, 'attempt question ID'), failure }] : [];
-      });
+      const evaluationFailures = failuresByAttempt.get(attemptId) ?? [];
       return {
         attemptId,
         groupId: asText(row.group_id, 'question group ID'),
-        evaluationIds: asText(row.evaluation_ids, 'attempt evaluation IDs').split(','),
+        evaluationIds: membershipsByAttempt.get(attemptId) ?? [],
         status: asText(row.status, 'attempt status') as RunAttempt['status'],
         startedAt: new Date(asNumber(row.started_ms, 'attempt start time')).toISOString(),
         ...(row.settled_ms === null ? {} : { settledAt: new Date(asNumber(row.settled_ms, 'attempt settlement time')).toISOString() }),
@@ -751,6 +851,7 @@ class SQLiteRunStore implements RunStore {
     return { items, ...(hasMore && last ? { nextCursor: encodeCursor({
       kind: 'attempts', runId, sequence: asNumber(last.attempt_sequence, 'attempt sequence'),
     } satisfies AttemptCursorPayload) } : {}) };
+    });
   }
 
   requestCancel(runId: string): RunStatusView {
@@ -891,14 +992,10 @@ class SQLiteRunStore implements RunStore {
   storageInfo(): StorageInfo {
     this.ensureOpen();
     try {
-      return this.transaction(() => {
+      return this.readTransaction(() => {
         const integrityRows = this.database.prepare('PRAGMA integrity_check').all() as DatabaseRow[];
         const foreignKeyViolations = this.database.prepare('PRAGMA foreign_key_check').all() as DatabaseRow[];
         const integrity = integrityRows.length === 1 && integrityRows[0]?.integrity_check === 'ok' && foreignKeyViolations.length === 0 ? 'ok' : 'failed';
-        if (integrity === 'ok') {
-          const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all() as DatabaseRow[];
-          for (const row of active) this.reconcileInside(asText(row.run_id, 'run ID'), this.now());
-        }
         const count = (table: 'runs' | 'evaluations' | 'attempts', where = '') => asNumber((this.database.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get() as DatabaseRow).count, `${table} count`);
         return {
           integrity,
@@ -960,7 +1057,7 @@ class SQLiteRunStore implements RunStore {
       const evaluationId = asText(row.evaluation_id, 'evaluation ID');
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)")
         .run(attemptId, claim.runId, asText(row.group_id, 'group ID'), evaluationId, asText(row.packet_fingerprint, 'packet fingerprint'), claim.ownerToken, nowMs);
-      this.database.prepare('INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)').run(attemptId, evaluationId);
+      this.database.prepare('INSERT INTO attempt_evaluations (run_id, attempt_id, evaluation_id) VALUES (?, ?, ?)').run(claim.runId, attemptId, evaluationId);
       this.database.prepare('UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?').run(claim.runId);
       return { attemptId, evaluation: this.evaluationFromRow(row) };
     });
@@ -988,8 +1085,8 @@ class SQLiteRunStore implements RunStore {
       const packetFingerprint = hashCanonical({ state, questions: packetQuestions });
       this.database.prepare("INSERT INTO attempts (attempt_id, run_id, group_id, evaluation_id, packet_fingerprint, owner_token, status, started_ms) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)")
         .run(attemptId, claim.runId, groupId, anchorId, packetFingerprint, claim.ownerToken, nowMs);
-      const link = this.database.prepare('INSERT INTO attempt_evaluations (attempt_id, evaluation_id) VALUES (?, ?)');
-      for (const row of sorted) link.run(attemptId, asText(row.evaluation_id, 'evaluation ID'));
+      const link = this.database.prepare('INSERT INTO attempt_evaluations (run_id, attempt_id, evaluation_id) VALUES (?, ?, ?)');
+      for (const row of sorted) link.run(claim.runId, attemptId, asText(row.evaluation_id, 'evaluation ID'));
       this.database.prepare('UPDATE runs SET reserved_calls = reserved_calls + 1 WHERE run_id = ?').run(claim.runId);
       return { attemptId, evaluations: sorted.map((row) => this.evaluationFromRow(row)) };
     });
@@ -1004,9 +1101,10 @@ class SQLiteRunStore implements RunStore {
       if (!attempt) throw new RunStoreError('attempt_not_reserved', 'The provider attempt is not reserved by this worker.');
       const rows = this.database.prepare(`SELECT e.* FROM attempt_evaluations ae JOIN evaluations e USING (evaluation_id) WHERE ae.attempt_id = ? ORDER BY e.ordinal`).all(attemptId) as DatabaseRow[];
       if (!rows.length) throw new RunStoreError('data_integrity_error', 'The provider attempt has no linked evaluations.');
+      const chargedCalls = outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.execution.attempts;
       if (outcome.kind === 'failed') {
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
-          .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
+          .run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
         for (const row of rows) {
           const evaluationId = asText(row.evaluation_id, 'evaluation ID');
           this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
@@ -1020,8 +1118,8 @@ class SQLiteRunStore implements RunStore {
         if (!result.success) throw new RunStoreError('invalid_batch_result', 'The batch result envelope is invalid.');
         const expected = new Map(rows.map((row) => [asText(row.question_id, 'question ID'), row]));
         if (result.data.answers.some(({ questionId }) => !expected.has(questionId))) throw new RunStoreError('invalid_batch_result', 'The batch result contains an unknown question ID.');
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, execution_json = ? WHERE attempt_id = ?")
-          .run(nowMs, JSON.stringify(result.data.execution), attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, execution_json = ? WHERE attempt_id = ?")
+          .run(nowMs, result.data.execution.attempts, JSON.stringify(result.data.execution), attemptId);
         for (const [questionId, row] of expected) {
           const answer = result.data.answers.find((item) => item.questionId === questionId);
           const evaluationId = asText(row.evaluation_id, 'evaluation ID');
@@ -1032,7 +1130,7 @@ class SQLiteRunStore implements RunStore {
           } else if ('failure' in answer) {
             const failure = { code: answer.failure.code, message: answer.failure.message, ...(answer.failure.detail ? { detail: answer.failure.detail } : {}) };
             this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-              .run(failure.code, failure.message, failure.detail ? JSON.stringify(failure.detail) : null, evaluationId);
+              .run(failure.code, failure.message, failureEvidenceJson(failure), evaluationId);
             this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
               .run(evaluationFailureJson(failure), attemptId, evaluationId);
           } else {
@@ -1044,19 +1142,19 @@ class SQLiteRunStore implements RunStore {
             } catch {
               const failure = { code: 'invalid_decision', message: 'The stored answer did not satisfy this question contract.', detail: decisionFailureDetailForReason('invalid_answer') };
               this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
-                .run(failure.code, failure.message, JSON.stringify(failure.detail), evaluationId);
+                .run(failure.code, failure.message, failureEvidenceJson(failure), evaluationId);
               this.database.prepare('UPDATE attempt_evaluations SET failure_json = ? WHERE attempt_id = ? AND evaluation_id = ?')
                 .run(evaluationFailureJson(failure), attemptId, evaluationId);
             }
             if (validated) {
-              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(JSON.stringify(answer.value), evaluationId);
-              this.database.prepare('INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)').run(evaluationId, attemptId);
+              this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?").run(encodeStoredPayload('decision-value', answer.value, decisionValueSchema), evaluationId);
+              this.database.prepare('INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)').run(claim.runId, evaluationId, attemptId);
             }
           }
         }
       }
       this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
-        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : 1, claim.runId);
+        .run(chargedCalls, claim.runId);
     });
   }
 
@@ -1075,14 +1173,15 @@ class SQLiteRunStore implements RunStore {
 
       if (outcome.kind === 'answered') {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
-          .run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
+          .run(nowMs, result.attempts, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?")
-          .run(JSON.stringify(result), evaluationId);
-        this.database.prepare('INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)').run(evaluationId, attemptId);
+          .run(encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema), evaluationId);
+        this.database.prepare('INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)').run(claim.runId, evaluationId, attemptId);
       } else {
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
-          .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        const chargedCalls = outcome.providerAttempts ?? 1;
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
+          .run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
           .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
         const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
@@ -1094,7 +1193,7 @@ class SQLiteRunStore implements RunStore {
         }
       }
       this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
-        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : 1, claim.runId);
+        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts, claim.runId);
     });
   }
 
@@ -1161,11 +1260,11 @@ class SQLiteRunStore implements RunStore {
         } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
           throw new RunStoreError('journey_transition_conflict', 'A terminal respondent state cannot have a next reached turn.');
         }
-        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
-          .run(nowMs, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
+        this.database.prepare("UPDATE attempts SET status = 'answered', settled_ms = ?, charged_calls = ?, result_json = ?, execution_json = ? WHERE attempt_id = ?")
+          .run(nowMs, result.attempts, JSON.stringify(result), JSON.stringify({ attempts: result.attempts, provider: result.provider, model: result.model, ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}), latencyMs: result.latencyMs, usage: result.usage, ...(result.cost ? { cost: result.cost } : {}) }), attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'answered', result_json = ?, failure_code = NULL, failure_message = NULL, failure_detail_json = NULL WHERE evaluation_id = ?")
-          .run(JSON.stringify(result), evaluationId);
-        this.database.prepare('INSERT INTO evaluation_answer_attempts (evaluation_id, attempt_id) VALUES (?, ?)').run(evaluationId, attemptId);
+          .run(encodeStoredPayload('decision-value', decisionValueFromResult(result), decisionValueSchema), evaluationId);
+        this.database.prepare('INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES (?, ?, ?)').run(claim.runId, evaluationId, attemptId);
       } else {
         const sharedFailure = outcome.scope === 'run';
         if (transition.nextEvaluation || (sharedFailure
@@ -1173,8 +1272,9 @@ class SQLiteRunStore implements RunStore {
           : transition.state.status !== 'failed' || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
           throw new RunStoreError('journey_transition_conflict', 'A failed turn must preserve a resumable shared turn or stop only this respondent.');
         }
-        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
-          .run(nowMs, outcome.code, outcome.message, outcome.scope, attemptId);
+        const chargedCalls = outcome.providerAttempts ?? 1;
+        this.database.prepare("UPDATE attempts SET status = 'failed', settled_ms = ?, charged_calls = ?, failure_code = ?, failure_message = ?, failure_scope = ? WHERE attempt_id = ?")
+          .run(nowMs, chargedCalls, outcome.code, outcome.message, outcome.scope, attemptId);
         this.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ?, failure_detail_json = ? WHERE evaluation_id = ?")
           .run(outcome.code, outcome.message, failureEvidenceJson(outcome), evaluationId);
         const failure = { code: outcome.code, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}), ...(outcome.providerFailure ? { providerFailure: outcome.providerFailure } : {}) };
@@ -1214,7 +1314,7 @@ class SQLiteRunStore implements RunStore {
           claim.runId, respondentId, transition.expectedRevision);
       if (updatedState.changes !== 1) throw new RunStoreError('journey_transition_conflict', 'Journey respondent state changed before its transition committed.');
       this.database.prepare('UPDATE runs SET used_calls = used_calls + ?, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0')
-        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : 1, claim.runId);
+        .run(outcome.kind === 'failed' ? outcome.providerAttempts ?? 1 : outcome.result.attempts, claim.runId);
     });
   }
 
@@ -1266,7 +1366,7 @@ class SQLiteRunStore implements RunStore {
       this.ownedRun(claim, this.now());
       const reserved = this.database.prepare("SELECT attempt_id FROM attempts WHERE run_id = ? AND owner_token = ? AND status = 'reserved'").get(claim.runId, claim.ownerToken) as DatabaseRow | undefined;
       if (reserved) {
-        this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, failure_code = 'worker_interrupted', failure_message = 'The provider outcome could not be confirmed' WHERE attempt_id = ?")
+        this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, charged_calls = 1, failure_code = 'worker_interrupted', failure_message = 'The provider outcome could not be confirmed' WHERE attempt_id = ?")
           .run(this.now(), asText(reserved.attempt_id, 'attempt ID'));
         this.database.prepare('UPDATE runs SET used_calls = used_calls + 1, reserved_calls = reserved_calls - 1 WHERE run_id = ? AND reserved_calls > 0').run(claim.runId);
       }
@@ -1285,12 +1385,32 @@ class SQLiteRunStore implements RunStore {
 
   close(): void {
     if (this.isClosed) return;
-    this.database.close();
+    this.connection.close();
     this.isClosed = true;
   }
 
   private ensureOpen(): void {
     if (this.isClosed) throw new RunStoreError('store_closed', 'This run store connection is closed.');
+    const version = (this.database.prepare('PRAGMA user_version').get() as DatabaseRow).user_version;
+    if (asNumber(version, 'schema version') !== SCHEMA_VERSION) {
+      throw new RunStoreError('datastore_schema_changed', 'The datastore schema changed while this process was open. Close and reopen Sheg before continuing.');
+    }
+  }
+
+  reconcileMany(runIds: string[], nowMs: number): void {
+    this.ensureOpen();
+    const uniqueRunIds = [...new Set(runIds)];
+    this.transaction(() => {
+      for (const runId of uniqueRunIds) this.reconcileInside(runId, nowMs);
+    });
+  }
+
+  reconcileActive(nowMs: number): void {
+    this.ensureOpen();
+    this.transaction(() => {
+      const active = this.database.prepare("SELECT run_id FROM runs WHERE status IN ('prepared', 'running')").all() as DatabaseRow[];
+      for (const row of active) this.reconcileInside(asText(row.run_id, 'run ID'), nowMs);
+    });
   }
 
   private transaction<T>(operation: () => T): T {
@@ -1320,7 +1440,14 @@ class SQLiteRunStore implements RunStore {
   private notFound(): RunStoreError { return new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.'); }
 
   private statusInside(runId: string): RunStatusView {
-    const row = this.database.prepare(`SELECT r.*,
+    const result = this.statusesInside([runId])[0];
+    if (!result) throw this.notFound();
+    return result;
+  }
+
+  private statusesInside(runIds: string[]): RunStatusView[] {
+    if (runIds.length === 0) return [];
+    const rows = this.database.prepare(`SELECT r.*,
       (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'answered') AS completed_evaluations,
       (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed') AS failed_evaluations,
       (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'pending') AS pending_evaluations,
@@ -1339,16 +1466,16 @@ class SQLiteRunStore implements RunStore {
           GROUP BY e.respondent_id HAVING COUNT(*) <> 1) AND
        NOT EXISTS (SELECT 1 FROM journey_respondents jr WHERE jr.run_id = r.run_id AND jr.status = 'failed' AND
           (SELECT COUNT(*) FROM evaluations e WHERE e.run_id = jr.run_id AND e.respondent_id = jr.respondent_id AND e.status = 'failed') <> 1)) AS retryable_journey_failure
-      FROM runs r WHERE r.run_id = ?`).get(runId) as DatabaseRow | undefined;
-    if (!row) throw this.notFound();
-    const stored = parseJson<{ request?: unknown }>(row.request_json, 'run request');
-    const request = runRequestSchema.safeParse(stored.request);
-    if (!request.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
-    const status = asText(row.status, 'run status') as RunStatus;
-    const usedCalls = asNumber(row.used_calls, 'used calls');
-    const reservedCalls = asNumber(row.reserved_calls, 'reserved calls');
-    const maxCalls = asNumber(row.max_calls, 'maximum calls');
-    return {
+      FROM runs r WHERE r.run_id IN (${runIds.map(() => '?').join(', ')}) ORDER BY r.created_ms, r.run_id`).all(...runIds) as DatabaseRow[];
+    return rows.map((row) => {
+      const stored = parseJson<{ request?: unknown }>(row.request_json, 'run request');
+      const request = runRequestSchema.safeParse(stored.request);
+      if (!request.success) throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
+      const status = asText(row.status, 'run status') as RunStatus;
+      const usedCalls = asNumber(row.used_calls, 'used calls');
+      const reservedCalls = asNumber(row.reserved_calls, 'reserved calls');
+      const maxCalls = asNumber(row.max_calls, 'maximum calls');
+      return {
       runId: asText(row.run_id, 'run ID'),
       status,
       createdAt: asText(row.created_at, 'created time'),
@@ -1367,7 +1494,8 @@ class SQLiteRunStore implements RunStore {
         canRetrySharedFailure: asNumber(row.retryable_shared_failure, 'retryable shared failure') === 1,
         hasRetryableJourneyFailure: asNumber(row.retryable_journey_failure, 'retryable journey failure') === 1 }),
       ...(row.failure_code === null ? {} : { failure: { code: asText(row.failure_code, 'failure code'), message: asText(row.failure_message, 'failure message') } }),
-    };
+      };
+    });
   }
 
   private evaluationFromRow(row: DatabaseRow): FrozenEvaluation {
@@ -1401,7 +1529,7 @@ class SQLiteRunStore implements RunStore {
       if (uncertain !== asNumber(run.reserved_calls, 'reserved calls')) {
         throw new RunStoreError('data_integrity_error', 'Reserved call counters do not match reserved attempts.');
       }
-      this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, failure_code = 'worker_interrupted', failure_message = 'Provider completion is unknown' WHERE run_id = ? AND status = 'reserved'").run(nowMs, runId);
+      this.database.prepare("UPDATE attempts SET status = 'uncertain', settled_ms = ?, charged_calls = 1, failure_code = 'worker_interrupted', failure_message = 'Provider completion is unknown' WHERE run_id = ? AND status = 'reserved'").run(nowMs, runId);
       this.database.prepare(`UPDATE runs SET status = 'interrupted', used_calls = used_calls + ?,
         reserved_calls = reserved_calls - ?, owner_token = NULL, owner_pid = NULL, lease_expires_ms = NULL,
         failure_scope = 'run', failure_code = 'worker_interrupted', failure_message = 'Worker ownership expired; unfinished work requires explicit resume'

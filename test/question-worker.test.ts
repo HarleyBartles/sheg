@@ -11,10 +11,15 @@ import { compileDecisionPacket, compileDecisionPacketForCompiler, promptContract
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { runRequestSchema, type InlineRunRequest, type InlineJourneyRequest, type PreparedJourneyRun } from '../src/domain/run/request.js';
 import { prepareRun } from '../src/application/run-inspection.js';
-import { executeQuestionRun } from '../src/application/question-worker.js';
+import { executeQuestionRun as executeWorker } from '../src/application/question-worker.js';
+import type { RunStore } from '../src/application/run-store.js';
+
+function executeQuestionRun(store: RunStore, runId: string, providerFactory: Parameters<typeof executeWorker>[2]): Promise<void> {
+  return executeWorker(splitRunStore(store), runId, providerFactory);
+}
 import { JevCallError } from '../src/providers/jev.js';
 import { LayaCallError } from '../src/providers/laya.js';
-import { openRunStore } from '../src/infrastructure/run-store.js';
+import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
 
 function request(respondents = 2): InlineRunRequest {
@@ -485,6 +490,35 @@ test('a detached journey worker records reached Choice, Score and Noul turns thr
     assert.equal(run.respondents[0]!.outcome, 'likely');
     assert.deepEqual(run.respondents[0]!.route.map(({ toNodeId }) => toNodeId), ['expose-section-three', 'ask-likely', 'likely-outcome']);
   } finally { await f.close(); }
+});
+
+test('a journey worker advances from its checkpoint without reading earlier turn packets', async () => {
+  const f = await journeyFixture(1, 6);
+  const database = new DatabaseSync(path.join(f.root, 'runs.sqlite'));
+  let calls = 0;
+  try {
+    database.exec(`CREATE TRIGGER corrupt_prior_journey_packet AFTER UPDATE OF status ON evaluations
+      WHEN NEW.run_id = '${f.runId}' AND NEW.question_id = 'interest' AND NEW.status = 'answered'
+      BEGIN UPDATE evaluations SET packet_json = '{' WHERE evaluation_id = NEW.evaluation_id; END`);
+    await executeQuestionRun(f.store, f.runId, factory({
+      async decide(request) {
+        calls += 1;
+        if (calls === 1) {
+          assert.equal(request.question.id, 'interest');
+          return { ...answer(), choice: 'continue' };
+        }
+        assert.equal(request.question.id, 'clarity');
+        database.prepare('UPDATE runs SET cancel_requested = 1 WHERE run_id = ?').run(f.runId);
+        return { type: 'score', score: 1, legend: { 0: 'Unclear', 1: 'Mixed', 2: 'Clear' }, probabilities: { 0: 0.1, 1: 0.8, 2: 0.1 }, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
+      },
+    }));
+    assert.equal(calls, 2);
+    assert.equal(f.store.getStatus(f.runId).status, 'cancelled');
+    const rows = database.prepare('SELECT respondent_id, question_id, status FROM evaluations WHERE run_id = ? ORDER BY ordinal').all(f.runId) as Array<{ respondent_id: string; question_id: string; status: string }>;
+    assert.deepEqual(rows.map(({ question_id, status }) => [question_id, status]), [
+      ['interest', 'answered'], ['clarity', 'answered'], ['likely', 'pending'],
+    ]);
+  } finally { database.close(); await f.close(); }
 });
 
 test('a respondent-local journey failure does not block another respondent', async () => {

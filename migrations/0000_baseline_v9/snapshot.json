@@ -1,0 +1,1410 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "57f536d8-2cd0-477f-890f-bb28c4ee7abc",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "ddl": [
+    {
+      "name": "attempt_evaluations",
+      "entityType": "tables"
+    },
+    {
+      "name": "attempts",
+      "entityType": "tables"
+    },
+    {
+      "name": "evaluation_answer_attempts",
+      "entityType": "tables"
+    },
+    {
+      "name": "evaluations",
+      "entityType": "tables"
+    },
+    {
+      "name": "journey_respondents",
+      "entityType": "tables"
+    },
+    {
+      "name": "question_groups",
+      "entityType": "tables"
+    },
+    {
+      "name": "runs",
+      "entityType": "tables"
+    },
+    {
+      "name": "schema_migrations",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "attempt_evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_id",
+      "entityType": "columns",
+      "table": "attempt_evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evaluation_id",
+      "entityType": "columns",
+      "table": "attempt_evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_json",
+      "entityType": "columns",
+      "table": "attempt_evaluations"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "attempt_sequence",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_id",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "group_id",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evaluation_id",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "packet_fingerprint",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "owner_token",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_ms",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "settled_ms",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "charged_calls",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result_json",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "execution_json",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_code",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_message",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_scope",
+      "entityType": "columns",
+      "table": "attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "evaluation_answer_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evaluation_id",
+      "entityType": "columns",
+      "table": "evaluation_answer_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_id",
+      "entityType": "columns",
+      "table": "evaluation_answer_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evaluation_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ordinal",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "context_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "respondent_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "question_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "group_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "turn_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "node_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path_id",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "occurrence",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "packet_json",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "packet_fingerprint",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result_json",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_code",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_message",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_detail_json",
+      "entityType": "columns",
+      "table": "evaluations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "respondent_id",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "current_node_id",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "current_turn_id",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "current_context_id",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "events_json",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "route_json",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome",
+      "entityType": "columns",
+      "table": "journey_respondents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "group_id",
+      "entityType": "columns",
+      "table": "question_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "question_groups"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ordinal",
+      "entityType": "columns",
+      "table": "question_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "context_id",
+      "entityType": "columns",
+      "table": "question_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "respondent_id",
+      "entityType": "columns",
+      "table": "question_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state_json",
+      "entityType": "columns",
+      "table": "question_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "question_ids_json",
+      "entityType": "columns",
+      "table": "question_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "submission_id",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_fingerprint",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_ms",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "label",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_json",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "evaluation_count",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "max_calls",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "used_calls",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "reserved_calls",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "cancel_requested",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "owner_token",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "owner_pid",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_expires_ms",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_scope",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_code",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_message",
+      "entityType": "columns",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "schema_migrations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "migration_id",
+      "entityType": "columns",
+      "table": "schema_migrations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "checksum",
+      "entityType": "columns",
+      "table": "schema_migrations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "applied_at",
+      "entityType": "columns",
+      "table": "schema_migrations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "attempt_id"
+      ],
+      "tableTo": "attempts",
+      "columnsTo": [
+        "run_id",
+        "attempt_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "attempt_evaluations_attempt_fk",
+      "entityType": "fks",
+      "table": "attempt_evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "evaluation_id"
+      ],
+      "tableTo": "evaluations",
+      "columnsTo": [
+        "run_id",
+        "evaluation_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "attempt_evaluations_evaluation_fk",
+      "entityType": "fks",
+      "table": "attempt_evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "evaluation_id",
+        "group_id"
+      ],
+      "tableTo": "evaluations",
+      "columnsTo": [
+        "run_id",
+        "evaluation_id",
+        "group_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "attempts_run_evaluation_group_fk",
+      "entityType": "fks",
+      "table": "attempts"
+    },
+    {
+      "columns": [
+        "run_id",
+        "group_id"
+      ],
+      "tableTo": "question_groups",
+      "columnsTo": [
+        "run_id",
+        "group_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "attempts_run_group_fk",
+      "entityType": "fks",
+      "table": "attempts"
+    },
+    {
+      "columns": [
+        "run_id",
+        "attempt_id",
+        "evaluation_id"
+      ],
+      "tableTo": "attempt_evaluations",
+      "columnsTo": [
+        "run_id",
+        "attempt_id",
+        "evaluation_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "evaluation_answer_attempts_membership_fk",
+      "entityType": "fks",
+      "table": "evaluation_answer_attempts"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "tableTo": "runs",
+      "columnsTo": [
+        "run_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "evaluations_run_fk",
+      "entityType": "fks",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "group_id"
+      ],
+      "tableTo": "question_groups",
+      "columnsTo": [
+        "run_id",
+        "group_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": true,
+      "name": "evaluations_group_fk",
+      "entityType": "fks",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "tableTo": "runs",
+      "columnsTo": [
+        "run_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_journey_respondents_run_id_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "journey_respondents"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "tableTo": "runs",
+      "columnsTo": [
+        "run_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_question_groups_run_id_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "question_groups"
+    },
+    {
+      "columns": [
+        "run_id",
+        "attempt_id",
+        "evaluation_id"
+      ],
+      "nameExplicit": true,
+      "name": "attempt_evaluations_pk",
+      "entityType": "pks",
+      "table": "attempt_evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "evaluation_id"
+      ],
+      "nameExplicit": true,
+      "name": "evaluation_answer_attempts_pk",
+      "entityType": "pks",
+      "table": "evaluation_answer_attempts"
+    },
+    {
+      "columns": [
+        "evaluation_id"
+      ],
+      "nameExplicit": true,
+      "name": "evaluations_pk",
+      "entityType": "pks",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "respondent_id"
+      ],
+      "nameExplicit": true,
+      "name": "journey_respondents_pk",
+      "entityType": "pks",
+      "table": "journey_respondents"
+    },
+    {
+      "columns": [
+        "group_id"
+      ],
+      "nameExplicit": true,
+      "name": "question_groups_pk",
+      "entityType": "pks",
+      "table": "question_groups"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "nameExplicit": true,
+      "name": "runs_pk",
+      "entityType": "pks",
+      "table": "runs"
+    },
+    {
+      "columns": [
+        "migration_id"
+      ],
+      "nameExplicit": true,
+      "name": "schema_migrations_pk",
+      "entityType": "pks",
+      "table": "schema_migrations"
+    },
+    {
+      "columns": [
+        "attempt_sequence"
+      ],
+      "nameExplicit": false,
+      "name": "attempts_pk",
+      "table": "attempts",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "attempt_sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "attempts_run_sequence",
+      "entityType": "indexes",
+      "table": "attempts"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "attempt_sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "attempts_run_status_sequence",
+      "entityType": "indexes",
+      "table": "attempts"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "respondent_id",
+          "isExpression": false
+        },
+        {
+          "value": "ordinal",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "evaluations_pending_turn",
+      "entityType": "indexes",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        {
+          "value": "created_ms",
+          "isExpression": false
+        },
+        {
+          "value": "run_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "runs_created_identity",
+      "entityType": "indexes",
+      "table": "runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "lease_expires_ms",
+          "isExpression": false
+        },
+        {
+          "value": "run_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "runs_expired_lease",
+      "entityType": "indexes",
+      "table": "runs"
+    },
+    {
+      "columns": [
+        "attempt_id"
+      ],
+      "nameExplicit": true,
+      "name": "attempts_attempt_id_uq",
+      "entityType": "uniques",
+      "table": "attempts"
+    },
+    {
+      "columns": [
+        "run_id",
+        "attempt_id"
+      ],
+      "nameExplicit": true,
+      "name": "attempts_run_attempt_uq",
+      "entityType": "uniques",
+      "table": "attempts"
+    },
+    {
+      "columns": [
+        "run_id",
+        "ordinal"
+      ],
+      "nameExplicit": true,
+      "name": "evaluations_run_ordinal_uq",
+      "entityType": "uniques",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "evaluation_id"
+      ],
+      "nameExplicit": true,
+      "name": "evaluations_run_eval_uq",
+      "entityType": "uniques",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "evaluation_id",
+        "group_id"
+      ],
+      "nameExplicit": true,
+      "name": "evaluations_run_eval_group_uq",
+      "entityType": "uniques",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "turn_id"
+      ],
+      "nameExplicit": true,
+      "name": "evaluations_run_turn_uq",
+      "entityType": "uniques",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "respondent_id",
+        "node_id",
+        "occurrence"
+      ],
+      "nameExplicit": true,
+      "name": "evaluations_run_respondent_node_occurrence_uq",
+      "entityType": "uniques",
+      "table": "evaluations"
+    },
+    {
+      "columns": [
+        "run_id",
+        "ordinal"
+      ],
+      "nameExplicit": true,
+      "name": "question_groups_run_ordinal_uq",
+      "entityType": "uniques",
+      "table": "question_groups"
+    },
+    {
+      "columns": [
+        "run_id",
+        "group_id"
+      ],
+      "nameExplicit": true,
+      "name": "question_groups_run_group_uq",
+      "entityType": "uniques",
+      "table": "question_groups"
+    },
+    {
+      "columns": [
+        "submission_id"
+      ],
+      "nameExplicit": true,
+      "name": "runs_submission_id_uq",
+      "entityType": "uniques",
+      "table": "runs"
+    },
+    {
+      "columns": [
+        "run_id",
+        "submission_id"
+      ],
+      "nameExplicit": true,
+      "name": "runs_run_submission_uq",
+      "entityType": "uniques",
+      "table": "runs"
+    },
+    {
+      "columns": [
+        "version"
+      ],
+      "nameExplicit": true,
+      "name": "schema_migrations_version_uq",
+      "entityType": "uniques",
+      "table": "schema_migrations"
+    },
+    {
+      "value": "\"status\" IN ('reserved', 'answered', 'failed', 'uncertain')",
+      "name": "attempts_status_ck",
+      "entityType": "checks",
+      "table": "attempts"
+    },
+    {
+      "value": "\"charged_calls\" >= 0 AND (\"status\" = 'reserved' OR \"settled_ms\" IS NOT NULL)",
+      "name": "attempts_call_ledger_ck",
+      "entityType": "checks",
+      "table": "attempts"
+    },
+    {
+      "value": "(\"status\" = 'answered' AND \"execution_json\" IS NOT NULL AND \"charged_calls\" >= 1) OR (\"status\" = 'failed' AND \"failure_code\" IS NOT NULL) OR (\"status\" = 'uncertain' AND \"charged_calls\" >= 1) OR (\"status\" = 'reserved' AND \"settled_ms\" IS NULL AND \"charged_calls\" = 0)",
+      "name": "attempts_settlement_ck",
+      "entityType": "checks",
+      "table": "attempts"
+    },
+    {
+      "value": "\"failure_scope\" IS NULL OR \"failure_scope\" IN ('evaluation', 'run')",
+      "name": "attempts_failure_scope_ck",
+      "entityType": "checks",
+      "table": "attempts"
+    },
+    {
+      "value": "\"status\" IN ('pending', 'answered', 'failed', 'unreached')",
+      "name": "evaluations_status_ck",
+      "entityType": "checks",
+      "table": "evaluations"
+    },
+    {
+      "value": "\"ordinal\" >= 0",
+      "name": "evaluations_ordinal_ck",
+      "entityType": "checks",
+      "table": "evaluations"
+    },
+    {
+      "value": "(\"turn_id\" IS NULL AND \"node_id\" IS NULL AND \"path_id\" IS NULL AND \"occurrence\" IS NULL) OR (\"turn_id\" IS NOT NULL AND \"node_id\" IS NOT NULL AND \"path_id\" IS NOT NULL AND \"occurrence\" >= 1)",
+      "name": "evaluations_journey_identity_ck",
+      "entityType": "checks",
+      "table": "evaluations"
+    },
+    {
+      "value": "(\"status\" = 'answered' AND \"result_json\" IS NOT NULL AND \"failure_code\" IS NULL) OR (\"status\" <> 'answered' AND \"result_json\" IS NULL)",
+      "name": "evaluations_answer_ck",
+      "entityType": "checks",
+      "table": "evaluations"
+    },
+    {
+      "value": "\"status\" IN ('active', 'completed', 'failed', 'unreached')",
+      "name": "journey_respondents_status_ck",
+      "entityType": "checks",
+      "table": "journey_respondents"
+    },
+    {
+      "value": "\"revision\" >= 0",
+      "name": "journey_respondents_revision_ck",
+      "entityType": "checks",
+      "table": "journey_respondents"
+    },
+    {
+      "value": "(\"status\" = 'active' AND \"current_node_id\" IS NOT NULL AND \"current_turn_id\" IS NOT NULL AND \"current_context_id\" IS NOT NULL) OR (\"status\" <> 'active' AND \"current_node_id\" IS NULL AND \"current_turn_id\" IS NULL AND \"current_context_id\" IS NULL)",
+      "name": "journey_respondents_checkpoint_ck",
+      "entityType": "checks",
+      "table": "journey_respondents"
+    },
+    {
+      "value": "\"ordinal\" >= 0",
+      "name": "question_groups_ordinal_ck",
+      "entityType": "checks",
+      "table": "question_groups"
+    },
+    {
+      "value": "\"status\" IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')",
+      "name": "runs_status_ck",
+      "entityType": "checks",
+      "table": "runs"
+    },
+    {
+      "value": "\"evaluation_count\" > 0 AND \"max_calls\" > 0 AND \"used_calls\" >= 0 AND \"reserved_calls\" >= 0 AND \"used_calls\" + \"reserved_calls\" <= \"max_calls\"",
+      "name": "runs_count_ck",
+      "entityType": "checks",
+      "table": "runs"
+    },
+    {
+      "value": "(\"status\" = 'running' AND \"owner_token\" IS NOT NULL AND \"owner_pid\" IS NOT NULL AND \"lease_expires_ms\" IS NOT NULL) OR (\"status\" <> 'running' AND \"owner_token\" IS NULL AND \"owner_pid\" IS NULL)",
+      "name": "runs_owner_ck",
+      "entityType": "checks",
+      "table": "runs"
+    },
+    {
+      "value": "\"cancel_requested\" IN (0, 1)",
+      "name": "runs_cancel_ck",
+      "entityType": "checks",
+      "table": "runs"
+    },
+    {
+      "value": "\"failure_scope\" IS NULL OR \"failure_scope\" IN ('evaluation', 'run')",
+      "name": "runs_failure_scope_ck",
+      "entityType": "checks",
+      "table": "runs"
+    },
+    {
+      "value": "\"version\" > 0",
+      "name": "schema_migrations_version_ck",
+      "entityType": "checks",
+      "table": "schema_migrations"
+    }
+  ],
+  "renames": []
+}

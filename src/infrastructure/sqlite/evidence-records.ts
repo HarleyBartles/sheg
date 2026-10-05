@@ -2,10 +2,21 @@ import type { SQLOutputValue } from 'node:sqlite';
 import { RunStoreError } from '../../application/run-store.js';
 import { providerFailureEvidenceSchema } from '../../domain/decision/provider-failure.js';
 import { decisionFailureDetailSchema, decisionResultSchema, decisionValueSchema, providerExecutionEvidenceSchema } from '../../domain/decision/decision.js';
-import { asText, parseJson, type DatabaseRow } from './rows.js';
+import { asText, type DatabaseRow } from './rows.js';
 import type { FollowOnLineage, ParsedRunRequest, RunMaterialItem } from '../../domain/run/request.js';
 import type { DecisionResult } from '../../domain/decision/decision.js';
 import type { EvaluationFailure } from '../../domain/run/lifecycle.js';
+import { decodeStoredPayload, encodeStoredPayload } from './payload-codecs.js';
+import { z } from 'zod';
+
+const evaluationFailureEvidenceSchema = z.object({
+  detail: decisionFailureDetailSchema.optional(),
+  providerFailure: providerFailureEvidenceSchema.optional(),
+}).strict();
+const attemptEvaluationFailureSchema = evaluationFailureEvidenceSchema.extend({
+  code: z.string().min(1),
+  message: z.string(),
+}).strict();
 
 function mergeMaterialCatalog(...collections: readonly (readonly RunMaterialItem[])[]): RunMaterialItem[] {
   const merged = new Map<string, RunMaterialItem>();
@@ -36,24 +47,23 @@ export function encounteredMaterialsFromState(state: Record<string, unknown>): A
 }
 
 export function resultFromStorage(value: unknown, execution: unknown): DecisionResult {
-  const complete = decisionResultSchema.safeParse(value);
-  if (complete.success) return complete.data;
-  const typed = decisionValueSchema.parse(value);
+  const typed = decodeStoredPayload(JSON.stringify(value), 'decision-value', decisionValueSchema);
   const evidence = providerExecutionEvidenceSchema.parse(execution);
   return decisionResultSchema.parse({ ...typed, ...evidence });
 }
 
 export function failureEvidenceFromStorage(value: SQLOutputValue | undefined): Partial<Pick<EvaluationFailure, 'detail' | 'providerFailure'>> {
   if (value === null || value === undefined) return {};
-  const parsed = parseJson<Record<string, unknown>>(value, 'evaluation failure evidence');
-  // Original schema-8 records contain a bare typed-answer detail. Preserve their bytes and meaning.
-  if ('reason' in parsed) return { detail: decisionFailureDetailSchema.parse(parsed) };
-  return { ...(parsed.detail === undefined ? {} : { detail: decisionFailureDetailSchema.parse(parsed.detail) }), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
+  const decoded = decodeStoredPayload(asText(value, 'evaluation failure evidence'), 'evaluation-failure-evidence', evaluationFailureEvidenceSchema);
+  return { ...(decoded.detail ? { detail: decoded.detail } : {}), ...(decoded.providerFailure ? { providerFailure: decoded.providerFailure } : {}) };
 }
 
 export function failureEvidenceJson(failure: EvaluationFailure): string | null {
-  if (failure.providerFailure) return JSON.stringify({ ...(failure.detail ? { detail: failure.detail } : {}), providerFailure: providerFailureEvidenceSchema.parse(failure.providerFailure) });
-  return failure.detail ? JSON.stringify(failure.detail) : null;
+  if (!failure.detail && !failure.providerFailure) return null;
+  return encodeStoredPayload('evaluation-failure-evidence', {
+    ...(failure.detail ? { detail: failure.detail } : {}),
+    ...(failure.providerFailure ? { providerFailure: failure.providerFailure } : {}),
+  }, evaluationFailureEvidenceSchema);
 }
 
 export function storedEvaluationFailure(row: DatabaseRow): EvaluationFailure | undefined {
@@ -67,15 +77,18 @@ export function storedEvaluationFailure(row: DatabaseRow): EvaluationFailure | u
 }
 
 export function evaluationFailureJson(failure: EvaluationFailure): string {
-  return JSON.stringify(failure);
+  return encodeStoredPayload('attempt-evaluation-failure', failure, attemptEvaluationFailureSchema);
 }
 
 export function evaluationFailureFromJson(value: SQLOutputValue | undefined): EvaluationFailure | undefined {
   if (value === null || value === undefined) return undefined;
-  const parsed = parseJson<Record<string, unknown>>(value, 'attempt evaluation failure');
-  if (typeof parsed.code !== 'string' || typeof parsed.message !== 'string') throw new RunStoreError('data_integrity_error', 'Stored attempt evaluation failure is invalid.');
-  const detail = parsed.detail === undefined ? undefined : decisionFailureDetailSchema.parse(parsed.detail);
-  return { code: parsed.code, message: parsed.message, ...(detail ? { detail } : {}), ...(parsed.providerFailure === undefined ? {} : { providerFailure: providerFailureEvidenceSchema.parse(parsed.providerFailure) }) };
+  const decoded = decodeStoredPayload(asText(value, 'attempt evaluation failure'), 'attempt-evaluation-failure', attemptEvaluationFailureSchema);
+  return {
+    code: decoded.code,
+    message: decoded.message,
+    ...(decoded.detail === undefined ? {} : { detail: decoded.detail }),
+    ...(decoded.providerFailure === undefined ? {} : { providerFailure: decoded.providerFailure }),
+  };
 }
 
 

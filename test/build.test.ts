@@ -18,8 +18,10 @@ test('build replaces the distribution with only current runtime outputs', async 
 
   await buildPlugin(outputDirectory);
 
-  assert.deepEqual((await readdir(outputDirectory)).sort(), ['cli.js', 'credentials', 'data', 'mcp.js', 'worker.js']);
+  assert.deepEqual((await readdir(outputDirectory)).sort(), ['cli.js', 'credentials', 'data', 'licenses', 'mcp.js', 'migrations', 'worker.js']);
   assert.equal(await readFile(path.join(outputDirectory, 'credentials/windows-credential.ps1'), 'utf8'), await readFile(new URL('../src/infrastructure/credentials/windows-credential.ps1', import.meta.url), 'utf8'));
+  assert.equal(await readFile(path.join(outputDirectory, 'migrations/0000_baseline_v9/migration.sql'), 'utf8'), await readFile(new URL('../migrations/0000_baseline_v9/migration.sql', import.meta.url), 'utf8'));
+  assert.equal(await readFile(path.join(outputDirectory, 'licenses/drizzle-orm-Apache-2.0.txt'), 'utf8'), await readFile(new URL('../licenses/drizzle-orm-Apache-2.0.txt', import.meta.url), 'utf8'));
   if (process.platform === 'win32') {
     const status = spawnSync('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
