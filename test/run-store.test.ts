@@ -87,7 +87,7 @@ function preparedJourneyRun(): PreparedJourneyRun {
     const turnId = `turn-${respondent.id}-opening`;
     const contextId = `context-${respondent.id}-opening`;
     const nodeId = 'ask-interest';
-    const packet = compileDecisionPacket(journeyRequest.journey, respondent, 'interest', initialEvents);
+    const packet = compileDecisionPacket(request.journey, respondent, 'interest', initialEvents);
     return {
       evaluationId: `evaluation-${respondent.id}-opening`, contextId, respondentId: respondent.id,
       questionId: 'interest', packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
@@ -246,7 +246,7 @@ test('a physical batch reserves and settles once while preserving one typed eval
     { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Clear'] },
     { type: 'noul', id: 'appeal', instructions: 'Was it appealing?' },
   ], material: [{ ...input.material[0]!, sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) }] };
-  const batchProvider: DecisionProvider = { ...provider, measureBatch: () => fit };
+  const batchProvider: DecisionProvider = { ...provider, measureBatch: () => fit, async decideBatch() { throw new Error('Admission must not infer.'); } };
   const prepared = await prepareRun(value, batchProvider);
   assert.ok(prepared.prepared);
   const root = await temporaryRoot(); const store = openRunStore(root, { now: () => 10_000 });
@@ -297,7 +297,7 @@ test('a physical batch reserves and settles once while preserving one typed eval
 test('a batch-wide provider failure records one physical call and fails every reserved evaluation together', async () => {
   const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [input.questions[0]!,
     { type: 'noul', id: 'interest-score', instructions: 'Would you describe this material as interesting?' }] };
-  const prepared = await prepareRun(value, { ...provider, measureBatch: () => fit }); assert.ok(prepared.prepared);
+  const prepared = await prepareRun(value, { ...provider, measureBatch: () => fit, async decideBatch() { throw new Error('Admission must not infer.'); } }); assert.ok(prepared.prepared);
   const root = await temporaryRoot(); const store = openRunStore(root, { now: () => 10_000 });
   try {
     const accepted = store.accept(randomUUID(), prepared.prepared); const claim = store.claim(accepted.run.runId, 10_000, 1234); assert.ok(claim);
@@ -308,6 +308,35 @@ test('a batch-wide provider failure records one physical call and fails every re
       ['failed', 'provider_authentication_failed'], ['failed', 'provider_authentication_failed'],
     ]);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('failed batch settlement rolls attempt and call accounting back together', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root, { now: () => 10_000 });
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const prepared = await preparedRun({ ...input, respondents: [input.respondents[0]!], maxCalls: 1 });
+    const runId = store.accept(randomUUID(), prepared).run.runId;
+    const claim = store.claim(runId, 10_000, 1234);
+    assert.ok(claim);
+    const reservation = store.reserveBatch(claim, prepared.groups![0]!.groupId, [prepared.evaluations[0]!.evaluationId], 10_000);
+    assert.ok(reservation);
+    database.exec(`CREATE TRIGGER reject_evaluation_settlement BEFORE UPDATE ON evaluations
+      BEGIN SELECT RAISE(ABORT, 'injected settlement failure'); END`);
+
+    assert.throws(() => store.settleBatch(claim, reservation.attemptId, { kind: 'answered', result: {
+      execution: { attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} },
+      answers: [{ questionId: prepared.evaluations[0]!.questionId, value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }],
+    } }));
+    assert.equal(store.getStatus(runId).usedCalls, 0);
+    assert.equal(store.getStatus(runId).reservedCalls, 1);
+    assert.equal(store.attempts(runId).items[0]!.status, 'reserved');
+    assert.equal(store.answers(runId).items[0]!.status, 'pending');
+  } finally {
+    database.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('safe typed-answer diagnostics persist in answers, filtered queries, and attempt history after resume', async () => {
@@ -384,6 +413,52 @@ test('journey acceptance freezes exact reached packets and respondent state acro
     assert.equal(run.respondents[1]!.respondentId, 'reader-b');
   } finally {
     reopened.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('journey recall rejects corrupt history and route fields behind valid JSON arrays', async () => {
+  const corruptions = [
+    { column: 'events_json', value: [{ type: 'exposure', sequence: 'zero', nodeId: 'show-opening', itemId: 'section-one' }] },
+    { column: 'route_json', value: [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 42 }, toNodeId: 17 }] },
+  ] as const;
+
+  for (const { column, value } of corruptions) {
+    const root = await temporaryRoot();
+    const store = openRunStore(root);
+    const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try {
+      const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+      database.prepare(`UPDATE journey_respondents SET ${column} = ? WHERE run_id = ? AND respondent_id = ?`)
+        .run(JSON.stringify(value), accepted.run.runId, 'reader-a');
+      assert.throws(() => store.getJourneyRun(accepted.run.runId),
+        (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
+    } finally {
+      database.close();
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('journey recall validates model-visible packet state after JSON and fingerprint checks', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+    const row = database.prepare('SELECT packet_json FROM evaluations WHERE run_id = ? ORDER BY ordinal LIMIT 1').get(accepted.run.runId) as { packet_json: string };
+    const packet = JSON.parse(row.packet_json) as Record<string, unknown>;
+    packet.state = { respondent: 'not-a-profile', encounteredItems: [null], trajectory: {} };
+    const packetJson = JSON.stringify(packet);
+    database.prepare('UPDATE evaluations SET packet_json = ?, packet_fingerprint = ? WHERE run_id = ? AND ordinal = 0')
+      .run(packetJson, hashCanonical({ packet, compilerFingerprint: promptContractHash() }), accepted.run.runId);
+
+    assert.throws(() => store.getJourneyRun(accepted.run.runId),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
+  } finally {
+    database.close();
+    store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -999,6 +1074,26 @@ test('run discovery observes explicit batch reconciliation before applying statu
     assert.equal(page.items.length, 1);
     assert.equal(page.items[0]!.runId, accepted.run.runId);
     assert.equal(page.items[0]!.status, 'interrupted');
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('active reconciliation processes expired work beyond one bounded selection', async () => {
+  const root = await temporaryRoot();
+  let nowMs = 10_000;
+  const store = openRunStore(root, { now: () => nowMs });
+  try {
+    for (let index = 0; index < 101; index += 1) {
+      const value = { ...input, respondents: [{ ...input.respondents[0]!, id: `bounded-${index}` }], maxCalls: 1 };
+      store.accept(randomUUID(), await preparedRun(value));
+    }
+    nowMs += 31_000;
+    store.reconcileActive(nowMs);
+    const page = store.list({ status: 'interrupted', limit: 200 });
+    assert.equal(page.items.length, 101);
+    assert.ok(page.items.every(({ status }) => status === 'interrupted'));
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });
@@ -1718,5 +1813,20 @@ test('storage inspection observes reconciliation without restarting expired work
     const info = store.storageInfo();
     assert.equal(info.activeRunCount, 0);
     assert.equal(store.getStatus(runId).status, 'interrupted');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('narrow request, evaluation and answer reads preserve the missing-run error', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const missingRunId = randomUUID();
+  try {
+    const assertMissing = (operation: () => unknown) => assert.throws(operation, (error: unknown) => error instanceof RunStoreError && error.code === 'run_not_found');
+    assertMissing(() => store.getRequestKind(missingRunId));
+    assertMissing(() => store.getRequest(missingRunId));
+    assertMissing(() => store.getJourneyRun(missingRunId));
+    assertMissing(() => store.evaluationStatuses(missingRunId));
+    assertMissing(() => store.answers(missingRunId));
+    assertMissing(() => store.attempts(missingRunId));
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

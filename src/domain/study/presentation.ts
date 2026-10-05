@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { routeableDecisionTypeSchema } from '../decision/decision.js';
 
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 
@@ -9,7 +10,7 @@ const nodeSchema = z.discriminatedUnion('kind', [
 ]);
 
 const responseIntervalSchema = z.object({
-  type: z.enum(['score', 'noul']),
+  type: routeableDecisionTypeSchema,
   minimum: z.number().finite(),
   maximum: z.number().finite(),
   minimumInclusive: z.boolean(),

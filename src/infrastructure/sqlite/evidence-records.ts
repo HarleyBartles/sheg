@@ -47,9 +47,13 @@ export function encounteredMaterialsFromState(state: Record<string, unknown>): A
 }
 
 export function resultFromStorage(value: unknown, execution: unknown): DecisionResult {
+  return decodeResultAndExecution(value, execution).result;
+}
+
+export function decodeResultAndExecution(value: unknown, execution: unknown): { result: DecisionResult; execution: import('../../domain/decision/decision.js').ProviderExecutionEvidence } {
   const typed = decodeStoredPayload(JSON.stringify(value), 'decision-value', decisionValueSchema);
   const evidence = providerExecutionEvidenceSchema.parse(execution);
-  return decisionResultSchema.parse({ ...typed, ...evidence });
+  return { result: decisionResultSchema.parse({ ...typed, ...evidence }), execution: evidence };
 }
 
 export function failureEvidenceFromStorage(value: SQLOutputValue | undefined): Partial<Pick<EvaluationFailure, 'detail' | 'providerFailure'>> {

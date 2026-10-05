@@ -40,7 +40,7 @@ async function connectedFixture(assertProviderReady: () => Promise<void> = async
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-'));
   const store = openRunStore(root);
   const fit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
-  const provider: DecisionProvider = { measure: () => fit, measureBatch: () => fit, async decide() { throw new Error('MCP admission must not infer.'); } };
+  const provider: DecisionProvider = { measure: () => fit, measureBatch: () => fit, async decide() { throw new Error('MCP admission must not infer.'); }, async decideBatch() { throw new Error('MCP admission must not infer.'); } };
   const service = createRunService(store, root, () => provider, { async launch() {} }, { assertProviderReady });
   const server = createPollingServer(service);
   const client = new Client({ name: 'sheg-mcp-test', version: '1.0.0' });

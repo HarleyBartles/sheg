@@ -21,10 +21,10 @@ export function journeyTopology(arm: JourneyDefinition): Extract<StudyPresentati
     const id = asks[index]!;
     nodes.push({ id, kind: 'ask', taskId: task.id });
     const toNodeId = asks[index + 1] ?? terminal;
-    if ('options' in task) {
+    if (task.type === 'choice') {
       for (const optionId of Object.keys(task.options)) transitions.push({ fromNodeId: id, optionId, toNodeId });
     } else {
-      const maximum = 'rubric' in task ? task.rubric.length - 1 : 1;
+      const maximum = task.type === 'score' ? task.rubric.length - 1 : 1;
       transitions.push({ fromNodeId: id, when: { type: task.type, minimum: 0, maximum, minimumInclusive: true, maximumInclusive: true }, toNodeId });
     }
   });

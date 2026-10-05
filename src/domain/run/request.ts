@@ -1,10 +1,11 @@
 import { providerFailureEvidenceSchema } from '../decision/provider-failure.js';
 import { z } from 'zod';
 import { decisionFailureDetailSchema, decisionQuestionSchema } from '../decision/decision.js';
+import { providerKindSchema } from '../decision/provider.js';
 import { respondentProfileSchema } from '../respondents/profile.js';
 import { providerConfigSchema } from '../../providers/config.js';
 import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js';
-import type { JourneyEvaluation, JourneyRespondentState } from './lifecycle.js';
+import { evaluationStatusSchema, runLifecycleStateSchema, runStatusSchema, resumeRefusalReasonSchema, type JourneyEvaluation, type JourneyRespondentState } from './lifecycle.js';
 import { decisionResultSchema } from '../decision/decision.js';
 import { providerExecutionEvidenceSchema } from '../decision/decision.js';
 import { stimulusItemSchema } from '../study/stimulus.js';
@@ -152,13 +153,11 @@ export const followOnRunRequestSchema = z.object({
   }
 });
 
-const runStatuses = ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] as const;
-const sourceEvaluationStatuses = ['pending', 'answered', 'failed', 'unreached'] as const;
 const followOnExclusionSchema = z.object({
   sourceEvaluationId: z.string().uuid(),
   sourceContextId: z.string().uuid(),
   respondentId: z.string().min(1),
-  status: z.enum(sourceEvaluationStatuses),
+  status: evaluationStatusSchema,
   reason: z.enum(['pending', 'failed', 'unreached', 'nonChoice', 'unmappedChoice']),
   choiceId: z.string().min(1).optional(),
   choiceMeaning: z.string().min(1).optional(),
@@ -192,9 +191,9 @@ const selectedMaterialEvidenceSchema = z.object({
 
 export const followOnLineageSchema = z.object({
   sourceRunId: z.string().uuid(),
-  sourceStatusAtAcceptance: z.enum(runStatuses),
+  sourceStatusAtAcceptance: runStatusSchema,
   sourceCompleteAtAcceptance: z.boolean(),
-  sourceVersion: z.object({ status: z.enum(runStatuses), usedCalls: z.number().int().nonnegative(), reservedCalls: z.number().int().nonnegative(), maxOrdinal: z.number().int().min(-1) }).strict(),
+  sourceVersion: z.object({ status: runStatusSchema, usedCalls: z.number().int().nonnegative(), reservedCalls: z.number().int().nonnegative(), maxOrdinal: z.number().int().min(-1) }).strict(),
   sourceAvailable: z.boolean().optional(),
   sourceRecordState: z.enum(['live', 'historical']).optional(),
   selectionCoverage: selectionCoverageSchema.optional(),
@@ -206,7 +205,7 @@ export const followOnLineageSchema = z.object({
 }).strict();
 
 export const runListQuerySchema = z.object({
-  status: z.enum(runStatuses).optional(),
+  status: runStatusSchema.optional(),
   label: z.string().min(1).optional(),
   createdAfter: z.string().datetime().optional(),
   createdBefore: z.string().datetime().optional(),
@@ -232,7 +231,7 @@ export const runEvidenceItemSchema = z.object({
     contextId: z.string().uuid(),
     respondentId: z.string().min(1),
     questionId: z.string().min(1),
-    status: z.enum(['pending', 'answered', 'failed', 'unreached']),
+    status: evaluationStatusSchema,
     result: decisionResultSchema.optional(),
     failure: z.object({ code: z.string().min(1), message: z.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
@@ -241,14 +240,14 @@ export const runEvidenceItemSchema = z.object({
     nodeId: z.string().min(1).optional(),
     occurrence: z.number().int().positive().optional(),
     outcome: z.string().optional(),
-    provenance: z.object({ provider: z.enum(['jev', 'laya']), model: z.string().min(1), endpoint: z.string().optional(), compilerFingerprint: z.string().min(1), contextFingerprint: z.string().min(1) }).strict(),
+    provenance: z.object({ provider: providerKindSchema, model: z.string().min(1), endpoint: z.string().optional(), compilerFingerprint: z.string().min(1), contextFingerprint: z.string().min(1) }).strict(),
   }).strict();
 
 export const runLifecycleSchema = z.object({
-  state: z.enum(['active', 'stopped', 'complete']),
+  state: runLifecycleStateSchema,
   resume: z.discriminatedUnion('eligible', [
     z.object({ eligible: z.literal(true) }).strict(),
-    z.object({ eligible: z.literal(false), reason: z.enum(['already_active', 'already_completed', 'cancelled', 'unsupported_status', 'partial_journey', 'cancellation_requested', 'attempt_unresolved', 'call_allowance_exhausted', 'no_unfinished_work']) }).strict(),
+    z.object({ eligible: z.literal(false), reason: resumeRefusalReasonSchema }).strict(),
   ]),
 }).strict();
 
@@ -256,7 +255,7 @@ export const runEvidencePageSchema = z.object({
   items: z.array(runEvidenceItemSchema),
   totalMatches: z.number().int().nonnegative(),
   sourceRunId: z.string().uuid(),
-  sourceStatus: z.enum(runStatuses),
+  sourceStatus: runStatusSchema,
   sourceComplete: z.boolean(),
   lifecycle: runLifecycleSchema,
   coverage: z.object({

@@ -26,7 +26,7 @@ Feature PRs target `develop`. Release PRs target `main` from `release/<version>`
 
 ## Doctrine and contracts
 
-Follow the Gitflow branch and release routing playbook, SemVer/version alignment playbook, and approved issue.
+Follow the [operating standards certification](../contracts/standards-certification.md), applicable playbooks, and approved work plan.
 
 ## Local commands and paths
 
@@ -42,5 +42,6 @@ Do not merge ordinary feature work into `main`, publish a release from an unveri
 
 ## Playbook routing
 
+- [Source quality](../playbooks/source-quality.md) - for reviewing source, tests, generated runtime output, persisted contracts, providers, and entrypoints. Repeat its Method checks against the final diff and callers. Include the concrete owner and boundary findings required by Verification in the review or PR handoff; a claim that profiles were applied does not establish readiness. Assess whether the guards were reachable and useful, and record only distinct evidence.
 - [Gitflow branch and release routing](../playbooks/gitflow-branch-and-release.md) - for branch choice, PR target, release, or hotfix.
 - [SemVer and version alignment](../playbooks/semver-version-alignment.md) - when versions change or a release is prepared.

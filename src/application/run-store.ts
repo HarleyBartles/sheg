@@ -7,6 +7,8 @@ export type AttemptOutcome =
   | { kind: 'answered'; result: DecisionResult }
   | { kind: 'failed'; code: string; message: string; scope: 'evaluation' | 'run'; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence; providerAttempts?: number };
 
+export type BatchEvaluationOutcome = { evaluationId: string; status: AnswerRow['status'] };
+
 export type RunListQuery = RunListQueryInput;
 export type DeletePreview = { runs: Array<{ runId: string; status: RunStatus; evaluationCount: number; attemptCount: number; blockedByActiveWork: boolean; retainedFollowOnRunIds: string[] }>; blockedByActiveWork: boolean };
 export type DeleteResult = {
@@ -54,7 +56,7 @@ export interface RunCommandRepository {
   heartbeat(claim: WorkerClaim, nowMs: number): boolean;
   reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null;
   reserveBatch(claim: WorkerClaim, groupId: string, evaluationIds: string[], nowMs: number): { attemptId: string; evaluations: FrozenEvaluation[] } | null;
-  settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): void;
+  settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): BatchEvaluationOutcome[];
   settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void;
   settleJourney(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome, transition: JourneyTransition): void;
   finish(claim: WorkerClaim): RunStatusView;

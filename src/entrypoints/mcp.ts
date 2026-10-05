@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { RunServiceError, type RunService } from '../application/run-service.js';
 import { RunStoreError } from '../infrastructure/run-store.js';
 import { createRunRuntime } from '../infrastructure/run-runtime.js';
-import { resetConfirmation, runStorageSchema, runDeleteSchema, runGetSchema } from '../application/run-operations.js';
+import { dispatchRunGet, resetConfirmation, runStorageSchema, runDeleteSchema, runGetSchema } from '../application/run-operations.js';
 import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import { productVersion } from '../infrastructure/product-identity.js';
 
@@ -19,12 +19,7 @@ export function createPollingServer(service?: RunService): McpServer {
   server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
   server.registerTool('run_query', { description: 'Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.', inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtime.service.queryEvidence(query)));
   server.registerTool('run_get', { description: 'Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.', inputSchema: runGetSchema }, async (input) => safeResult(() => {
-    if (input.view === 'status') return runtime.service.getStatus(input.runId);
-    if (input.view === 'request') return runtime.service.getRequest(input.runId);
-    if (input.view === 'journey') return runtime.service.getJourneyRun(input.runId);
-    if (input.view === 'context') return runtime.service.getContext(input.runId, input.evaluationId, input.contextId);
-    if (input.view === 'answers') return runtime.service.answers(input.runId, input.cursor, input.limit);
-    return runtime.service.attempts(input.runId, input.cursor, input.limit);
+    return dispatchRunGet(input, runtime.service);
   }));
   server.registerTool('run_cancel', { description: 'Request cancellation of a run. Any already dispatched physical provider request is allowed to settle; all valid returned sibling answers are retained and later requests are stopped.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.cancel(runId)));
   server.registerTool('run_resume', { description: 'Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.', inputSchema: z.object({ runId: z.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.resume(runId)));

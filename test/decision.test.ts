@@ -262,6 +262,41 @@ test('isolates duplicate, missing, malformed and wrong-type batch answers by que
   assert.deepEqual(missing.answers.map((answer) => 'failure' in answer ? answer.failure.code : 'answered'), ['missing_answer', 'missing_answer']);
 });
 
+test('validates shared batch execution even when answers are empty or all explicitly failed', () => {
+  const batch: DecisionBatchRequest = { state: request.state, questions: [request.question] };
+  const invalidExecutions = [
+    { attempts: 1, provider: 'laya', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+    { attempts: 1, provider: 'jev', model: 'another-model', latencyMs: 1, usage: {} },
+    { attempts: 2, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+  ] as const;
+  const answerSets = [
+    [],
+    [{ questionId: request.question.id, failure: { code: 'provider_error', message: 'The provider could not answer.' } }],
+  ] as const;
+
+  for (const answers of answerSets) for (const execution of invalidExecutions) {
+    assert.throws(() => validateDecisionBatch(batch, { answers, execution }, {
+      maxAttempts: 1, provider: 'jev', model: 'typesafe/jev-1.13',
+    }), DecisionError);
+  }
+});
+
+test('valid batch execution preserves a valid sibling beside an explicit answer failure', () => {
+  const batch: DecisionBatchRequest = { state: request.state, questions: [request.question,
+    { type: 'noul', id: 'trust', instructions: 'Credible?' }] };
+  const validated = validateDecisionBatch(batch, {
+    answers: [
+      { questionId: request.question.id, value: { type: 'choice', choice: 'continue', probabilities: { continue: 0.7, leave: 0.3 } } },
+      { questionId: 'trust', failure: { code: 'provider_error', message: 'The provider could not answer.' } },
+    ],
+    execution: { attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} },
+  }, { maxAttempts: 1, provider: 'jev', model: 'typesafe/jev-1.13' });
+
+  assert.ok('value' in validated.answers[0]!);
+  assert.ok('failure' in validated.answers[1]!);
+  if ('failure' in validated.answers[1]!) assert.equal(validated.answers[1].failure.code, 'provider_error');
+});
+
 test('typed-answer failures retain safe validation reasons beside successful sibling answers', () => {
   const batch: DecisionBatchRequest = { state: request.state, questions: [request.question,
     { type: 'choice', id: 'probability', instructions: 'Which outcome?', options: { continue: 'Continue', leave: 'Leave' } },

@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { providerKinds } from '../domain/decision/provider.js';
 import { jevConfigInputSchema, jevConfigSchema } from './jev/config.js';
 
 const layaConfigSchema = z.object({
-  kind: z.literal('laya'),
+  kind: z.literal(providerKinds[1]),
   baseUrl: z.string().url(),
   checkpoint: z.string().min(1),
   contextLimit: z.number().int().positive(),

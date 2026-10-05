@@ -1,12 +1,13 @@
 {
   "name": "sheg",
-  "version": "0.3.0-dev.15",
+  "version": "0.3.0-dev.16",
   "description": "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   "scripts": {
     "test": "node --import tsx --test --test-concurrency=4 \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test scripts",
-    "verify": "npm run lint && npm run typecheck && npm test && node --import tsx scripts/check-generated.ts",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run guidance:check && node --import tsx scripts/check-generated.ts",
+    "guidance:check": "node --import tsx scripts/check-agent-guidance.ts",
     "contracts:build": "node --import tsx scripts/generate-contracts.ts",
     "sqlite:schema:generate": "drizzle-kit generate",
     "skill:scenario": "node --import tsx scripts/skill-scenario.ts",

@@ -7,13 +7,16 @@ import { RunStoreError } from '../../application/run-store.js';
 import { decodeCursor, encodeCursor, pageSize, type AttemptCursorPayload } from './cursors.js';
 import { evaluationFailureFromJson } from './evidence-records.js';
 import { attempts, attemptEvaluations, evaluations } from './tables.js';
+import { z } from 'zod';
+
+const attemptCursorSchema = z.object({ kind: z.literal('attempts'), runId: z.string().min(1), sequence: z.number().int().positive() }).strict();
 
 export function loadAttempts(database: NodeSQLiteDatabase, runId: string, cursorText: string | undefined, requestedLimit: number | undefined, ensureRun: () => void): Page<RunAttempt> {
   ensureRun();
   const limit = pageSize(requestedLimit);
   let cursor: AttemptCursorPayload | undefined;
   if (cursorText) {
-    cursor = decodeCursor<AttemptCursorPayload>(cursorText, 'attempts');
+    cursor = decodeCursor(cursorText, 'attempts', attemptCursorSchema);
     if (cursor.kind !== 'attempts' || cursor.runId !== runId || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 1) {
       throw new RunStoreError('invalid_cursor', 'The attempt cursor does not match this run.');
     }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { decisionTypes } from '../decision/decision.js';
 
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const prose = z.string().trim().min(1);
@@ -45,7 +46,7 @@ const legacyChoiceTaskSchema = z.object({
 
 const typedChoiceTaskSchema = z.object({
   ...taskFields,
-  type: z.literal('choice'),
+  type: z.literal(decisionTypes.choice),
   options,
   materialOptions,
   answerKeyOptionId: identifier.optional(),
@@ -53,13 +54,13 @@ const typedChoiceTaskSchema = z.object({
 
 const scoreTaskSchema = z.object({
   ...taskFields,
-  type: z.literal('score'),
+  type: z.literal(decisionTypes.score),
   rubric: z.array(prose).min(2),
 }).strict();
 
 const noulTaskSchema = z.object({
   ...taskFields,
-  type: z.literal('noul'),
+  type: z.literal(decisionTypes.noul),
   criteria: z.object({ true: prose.optional(), false: prose.optional() }).strict().optional(),
 }).strict();
 
@@ -69,10 +70,5 @@ export const taskSchema = z.union([legacyChoiceTaskSchema, typedTaskSchema]).tra
   'type' in task ? task : { ...task, type: 'choice' as const }
 ));
 
-type HistoryPolicy = 'include' | 'omit';
-type CommonTask = { id: string; instructions: string; comparisonKey?: string | undefined; responseHistory?: HistoryPolicy | undefined };
-export type StudyTask =
-  | (CommonTask & { type?: 'choice' | undefined; options: Record<string, string>; materialOptions?: Record<string, string> | undefined; answerKeyOptionId?: string | undefined })
-  | (CommonTask & { type: 'score'; rubric: string[] })
-  | (CommonTask & { type: 'noul'; criteria?: { true?: string | undefined; false?: string | undefined } | undefined });
+export type StudyTask = z.output<typeof taskSchema>;
 export type StudyTaskInput = z.input<typeof taskSchema>;

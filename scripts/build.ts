@@ -32,6 +32,11 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
   const credentialDirectory = path.join(resolvedOutputDirectory, 'credentials');
   await mkdir(credentialDirectory, { recursive: true });
   await cp(
+    path.join(repositoryRoot, 'src/infrastructure/sqlite/queries'),
+    path.join(resolvedOutputDirectory, 'queries'),
+    { recursive: true },
+  );
+  await cp(
     path.join(repositoryRoot, 'src/infrastructure/credentials/windows-credential.ps1'),
     path.join(credentialDirectory, 'windows-credential.ps1'),
   );

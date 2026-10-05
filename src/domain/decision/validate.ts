@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { decisionBatchRequestSchema, decisionBatchResultSchema, decisionFailureDetailForReason, decisionRequestSchema, decisionResultSchema, decisionValueSchema, decisionValueFromResult, providerExecutionEvidenceSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionRequest, type DecisionResult } from './decision.js';
+import { decisionBatchRequestSchema, decisionBatchResultSchema, decisionFailureDetailForReason, decisionRequestSchema, decisionResultSchema, decisionValueSchema, decisionValueFromResult, providerExecutionEvidenceSchema, type DecisionBatchRequest, type DecisionBatchResult, type DecisionFailureDetail, type DecisionRequest, type DecisionResult, type ProviderExecutionEvidence } from './decision.js';
 import type { ProviderKind } from './provider.js';
 
 type ValidationOptions = {
@@ -20,6 +20,19 @@ export class DecisionError extends Error {
 
 const probabilitySumTolerance = 0.01;
 
+function validateProviderExecution(evidence: ProviderExecutionEvidence, options: ValidationOptions): ProviderExecutionEvidence {
+  const maxAttempts = options.maxAttempts ?? 1;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || evidence.attempts > maxAttempts) {
+    throw new DecisionError(`Provider execution attempts exceed the configured limit of ${maxAttempts}.`);
+  }
+  for (const key of ['provider', 'model', 'checkpoint'] as const) {
+    if (options[key] !== undefined && evidence[key] !== options[key]) {
+      throw new DecisionError(`Provider execution ${key} does not match the configured ${key}.`);
+    }
+  }
+  return evidence;
+}
+
 export function validateDecision(
   request: DecisionRequest,
   result: unknown,
@@ -35,6 +48,7 @@ export function validateDecision(
   }
   const decision = parsed.data;
   const normalizedRequest = parsedRequest.data;
+  validateProviderExecution(decision, options);
   if (decision.type !== normalizedRequest.question.type) {
     throw new DecisionError(`Decision response type ${decision.type} does not match task type ${normalizedRequest.question.type}.`, { reason: 'answer_type_mismatch' });
   }
@@ -59,15 +73,6 @@ export function validateDecision(
       }
     }
   } else if (normalizedRequest.question.type !== 'noul') throw new DecisionError('Noul response does not match the task type.', { reason: 'answer_type_mismatch' });
-  const maxAttempts = options.maxAttempts ?? 1;
-  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || decision.attempts > maxAttempts) {
-    throw new DecisionError(`Decision attempts exceed the configured limit of ${maxAttempts}.`);
-  }
-  for (const key of ['provider', 'model', 'checkpoint'] as const) {
-    if (options[key] !== undefined && decision[key] !== options[key]) {
-      throw new DecisionError(`Decision ${key} does not match the configured ${key}.`);
-    }
-  }
   return decision;
 }
 
@@ -84,7 +89,7 @@ export function validateDecisionBatch(
   if (!envelope.success) {
     throw new DecisionError(`Decision batch response envelope is invalid: ${envelope.error.issues.map((issue) => issue.message).join(' ')}`, { cause: envelope.error });
   }
-  const execution = providerExecutionEvidenceSchema.parse(envelope.data.execution);
+  const execution = validateProviderExecution(envelope.data.execution, options);
   for (const answer of envelope.data.answers) {
     if (!parsedRequest.data.questions.some(({ id }) => id === answer.questionId)) {
       throw new DecisionError(`Decision batch response contains unknown question ID ${answer.questionId}.`);

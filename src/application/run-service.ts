@@ -6,7 +6,6 @@ import type { PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput } from '../providers/config.js';
 import type { DeletePreview, DeleteResult, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
-import { CredentialStoreError } from '../infrastructure/credentials/windows.js';
 import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
 
 export class RunServiceError extends Error {
@@ -60,9 +59,10 @@ export function createRunService(
     try { await options.assertProviderReady?.(provider); }
     catch (error) {
       if (error instanceof RunServiceError) throw error;
-      if (error instanceof CredentialStoreError) {
-        const code = error.code === 'credential_malformed' ? 'provider_credential_malformed' : error.code === 'credential_missing' ? 'provider_credential_missing' : 'provider_credential_unavailable';
-        throw new RunServiceError(code, error.message, { cause: error });
+      const code = error instanceof Error && 'code' in error ? String(error.code) : '';
+      if (code === 'credential_malformed' || code === 'credential_missing' || code === 'credential_unavailable') {
+        const mapped = code === 'credential_malformed' ? 'provider_credential_malformed' : code === 'credential_missing' ? 'provider_credential_missing' : 'provider_credential_unavailable';
+        throw new RunServiceError(mapped, error instanceof Error ? error.message : 'Provider credential is unavailable.', { cause: error });
       }
       throw new RunServiceError('provider_credential_unavailable', 'Provider credential is unavailable.', { cause: error });
     }

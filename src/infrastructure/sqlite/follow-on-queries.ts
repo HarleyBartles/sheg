@@ -1,21 +1,22 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { RunStoreError } from '../../application/run-store.js';
-import { decisionRequestSchema } from '../../domain/decision/decision.js';
+import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type ParsedFollowOnRunRequest } from '../../domain/run/request.js';
-import { asNumber, asText, parseJson, type DatabaseRow } from './rows.js';
+import { asNumber, asText, parseJson, parseJsonRecord, type DatabaseRow } from './rows.js';
 import { materialCatalogForRequest, resultFromStorage } from './evidence-records.js';
+import { evaluationCriteriaSql } from './evaluation-criteria.js';
 
 export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowOnRunRequest, notFound: () => Error): FollowOnSourceSet {
   const request = followOnRunRequestSchema.parse(input);
   const run = database.prepare('SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?').get(request.sourceRunId) as DatabaseRow | undefined;
   if (!run) throw notFound();
-  const stored = parseJson<{ request?: unknown; lineage?: unknown }>(run.request_json, 'source run request');
-  const sourceRequest = runRequestSchema.safeParse(stored.request);
+  const storedRecord = parseJsonRecord(run.request_json, 'source run request');
+  const sourceRequest = runRequestSchema.safeParse(storedRecord.request);
   if (!sourceRequest.success) throw new RunStoreError('data_integrity_error', 'Stored source run request is invalid.');
   let sourceLineage: FollowOnLineage | undefined;
   if (sourceRequest.data.kind === 'follow-on') {
-    const parsedLineage = followOnLineageSchema.safeParse(stored.lineage);
+    const parsedLineage = followOnLineageSchema.safeParse(storedRecord.lineage);
     if (!parsedLineage.success) throw new RunStoreError('data_integrity_error', 'Stored source follow-on material lineage is invalid.');
     sourceLineage = parsedLineage.data;
   }
@@ -33,24 +34,9 @@ export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowO
     )`);
     parameters.push(JSON.stringify(request.selection.references));
   } else {
-    const criteria = request.selection.criteria;
-    if (criteria.respondentId !== undefined) { where.push('e.respondent_id = ?'); parameters.push(criteria.respondentId); }
-    if (criteria.status !== undefined) { where.push('e.status = ?'); parameters.push(criteria.status); }
-    if (criteria.questionId !== undefined) { where.push('e.question_id = ?'); parameters.push(criteria.questionId); }
-    if (criteria.materialId !== undefined) {
-      where.push("EXISTS (SELECT 1 FROM json_each(e.packet_json, '$.state.encounteredItems') AS encountered WHERE json_extract(encountered.value, '$.id') = ?)");
-      parameters.push(criteria.materialId);
-    }
-    if (criteria.answer?.type === 'choice') {
-      where.push("json_extract(e.result_json, '$.value.type') = 'choice' AND json_extract(e.result_json, '$.value.choice') = ?");
-      parameters.push(criteria.answer.choiceId);
-    } else if (criteria.answer?.type === 'score' || criteria.answer?.type === 'noul') {
-      const field = criteria.answer.type === 'score' ? 'score' : 'noul';
-      const operator = criteria.answer.operator === 'eq' ? '=' : criteria.answer.operator === 'lt' ? '<' : criteria.answer.operator === 'lte' ? '<=' : criteria.answer.operator === 'gt' ? '>' : '>=';
-      where.push(`json_extract(e.result_json, '$.value.type') = '${field}' AND json_extract(e.result_json, '$.value.${field}') ${operator} ?`);
-      parameters.push(criteria.answer.value);
-    }
-    if (criteria.outcome !== undefined) { where.push('jr.outcome = ?'); parameters.push(criteria.outcome); }
+    const filters = evaluationCriteriaSql(request.selection.criteria);
+    where.push(...filters.sql);
+    parameters.push(...filters.parameters);
   }
   const rows = database.prepare(`SELECT e.*,
     (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
@@ -63,7 +49,7 @@ export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowO
     throw new RunStoreError('follow_on_reference_not_found', 'One or more evaluation/context references were not found in the source run.');
   }
   const turns: FollowOnSourceSet['turns'] = rows.map((row) => {
-    const packet = decisionRequestSchema.parse(parseJson(row.packet_json, 'source packet')) as FollowOnSourceSet['turns'][number]['packet'];
+    const packet = decisionPacketSchema.parse(parseJson(row.packet_json, 'source packet'));
     const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'source answer'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'source execution'));
     const contextId = asText(row.context_id, 'context ID');
     const respondentId = asText(row.respondent_id, 'respondent ID');

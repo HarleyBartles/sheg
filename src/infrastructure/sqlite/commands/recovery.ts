@@ -1,5 +1,11 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import type { DeleteResult } from '../../../application/run-store.js';
+import type { RunStatus } from '../../../domain/run/lifecycle.js';
+import { RunStoreError } from '../../../application/run-store.js';
+import type { RunDeletionSnapshot } from '../run-deletion-queries.js';
+import { loadRunDeletionSnapshot } from '../run-deletion-queries.js';
 import { attemptEvaluations, evaluations, journeyRespondents, runs } from '../tables.js';
 
 export function reopenSharedFailure(database: NodeSQLiteDatabase, runId: string, attemptId: string): void {
@@ -49,4 +55,46 @@ export function markActiveJourneyRespondentsUnreached(database: NodeSQLiteDataba
 
 export function deleteRuns(database: NodeSQLiteDatabase, runIds: string[]): void {
   database.delete(runs).where(inArray(runs.runId, runIds)).run();
+}
+
+export function deleteRunSelection(context: {
+  database: DatabaseSync;
+  orm: NodeSQLiteDatabase;
+  transaction<T>(operation: () => T): T;
+  now(): number;
+  reconcile(snapshot: RunDeletionSnapshot, nowMs: number): Map<string, RunStatus>;
+  notFound(): never;
+  optimize(): void;
+}, runIds: string[]): DeleteResult {
+  const result = context.transaction(() => {
+    const snapshot = loadRunDeletionSnapshot(context.orm, runIds, { includeReservedAttemptCounts: true });
+    if (snapshot.runs.length !== runIds.length) throw context.notFound();
+    const statuses = context.reconcile(snapshot, context.now());
+    const counts = runIds.map((runId) => {
+      const status = statuses.get(runId)!;
+      if (status === 'prepared' || status === 'running') {
+        throw new RunStoreError('runs_active', 'Active runs cannot be deleted. Cancel each run, wait until it reaches a terminal state, then submit the explicit selection again.');
+      }
+      return { evaluations: snapshot.evaluationCounts.get(runId) ?? 0, attempts: snapshot.attemptCounts.get(runId) ?? 0 };
+    });
+    deleteRuns(context.orm, runIds);
+    const violations = context.database.prepare('PRAGMA foreign_key_check').all();
+    const integrity = context.database.prepare('PRAGMA integrity_check').all() as Array<{ integrity_check?: unknown }>;
+    if (violations.length > 0 || integrity.length !== 1 || integrity[0]?.integrity_check !== 'ok') {
+      throw new RunStoreError('storage_integrity_failed', 'The datastore integrity check failed; no runs were deleted.');
+    }
+    return { deletedRunIds: [...runIds], removed: {
+      runs: counts.length,
+      evaluations: counts.reduce((sum, item) => sum + item.evaluations, 0),
+      attempts: counts.reduce((sum, item) => sum + item.attempts, 0),
+    } };
+  });
+  let maintenance: DeleteResult['maintenance'];
+  try {
+    context.optimize();
+    maintenance = { optimization: 'completed' };
+  } catch (error) {
+    maintenance = { optimization: 'failed', failureCode: error instanceof RunStoreError ? error.code : 'storage_operation_failed' };
+  }
+  return { ...result, maintenance };
 }

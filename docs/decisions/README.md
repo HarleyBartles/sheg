@@ -38,6 +38,9 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0030](0030-use-drizzle-behind-typed-run-repositories.md) | Use Drizzle behind typed run repositories | Accepted |
 | [0031](0031-set-schema-nine-as-release-baseline.md) | Set schema 9 as the v0.3.0 release baseline | Accepted |
 | [0032](0032-admit-journey-turns-as-they-are-reached.md) | Admit journey turns as they are reached | Accepted |
+| [0033](0033-own-and-validate-sql-query-assets.md) | Own and validate SQLite query assets | Accepted |
+| [0034](0034-adopt-routed-agent-operating-standards.md) | Adopt routed agent operating standards | Accepted |
+| [0035](0035-drop-pre-release-file-backed-reports.md) | Drop pre-release file-backed run reports | Accepted |
 
 ## Writing and changing decisions
 
