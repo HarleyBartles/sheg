@@ -128,10 +128,10 @@
 
 **Files:** `package.json`, generated lock/manifests/contracts/runtime/plugin output, version/build scripts as required, `test/{package,plugin-package-build,build}.test.ts` and installed-runtime behavior coverage.
 
-- [ ] Set the single authored version to `0.3.0-dev.16`; run canonical generators/build to align generated identity. Verify no second authored version source is introduced.
-- [ ] Build the ZIP from the generated package. Compare Git-package and ZIP runtime content; exercise MCP startup and a mock durable study/recall from a copied package, including query assets, schemas, migrations and worker resolution. No paid inference or credential export.
-- [ ] Run relevant integration coverage and the full `npm run verify` staged gate. Fix genuine failures rather than weakening tests. Keep outputs and measurements outside the repository.
-- [ ] Inspect the final diff for unintended public contract/schema changes, generated parity, secure diagnostics and preserved migration guarantees. Commit the version/generated closeout with the passing hook.
+- [x] Set the single authored version to `0.3.0-dev.16`; run canonical generators/build to align generated identity. Verify no second authored version source is introduced.
+- [x] Build the ZIP from the generated package. Compare Git-package and ZIP runtime content; exercise MCP startup and a mock durable study/recall from a copied package, including query assets, schemas, migrations and worker resolution. No paid inference or credential export.
+- [x] Run relevant integration coverage and the full `npm run verify` staged gate. Fix genuine failures rather than weakening tests. Keep outputs and measurements outside the repository.
+- [x] Inspect the final diff for unintended public contract/schema changes, generated parity, secure diagnostics and preserved migration guarantees. Commit the version/generated closeout with the passing hook.
 
 ## Task 10: Review and publish the slice
 

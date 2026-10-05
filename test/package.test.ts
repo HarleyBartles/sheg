@@ -25,6 +25,10 @@ type FollowOnRequestTestShape = {
   lineage: { sourceAvailable: boolean; selections: Array<{ sourceContextId: string; selectedMaterial?: { materialId: string } }>; materialSnapshots: Array<{ materials: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> }> };
 };
 
+function pluginPackageSource(): string {
+  return path.resolve(process.env.SHEG_PLUGIN_PACKAGE_ROOT ?? 'plugins/sheg');
+}
+
 test('a copied plugin launches its shipped MCP without checkout or node_modules', async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), 'polling-plugin-copy-'));
   const cleanup: { closeTransport?: () => Promise<void> } = {};
@@ -37,7 +41,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   });
   const plugin = path.join(sandbox, 'installed', 'sheg');
   await mkdir(path.dirname(plugin), { recursive: true });
-  await cp(path.resolve('plugins/sheg'), plugin, { recursive: true });
+  await cp(pluginPackageSource(), plugin, { recursive: true });
   await assertSkillLinksResolve(path.join(plugin, 'skills/stimulus-response-polling'), plugin);
   await assertSkillLinksResolve(path.join(plugin, 'skills/study-design'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
@@ -114,8 +118,8 @@ test('a packaged run survives its requesting MCP and can be recalled from a new 
   const dataRoot = path.join(sandbox, 'data');
   const pluginBeforeUpdate = path.join(sandbox, 'plugin-before-update');
   const pluginAfterUpdate = path.join(sandbox, 'plugin-after-update');
-  await cp(path.resolve('plugins/sheg'), pluginBeforeUpdate, { recursive: true });
-  await cp(path.resolve('plugins/sheg'), pluginAfterUpdate, { recursive: true });
+  await cp(pluginPackageSource(), pluginBeforeUpdate, { recursive: true });
+  await cp(pluginPackageSource(), pluginAfterUpdate, { recursive: true });
   const tokenizerPath = path.join(sandbox, 'laya-tokenizer.json');
   await cp(path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerPath);
   const tokenizerSha256 = createHash('sha256').update(readFileSync(tokenizerPath)).digest('hex');
