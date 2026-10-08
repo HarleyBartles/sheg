@@ -14,6 +14,8 @@ Qualify release candidates as `rc.N`; source changes require the next number and
 
 Apply the Gitflow playbook for promotion and reconciliation. Create a release tag only after its reviewed release PR merges to `main`.
 
+When preparing the first `1.0.0` release, define and publish its stable public compatibility contract through the release guide's version policy. This preparation obligation does not require future guarantees during `0.y.z` adoption.
+
 ## Constraints
 
 `package.json` is the single authored version source and remains private. The tagged Git commit is release source truth; the release artifact is the self-contained Codex plugin ZIP. Do not infer a bump from arbitrary commits, edit derived version identities directly, publish from an unverified tag, or publish to npm. A development version or local ZIP does not publish a release.
