@@ -14,7 +14,7 @@ Preserve feature, release, hotfix, and merge-commit routes; stable-only tagged p
 
 - [x] Make generated-output checking compare a disposable build rather than rewrite the checkout. Extend behavior coverage with stale, missing, and extra output rejection and unchanged checkout bytes. Prove the preservation test fails against the old behavior. Align the manifest generator's accepted versions with the packager's existing SemVer subset and prove malformed identities are rejected.
 - [x] Record v2 Gitflow and SemVer subscriptions and certification, retaining existing pins. Update the guidance checker for the declared subscriptions. Add ADR-0037 for merge-based development identity, mark earlier decisions partially superseded, and update the release guide and agent playbooks for concurrency, candidate qualification, both reconciliation states, and active release fixes. Set root version to `0.3.1-dev.1`, then regenerate derived identities.
-- [ ] Run focused behavior checks, build, full verification, and local prerelease package validation. Review the whole branch independently, correct findings, and publish a Draft PR targeting `develop`. Confirm its remote head and report validation and remaining review limits. No merge or cleanup is part of this handoff.
+- [x] Run focused behavior checks, build, full verification, and local prerelease package validation. Review the whole branch independently, correct findings, and publish a Draft PR targeting `develop`. Confirm its remote head and report validation and remaining review limits. No merge or cleanup is part of this handoff.
 
 ## Validation and ownership
 
