@@ -10,8 +10,6 @@ import { generatePluginPackage } from './generate-plugin-package.js';
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
 export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'dist')): Promise<void> {
-  await syncPackageLockVersion(repositoryRoot);
-  await syncPluginManifest(repositoryRoot);
   const resolvedOutputDirectory = path.resolve(outputDirectory);
   await rm(resolvedOutputDirectory, { recursive: true, force: true });
   await mkdir(resolvedOutputDirectory, { recursive: true });
@@ -22,6 +20,8 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
       path.join(repositoryRoot, 'src/entrypoints/worker.ts'),
     ],
     bundle: true,
+    // Keep dependency labels stable when disposable checks link node_modules.
+    preserveSymlinks: true,
     platform: 'node',
     target: 'node24',
     format: 'esm',
@@ -67,6 +67,8 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await syncPackageLockVersion(repositoryRoot);
+  await syncPluginManifest(repositoryRoot);
   await buildPlugin();
   await generatePluginPackage(repositoryRoot);
 }

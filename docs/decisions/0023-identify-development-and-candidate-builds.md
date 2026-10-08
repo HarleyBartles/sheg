@@ -1,6 +1,6 @@
 # ADR-0023: Identify development and candidate builds
 
-- Status: Accepted
+- Status: Checkpoint allocation superseded by ADR-0037; version ownership and publication boundaries remain accepted
 - Date: 2026-10-02
 - Supersedes: ADR-0013 only for the consequence that development checkpoints do not identify themselves in product manifests.
 

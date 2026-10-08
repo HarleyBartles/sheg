@@ -24,6 +24,8 @@ None.
 
 Start feature work from the latest `develop`. Keep changes within the approved issue. Validate the staged result using the repository gate before publication.
 
+Propose the next unique development identity for every ordinary integration PR, including documentation and tooling, through the version-alignment playbook. Keep one proposal across the PR's commits and rebuild all derived identities.
+
 ## Doctrine and contracts
 
 Follow `AGENTS.md`, the [operating standards certification](../contracts/standards-certification.md), `docs/decisions/README.md`, and the approved work plan. Generated `dist/` output is derived from source and build scripts.

@@ -24,6 +24,8 @@ None.
 
 Feature PRs target `develop`. Release PRs target `main` from `release/<version>`; hotfix PRs target `main` from `hotfix/<version>`. A completed release must be reconciled back into `develop`.
 
+Immediately before an ordinary integration merge, refresh remote `develop` and check the proposed `dev.N` identity is unique and current on its intended release line. Reallocate, rebuild, and reverify stale proposals. Review release/hotfix reconciliation against both continuing development and affected active release branches using the Gitflow and version-alignment playbooks.
+
 ## Doctrine and contracts
 
 Follow the [operating standards certification](../contracts/standards-certification.md), applicable playbooks, and approved work plan.
