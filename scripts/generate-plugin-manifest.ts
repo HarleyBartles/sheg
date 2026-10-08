@@ -6,7 +6,7 @@ type PackageIdentity = { version: string };
 
 export function createPluginManifest(template: PluginTemplate, packageIdentity: PackageIdentity): Record<string, unknown> {
   if (!template.name || typeof template.name !== 'string') throw new Error('The plugin template must declare a name.');
-  if (!/^\d+\.\d+\.\d+(?:-(?:dev|rc)\.\d+)?$/.test(packageIdentity.version)) {
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:dev|rc)\.[1-9]\d*)?$/.test(packageIdentity.version)) {
     throw new Error('package.json must declare a supported stable or prerelease version.');
   }
   if (Object.hasOwn(template, 'version')) throw new Error('The plugin template must not declare a version.');

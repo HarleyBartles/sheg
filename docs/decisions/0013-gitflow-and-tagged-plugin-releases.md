@@ -1,6 +1,6 @@
 # ADR-0013: Use Gitflow and tagged plugin releases
 
-- Status: Accepted
+- Status: Ordinary-integration version allocation superseded by ADR-0037; branch and release decisions remain accepted
 - Date: 2026-09-30
 
 ## Context

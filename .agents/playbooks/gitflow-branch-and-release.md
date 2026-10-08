@@ -10,6 +10,8 @@ Inspect the current branch, remote refs, worktree state, and work type before se
 
 Use available Git and hosting capabilities to verify refs, PR state, and merge outcomes. Apply the version-alignment playbook when selecting a development checkpoint or release identity.
 
+Carry a promoted fix into each affected active release branch as well as `develop`, using that branch's candidate validation. Before reconciliation, distinguish the released product baseline from continuing next-release work and apply the version-alignment transition rules. Preserve future work and active planning artifacts; do not reset a continuing development line to an older stable version.
+
 ## Constraints
 
 `main` is the stable release line; `develop` is the integration and default branch. Do not target `main` from an ordinary feature branch, add unrelated features to a release branch, or leave release fixes only on `main`. Apply the release guide's planning artifact exclusion and reconciliation rules. Tags identify verified releases.

@@ -18,7 +18,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0010](0010-preflight-study-context-for-configured-providers.md) | Preflight study context for configured providers | Proposed; durable-run admission superseded by 0032 |
 | [0011](0011-deterministic-study-preview-and-packet-sizing.md) | Share packet assembly and expose deterministic study preview and sizing | Partially superseded by 0016 and 0032 |
 | [0012](0012-system-one-typed-responses-and-routing.md) | Preserve typed System One responses and route explicitly | Accepted |
-| [0013](0013-gitflow-and-tagged-plugin-releases.md) | Use Gitflow and tagged plugin releases | Accepted |
+| [0013](0013-gitflow-and-tagged-plugin-releases.md) | Use Gitflow and tagged plugin releases | Version allocation superseded by 0037 |
 | [0014](0014-route-jev-execution-explicitly.md) | Select Jev routes explicitly and include route identity | Accepted |
 | [0015](0015-store-jev-credentials-in-windows-vault.md) | Store Jev credentials in Windows Credential Manager | Accepted |
 | [0016](0016-bound-provider-attempts-without-spend-accounting.md) | Bound provider attempts without spend accounting | Accepted |
@@ -28,7 +28,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0020](0020-snapshot-follow-on-contexts.md) | Snapshot follow-on contexts with separate lineage | Accepted |
 | [0021](0021-independent-question-groups-and-batched-attempts.md) | Independent question groups share context and separate evidence | Accepted |
 | [0022](0022-source-linked-material-choices.md) | Link offered Choice options to exact source material | Accepted |
-| [0023](0023-identify-development-and-candidate-builds.md) | Identify development and candidate builds | Accepted |
+| [0023](0023-identify-development-and-candidate-builds.md) | Identify development and candidate builds | Checkpoint allocation superseded by 0037 |
 | [0024](0024-normalize-journeys-and-version-packet-context.md) | Normalize journeys and version packet context | Accepted |
 | [0025](0025-bound-native-typesafe-context-admission.md) | Bound native TypeSafe context admission with published evidence | Accepted |
 | [0026](0026-resume-failed-journey-turns.md) | Resume respondent-local failures in partial journeys | Accepted |
@@ -42,6 +42,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0034](0034-adopt-routed-agent-operating-standards.md) | Adopt routed agent operating standards | Accepted |
 | [0035](0035-drop-pre-release-file-backed-reports.md) | Drop pre-release file-backed run reports | Accepted |
 | [0036](0036-share-the-default-datastore-across-harnesses.md) | Share the default datastore across harnesses | Accepted |
+| [0037](0037-adopt-gitflow-and-semver-cadence.md) | Adopt Gitflow and SemVer with integration checkpoints | Accepted |
 
 ## Writing and changing decisions
 

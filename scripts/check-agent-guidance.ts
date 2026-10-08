@@ -5,15 +5,17 @@ import path from 'node:path';
 const root = process.cwd();
 const contractPath = path.join(root, '.agents/contracts/operating-standards.json');
 const contract = JSON.parse(readFileSync(contractPath, 'utf8')) as {
-  standards: Array<{ id: string; source_repository: string; commit: string; definition_path: string; certification: string }>;
+  version: number;
+  standards: Array<{ id: string; source: { repository: string; commit: string; definition: string }; certification: string }>;
 };
-const requiredStandardIds = ['unslop', 'playbook-composition', 'runbook-composition'];
+assert.equal(contract.version, 2);
+const requiredStandardIds = ['unslop', 'playbook-composition', 'runbook-composition', 'gitflow', 'semver'];
 assert.deepEqual(contract.standards.map((standard) => standard.id).sort(), requiredStandardIds.sort());
 for (const standard of contract.standards) {
-  assert.match(standard.source_repository, /^https:\/\//);
-  assert.match(standard.commit, /^[a-f\d]{40}$/i);
-  assert.ok(standard.definition_path.startsWith('skills/') && !standard.definition_path.includes('..'));
-  assert.ok(existsSync(path.resolve(path.dirname(contractPath), standard.certification)), `Missing certification for ${standard.id}.`);
+  assert.match(standard.source.repository, /^https:\/\//);
+  assert.match(standard.source.commit, /^[a-f\d]{40}$/i);
+  assert.ok(standard.source.definition.startsWith('skills/') && !standard.source.definition.includes('..'));
+  assert.ok(existsSync(path.resolve(root, standard.certification)), `Missing certification for ${standard.id}.`);
 }
 
 const playbookPaths = readdirSync(path.join(root, '.agents/playbooks'))
