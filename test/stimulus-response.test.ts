@@ -10,9 +10,41 @@ import { loadStudy } from '../src/infrastructure/study-loader.js';
 import { taskSchema } from '../src/domain/study/task.js';
 import type { StudyArm } from '../src/domain/study/arm.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
+import { materialItemSchema } from '../src/domain/study/stimulus.js';
+import { journeyDefinitionSchema } from '../src/domain/study/arm.js';
 
 const sourceText = 'The passage gives enough evidence to answer the question.';
 const sourceHash = createHash('sha256').update(sourceText).digest('hex');
+
+test('visual material binds supplied descriptions to immutable saved image metadata', () => {
+  const image = {
+    id: 'hero-image', type: 'image', altText: 'A small cream-helmeted robot holds a green ledger.', caption: 'Writ at the Office of Lawful Standards.',
+    asset: { assetId: `sha256:${'a'.repeat(64)}`, sha256: 'a'.repeat(64), format: 'png', width: 320, height: 400, bytes: 12_000 },
+  };
+  assert.deepEqual(materialItemSchema.parse(image), { ...image, text: '' });
+  assert.deepEqual(materialItemSchema.parse({ id: 'opening', text: 'The article opens here.' }), { id: 'opening', text: 'The article opens here.' });
+  for (const invalid of [
+    { ...image, altText: '  ' },
+    { ...image, asset: { ...image.asset, sha256: 'b'.repeat(64) } },
+    { ...image, asset: { ...image.asset, path: 'C:/private/image.png' } },
+    { ...image, unexpected: true },
+  ]) assert.equal(materialItemSchema.safeParse(invalid).success, false);
+});
+
+test('journey visual bindings resolve only to declared image materials', () => {
+  const image = {
+    id: 'hero-image', type: 'image', altText: 'A small cream-helmeted robot holds a green ledger.',
+    asset: { assetId: `sha256:${'a'.repeat(64)}`, sha256: 'a'.repeat(64), format: 'png', width: 320, height: 400, bytes: 12_000 },
+  };
+  const journey = {
+    id: 'character-study', label: 'Character study', items: [image],
+    tasks: [{ type: 'choice', id: 'character-fit', instructions: 'Which portrait fits?', options: { a: 'Portrait A', b: 'Portrait B' }, visual: { mode: 'pixels', materialIds: ['hero-image'] } }],
+    presentation: { kind: 'sequence' },
+  };
+  assert.equal(journeyDefinitionSchema.safeParse(journey).success, true);
+  assert.equal(journeyDefinitionSchema.safeParse({ ...journey, tasks: [{ ...journey.tasks[0]!, visual: { mode: 'pixels', materialIds: ['missing'] } }] }).success, false);
+  assert.equal(journeyDefinitionSchema.safeParse({ ...journey, items: [{ id: 'opening', text: 'Article text.' }], tasks: [{ ...journey.tasks[0]!, visual: { mode: 'pixels', materialIds: ['opening'] } }] }).success, false);
+});
 
 function comprehensionArm(id: string, text = sourceText): StudyArm {
   return {

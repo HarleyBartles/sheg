@@ -242,7 +242,7 @@ test('batch reconciliation surfaces reservation corruption and rolls back earlie
 test('a physical batch reserves and settles once while preserving one typed evaluation per question', async () => {
   const value: InlineRunRequest = { ...input, respondents: [input.respondents[0]!], maxCalls: 1, questions: [
     { type: 'choice', id: 'interest', instructions: 'Would you keep reading?',
-      options: { continue: input.material[0]!.text, leave: 'Leave' }, materialOptions: { continue: input.material[0]!.id } },
+      options: { continue: input.material[0]!.text!, leave: 'Leave' }, materialOptions: { continue: input.material[0]!.id } },
     { type: 'score', id: 'clarity', instructions: 'How clear was it?', rubric: ['Unclear', 'Clear'] },
     { type: 'noul', id: 'appeal', instructions: 'Was it appealing?' },
   ], material: [{ ...input.material[0]!, sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) }] };

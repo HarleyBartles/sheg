@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { decisionTypes } from '../decision/decision.js';
+import { decisionTypes, visualBindingSchema } from '../decision/decision.js';
 
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const prose = z.string().trim().min(1);
@@ -9,6 +9,7 @@ const taskFields = {
   instructions: prose,
   comparisonKey: identifier.optional(),
   responseHistory: z.enum(['include', 'omit']).optional(),
+  visual: visualBindingSchema.optional(),
 };
 const options = z.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0, 'A choice task requires at least one option.');
 const materialOptions = z.record(identifier, identifier).optional();

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { presentationSchema, type PresentationTransition } from './presentation.js';
-import { sourceReferenceSchema, stimulusItemSchema } from './stimulus.js';
+import { isImageMaterial, materialItemSchema, sourceReferenceSchema } from './stimulus.js';
 import { taskSchema } from './task.js';
 import type { StudyTask } from './task.js';
 
@@ -10,7 +10,7 @@ const prose = z.string().trim().min(1);
 const journeyDefinitionFields = {
   id: identifier,
   label: prose,
-  items: z.array(stimulusItemSchema).min(1),
+  items: z.array(materialItemSchema).min(1),
   tasks: z.array(taskSchema).min(1),
   presentation: presentationSchema,
 };
@@ -48,12 +48,24 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
         context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'materialOptions', optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
         continue;
       }
+      if (isImageMaterial(item)) {
+        context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'materialOptions', optionId], message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
       if (item.sourceId === undefined || item.sourceSha256 === undefined) {
         context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'materialOptions', optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
       }
       if (task.options[optionId] !== item.text) {
         context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'options', optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
       }
+    }
+  }
+
+  const imageIds = new Set(arm.items.filter(isImageMaterial).map((item) => item.id));
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (!task.visual) continue;
+    for (const materialId of task.visual.materialIds) {
+      if (!imageIds.has(materialId)) context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'visual', 'materialIds'], message: `Visual binding references unknown image material ${materialId}.` });
     }
   }
 

@@ -19712,6 +19712,9 @@ var prose = external_exports.string().min(1);
 var choiceText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
 var probability = external_exports.number().finite().min(0).max(1);
 var probabilities = external_exports.record(external_exports.string(), probability);
+var visualBindingSchema = external_exports.object({ mode: external_exports.enum(["pixels", "described"]), materialIds: external_exports.array(identifier).min(1).max(4) }).strict().superRefine((binding, context) => {
+  if (new Set(binding.materialIds).size !== binding.materialIds.length) context.addIssue({ code: "custom", path: ["materialIds"], message: "Visual material IDs must be unique and ordered." });
+});
 var decisionTypes = { choice: "choice", score: "score", noul: "noul" };
 var decisionTypeSchema = external_exports.enum(decisionTypes);
 var routeableDecisionTypes = [decisionTypes.score, decisionTypes.noul];
@@ -19739,7 +19742,8 @@ var choiceQuestionSchema = external_exports.object({
   id: identifier,
   instructions: prose,
   options: external_exports.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
-  materialOptions: external_exports.record(identifier, identifier).optional()
+  materialOptions: external_exports.record(identifier, identifier).optional(),
+  visual: visualBindingSchema.optional()
 }).strict().superRefine((question, context) => {
   if (question.materialOptions) {
     const links = Object.entries(question.materialOptions);
@@ -19759,13 +19763,15 @@ var scoreQuestionSchema = external_exports.object({
   type: external_exports.literal(decisionTypes.score),
   id: identifier,
   instructions: prose,
-  rubric: external_exports.array(prose).min(2)
+  rubric: external_exports.array(prose).min(2),
+  visual: visualBindingSchema.optional()
 }).strict();
 var noulQuestionSchema = external_exports.object({
   type: external_exports.literal(decisionTypes.noul),
   id: identifier,
   instructions: prose,
-  criteria: external_exports.object({ true: prose.optional(), false: prose.optional() }).strict().optional()
+  criteria: external_exports.object({ true: prose.optional(), false: prose.optional() }).strict().optional(),
+  visual: visualBindingSchema.optional()
 }).strict();
 var decisionQuestionSchema = external_exports.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
 var decisionBatchRequestSchema = external_exports.object({
@@ -19880,6 +19886,75 @@ var respondentProfileSchema = external_exports.object({
   ...perspectiveFields
 }).strict().superRefine(enforceAggregateProfileProse);
 
+// src/domain/assets/image.ts
+var IMAGE_FORMATS = ["png", "jpeg", "webp"];
+var ImageFormatSchema = external_exports.enum(IMAGE_FORMATS);
+var digest = external_exports.string().regex(/^[a-f0-9]{64}$/);
+var assetId = external_exports.string().regex(/^sha256:[a-f0-9]{64}$/);
+var ImageSourceSchema = external_exports.union([
+  external_exports.object({ path: external_exports.string().min(1), sha256: digest }).strict(),
+  external_exports.object({ assetId }).strict()
+]);
+var ImageImportRequestSchema = external_exports.object({ source: ImageSourceSchema }).strict();
+var ImageGetRequestSchema = external_exports.object({ assetId, export: external_exports.boolean().optional() }).strict();
+var ImageMetadataSchema = external_exports.object({
+  assetId,
+  sha256: digest,
+  format: ImageFormatSchema,
+  width: external_exports.number().int().positive().max(16e6),
+  height: external_exports.number().int().positive().max(16e6),
+  bytes: external_exports.number().int().positive().max(16 * 1024 * 1024)
+}).strict().refine((metadata2) => metadata2.width * metadata2.height <= 16e6, {
+  message: "Image dimensions exceed the 16 megapixel limit."
+});
+var ScaleRequestSchema = external_exports.object({
+  source: ImageSourceSchema,
+  maxWidth: external_exports.number().int().positive().optional(),
+  maxHeight: external_exports.number().int().positive().optional(),
+  maxBytes: external_exports.number().int().positive().optional()
+}).strict().refine((request) => request.maxWidth !== void 0 || request.maxHeight !== void 0 || request.maxBytes !== void 0, {
+  message: "At least one image target is required."
+});
+
+// src/domain/study/stimulus.ts
+var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var exactText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Material text must not be blank.");
+var materialOriginSchema = external_exports.object({
+  sourceId: identifier2,
+  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var sourceReferenceSchema = external_exports.object({
+  path: external_exports.string().min(1),
+  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var stimulusItemSchema = external_exports.object({
+  id: identifier2,
+  text: exactText,
+  sourceId: materialOriginSchema.shape.sourceId.optional(),
+  sourceSha256: materialOriginSchema.shape.sourceSha256.optional()
+}).strict().superRefine((item, context) => {
+  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) {
+    context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
+  }
+});
+var imageMaterialSchema = external_exports.object({
+  id: identifier2,
+  type: external_exports.literal("image"),
+  text: external_exports.literal("").default(""),
+  sourceId: materialOriginSchema.shape.sourceId.optional(),
+  sourceSha256: materialOriginSchema.shape.sourceSha256.optional(),
+  altText: exactText,
+  caption: exactText.optional(),
+  asset: ImageMetadataSchema
+}).strict().superRefine((item, context) => {
+  if (item.asset.assetId !== `sha256:${item.asset.sha256}`) context.addIssue({ code: "custom", path: ["asset", "assetId"], message: "Image asset ID must match its SHA-256 digest." });
+  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
+});
+var materialItemSchema = external_exports.union([stimulusItemSchema, imageMaterialSchema]);
+function isImageMaterial(item) {
+  return "type" in item && item.type === "image";
+}
+
 // src/domain/decision/prompt.ts
 var promptHistoryEventSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), itemId: external_exports.string().min(1) }).strict(),
@@ -19914,13 +19989,14 @@ var promptStateSchema = external_exports.object({
 }).strict();
 var decisionPacketSchema = decisionRequestSchema.and(external_exports.object({ state: promptStateSchema }).strict());
 function questionForTask(task) {
-  if (task.type === "choice") return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options }, ...task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {} };
-  if (task.type === "score") return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
-  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
+  if (task.type === "choice") return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options }, ...task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}, ...task.visual ? { visual: task.visual } : {} };
+  if (task.type === "score") return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric], ...task.visual ? { visual: task.visual } : {} };
+  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } }, ...task.visual ? { visual: task.visual } : {} };
 }
 var promptContract = {
-  version: 7,
+  version: 8,
   stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
+  visualBindings: "question-scoped image material IDs; image descriptors are carried as semantic context and pixel payloads are provider-specific",
   encounteredMaterial: "all items exposed through the current turn, unique by item ID in first-exposure order",
   trajectory: ["prior task IDs and typed responses with meanings", "prior exposure IDs", "event counts and range"],
   responseHistory: "per-task include or omit; omitted legacy setting includes prior responses",
@@ -20006,10 +20082,10 @@ function compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 
   } else {
     itemIds = [...new Set(history.filter((event) => event.type === "exposure").map((event) => event.itemId))];
   }
-  const encounteredItems = itemIds.map((id) => {
+  const encounteredItems = itemIds.flatMap((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
-    return { id: item.id, text: item.text };
+    return isImageMaterial(item) ? [] : [{ id: item.id, text: item.text }];
   });
   return compileDecisionRequest({
     respondentProfile: {
@@ -25902,7 +25978,15 @@ function applySchemaMigrations(database, dataRoot, migrations, targetVersion, no
           validateSchemaShape(database);
           return;
         }
-        if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError("unsupported_schema_version", "The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.");
+        if (lockedVersion !== 0 || lockedTables !== 0) {
+          const anotherInitializerAdvanced = lockedVersion > 0 && lockedVersion < targetVersion && lockedTables > 0 && migrations.some(({ fromVersion }) => fromVersion === lockedVersion);
+          if (anotherInitializerAdvanced) {
+            database.exec("COMMIT");
+            currentVersion = lockedVersion;
+            continue;
+          }
+          throw new RunStoreError("unsupported_schema_version", "The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.");
+        }
         runMigrationSql(database, migration.sql);
         database.exec(`PRAGMA user_version = ${migration.toVersion}`);
         database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), schemaFingerprint(database), new Date(now()).toISOString());
@@ -26082,11 +26166,11 @@ var providerConfigSchema = external_exports.union([
 ]);
 
 // src/domain/study/presentation.ts
-var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 var nodeSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ id: identifier2, kind: external_exports.literal("expose"), itemId: identifier2 }).strict(),
-  external_exports.object({ id: identifier2, kind: external_exports.literal("ask"), taskId: identifier2 }).strict(),
-  external_exports.object({ id: identifier2, kind: external_exports.literal("terminal"), outcome: identifier2 }).strict()
+  external_exports.object({ id: identifier3, kind: external_exports.literal("expose"), itemId: identifier3 }).strict(),
+  external_exports.object({ id: identifier3, kind: external_exports.literal("ask"), taskId: identifier3 }).strict(),
+  external_exports.object({ id: identifier3, kind: external_exports.literal("terminal"), outcome: identifier3 }).strict()
 ]);
 var responseIntervalSchema = external_exports.object({
   type: routeableDecisionTypeSchema,
@@ -26096,10 +26180,10 @@ var responseIntervalSchema = external_exports.object({
   maximumInclusive: external_exports.boolean()
 }).strict();
 var transitionSchema = external_exports.object({
-  fromNodeId: identifier2,
-  optionId: identifier2.optional(),
+  fromNodeId: identifier3,
+  optionId: identifier3.optional(),
   when: responseIntervalSchema.optional(),
-  toNodeId: identifier2
+  toNodeId: identifier3
 }).strict();
 var presentationSchema = external_exports.discriminatedUnion("kind", [
   external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
@@ -26107,32 +26191,10 @@ var presentationSchema = external_exports.discriminatedUnion("kind", [
     kind: external_exports.literal("graph"),
     nodes: external_exports.array(nodeSchema).min(1),
     transitions: external_exports.array(transitionSchema),
-    entryNodeId: identifier2,
+    entryNodeId: identifier3,
     maxDecisions: external_exports.number().int().positive()
   }).strict()
 ]);
-
-// src/domain/study/stimulus.ts
-var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var exactText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Material text must not be blank.");
-var materialOriginSchema = external_exports.object({
-  sourceId: identifier3,
-  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-}).strict();
-var sourceReferenceSchema = external_exports.object({
-  path: external_exports.string().min(1),
-  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-}).strict();
-var stimulusItemSchema = external_exports.object({
-  id: identifier3,
-  text: exactText,
-  sourceId: materialOriginSchema.shape.sourceId.optional(),
-  sourceSha256: materialOriginSchema.shape.sourceSha256.optional()
-}).strict().superRefine((item, context) => {
-  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) {
-    context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
-  }
-});
 
 // src/domain/study/task.ts
 var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -26142,7 +26204,8 @@ var taskFields = {
   id: identifier4,
   instructions: prose2,
   comparisonKey: identifier4.optional(),
-  responseHistory: external_exports.enum(["include", "omit"]).optional()
+  responseHistory: external_exports.enum(["include", "omit"]).optional(),
+  visual: visualBindingSchema.optional()
 };
 var options = external_exports.record(identifier4, choiceText2).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
 var materialOptions = external_exports.record(identifier4, identifier4).optional();
@@ -26201,7 +26264,7 @@ var prose3 = external_exports.string().trim().min(1);
 var journeyDefinitionFields = {
   id: identifier5,
   label: prose3,
-  items: external_exports.array(stimulusItemSchema).min(1),
+  items: external_exports.array(materialItemSchema).min(1),
   tasks: external_exports.array(taskSchema).min(1),
   presentation: presentationSchema
 };
@@ -26234,12 +26297,23 @@ function validateJourneyDefinition(arm, context) {
         context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
         continue;
       }
+      if (isImageMaterial(item)) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
       if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
         context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
       }
       if (task.options[optionId] !== item.text) {
         context.addIssue({ code: "custom", path: ["tasks", taskIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
       }
+    }
+  }
+  const imageIds = new Set(arm.items.filter(isImageMaterial).map((item) => item.id));
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (!task.visual) continue;
+    for (const materialId of task.visual.materialIds) {
+      if (!imageIds.has(materialId)) context.addIssue({ code: "custom", path: ["tasks", taskIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
     }
   }
   if (presentation.kind === "sequence") return;
@@ -26396,7 +26470,6 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
 }
 
 // src/domain/run/request.ts
-var materialItemSchema = stimulusItemSchema;
 function validateMaterialChoices(questions, material, context) {
   const materials = new Map(material.map((item) => [item.id, item]));
   questions.forEach((question, questionIndex) => {
@@ -26408,6 +26481,10 @@ function validateMaterialChoices(questions, material, context) {
         context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} references unknown material ${materialId}.` });
         continue;
       }
+      if (isImageMaterial(candidate)) {
+        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
       if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
         context.addIssue({ code: "custom", path: issuePath, message: `Material ${materialId} requires source identity and digest before it can be linked.` });
       }
@@ -26416,6 +26493,23 @@ function validateMaterialChoices(questions, material, context) {
       }
     }
   });
+}
+function validateVisualBindings(questions, material, context, path6) {
+  const byId = new Map(material.map((item) => [item.id, item]));
+  const bound = /* @__PURE__ */ new Set();
+  questions.forEach((question, questionIndex) => {
+    for (const materialId of question.visual?.materialIds ?? []) {
+      const candidate = byId.get(materialId);
+      if (!candidate || !isImageMaterial(candidate)) {
+        context.addIssue({ code: "custom", path: [path6, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
+        continue;
+      }
+      bound.add(materialId);
+    }
+  });
+  for (const item of material) {
+    if (isImageMaterial(item) && !bound.has(item.id)) context.addIssue({ code: "custom", path: [path6], message: `Image material ${item.id} must be bound to a visual question.` });
+  }
 }
 var inlineRunRequestSchema = external_exports.object({
   kind: external_exports.literal("poll"),
@@ -26439,6 +26533,10 @@ var inlineRunRequestSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
   }
   validateMaterialChoices(request.questions, request.material, context);
+  validateVisualBindings(request.questions, request.material, context, "questions");
+  if ((request.material.some(isImageMaterial) || request.questions.some((question) => question.visual !== void 0)) && String(request.provider.kind) !== "clef") {
+    context.addIssue({ code: "custom", path: ["provider"], message: "Image-bound visual questions require the explicit Clef provider." });
+  }
 });
 var inlineJourneyRequestSchema = external_exports.object({
   kind: external_exports.literal("journey"),
@@ -26452,6 +26550,11 @@ var inlineJourneyRequestSchema = external_exports.object({
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
   }
+  const images = request.journey.items.filter(isImageMaterial);
+  const visualTasks = request.journey.tasks.filter((task) => task.visual !== void 0);
+  if ((images.length > 0 || visualTasks.length > 0) && String(request.provider.kind) !== "clef") {
+    context.addIssue({ code: "custom", path: ["provider"], message: "Image-bound visual questions require the explicit Clef provider." });
+  }
 });
 var evidenceAnswerCriterionSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("choice"), choiceId: external_exports.string().min(1) }).strict(),
@@ -26462,7 +26565,7 @@ var evidenceCriteriaSchema = external_exports.object({
   respondentId: external_exports.string().min(1).optional(),
   status: external_exports.enum(["pending", "answered", "failed", "unreached"]).optional(),
   questionId: external_exports.string().min(1).optional(),
-  materialId: materialItemSchema.shape.id.optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
   answer: evidenceAnswerCriterionSchema.optional(),
   outcome: external_exports.string().min(1).optional()
 }).strict();
@@ -26477,7 +26580,7 @@ var followOnSelectionSchema = external_exports.union([
 ]);
 var followOnContextSchema = external_exports.object({
   mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
-  materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional(),
+  materialIds: external_exports.array(stimulusItemSchema.shape.id).min(1).optional(),
   includeSelectedMaterial: external_exports.boolean().optional()
 }).strict().superRefine((contextInput, context) => {
   if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
@@ -26520,6 +26623,10 @@ var followOnRunRequestSchema = external_exports.object({
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
   }
+  if (request.material) {
+    if (request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs is not supported in this slice." });
+    validateVisualBindings(request.questions, request.material, context, "questions");
+  }
   if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
     context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
   }
@@ -26553,8 +26660,8 @@ var selectionCoverageSchema = external_exports.object({
   }
 });
 var selectedMaterialEvidenceSchema = external_exports.object({
-  materialId: materialItemSchema.shape.id,
-  text: materialItemSchema.shape.text,
+  materialId: stimulusItemSchema.shape.id,
+  text: stimulusItemSchema.shape.text,
   sourceId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
   sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
   textSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
@@ -26583,7 +26690,7 @@ var runListQuerySchema = external_exports.object({
   label: external_exports.string().min(1).optional(),
   createdAfter: external_exports.string().datetime().optional(),
   createdBefore: external_exports.string().datetime().optional(),
-  materialId: materialItemSchema.shape.id.optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
   cursor: external_exports.string().optional(),
   limit: external_exports.number().int().min(1).max(200).optional()
 }).strict().superRefine((query, context) => {

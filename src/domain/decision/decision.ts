@@ -6,6 +6,9 @@ const prose = z.string().min(1);
 const choiceText = z.string().min(1).refine((value) => value.trim().length > 0, 'Choice text must not be blank.');
 const probability = z.number().finite().min(0).max(1);
 const probabilities = z.record(z.string(), probability);
+export const visualBindingSchema = z.object({ mode: z.enum(['pixels', 'described']), materialIds: z.array(identifier).min(1).max(4) }).strict().superRefine((binding, context) => {
+  if (new Set(binding.materialIds).size !== binding.materialIds.length) context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Visual material IDs must be unique and ordered.' });
+});
 export const decisionTypes = { choice: 'choice', score: 'score', noul: 'noul' } as const;
 export const decisionTypeSchema = z.enum(decisionTypes);
 export const routeableDecisionTypes = [decisionTypes.score, decisionTypes.noul] as const;
@@ -36,6 +39,7 @@ const choiceQuestionSchema = z.object({
   instructions: prose,
   options: z.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
   materialOptions: z.record(identifier, identifier).optional(),
+  visual: visualBindingSchema.optional(),
 }).strict().superRefine((question, context) => {
   if (question.materialOptions) {
     const links = Object.entries(question.materialOptions);
@@ -56,12 +60,14 @@ const scoreQuestionSchema = z.object({
   id: identifier,
   instructions: prose,
   rubric: z.array(prose).min(2),
+  visual: visualBindingSchema.optional(),
 }).strict();
 const noulQuestionSchema = z.object({
   type: z.literal(decisionTypes.noul),
   id: identifier,
   instructions: prose,
   criteria: z.object({ true: prose.optional(), false: prose.optional() }).strict().optional(),
+  visual: visualBindingSchema.optional(),
 }).strict();
 
 export const decisionQuestionSchema = z.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);

@@ -45,6 +45,21 @@ test('choice questions preserve explicit material links and reject links to dupl
   assert.equal(decisionQuestionSchema.safeParse({ ...candidate, materialOptions: { section: 'section-three', 'no-fit': 'section-three' } }).success, false);
 });
 
+test('visual questions declare ordered image material bindings and reject ambiguous or excessive bindings', () => {
+  const question = {
+    type: 'choice', id: 'character-fit', instructions: 'Which portrait best matches the brief?',
+    options: { first: 'Portrait one', second: 'Portrait two' },
+    visual: { mode: 'pixels', materialIds: ['portrait-one', 'portrait-two'] },
+  };
+  assert.deepEqual(decisionQuestionSchema.parse(question), question);
+  for (const visual of [
+    { mode: 'pixels', materialIds: [] },
+    { mode: 'pixels', materialIds: ['portrait-one', 'portrait-one'] },
+    { mode: 'pixels', materialIds: ['a', 'b', 'c', 'd', 'e'] },
+    { mode: 'pixels', materialIds: ['portrait-one'], unexpected: true },
+  ]) assert.equal(decisionQuestionSchema.safeParse({ ...question, visual }).success, false);
+});
+
 function result(overrides: Partial<Extract<DecisionResult, { type: 'choice' }>> = {}): Extract<DecisionResult, { type: 'choice' }> {
   return {
     type: 'choice',

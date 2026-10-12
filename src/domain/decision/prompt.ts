@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { decisionRequestSchema, decisionValueSchema, type DecisionRequest, type DecisionValue } from './decision.js';
 import { respondentPerspectiveSchema, type RespondentPerspective, type RespondentProfile } from '../respondents/profile.js';
 import type { JourneyDefinition } from '../study/arm.js';
+import { isImageMaterial } from '../study/stimulus.js';
 
 export const promptHistoryEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('exposure'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), itemId: z.string().min(1) }).strict(),
@@ -52,14 +53,15 @@ export type DecisionPacketParts = {
 };
 
 export function questionForTask(task: JourneyDefinition['tasks'][number]): DecisionRequest['question'] {
-  if (task.type === 'choice') return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}) };
-  if (task.type === 'score') return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
-  return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }) };
+  if (task.type === 'choice') return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}), ...(task.visual ? { visual: task.visual } : {}) };
+  if (task.type === 'score') return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric], ...(task.visual ? { visual: task.visual } : {}) };
+  return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }), ...(task.visual ? { visual: task.visual } : {}) };
 }
 
 const promptContract = {
-  version: 7,
+  version: 8,
   stateFields: ['respondent.profile', 'encounteredItems', 'trajectory'],
+  visualBindings: 'question-scoped image material IDs; image descriptors are carried as semantic context and pixel payloads are provider-specific',
   encounteredMaterial: 'all items exposed through the current turn, unique by item ID in first-exposure order',
   trajectory: ['prior task IDs and typed responses with meanings', 'prior exposure IDs', 'event counts and range'],
   responseHistory: 'per-task include or omit; omitted legacy setting includes prior responses',
@@ -264,10 +266,10 @@ function compileDecisionPacketWithMaterialPolicy(
       .map((event) => event.itemId))];
   }
 
-  const encounteredItems = itemIds.map((id) => {
+  const encounteredItems = itemIds.flatMap((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
-    return { id: item.id, text: item.text };
+    return isImageMaterial(item) ? [] : [{ id: item.id, text: item.text }];
   });
   return compileDecisionRequest({
     respondentProfile: {

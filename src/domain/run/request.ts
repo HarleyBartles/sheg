@@ -8,9 +8,9 @@ import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js
 import { evaluationStatusSchema, runLifecycleStateSchema, runStatusSchema, resumeRefusalReasonSchema, type JourneyEvaluation, type JourneyRespondentState } from './lifecycle.js';
 import { decisionResultSchema } from '../decision/decision.js';
 import { providerExecutionEvidenceSchema } from '../decision/decision.js';
-import { stimulusItemSchema } from '../study/stimulus.js';
+import { isImageMaterial, materialItemSchema, stimulusItemSchema } from '../study/stimulus.js';
 
-export const materialItemSchema = stimulusItemSchema;
+export { materialItemSchema };
 export type RunMaterialItem = z.infer<typeof materialItemSchema>;
 
 function validateMaterialChoices(questions: readonly { type?: string | undefined; id: string; options?: Record<string, string> | undefined; materialOptions?: Record<string, string> | undefined }[], material: readonly z.infer<typeof materialItemSchema>[], context: z.RefinementCtx): void {
@@ -24,6 +24,10 @@ function validateMaterialChoices(questions: readonly { type?: string | undefined
         context.addIssue({ code: 'custom', path: issuePath, message: `Choice option ${optionId} references unknown material ${materialId}.` });
         continue;
       }
+      if (isImageMaterial(candidate)) {
+        context.addIssue({ code: 'custom', path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
       if (candidate.sourceId === undefined || candidate.sourceSha256 === undefined) {
         context.addIssue({ code: 'custom', path: issuePath, message: `Material ${materialId} requires source identity and digest before it can be linked.` });
       }
@@ -32,6 +36,24 @@ function validateMaterialChoices(questions: readonly { type?: string | undefined
       }
     }
   });
+}
+
+function validateVisualBindings(questions: readonly { id: string; visual?: { materialIds: string[] } | undefined }[], material: readonly RunMaterialItem[], context: z.RefinementCtx, path: string): void {
+  const byId = new Map(material.map((item) => [item.id, item]));
+  const bound = new Set<string>();
+  questions.forEach((question, questionIndex) => {
+    for (const materialId of question.visual?.materialIds ?? []) {
+      const candidate = byId.get(materialId);
+      if (!candidate || !isImageMaterial(candidate)) {
+        context.addIssue({ code: 'custom', path: [path, questionIndex, 'visual', 'materialIds'], message: `Visual binding references unknown image material ${materialId}.` });
+        continue;
+      }
+      bound.add(materialId);
+    }
+  });
+  for (const item of material) {
+    if (isImageMaterial(item) && !bound.has(item.id)) context.addIssue({ code: 'custom', path: [path], message: `Image material ${item.id} must be bound to a visual question.` });
+  }
 }
 
 export const inlineRunRequestSchema = z.object({
@@ -58,6 +80,10 @@ export const inlineRunRequestSchema = z.object({
     context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a run.' });
   }
   validateMaterialChoices(request.questions, request.material, context);
+  validateVisualBindings(request.questions, request.material, context, 'questions');
+  if ((request.material.some(isImageMaterial) || request.questions.some((question) => question.visual !== undefined)) && String(request.provider.kind) !== 'clef') {
+    context.addIssue({ code: 'custom', path: ['provider'], message: 'Image-bound visual questions require the explicit Clef provider.' });
+  }
 });
 
 export const inlineJourneyRequestSchema = z.object({
@@ -72,6 +98,11 @@ export const inlineJourneyRequestSchema = z.object({
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });
   }
+  const images = request.journey.items.filter(isImageMaterial);
+  const visualTasks = request.journey.tasks.filter((task) => task.visual !== undefined);
+  if ((images.length > 0 || visualTasks.length > 0) && String(request.provider.kind) !== 'clef') {
+    context.addIssue({ code: 'custom', path: ['provider'], message: 'Image-bound visual questions require the explicit Clef provider.' });
+  }
 });
 
 const evidenceAnswerCriterionSchema = z.discriminatedUnion('type', [
@@ -84,7 +115,7 @@ export const evidenceCriteriaSchema = z.object({
   respondentId: z.string().min(1).optional(),
   status: z.enum(['pending', 'answered', 'failed', 'unreached']).optional(),
   questionId: z.string().min(1).optional(),
-  materialId: materialItemSchema.shape.id.optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
   answer: evidenceAnswerCriterionSchema.optional(),
   outcome: z.string().min(1).optional(),
 }).strict();
@@ -101,7 +132,7 @@ const followOnSelectionSchema = z.union([
 
 const followOnContextSchema = z.object({
   mode: z.enum(['recorded', 'fresh-material', 'omit-history', 'continue']),
-  materialIds: z.array(materialItemSchema.shape.id).min(1).optional(),
+  materialIds: z.array(stimulusItemSchema.shape.id).min(1).optional(),
   includeSelectedMaterial: z.boolean().optional(),
 }).strict().superRefine((contextInput, context) => {
   if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
@@ -145,6 +176,10 @@ export const followOnRunRequestSchema = z.object({
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: 'custom', path: ['material'], message: 'Material IDs must be unique within a follow-on request.' });
   }
+  if (request.material) {
+    if (request.material.some(isImageMaterial)) context.addIssue({ code: 'custom', path: ['material'], message: 'Image material in follow-on runs is not supported in this slice.' });
+    validateVisualBindings(request.questions, request.material, context, 'questions');
+  }
   if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
     context.addIssue({ code: 'custom', path: ['material'], message: 'Inline material IDs must not duplicate selected source material IDs.' });
   }
@@ -182,8 +217,8 @@ export const selectionCoverageSchema = z.object({
 });
 export type SelectionCoverage = z.infer<typeof selectionCoverageSchema>;
 const selectedMaterialEvidenceSchema = z.object({
-  materialId: materialItemSchema.shape.id,
-  text: materialItemSchema.shape.text,
+  materialId: stimulusItemSchema.shape.id,
+  text: stimulusItemSchema.shape.text,
   sourceId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
   sourceSha256: z.string().regex(/^[a-f\d]{64}$/i),
   textSha256: z.string().regex(/^[a-f\d]{64}$/i),
@@ -209,7 +244,7 @@ export const runListQuerySchema = z.object({
   label: z.string().min(1).optional(),
   createdAfter: z.string().datetime().optional(),
   createdBefore: z.string().datetime().optional(),
-  materialId: materialItemSchema.shape.id.optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
   cursor: z.string().optional(),
   limit: z.number().int().min(1).max(200).optional(),
 }).strict().superRefine((query, context) => {

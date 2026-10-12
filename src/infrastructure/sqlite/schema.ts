@@ -274,7 +274,16 @@ export function applySchemaMigrations(database: DatabaseSync, dataRoot: string, 
           validateSchemaShape(database);
           return;
         }
-        if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.');
+        if (lockedVersion !== 0 || lockedTables !== 0) {
+          const anotherInitializerAdvanced = lockedVersion > 0 && lockedVersion < targetVersion && lockedTables > 0 &&
+            migrations.some(({ fromVersion }) => fromVersion === lockedVersion);
+          if (anotherInitializerAdvanced) {
+            database.exec('COMMIT');
+            currentVersion = lockedVersion;
+            continue;
+          }
+          throw new RunStoreError('unsupported_schema_version', 'The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.');
+        }
         runMigrationSql(database, migration.sql);
         database.exec(`PRAGMA user_version = ${migration.toVersion}`);
         database.prepare('INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)')
