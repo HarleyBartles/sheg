@@ -26,6 +26,7 @@ test('build replaces the distribution with only current runtime outputs', async 
   assert.equal(await readFile(path.join(outputDirectory, 'migrations/0001_image_assets/migration.sql'), 'utf8'), await readFile(new URL('../migrations/0001_image_assets/migration.sql', import.meta.url), 'utf8'));
   assert.equal(await readFile(path.join(outputDirectory, 'licenses/drizzle-orm-Apache-2.0.txt'), 'utf8'), await readFile(new URL('../licenses/drizzle-orm-Apache-2.0.txt', import.meta.url), 'utf8'));
   assert.deepEqual((await readdir(path.join(outputDirectory, 'codec-assets'))).sort(), [...codecAssetNames].sort());
+  assert.deepEqual([...codecAssetNames].sort(), ['mozjpeg_dec.wasm', 'mozjpeg_enc.wasm', 'squoosh_png_bg.wasm', 'squoosh_resize_bg.wasm', 'webp_dec.wasm', 'webp_enc_simd.wasm']);
   for (const name of codecAssetNames) assert.deepEqual(await readFile(path.join(outputDirectory, 'codec-assets', name)), await readFile(new URL(`../node_modules/@jsquash/${codecSourceFor(name)}`, import.meta.url)));
   assert.equal((await readFile(path.join(outputDirectory, 'licenses/jsquash/jpeg/LICENSE.codec.md'), 'utf8')).includes('libjpeg-turbo'), true);
   if (process.platform === 'win32') {

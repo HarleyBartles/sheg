@@ -12,6 +12,8 @@ CLI and MCP use one Sheg datastore per OS user by default. Both call the same ru
 
 The root contains `runs.sqlite` and the runtime's associated files. For normal use, invoke CLI durable commands without `--data-root`; runs created through MCP are already in the same store.
 
+Image imports, prepared candidates, and their derivations use the same datastore. The [image preparation guide](image-preparation.md) explains import, scaling, explicit preview export, and source custody.
+
 ## Intentional alternatives
 
 Set `SHEG_DATA_DIR` to an absolute directory to select another store. This setting must reach each process intended to use that alternative. CLI `--data-root <dir>` overrides the setting for that command. Test harnesses must isolate their roots explicitly or supply isolated platform data directories. Invalid explicit environment paths fail instead of silently using another store.
