@@ -4,7 +4,8 @@ import type { FrozenCohort } from '../domain/respondents/cohort.js';
 
 export type ExecutionProvider =
   | { kind: 'jev'; route?: 'openrouter' | 'typesafe'; model: string; endpoint?: string; timeoutMs?: number }
-  | { kind: 'laya'; checkpoint: string; contextLimit: number; headLimit: number; tokenizerSha256: string; precision?: string; baseUrl?: string; timeoutMs?: number };
+  | { kind: 'laya'; checkpoint: string; contextLimit: number; headLimit: number; tokenizerSha256: string; precision?: string; baseUrl?: string; timeoutMs?: number }
+  | { kind: 'clef'; accountId: string; model: 'clef' | 'clef-flash'; timeoutMs?: number };
 
 export function stimulusFingerprint(
   study: StudyManifest,
@@ -25,7 +26,7 @@ export function executionFingerprint(stimulus: string, provider: ExecutionProvid
       model: requireText(provider.model, 'Jev model'),
       ...(provider.endpoint === undefined ? {} : { endpoint: provider.endpoint }),
     };
-  } else {
+  } else if (provider.kind === 'laya') {
     decisionSettings = {
       kind: provider.kind,
       checkpoint: requireText(provider.checkpoint, 'Laya checkpoint'),
@@ -34,6 +35,8 @@ export function executionFingerprint(stimulus: string, provider: ExecutionProvid
       tokenizerSha256: requireText(provider.tokenizerSha256, 'Laya tokenizer SHA-256'),
       ...(provider.precision === undefined ? {} : { precision: provider.precision }),
     };
+  } else {
+    decisionSettings = { kind: provider.kind, accountId: requireText(provider.accountId, 'Cloudflare account ID'), model: provider.model };
   }
   return hashCanonical({ version: 1, stimulus, provider: decisionSettings });
 }

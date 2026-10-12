@@ -486,6 +486,38 @@
                 "timeoutMs"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "clef"
+                },
+                "accountId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "model": {
+                  "default": "clef",
+                  "type": "string",
+                  "enum": [
+                    "clef",
+                    "clef-flash"
+                  ]
+                },
+                "timeoutMs": {
+                  "default": 30000,
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "kind",
+                "accountId"
+              ],
+              "additionalProperties": false
             }
           ]
         },
@@ -1312,6 +1344,38 @@
                 "timeoutMs"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "clef"
+                },
+                "accountId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "model": {
+                  "default": "clef",
+                  "type": "string",
+                  "enum": [
+                    "clef",
+                    "clef-flash"
+                  ]
+                },
+                "timeoutMs": {
+                  "default": 30000,
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "kind",
+                "accountId"
+              ],
+              "additionalProperties": false
             }
           ]
         },
@@ -1943,6 +2007,38 @@
                 "tokenizerJsonPath",
                 "tokenizerSha256",
                 "timeoutMs"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "clef"
+                },
+                "accountId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "model": {
+                  "default": "clef",
+                  "type": "string",
+                  "enum": [
+                    "clef",
+                    "clef-flash"
+                  ]
+                },
+                "timeoutMs": {
+                  "default": 30000,
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "kind",
+                "accountId"
               ],
               "additionalProperties": false
             }

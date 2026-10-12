@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { DecisionBatchRequest, DecisionBatchResult, DecisionRequest, DecisionResult } from './decision.js';
 
-export const providerKinds = ['jev', 'laya'] as const;
+export const providerKinds = ['jev', 'laya', 'clef'] as const;
 export const providerKindSchema = z.enum(providerKinds);
 export type ProviderKind = z.infer<typeof providerKindSchema>;
 export const providerContextFitStatuses = ['fits', 'overflow', 'unavailable'] as const;

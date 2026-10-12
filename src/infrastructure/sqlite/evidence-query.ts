@@ -169,8 +169,10 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       const pageRows = rows.slice(0, limit);
       const endpoint = parsedRequest.data.provider.kind === 'jev'
         ? parsedRequest.data.provider.endpoint
-        : parsedRequest.data.provider.baseUrl;
-      const model = parsedRequest.data.provider.kind === 'jev'
+        : parsedRequest.data.provider.kind === 'laya'
+          ? parsedRequest.data.provider.baseUrl
+          : `https://api.cloudflare.com/client/v4/accounts/${parsedRequest.data.provider.accountId}/ai/run/@cf/cloudflare/${parsedRequest.data.provider.model}`;
+      const model = parsedRequest.data.provider.kind === 'jev' || parsedRequest.data.provider.kind === 'clef'
         ? parsedRequest.data.provider.model
         : parsedRequest.data.provider.checkpoint;
       const items: RunEvidencePage['items'] = pageRows.map((row) => {

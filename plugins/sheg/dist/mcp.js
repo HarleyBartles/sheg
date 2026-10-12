@@ -37344,7 +37344,7 @@ import { pathToFileURL } from "node:url";
 import path from "node:path";
 
 // src/domain/decision/provider.ts
-var providerKinds = ["jev", "laya"];
+var providerKinds = ["jev", "laya", "clef"];
 var providerKindSchema = external_exports.enum(providerKinds);
 var providerContextFitStatuses = ["fits", "overflow", "unavailable"];
 var providerContextFitStatusSchema = external_exports.enum(providerContextFitStatuses);
@@ -38017,9 +38017,16 @@ var layaConfigSchema = external_exports.object({
   precision: external_exports.string().min(1).optional(),
   timeoutMs: external_exports.number().int().positive()
 }).strict();
+var clefConfigSchema = external_exports.object({
+  kind: external_exports.literal("clef"),
+  accountId: external_exports.string().regex(/^[a-f0-9]{32}$/),
+  model: external_exports.enum(["clef", "clef-flash"]).default("clef"),
+  timeoutMs: external_exports.number().int().positive().default(3e4)
+}).strict();
 var providerConfigSchema = external_exports.union([
   jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
-  layaConfigSchema
+  layaConfigSchema,
+  clefConfigSchema
 ]);
 
 // src/domain/study/presentation.ts
@@ -38813,7 +38820,7 @@ async function prepareFollowOnRun(request, source, provider) {
     } catch (error62) {
       throw new RunProblemError("follow_on_context_invalid", error62 instanceof Error ? error62.message : "Follow-on context could not be prepared.");
     }
-    const modelIdentity = request.provider.kind === "jev" ? request.provider.model : request.provider.checkpoint;
+    const modelIdentity = request.provider.kind === "jev" || request.provider.kind === "clef" ? request.provider.model : request.provider.checkpoint;
     const contextId = randomUUID();
     const groupId = randomUUID();
     const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
@@ -39016,7 +39023,7 @@ async function prepareRun(input2, provider) {
   const problems = [];
   let minimumCalls = 0;
   const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
   for (const respondent of request.respondents) {
     const respondentProfile = {
       intent: respondent.intent,
@@ -39189,7 +39196,7 @@ async function prepareJourneyAdmission(request, provider) {
     });
   }
   const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
   const measuredByInput = /* @__PURE__ */ new Map();
   for (const packet of packets) {
     const inputFingerprint = hashCanonical(packet.request);
@@ -46689,8 +46696,8 @@ function queryEvidencePage(context, input2) {
         WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.baseUrl;
-    const model = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
+    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.kind === "laya" ? parsedRequest.data.provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${parsedRequest.data.provider.accountId}/ai/run/@cf/cloudflare/${parsedRequest.data.provider.model}`;
+    const model = parsedRequest.data.provider.kind === "jev" || parsedRequest.data.provider.kind === "clef" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
     const items = pageRows.map((row) => {
       const contextId = asText(row.context_id, "context ID");
       const respondentId = asText(row.respondent_id, "respondent ID");
@@ -47811,7 +47818,8 @@ import path9 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var CredentialStoreError = class extends Error {
   constructor(code, route) {
-    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
+    const routeLabel = route === "clef" ? "Cloudflare Clef" : route;
+    const message = code === "credential_malformed" ? `The ${routeLabel} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${routeLabel} secure credential is missing.` : `The ${routeLabel} secure credential is unavailable.`;
     super(message);
     this.code = code;
     this.route = route;
@@ -47822,7 +47830,8 @@ var CredentialStoreError = class extends Error {
 };
 var defaultTargets = {
   typesafe: "Sheg/Jev/TypeSafe",
-  openrouter: "Sheg/Jev/OpenRouter"
+  openrouter: "Sheg/Jev/OpenRouter",
+  clef: "Sheg/Clef/Cloudflare"
 };
 var WindowsCredentialStore = class {
   targets;
@@ -47830,6 +47839,9 @@ var WindowsCredentialStore = class {
   run;
   constructor(options2 = {}) {
     this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    for (const [route, target] of Object.entries(options2.credentialTargets ?? {})) {
+      if (!/^Sheg\/Test\/[0-9a-f-]{36}$/i.test(target)) throw new Error(`The ${route} credential target is fixed and cannot be redirected.`);
+    }
     this.helperPath = options2.helperPath ?? locateHelper();
     this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
   }
@@ -48658,6 +48670,7 @@ function createProvider(config2) {
   if (config2.kind === "jev") {
     return new JevProvider(config2);
   }
+  if (config2.kind === "clef") throw new Error("Clef provider transport is not available yet.");
   return new LayaProvider({
     kind: "laya",
     baseUrl: config2.baseUrl,
@@ -48671,8 +48684,8 @@ function createProvider(config2) {
   });
 }
 async function assertProviderReady(config2, credentials = new WindowsCredentialStore()) {
-  if (config2.kind !== "jev") return;
-  const route = config2.route ?? "openrouter";
+  if (config2.kind === "laya") return;
+  const route = config2.kind === "jev" ? config2.route ?? "openrouter" : "clef";
   const state = await credentials.availability(route);
   if (state === "malformed") throw new CredentialStoreError("credential_malformed", route);
   if (state === "missing") throw new CredentialStoreError("credential_missing", route);

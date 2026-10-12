@@ -8,6 +8,7 @@ export function createProvider(config: ProviderConfigInput): DecisionProvider {
   if (config.kind === 'jev') {
     return new JevProvider(config);
   }
+  if (config.kind === 'clef') throw new Error('Clef provider transport is not available yet.');
   return new LayaProvider({
     kind: 'laya', baseUrl: config.baseUrl, checkpoint: config.checkpoint,
     contextLimit: config.contextLimit, headLimit: config.headLimit,
@@ -16,9 +17,9 @@ export function createProvider(config: ProviderConfigInput): DecisionProvider {
   });
 }
 
-export async function assertProviderReady(config: ProviderConfigInput, credentials = new WindowsCredentialStore()): Promise<void> {
-  if (config.kind !== 'jev') return;
-  const route = config.route ?? 'openrouter';
+export async function assertProviderReady(config: ProviderConfigInput, credentials: Pick<WindowsCredentialStore, 'availability'> = new WindowsCredentialStore()): Promise<void> {
+  if (config.kind === 'laya') return;
+  const route = config.kind === 'jev' ? config.route ?? 'openrouter' : 'clef';
   const state = await credentials.availability(route);
   if (state === 'malformed') throw new CredentialStoreError('credential_malformed', route);
   if (state === 'missing') throw new CredentialStoreError('credential_missing', route);

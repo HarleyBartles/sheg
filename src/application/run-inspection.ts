@@ -102,7 +102,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
     }
-    const modelIdentity = request.provider.kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+    const modelIdentity = request.provider.kind === 'jev' || request.provider.kind === 'clef' ? request.provider.model : request.provider.checkpoint;
     const contextId = randomUUID(); const groupId = randomUUID();
     const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
     minimumCalls += planned.batches.length;
@@ -264,7 +264,7 @@ export async function prepareRun(
   const problems: RunProblem[] = [];
   let minimumCalls = 0;
   const kind = request.provider.kind;
-  const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === 'jev' || kind === 'clef' ? request.provider.model : request.provider.checkpoint;
 
   for (const respondent of request.respondents) {
     const respondentProfile = {
@@ -421,7 +421,7 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
   }
 
   const kind = request.provider.kind;
-  const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === 'jev' || kind === 'clef' ? request.provider.model : request.provider.checkpoint;
   const measuredByInput = new Map<string, ProviderContextFit>();
   for (const packet of packets) {
     const inputFingerprint = hashCanonical(packet.request);

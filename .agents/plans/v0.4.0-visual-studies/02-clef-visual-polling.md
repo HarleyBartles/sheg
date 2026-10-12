@@ -49,15 +49,15 @@
 
 ### Task 2: Add Cloudflare configuration and separate secure credential custody
 
-**Files:** Modify `src/providers/config.ts`, `src/providers/factory.ts`, `src/infrastructure/credentials/windows.ts`, `src/infrastructure/credentials/windows-credential.ps1`, existing credential setup/status/removal MCP and CLI dispatch, `test/windows-credentials.test.ts`, and the owning CLI/MCP tests.
+**Files:** Modify `src/providers/config.ts`, `src/providers/factory.ts`, `src/infrastructure/credentials/windows.ts`, `src/infrastructure/credentials/windows-credential.ps1`, `test/windows-credentials.test.ts`, and provider-config/readiness tests. The current repository has no credential setup/status/removal CLI or MCP commands, so their public surface is added in Task 7.
 
 **Consumes:** Existing Jev/Laya config and `WindowsCredentialStore` boundary. **Produces:** strict `{ kind: 'clef', accountId, model: 'clef' | 'clef-flash', timeoutMs }` configuration, explicit readiness resolution, and a fixed `Sheg/Clef/Cloudflare` credential route that cannot be redirected into a Jev target.
 
 - [ ] Add schema tests for valid account IDs and the two explicit model selectors, and reject malformed account IDs, selectors, arbitrary endpoint fields, and additional properties.
 - [ ] Extend credential routing with a closed union for existing Jev routes plus Cloudflare Clef; preserve current Jev target defaults and behavior. The PowerShell helper must accept only the existing Jev/Test forms and the single exact `Sheg/Clef/Cloudflare` target.
 - [ ] Add credential-helper tests for status/read/setup/remove argument routing and injection attempts; prove arbitrary target input is rejected by the helper before any Credential Manager API operation using the fixture harness.
-- [ ] Extend factory/readiness tests so Clef construction uses its distinct adapter, missing/malformed/unavailable Clef credentials yield bounded route-specific errors, and a Clef credential can never be requested through a Jev route. Deliberately map the Clef target to a Jev target and verify the isolation test fails.
-- [ ] Run focused config, credential, factory, CLI, and MCP tests and commit.
+- [ ] Extend readiness tests so missing/malformed/unavailable Clef credentials yield bounded route-specific errors, and a Clef credential can never be requested through a Jev route. Deliberately map the Clef target to a Jev target and verify the isolation test fails. Construct the distinct provider adapter in Task 3 after its transport exists.
+- [ ] Run focused config, credential, and readiness tests and commit.
 
 ### Task 3: Implement the native Clef wire compiler and conservative admission
 

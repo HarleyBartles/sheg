@@ -14,9 +14,17 @@ const layaConfigSchema = z.object({
   timeoutMs: z.number().int().positive(),
 }).strict();
 
+const clefConfigSchema = z.object({
+  kind: z.literal('clef'),
+  accountId: z.string().regex(/^[a-f0-9]{32}$/),
+  model: z.enum(['clef', 'clef-flash']).default('clef'),
+  timeoutMs: z.number().int().positive().default(30_000),
+}).strict();
+
 export const providerConfigSchema = z.union([
   jevConfigInputSchema.transform((input) => jevConfigSchema.parse(input)),
   layaConfigSchema,
+  clefConfigSchema,
 ]);
 
 export type ProviderConfigInput = z.input<typeof providerConfigSchema>;
