@@ -617,7 +617,7 @@ test('a copied plugin runs a Clef visual journey from saved pixels and compact h
           { fromNodeId: 'ask-visual', optionId: 'continue', toNodeId: 'done' }, { fromNodeId: 'ask-visual', optionId: 'leave', toNodeId: 'done' },
         ] },
       },
-      maxCalls: 3, provider: { kind: 'clef', accountId: '3327878972ea82e6b454069bba62f3d9', model: 'clef', timeoutMs: 10_000 },
+      maxCalls: 3, provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef', timeoutMs: 10_000 },
     };
     const inspected = await client.callTool({ name: 'run_inspect', arguments: { request: journey } });
     assert.equal(inspected.isError ?? false, false, JSON.stringify(inspected));
@@ -628,7 +628,7 @@ test('a copied plugin runs a Clef visual journey from saved pixels and compact h
     await visualRequest;
     await rm(imagePath);
     assert.equal(calls.length, 2);
-    assert.equal(calls[1]?.originalUrl, 'https://api.cloudflare.com/client/v4/accounts/3327878972ea82e6b454069bba62f3d9/ai/run/@cf/cloudflare/clef');
+    assert.equal(calls[1]?.originalUrl, 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/clef');
     assert.equal(calls[0]?.body.images, undefined);
     assert.deepEqual(calls[1]?.body.images, [`data:image/png;base64,${imageBytes.toString('base64')}`]);
     assert.equal(calls[1]?.authorization, 'Bearer temporary-clef-test-token');

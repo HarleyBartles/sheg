@@ -2,6 +2,8 @@
 
 Sheg's native Clef provider sends typed study questions and saved image bytes directly to Cloudflare Workers AI. Select it explicitly for questions that require pixel inspection. Sheg does not route Clef calls through OpenRouter, switch providers automatically, or fall back to Jev or Laya when a Clef call fails.
 
+For the installed agent workflow, see [Native Cloudflare Clef](../../skills/stimulus-response-polling/references/native-clef.md).
+
 Clef can compare character sketches against a written character brief, judge whether an article image supports a section, or answer another bounded visual question. A successful answer is model evidence. It is not a human cohort result, proof of visual accuracy, or a prediction of real-world attention or reading behavior.
 
 ## Connect Cloudflare
