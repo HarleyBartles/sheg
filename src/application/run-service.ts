@@ -3,7 +3,7 @@ import type { DecisionProvider } from '../domain/decision/provider.js';
 import type { AnswerRow, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunStatusView } from '../domain/run/lifecycle.js';
 import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
 import type { PreparedRun, RunRequest } from '../domain/run/request.js';
-import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
+import { followOnRunRequestSchema, requireExplicitProvider, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput, ProviderFactoryOptions } from '../providers/config.js';
 import type { DeletePreview, DeleteResult, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
 import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
@@ -41,7 +41,7 @@ export interface RunService {
 function normalizeRequest(input: unknown): RunRequest {
   const parsed = runRequestSchema.safeParse(input);
   if (!parsed.success) throw new RunServiceError('invalid_request', parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
-  if (parsed.data.provider.kind === 'laya') {
+  if (parsed.data.provider?.kind === 'laya') {
     return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path.resolve(parsed.data.provider.tokenizerJsonPath) } };
   }
   return parsed.data;
@@ -79,12 +79,12 @@ export function createRunService(
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
+        return (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
       } catch (error) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error instanceof Error && 'code' in error ? String(error.code) : 'follow_on_resolution_failed', message: error instanceof Error ? error.message : 'Follow-on request could not be resolved.' }], fits: [] };
       }
     }
-    return (await prepareRun(request, providerFactory(request.provider))).inspection;
+    return (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
   }
 
   async function start(submissionId: string, input: RunRequest): Promise<RunStatusView> {
@@ -95,14 +95,14 @@ export function createRunService(
     const prior = reads.findSubmission(submissionId, requestFingerprint);
     if (prior) { commands.reconcile(prior.runId, Date.now()); return reads.getStatus(prior.runId); }
 
-    await assertReady(request.provider);
+    await assertReady(requireExplicitProvider(request));
     let accepted: ReturnType<RunCommandRepository['accept']>;
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
+        const admission = await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)));
         if (!admission.inspection.valid) throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
         accepted = commands.accept(submissionId, admission.prepared);
       } catch (error) {
@@ -111,7 +111,7 @@ export function createRunService(
         throw new RunServiceError('follow_on_resolution_failed', error instanceof Error ? error.message : 'Follow-on request could not be resolved.', { cause: error });
       }
     } else {
-      const admission = await prepareRun(request, providerFactory(request.provider));
+      const admission = await prepareRun(request, providerFactory(requireExplicitProvider(request)));
       if ((!admission.prepared && !admission.journey) || !admission.inspection.valid) {
         throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
       }
@@ -133,8 +133,8 @@ export function createRunService(
       throw new RunServiceError('run_not_resumable', resumeRefusalMessage(current.lifecycle.resume.reason));
     }
     const frozenProvider = reads.getRequestKind(runId) === 'journey'
-      ? reads.getJourneyRun(runId).request.provider
-      : reads.getRequest(runId).request.provider;
+      ? requireExplicitProvider(reads.getJourneyRun(runId).request)
+      : requireExplicitProvider(reads.getRequest(runId).request);
     await assertReady(frozenProvider);
     const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {

@@ -8,6 +8,25 @@ import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 
+export const providerSelectionPolicySnapshotSchema = z.object({
+  version: z.literal(1),
+  catalogueRevision: z.number().int().nonnegative(),
+  catalogue: z.object({
+    entries: z.array(z.object({
+      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+      enabled: z.boolean(),
+      provider: z.record(z.string(), z.unknown()),
+      execution: z.enum(['local', 'hosted']),
+      capabilities: z.array(z.enum(['text', 'pixels'])),
+      questionTypes: z.array(z.enum(['choice', 'score', 'noul'])),
+      pricing: z.record(z.string(), z.unknown()),
+    }).strict()),
+  }).strict(),
+  preferences: z.object({ preferredOrder: z.array(z.string()) }).strict(),
+  policy: z.object({ batching: z.enum(['automatic', 'singleton']) }).strict(),
+}).strict();
+export type ProviderSelectionPolicySnapshot = z.infer<typeof providerSelectionPolicySnapshotSchema>;
+
 export const runStatuses = ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] as const;
 export const runStatusSchema = z.enum(runStatuses);
 export type RunStatus = z.infer<typeof runStatusSchema>;

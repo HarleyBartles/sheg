@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { decisionFailureDetailSchema, decisionQuestionSchema } from '../decision/decision.js';
 import { providerKindSchema } from '../decision/provider.js';
 import { respondentProfileSchema } from '../respondents/profile.js';
-import { providerConfigSchema } from '../../providers/config.js';
+import { providerConfigSchema, type ProviderConfigInput } from '../../providers/config.js';
 import { journeyDefinitionSchema, type JourneyDefinition } from '../study/arm.js';
 import { evaluationStatusSchema, runLifecycleStateSchema, runStatusSchema, resumeRefusalReasonSchema, type JourneyEvaluation, type JourneyRespondentState } from './lifecycle.js';
 import { decisionResultSchema } from '../decision/decision.js';
@@ -12,6 +12,38 @@ import { isImageMaterial, materialItemSchema, stimulusItemSchema } from '../stud
 
 export { materialItemSchema };
 export type RunMaterialItem = z.infer<typeof materialItemSchema>;
+
+const providerSelectionSchema = z.object({
+  preferredOrder: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  requiredCapabilities: z.array(z.enum(['text', 'pixels'])).min(1).optional(),
+  unitOverrides: z.record(z.string().min(1), z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  comparisonLocks: z.array(z.object({
+    id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+    members: z.array(z.string().min(1)).min(2),
+    equality: z.object({ provider: z.enum(['same', 'vary']), model: z.enum(['same', 'vary']) }).strict(),
+  }).strict()).optional(),
+  batching: z.enum(['automatic', 'singleton']).optional(),
+}).strict().superRefine((selection, context) => {
+  if (selection.preferredOrder && new Set(selection.preferredOrder).size !== selection.preferredOrder.length) context.addIssue({ code: 'custom', path: ['preferredOrder'], message: 'Provider preference identities must be unique.' });
+  if (selection.requiredCapabilities && new Set(selection.requiredCapabilities).size !== selection.requiredCapabilities.length) context.addIssue({ code: 'custom', path: ['requiredCapabilities'], message: 'Required capabilities must be unique.' });
+  if (selection.comparisonLocks) {
+    const ids = new Set<string>();
+    for (const [index, lock] of selection.comparisonLocks.entries()) {
+      if (ids.has(lock.id)) context.addIssue({ code: 'custom', path: ['comparisonLocks', index, 'id'], message: `Duplicate comparison identity ${lock.id}.` });
+      ids.add(lock.id);
+      if (new Set(lock.members).size !== lock.members.length) context.addIssue({ code: 'custom', path: ['comparisonLocks', index, 'members'], message: 'Comparison members must be unique.' });
+    }
+  }
+});
+const selectionFingerprintSchema = z.string().regex(/^[a-f\d]{64}$/i);
+const runProviderSelectionShape = {
+  provider: providerConfigSchema.optional(),
+  providerSelection: providerSelectionSchema.optional(),
+  expectedSelectionFingerprint: selectionFingerprintSchema.optional(),
+};
+function requireProviderChoice<T extends { provider?: unknown; providerSelection?: unknown }>(request: T, context: z.RefinementCtx): void {
+  if ((request.provider === undefined) === (request.providerSelection === undefined)) context.addIssue({ code: 'custom', path: ['providerSelection'], message: 'Specify either an explicit provider or automatic provider selection.' });
+}
 
 function validateMaterialChoices(questions: readonly { type?: string | undefined; id: string; options?: Record<string, string> | undefined; materialOptions?: Record<string, string> | undefined }[], material: readonly z.infer<typeof materialItemSchema>[], context: z.RefinementCtx): void {
   const materials = new Map(material.map((item) => [item.id, item]));
@@ -62,9 +94,10 @@ export const inlineRunRequestSchema = z.object({
   respondents: z.array(respondentProfileSchema).min(1),
   material: z.array(materialItemSchema).min(1),
   questions: z.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });
@@ -81,7 +114,7 @@ export const inlineRunRequestSchema = z.object({
   }
   validateMaterialChoices(request.questions, request.material, context);
   validateVisualBindings(request.questions, request.material, context, 'questions');
-  if (request.questions.some((question) => question.visual?.mode === 'pixels') && String(request.provider.kind) !== 'clef') {
+  if (request.questions.some((question) => question.visual?.mode === 'pixels') && request.provider && String(request.provider.kind) !== 'clef') {
     context.addIssue({ code: 'custom', path: ['provider'], message: 'Pixel-inspection questions require the explicit Clef provider.' });
   }
 });
@@ -91,15 +124,16 @@ export const inlineJourneyRequestSchema = z.object({
   label: z.string().min(1).max(120).optional(),
   respondents: z.array(respondentProfileSchema).min(1),
   journey: journeyDefinitionSchema,
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });
   }
   const visualTasks = request.journey.tasks.filter((task) => task.visual !== undefined);
-  if (visualTasks.some((task) => task.visual?.mode === 'pixels') && String(request.provider.kind) !== 'clef') {
+  if (visualTasks.some((task) => task.visual?.mode === 'pixels') && request.provider && String(request.provider.kind) !== 'clef') {
     context.addIssue({ code: 'custom', path: ['provider'], message: 'Pixel-inspection questions require the explicit Clef provider.' });
   }
 });
@@ -153,9 +187,10 @@ export const followOnRunRequestSchema = z.object({
   context: followOnContextSchema,
   material: z.array(materialItemSchema).min(1).optional(),
   questions: z.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
   const questionIds = request.questions.map(({ id }) => id);
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a run.' });
@@ -322,6 +357,11 @@ export type RunEvidenceItem = z.infer<typeof runEvidenceItemSchema>;
 export type RunEvidencePage = z.infer<typeof runEvidencePageSchema>;
 export type RunRequest = z.input<typeof runRequestSchema>;
 export type { JourneyDefinition };
+
+export function requireExplicitProvider(request: { provider?: ProviderConfigInput | z.infer<typeof providerConfigSchema> | undefined }): z.infer<typeof providerConfigSchema> {
+  if (!request.provider) throw new Error('Automatic provider selection has been accepted as a request contract but is not yet available in this execution path.');
+  return providerConfigSchema.parse(request.provider);
+}
 
 export type FrozenEvaluation = {
   groupId?: string;

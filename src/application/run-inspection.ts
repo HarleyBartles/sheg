@@ -4,7 +4,7 @@ import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
-import { runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage, type RunMaterialItem, type FollowOnSelectionExclusion, type SelectionCoverage } from '../domain/run/request.js';
+import { requireExplicitProvider, runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage, type RunMaterialItem, type FollowOnSelectionExclusion, type SelectionCoverage } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
 import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import type { PreparedJourneyRun } from '../domain/run/request.js';
@@ -46,6 +46,7 @@ function validateFollowOnMaterialChoices(request: ParsedFollowOnRunRequest, mate
 }
 
 export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, source: FollowOnSourceSet, provider: DecisionProvider): Promise<PreparedFollowOnAdmission> {
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
@@ -103,9 +104,9 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
     }
-    const modelIdentity = request.provider.kind === 'jev' || request.provider.kind === 'clef' ? request.provider.model : request.provider.checkpoint;
+    const modelIdentity = configured.kind === 'jev' || configured.kind === 'clef' ? configured.model : configured.checkpoint;
     const contextId = randomUUID(); const groupId = randomUUID();
-    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets }, provider, configured.kind, modelIdentity);
     minimumCalls += planned.batches.length;
     fits.push(...planned.fits);
     problems.push(...planned.problems);
@@ -257,6 +258,7 @@ export async function prepareRun(
     return { inspection: { valid: false, respondentCount: 0, minimumCalls: 0,
       problems: [{ code: 'follow_on_resolution_required', message: 'Follow-on requests must be resolved against their source run before provider fit inspection.' }], fits: [] } };
   }
+  const configured = requireExplicitProvider(request);
 
   const compilerFingerprint = promptContractHash();
   const evaluations: FrozenEvaluation[] = [];
@@ -264,8 +266,8 @@ export async function prepareRun(
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
   let minimumCalls = 0;
-  const kind = request.provider.kind;
-  const modelIdentity = kind === 'jev' || kind === 'clef' ? request.provider.model : request.provider.checkpoint;
+  const kind = configured.kind;
+  const modelIdentity = kind === 'jev' || kind === 'clef' ? configured.model : configured.checkpoint;
 
   for (const respondent of request.respondents) {
     const respondentProfile = {
@@ -400,6 +402,7 @@ async function planQuestionBatches(
 }
 
 async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, provider: DecisionProvider): Promise<{ inspection: Inspection; journey?: PreparedJourneyAdmission }> {
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   let callBounds: ReturnType<typeof estimateRunDecisionCalls>;
   try { callBounds = estimateRunDecisionCalls([request.journey], request.respondents); }
@@ -438,8 +441,8 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
       nodeId: initialPath.nodeId, request: packetRequest });
   }
 
-  const kind = request.provider.kind;
-  const modelIdentity = kind === 'jev' || kind === 'clef' ? request.provider.model : request.provider.checkpoint;
+  const kind = configured.kind;
+  const modelIdentity = kind === 'jev' || kind === 'clef' ? configured.model : configured.checkpoint;
   const measuredByInput = new Map<string, ProviderContextFit>();
   for (const packet of packets) {
     const inputFingerprint = hashCanonical(packet.request);

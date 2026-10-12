@@ -521,6 +521,102 @@
             }
           ]
         },
+        "providerSelection": {
+          "type": "object",
+          "properties": {
+            "preferredOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "requiredCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "pixels"
+                ]
+              }
+            },
+            "unitOverrides": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "comparisonLocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "members": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "equality": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      },
+                      "model": {
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider",
+                      "model"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "members",
+                  "equality"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "batching": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "singleton"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "expectedSelectionFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f\\d]{64}$"
+        },
         "maxCalls": {
           "type": "integer",
           "exclusiveMinimum": 0,
@@ -532,7 +628,6 @@
         "respondents",
         "material",
         "questions",
-        "provider",
         "maxCalls"
       ],
       "additionalProperties": false
@@ -1379,6 +1474,102 @@
             }
           ]
         },
+        "providerSelection": {
+          "type": "object",
+          "properties": {
+            "preferredOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "requiredCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "pixels"
+                ]
+              }
+            },
+            "unitOverrides": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "comparisonLocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "members": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "equality": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      },
+                      "model": {
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider",
+                      "model"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "members",
+                  "equality"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "batching": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "singleton"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "expectedSelectionFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f\\d]{64}$"
+        },
         "maxCalls": {
           "type": "integer",
           "exclusiveMinimum": 0,
@@ -1389,7 +1580,6 @@
         "kind",
         "respondents",
         "journey",
-        "provider",
         "maxCalls"
       ],
       "additionalProperties": false
@@ -2044,6 +2234,102 @@
             }
           ]
         },
+        "providerSelection": {
+          "type": "object",
+          "properties": {
+            "preferredOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "requiredCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "pixels"
+                ]
+              }
+            },
+            "unitOverrides": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "comparisonLocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "members": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "equality": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      },
+                      "model": {
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider",
+                      "model"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "members",
+                  "equality"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "batching": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "singleton"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "expectedSelectionFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f\\d]{64}$"
+        },
         "maxCalls": {
           "type": "integer",
           "exclusiveMinimum": 0,
@@ -2056,7 +2342,6 @@
         "selection",
         "context",
         "questions",
-        "provider",
         "maxCalls"
       ],
       "additionalProperties": false

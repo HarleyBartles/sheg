@@ -209,7 +209,7 @@ test('provider inputs normalize Jev defaults and reject invalid Laya precision c
     timeoutMs: 30_000,
   });
   const laya = inlineRunRequestSchema.parse({ ...input, provider: { ...input.provider, precision: 'fp16' } });
-  assert.equal(laya.provider.kind, 'laya');
+  assert.equal(laya.provider?.kind, 'laya');
   assert.equal(inlineRunRequestSchema.safeParse({ ...input, provider: { ...input.provider, precision: '' } }).success, false);
 });
 

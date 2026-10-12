@@ -25444,6 +25444,55 @@ var providerConfigSchema = external_exports.union([
   layaConfigSchema,
   clefConfigSchema
 ]);
+var providerCapabilitySchema = external_exports.enum(["text", "pixels"]);
+var providerQuestionTypeSchema = external_exports.enum(["choice", "score", "noul"]);
+var providerPriceSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("no-provider-invoice") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("published-rate"),
+    currency: external_exports.string().regex(/^[A-Z]{3}$/),
+    unit: external_exports.literal("million-input-tokens"),
+    amount: external_exports.number().finite().nonnegative(),
+    source: external_exports.string().url(),
+    observedAt: external_exports.string().date()
+  }).strict(),
+  external_exports.object({ kind: external_exports.literal("unknown") }).strict()
+]);
+var providerCatalogueEntrySchema = external_exports.object({
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  enabled: external_exports.boolean(),
+  provider: providerConfigSchema,
+  execution: external_exports.enum(["local", "hosted"]),
+  capabilities: external_exports.array(providerCapabilitySchema).min(1),
+  questionTypes: external_exports.array(providerQuestionTypeSchema).min(1),
+  pricing: providerPriceSchema
+}).strict().superRefine((entry, context) => {
+  if (new Set(entry.capabilities).size !== entry.capabilities.length) context.addIssue({ code: "custom", path: ["capabilities"], message: "Provider capabilities must be unique." });
+  if (new Set(entry.questionTypes).size !== entry.questionTypes.length) context.addIssue({ code: "custom", path: ["questionTypes"], message: "Provider question types must be unique." });
+  if (entry.provider.kind === "laya" !== (entry.execution === "local")) context.addIssue({ code: "custom", path: ["execution"], message: "Execution mode must match the provider configuration." });
+  if (entry.provider.kind === "clef" !== entry.capabilities.includes("pixels")) context.addIssue({ code: "custom", path: ["capabilities"], message: "Pixel capability must match the Clef provider configuration." });
+  if (entry.execution === "local" && entry.pricing.kind !== "no-provider-invoice") context.addIssue({ code: "custom", path: ["pricing"], message: "Local providers must declare that no provider invoice applies." });
+  if (entry.execution === "hosted" && entry.pricing.kind === "no-provider-invoice") context.addIssue({ code: "custom", path: ["pricing"], message: "Hosted providers require published or unknown price evidence." });
+});
+var providerCatalogueSchema = external_exports.object({
+  revision: external_exports.number().int().nonnegative(),
+  entries: external_exports.array(providerCatalogueEntrySchema)
+}).strict().superRefine((catalogue, context) => {
+  const ids = /* @__PURE__ */ new Set();
+  const configs = /* @__PURE__ */ new Set();
+  catalogue.entries.forEach((entry, index2) => {
+    if (ids.has(entry.id)) context.addIssue({ code: "custom", path: ["entries", index2, "id"], message: `Duplicate provider identity ${entry.id}.` });
+    ids.add(entry.id);
+    const canonicalConfig = JSON.stringify(entry.provider, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
+    if (configs.has(canonicalConfig)) context.addIssue({ code: "custom", path: ["entries", index2, "provider"], message: "Provider configuration is already present under another identity." });
+    configs.add(canonicalConfig);
+  });
+});
+var providerPreferenceSchema = external_exports.object({
+  preferredOrder: external_exports.array(external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/))
+}).strict().superRefine((preferences, context) => {
+  if (new Set(preferences.preferredOrder).size !== preferences.preferredOrder.length) context.addIssue({ code: "custom", path: ["preferredOrder"], message: "Provider preference identities must be unique." });
+});
 
 // src/infrastructure/identity.ts
 import { createHash as createHash6 } from "node:crypto";
@@ -25602,6 +25651,23 @@ function packetRef(packet) {
 }
 
 // src/domain/run/lifecycle.ts
+var providerSelectionPolicySnapshotSchema = external_exports.object({
+  version: external_exports.literal(1),
+  catalogueRevision: external_exports.number().int().nonnegative(),
+  catalogue: external_exports.object({
+    entries: external_exports.array(external_exports.object({
+      id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+      enabled: external_exports.boolean(),
+      provider: external_exports.record(external_exports.string(), external_exports.unknown()),
+      execution: external_exports.enum(["local", "hosted"]),
+      capabilities: external_exports.array(external_exports.enum(["text", "pixels"])),
+      questionTypes: external_exports.array(external_exports.enum(["choice", "score", "noul"])),
+      pricing: external_exports.record(external_exports.string(), external_exports.unknown())
+    }).strict())
+  }).strict(),
+  preferences: external_exports.object({ preferredOrder: external_exports.array(external_exports.string()) }).strict(),
+  policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict()
+}).strict();
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
 var runStatusSchema = external_exports.enum(runStatuses);
 var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
@@ -25660,6 +25726,37 @@ var journeyEventsSchema = external_exports.array(promptHistoryEventSchema);
 var journeyRouteSchema = external_exports.array(journeyRouteEntrySchema);
 
 // src/domain/run/request.ts
+var providerSelectionSchema = external_exports.object({
+  preferredOrder: external_exports.array(external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  requiredCapabilities: external_exports.array(external_exports.enum(["text", "pixels"])).min(1).optional(),
+  unitOverrides: external_exports.record(external_exports.string().min(1), external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  comparisonLocks: external_exports.array(external_exports.object({
+    id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+    members: external_exports.array(external_exports.string().min(1)).min(2),
+    equality: external_exports.object({ provider: external_exports.enum(["same", "vary"]), model: external_exports.enum(["same", "vary"]) }).strict()
+  }).strict()).optional(),
+  batching: external_exports.enum(["automatic", "singleton"]).optional()
+}).strict().superRefine((selection, context) => {
+  if (selection.preferredOrder && new Set(selection.preferredOrder).size !== selection.preferredOrder.length) context.addIssue({ code: "custom", path: ["preferredOrder"], message: "Provider preference identities must be unique." });
+  if (selection.requiredCapabilities && new Set(selection.requiredCapabilities).size !== selection.requiredCapabilities.length) context.addIssue({ code: "custom", path: ["requiredCapabilities"], message: "Required capabilities must be unique." });
+  if (selection.comparisonLocks) {
+    const ids = /* @__PURE__ */ new Set();
+    for (const [index2, lock] of selection.comparisonLocks.entries()) {
+      if (ids.has(lock.id)) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "id"], message: `Duplicate comparison identity ${lock.id}.` });
+      ids.add(lock.id);
+      if (new Set(lock.members).size !== lock.members.length) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "members"], message: "Comparison members must be unique." });
+    }
+  }
+});
+var selectionFingerprintSchema = external_exports.string().regex(/^[a-f\d]{64}$/i);
+var runProviderSelectionShape = {
+  provider: providerConfigSchema.optional(),
+  providerSelection: providerSelectionSchema.optional(),
+  expectedSelectionFingerprint: selectionFingerprintSchema.optional()
+};
+function requireProviderChoice(request, context) {
+  if (request.provider === void 0 === (request.providerSelection === void 0)) context.addIssue({ code: "custom", path: ["providerSelection"], message: "Specify either an explicit provider or automatic provider selection." });
+}
 function validateMaterialChoices(questions, material, context) {
   const materials = new Map(material.map((item) => [item.id, item]));
   questions.forEach((question, questionIndex) => {
@@ -25707,9 +25804,10 @@ var inlineRunRequestSchema = external_exports.object({
   respondents: external_exports.array(respondentProfileSchema).min(1),
   material: external_exports.array(materialItemSchema).min(1),
   questions: external_exports.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
@@ -25724,7 +25822,7 @@ var inlineRunRequestSchema = external_exports.object({
   }
   validateMaterialChoices(request.questions, request.material, context);
   validateVisualBindings(request.questions, request.material, context, "questions");
-  if (request.questions.some((question) => question.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
+  if (request.questions.some((question) => question.visual?.mode === "pixels") && request.provider && String(request.provider.kind) !== "clef") {
     context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
   }
 });
@@ -25733,15 +25831,16 @@ var inlineJourneyRequestSchema = external_exports.object({
   label: external_exports.string().min(1).max(120).optional(),
   respondents: external_exports.array(respondentProfileSchema).min(1),
   journey: journeyDefinitionSchema,
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
   }
   const visualTasks = request.journey.tasks.filter((task) => task.visual !== void 0);
-  if (visualTasks.some((task) => task.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
+  if (visualTasks.some((task) => task.visual?.mode === "pixels") && request.provider && String(request.provider.kind) !== "clef") {
     context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
   }
 });
@@ -25790,9 +25889,10 @@ var followOnRunRequestSchema = external_exports.object({
   context: followOnContextSchema,
   material: external_exports.array(materialItemSchema).min(1).optional(),
   questions: external_exports.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
   const questionIds = request.questions.map(({ id }) => id);
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
@@ -25938,6 +26038,10 @@ var runEvidencePageSchema = external_exports.object({
   nextCursor: external_exports.string().min(1).optional()
 }).strict();
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
+function requireExplicitProvider(request) {
+  if (!request.provider) throw new Error("Automatic provider selection has been accepted as a request contract but is not yet available in this execution path.");
+  return providerConfigSchema.parse(request.provider);
+}
 
 // src/application/run-operations.ts
 var resetConfirmation = "RESET SHEG DATASTORE";
@@ -26062,6 +26166,7 @@ function validateFollowOnMaterialChoices(request, materials, evaluationId) {
   }
 }
 async function prepareFollowOnRun(request, source, provider) {
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   const fits = [];
   const problems = [];
@@ -26129,10 +26234,10 @@ async function prepareFollowOnRun(request, source, provider) {
     } catch (error62) {
       throw new RunProblemError("follow_on_context_invalid", error62 instanceof Error ? error62.message : "Follow-on context could not be prepared.");
     }
-    const modelIdentity = request.provider.kind === "jev" || request.provider.kind === "clef" ? request.provider.model : request.provider.checkpoint;
+    const modelIdentity = configured.kind === "jev" || configured.kind === "clef" ? configured.model : configured.checkpoint;
     const contextId = randomUUID();
     const groupId = randomUUID();
-    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, configured.kind, modelIdentity);
     minimumCalls += planned.batches.length;
     fits.push(...planned.fits);
     problems.push(...planned.problems);
@@ -26325,14 +26430,15 @@ async function prepareRun(input2, provider) {
       fits: []
     } };
   }
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   const evaluations2 = [];
   const preparedGroups = [];
   const fits = [];
   const problems = [];
   let minimumCalls = 0;
-  const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
+  const kind = configured.kind;
+  const modelIdentity = kind === "jev" || kind === "clef" ? configured.model : configured.checkpoint;
   for (const respondent of request.respondents) {
     const respondentProfile = {
       intent: respondent.intent,
@@ -26467,6 +26573,7 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
   return { batches, fits, problems };
 }
 async function prepareJourneyAdmission(request, provider) {
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   let callBounds;
   try {
@@ -26520,8 +26627,8 @@ async function prepareJourneyAdmission(request, provider) {
       request: packetRequest
     });
   }
-  const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
+  const kind = configured.kind;
+  const modelIdentity = kind === "jev" || kind === "clef" ? configured.model : configured.checkpoint;
   const measuredByInput = /* @__PURE__ */ new Map();
   for (const packet of packets) {
     const inputFingerprint = hashCanonical(packet.request);
@@ -26580,7 +26687,7 @@ var RunServiceError = class extends Error {
 function normalizeRequest(input2) {
   const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) throw new RunServiceError("invalid_request", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
-  if (parsed.data.provider.kind === "laya") {
+  if (parsed.data.provider?.kind === "laya") {
     return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path4.resolve(parsed.data.provider.tokenizerJsonPath) } };
   }
   return parsed.data;
@@ -26612,12 +26719,12 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
+        return (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
       } catch (error62) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error62 instanceof Error && "code" in error62 ? String(error62.code) : "follow_on_resolution_failed", message: error62 instanceof Error ? error62.message : "Follow-on request could not be resolved." }], fits: [] };
       }
     }
-    return (await prepareRun(request, providerFactory(request.provider))).inspection;
+    return (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
   }
   async function start(submissionId, input2) {
     if (typeof submissionId !== "string" || !submissionId.trim()) throw new RunServiceError("invalid_submission_id", "A submission ID is required.");
@@ -26629,14 +26736,14 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
       commands.reconcile(prior.runId, Date.now());
       return reads.getStatus(prior.runId);
     }
-    await assertReady(request.provider);
+    await assertReady(requireExplicitProvider(request));
     let accepted;
     if (request.kind === "follow-on") {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
+        const admission = await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)));
         if (!admission.inspection.valid) throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
         accepted = commands.accept(submissionId, admission.prepared);
       } catch (error62) {
@@ -26645,7 +26752,7 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
         throw new RunServiceError("follow_on_resolution_failed", error62 instanceof Error ? error62.message : "Follow-on request could not be resolved.", { cause: error62 });
       }
     } else {
-      const admission = await prepareRun(request, providerFactory(request.provider));
+      const admission = await prepareRun(request, providerFactory(requireExplicitProvider(request)));
       if (!admission.prepared && !admission.journey || !admission.inspection.valid) {
         throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
       }
@@ -26666,7 +26773,7 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
     if (!current.lifecycle.resume.eligible) {
       throw new RunServiceError("run_not_resumable", resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    const frozenProvider = reads.getRequestKind(runId) === "journey" ? reads.getJourneyRun(runId).request.provider : reads.getRequest(runId).request.provider;
+    const frozenProvider = reads.getRequestKind(runId) === "journey" ? requireExplicitProvider(reads.getJourneyRun(runId).request) : requireExplicitProvider(reads.getRequest(runId).request);
     await assertReady(frozenProvider);
     const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {
@@ -34128,8 +34235,9 @@ function queryEvidencePage(context, input2) {
         WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.kind === "laya" ? parsedRequest.data.provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${parsedRequest.data.provider.accountId}/ai/run/@cf/cloudflare/${parsedRequest.data.provider.model}`;
-    const model = parsedRequest.data.provider.kind === "jev" || parsedRequest.data.provider.kind === "clef" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
+    const provider = requireExplicitProvider(parsedRequest.data);
+    const endpoint = provider.kind === "jev" ? provider.endpoint : provider.kind === "laya" ? provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
+    const model = provider.kind === "jev" || provider.kind === "clef" ? provider.model : provider.checkpoint;
     const items = pageRows.map((row) => {
       const contextId = asText(row.context_id, "context ID");
       const respondentId = asText(row.respondent_id, "respondent ID");
@@ -34167,7 +34275,7 @@ function queryEvidencePage(context, input2) {
         ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
         ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
         provenance: {
-          provider: parsedRequest.data.provider.kind,
+          provider: provider.kind,
           model,
           endpoint,
           compilerFingerprint,

@@ -20359,6 +20359,824 @@ var ProviderCallError = class extends Error {
   }
 };
 
+// src/providers/jev/config.ts
+var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
+var routeDefaults = {
+  openrouter: {
+    model: "typesafe/jev-1.13",
+    endpoint: "https://openrouter.ai/api/alpha/decisions"
+  },
+  typesafe: {
+    model: "jev-latest",
+    endpoint: "https://api.typesafe.ai/v1/systemone"
+  }
+};
+var jevConfigInputSchema = external_exports.object({
+  kind: external_exports.literal("jev"),
+  route: jevRouteSchema.optional(),
+  model: external_exports.string().min(1).optional(),
+  endpoint: external_exports.string().url().optional(),
+  timeoutMs: external_exports.number().int().positive().optional()
+}).strict().superRefine((input2, context) => {
+  if (input2.endpoint === void 0) return;
+  let endpoint;
+  try {
+    endpoint = new URL(input2.endpoint);
+  } catch {
+    return;
+  }
+  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
+  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
+    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
+  }
+});
+var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
+  const route = input2.route ?? "openrouter";
+  const defaults = routeDefaults[route];
+  return {
+    kind: "jev",
+    route,
+    model: input2.model ?? defaults.model,
+    endpoint: input2.endpoint ?? defaults.endpoint,
+    timeoutMs: input2.timeoutMs ?? 3e4
+  };
+});
+
+// src/providers/clef/config.ts
+var clefConfigSchema = external_exports.object({
+  kind: external_exports.literal("clef"),
+  accountId: external_exports.string().regex(/^[a-f0-9]{32}$/),
+  model: external_exports.enum(["clef", "clef-flash"]).default("clef"),
+  timeoutMs: external_exports.number().int().positive().default(3e4)
+}).strict();
+function clefEndpoint(config2) {
+  return `https://api.cloudflare.com/client/v4/accounts/${config2.accountId}/ai/run/@cf/cloudflare/${config2.model}`;
+}
+
+// src/providers/config.ts
+var layaConfigSchema = external_exports.object({
+  kind: external_exports.literal(providerKinds[1]),
+  baseUrl: external_exports.string().url(),
+  checkpoint: external_exports.string().min(1),
+  contextLimit: external_exports.number().int().positive(),
+  headLimit: external_exports.number().int().positive(),
+  tokenizerJsonPath: external_exports.string().min(1),
+  tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  precision: external_exports.string().min(1).optional(),
+  timeoutMs: external_exports.number().int().positive()
+}).strict();
+var providerConfigSchema = external_exports.union([
+  jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
+  layaConfigSchema,
+  clefConfigSchema
+]);
+var providerCapabilitySchema = external_exports.enum(["text", "pixels"]);
+var providerQuestionTypeSchema = external_exports.enum(["choice", "score", "noul"]);
+var providerPriceSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("no-provider-invoice") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("published-rate"),
+    currency: external_exports.string().regex(/^[A-Z]{3}$/),
+    unit: external_exports.literal("million-input-tokens"),
+    amount: external_exports.number().finite().nonnegative(),
+    source: external_exports.string().url(),
+    observedAt: external_exports.string().date()
+  }).strict(),
+  external_exports.object({ kind: external_exports.literal("unknown") }).strict()
+]);
+var providerCatalogueEntrySchema = external_exports.object({
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  enabled: external_exports.boolean(),
+  provider: providerConfigSchema,
+  execution: external_exports.enum(["local", "hosted"]),
+  capabilities: external_exports.array(providerCapabilitySchema).min(1),
+  questionTypes: external_exports.array(providerQuestionTypeSchema).min(1),
+  pricing: providerPriceSchema
+}).strict().superRefine((entry, context) => {
+  if (new Set(entry.capabilities).size !== entry.capabilities.length) context.addIssue({ code: "custom", path: ["capabilities"], message: "Provider capabilities must be unique." });
+  if (new Set(entry.questionTypes).size !== entry.questionTypes.length) context.addIssue({ code: "custom", path: ["questionTypes"], message: "Provider question types must be unique." });
+  if (entry.provider.kind === "laya" !== (entry.execution === "local")) context.addIssue({ code: "custom", path: ["execution"], message: "Execution mode must match the provider configuration." });
+  if (entry.provider.kind === "clef" !== entry.capabilities.includes("pixels")) context.addIssue({ code: "custom", path: ["capabilities"], message: "Pixel capability must match the Clef provider configuration." });
+  if (entry.execution === "local" && entry.pricing.kind !== "no-provider-invoice") context.addIssue({ code: "custom", path: ["pricing"], message: "Local providers must declare that no provider invoice applies." });
+  if (entry.execution === "hosted" && entry.pricing.kind === "no-provider-invoice") context.addIssue({ code: "custom", path: ["pricing"], message: "Hosted providers require published or unknown price evidence." });
+});
+var providerCatalogueSchema = external_exports.object({
+  revision: external_exports.number().int().nonnegative(),
+  entries: external_exports.array(providerCatalogueEntrySchema)
+}).strict().superRefine((catalogue, context) => {
+  const ids = /* @__PURE__ */ new Set();
+  const configs = /* @__PURE__ */ new Set();
+  catalogue.entries.forEach((entry, index2) => {
+    if (ids.has(entry.id)) context.addIssue({ code: "custom", path: ["entries", index2, "id"], message: `Duplicate provider identity ${entry.id}.` });
+    ids.add(entry.id);
+    const canonicalConfig = JSON.stringify(entry.provider, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
+    if (configs.has(canonicalConfig)) context.addIssue({ code: "custom", path: ["entries", index2, "provider"], message: "Provider configuration is already present under another identity." });
+    configs.add(canonicalConfig);
+  });
+});
+var providerPreferenceSchema = external_exports.object({
+  preferredOrder: external_exports.array(external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/))
+}).strict().superRefine((preferences, context) => {
+  if (new Set(preferences.preferredOrder).size !== preferences.preferredOrder.length) context.addIssue({ code: "custom", path: ["preferredOrder"], message: "Provider preference identities must be unique." });
+});
+
+// src/domain/study/presentation.ts
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var nodeSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ id: identifier3, kind: external_exports.literal("expose"), itemId: identifier3 }).strict(),
+  external_exports.object({ id: identifier3, kind: external_exports.literal("ask"), taskId: identifier3 }).strict(),
+  external_exports.object({ id: identifier3, kind: external_exports.literal("terminal"), outcome: identifier3 }).strict()
+]);
+var responseIntervalSchema = external_exports.object({
+  type: routeableDecisionTypeSchema,
+  minimum: external_exports.number().finite(),
+  maximum: external_exports.number().finite(),
+  minimumInclusive: external_exports.boolean(),
+  maximumInclusive: external_exports.boolean()
+}).strict();
+var transitionSchema = external_exports.object({
+  fromNodeId: identifier3,
+  optionId: identifier3.optional(),
+  when: responseIntervalSchema.optional(),
+  toNodeId: identifier3
+}).strict();
+var presentationSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("graph"),
+    nodes: external_exports.array(nodeSchema).min(1),
+    transitions: external_exports.array(transitionSchema),
+    entryNodeId: identifier3,
+    maxDecisions: external_exports.number().int().positive()
+  }).strict()
+]);
+
+// src/domain/study/task.ts
+var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose2 = external_exports.string().trim().min(1);
+var choiceText2 = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
+var taskFields = {
+  id: identifier4,
+  instructions: prose2,
+  comparisonKey: identifier4.optional(),
+  responseHistory: external_exports.enum(["include", "omit"]).optional(),
+  visual: visualBindingSchema.optional()
+};
+var options = external_exports.record(identifier4, choiceText2).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
+var materialOptions = external_exports.record(identifier4, identifier4).optional();
+function validateChoiceTask(task, context) {
+  if (typeof task !== "object" || task === null || !("options" in task)) return;
+  const optionsValue = task.options;
+  if (typeof optionsValue !== "object" || optionsValue === null || Array.isArray(optionsValue)) return;
+  const choiceOptions = optionsValue;
+  if ("answerKeyOptionId" in task) {
+    const answerKeyOptionId = task.answerKeyOptionId;
+    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !Object.hasOwn(choiceOptions, answerKeyOptionId)) {
+      context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
+    }
+  }
+  if ("materialOptions" in task && typeof task.materialOptions === "object" && task.materialOptions !== null && !Array.isArray(task.materialOptions)) {
+    const materialOptions2 = task.materialOptions;
+    for (const optionId of Object.keys(materialOptions2)) {
+      if (!Object.hasOwn(choiceOptions, optionId)) {
+        context.addIssue({ code: "custom", path: ["materialOptions", optionId], message: `Material link references unknown option ${optionId}.` });
+      }
+    }
+    if (new Set(Object.values(materialOptions2)).size !== Object.keys(materialOptions2).length) {
+      context.addIssue({ code: "custom", path: ["materialOptions"], message: "Each material may be linked from at most one option." });
+    }
+  }
+}
+var legacyChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  options,
+  materialOptions,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var typedChoiceTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal(decisionTypes.choice),
+  options,
+  materialOptions,
+  answerKeyOptionId: identifier4.optional()
+}).strict().superRefine(validateChoiceTask);
+var scoreTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal(decisionTypes.score),
+  rubric: external_exports.array(prose2).min(2)
+}).strict();
+var noulTaskSchema = external_exports.object({
+  ...taskFields,
+  type: external_exports.literal(decisionTypes.noul),
+  criteria: external_exports.object({ true: prose2.optional(), false: prose2.optional() }).strict().optional()
+}).strict();
+var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
+var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
+
+// src/domain/study/arm.ts
+var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var prose3 = external_exports.string().trim().min(1);
+var journeyDefinitionFields = {
+  id: identifier5,
+  label: prose3,
+  items: external_exports.array(materialItemSchema).min(1),
+  tasks: external_exports.array(taskSchema).min(1),
+  presentation: presentationSchema
+};
+var journeyDefinitionSchema = external_exports.object(journeyDefinitionFields).strict().superRefine(validateJourneyDefinition);
+var studyArmSchema = external_exports.object({
+  ...journeyDefinitionFields,
+  sources: external_exports.array(sourceReferenceSchema).min(1)
+}).strict().superRefine(validateJourneyDefinition);
+function validateJourneyDefinition(arm, context) {
+  const presentation = arm.presentation;
+  const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
+  const nodeIdValues = nodeValues.map((node2) => node2.id);
+  const itemIdValues = arm.items.map((item) => item.id);
+  const taskIdValues = arm.tasks.map((task) => task.id);
+  const itemIds = new Set(itemIdValues);
+  const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
+  const allIds = [...itemIdValues, ...taskIdValues, ...nodeIdValues];
+  if (new Set(allIds).size !== allIds.length) {
+    context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
+  }
+  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
+  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
+  }
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (task.type !== "choice" || !task.materialOptions) continue;
+    for (const [optionId, materialId] of Object.entries(task.materialOptions)) {
+      const item = arm.items.find((candidate) => candidate.id === materialId);
+      if (!item) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
+        continue;
+      }
+      if (isImageMaterial(item)) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
+      if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
+      }
+      if (task.options[optionId] !== item.text) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
+      }
+    }
+  }
+  const imageIds = new Set(arm.items.filter(isImageMaterial).map((item) => item.id));
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (!task.visual) continue;
+    for (const materialId of task.visual.materialIds) {
+      if (!imageIds.has(materialId)) context.addIssue({ code: "custom", path: ["tasks", taskIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
+    }
+  }
+  if (presentation.kind === "sequence") return;
+  const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
+  if (!nodesById.has(presentation.entryNodeId)) {
+    context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
+  }
+  for (const [index2, node2] of presentation.nodes.entries()) {
+    if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index2, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
+    }
+    if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes", index2, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
+    }
+  }
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const [index2, edge] of presentation.transitions.entries()) {
+    const source = nodesById.get(edge.fromNodeId);
+    if (!source) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
+      continue;
+    }
+    if (!nodesById.has(edge.toNodeId)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
+    }
+    const edges = outgoing.get(edge.fromNodeId) ?? [];
+    outgoing.set(edge.fromNodeId, [...edges, edge]);
+    if (source.kind === "terminal") {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Terminal nodes cannot have outgoing transitions." });
+    }
+    if (source.kind === "expose" && (edge.optionId !== void 0 || edge.when !== void 0)) {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Exposure transitions must be unconditional." });
+    }
+  }
+  for (const [index2, node2] of presentation.nodes.entries()) {
+    const edges = outgoing.get(node2.id) ?? [];
+    if (node2.kind === "terminal") {
+      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Terminal nodes cannot have outgoing transitions." });
+      continue;
+    }
+    if (node2.kind === "expose") {
+      if (edges.length !== 1 || edges[0]?.optionId !== void 0 || edges[0]?.when !== void 0) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Each exposure node must have exactly one unconditional transition." });
+      }
+      continue;
+    }
+    const task = taskById.get(node2.taskId);
+    if (!task) continue;
+    if (task.type !== "score" && task.type !== "noul") {
+      const optionIds = Object.keys(task.options);
+      const edgeOptionIds = edges.map((edge) => edge.optionId);
+      if (edges.some((edge) => edge.when !== void 0) || edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
+        context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Choice task transitions must contain exactly one edge for every offered option and no others." });
+      }
+    } else {
+      const maximum = task.type === "score" ? task.rubric.length - 1 : 1;
+      validateResponseIntervals(edges, task.type, maximum, context, index2);
+    }
+  }
+  if (nodesById.has(presentation.entryNodeId)) {
+    const visited = /* @__PURE__ */ new Set();
+    const pending = [presentation.entryNodeId];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
+    }
+    const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
+    if (unreachable.length > 0) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
+    }
+    const state = /* @__PURE__ */ new Map();
+    const decisionsToTerminal = /* @__PURE__ */ new Map();
+    let containsCycle = false;
+    const longestDecisionsToTerminal = (nodeId) => {
+      const node2 = nodesById.get(nodeId);
+      if (!node2) return null;
+      if (state.get(nodeId) === "visiting") {
+        containsCycle = true;
+        return null;
+      }
+      if (state.get(nodeId) === "visited") return decisionsToTerminal.get(nodeId) ?? null;
+      state.set(nodeId, "visiting");
+      let longest;
+      if (node2.kind === "terminal") {
+        longest = 0;
+      } else {
+        const edges = outgoing.get(nodeId) ?? [];
+        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
+        const completedContinuations = continuations.filter((count2) => count2 !== null);
+        if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
+          longest = null;
+        } else {
+          const nextDecisionCount = Math.max(...completedContinuations);
+          longest = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+        }
+      }
+      state.set(nodeId, "visited");
+      decisionsToTerminal.set(nodeId, longest);
+      return longest;
+    };
+    const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
+    if (containsCycle) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Graph contains a cycle; every journey must terminate." });
+    } else if (longestPath === null) {
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Every graph branch must reach a terminal node." });
+    } else if (longestPath > presentation.maxDecisions) {
+      context.addIssue({
+        code: "custom",
+        path: ["presentation", "maxDecisions"],
+        message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`
+      });
+    }
+  }
+}
+function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
+  const issues = context;
+  const ranges = edges.map((edge, index2) => ({ edge, index: index2, range: edge.when }));
+  const fail = (message) => issues.addIssue({
+    code: "custom",
+    path: ["presentation", "nodes", nodeIndex],
+    message
+  });
+  if (ranges.some(({ edge, range }) => edge.optionId !== void 0 || range === void 0 || range.type !== type)) {
+    fail(`${type.toUpperCase()} task transitions must use matching typed response intervals only.`);
+    return;
+  }
+  const ordered = ranges.toSorted((left, right) => left.range.minimum - right.range.minimum || Number(right.range.minimumInclusive) - Number(left.range.minimumInclusive));
+  for (const { range } of ordered) {
+    if (range.minimum > range.maximum || range.minimum < 0 || range.maximum > maximum || range.minimum === range.maximum && !(range.minimumInclusive && range.maximumInclusive)) {
+      fail(`${type.toUpperCase()} route interval is reversed, empty, or outside its response domain.`);
+      return;
+    }
+  }
+  const first = ordered[0]?.range;
+  const last = ordered.at(-1)?.range;
+  if (!first || !last || first.minimum !== 0 || !first.minimumInclusive || last.maximum !== maximum || !last.maximumInclusive) {
+    fail(`${type.toUpperCase()} route intervals must cover the complete response domain.`);
+    return;
+  }
+  for (let index2 = 1; index2 < ordered.length; index2 += 1) {
+    const previous = ordered[index2 - 1].range;
+    const current = ordered[index2].range;
+    if (previous.maximum > current.minimum || previous.maximum === current.minimum && previous.maximumInclusive && current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals overlap or leave an ambiguous boundary.`);
+      return;
+    }
+    if (previous.maximum < current.minimum || previous.maximum === current.minimum && !previous.maximumInclusive && !current.minimumInclusive) {
+      fail(`${type.toUpperCase()} route intervals leave a gap in the response domain.`);
+      return;
+    }
+  }
+}
+
+// src/domain/run/lifecycle.ts
+var providerSelectionPolicySnapshotSchema = external_exports.object({
+  version: external_exports.literal(1),
+  catalogueRevision: external_exports.number().int().nonnegative(),
+  catalogue: external_exports.object({
+    entries: external_exports.array(external_exports.object({
+      id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+      enabled: external_exports.boolean(),
+      provider: external_exports.record(external_exports.string(), external_exports.unknown()),
+      execution: external_exports.enum(["local", "hosted"]),
+      capabilities: external_exports.array(external_exports.enum(["text", "pixels"])),
+      questionTypes: external_exports.array(external_exports.enum(["choice", "score", "noul"])),
+      pricing: external_exports.record(external_exports.string(), external_exports.unknown())
+    }).strict())
+  }).strict(),
+  preferences: external_exports.object({ preferredOrder: external_exports.array(external_exports.string()) }).strict(),
+  policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict()
+}).strict();
+var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
+var runStatusSchema = external_exports.enum(runStatuses);
+var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
+var evaluationStatusSchema = external_exports.enum(evaluationStatuses);
+var journeyRespondentStatuses = ["active", "completed", "failed", "unreached"];
+var journeyRespondentStatusSchema = external_exports.enum(journeyRespondentStatuses);
+var attemptStatuses = ["reserved", "answered", "failed", "uncertain"];
+var attemptStatusSchema = external_exports.enum(attemptStatuses);
+var runLifecycleStates = ["active", "stopped", "complete"];
+var runLifecycleStateSchema = external_exports.enum(runLifecycleStates);
+var resumeRefusalReasons = ["already_active", "already_completed", "cancelled", "unsupported_status", "partial_journey", "cancellation_requested", "attempt_unresolved", "call_allowance_exhausted", "no_unfinished_work"];
+var resumeRefusalReasonSchema = external_exports.enum(resumeRefusalReasons);
+function deriveRunLifecycle(facts) {
+  const state = facts.status === "completed" ? "complete" : facts.status === "prepared" || facts.status === "running" ? "active" : "stopped";
+  const refuse = (reason) => ({ state, resume: { eligible: false, reason } });
+  if (facts.status === "prepared" || facts.status === "running") return refuse("already_active");
+  if (facts.status === "completed") return refuse("already_completed");
+  if (facts.status === "cancelled") return refuse("cancelled");
+  if (facts.status !== "interrupted" && facts.status !== "failed" && facts.status !== "partial") return refuse("unsupported_status");
+  if (facts.cancelRequested) return refuse("cancellation_requested");
+  if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
+  if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
+  if (facts.status === "partial" && facts.kind === "journey" && !facts.hasRetryableJourneyFailure) return refuse("partial_journey");
+  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && (facts.kind === "journey" ? facts.hasRetryableJourneyFailure : facts.hasFailedEvaluations) || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
+  if (!hasResumableWork) return refuse("no_unfinished_work");
+  return { state, resume: { eligible: true } };
+}
+function resumeRefusalMessage(reason) {
+  switch (reason) {
+    case "already_active":
+      return "A run that is already active does not need to be resumed.";
+    case "already_completed":
+      return "A completed run cannot be resumed.";
+    case "cancelled":
+      return "A cancelled run cannot be resumed.";
+    case "unsupported_status":
+      return "This run state cannot be resumed.";
+    case "partial_journey":
+      return "A partial journey run cannot be resumed from this state.";
+    case "cancellation_requested":
+      return "A run with a cancellation request cannot be resumed.";
+    case "attempt_unresolved":
+      return "A run with an unresolved provider attempt cannot be resumed.";
+    case "call_allowance_exhausted":
+      return "This run has no remaining provider-call allowance.";
+    case "no_unfinished_work":
+      return "This run has no resumable unfinished work.";
+  }
+}
+var journeyRouteEntrySchema = external_exports.object({
+  nodeId: external_exports.string().min(1),
+  response: decisionValueSchema,
+  toNodeId: external_exports.string().min(1)
+}).strict();
+var journeyEventsSchema = external_exports.array(promptHistoryEventSchema);
+var journeyRouteSchema = external_exports.array(journeyRouteEntrySchema);
+
+// src/domain/run/request.ts
+var providerSelectionSchema = external_exports.object({
+  preferredOrder: external_exports.array(external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  requiredCapabilities: external_exports.array(external_exports.enum(["text", "pixels"])).min(1).optional(),
+  unitOverrides: external_exports.record(external_exports.string().min(1), external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  comparisonLocks: external_exports.array(external_exports.object({
+    id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+    members: external_exports.array(external_exports.string().min(1)).min(2),
+    equality: external_exports.object({ provider: external_exports.enum(["same", "vary"]), model: external_exports.enum(["same", "vary"]) }).strict()
+  }).strict()).optional(),
+  batching: external_exports.enum(["automatic", "singleton"]).optional()
+}).strict().superRefine((selection, context) => {
+  if (selection.preferredOrder && new Set(selection.preferredOrder).size !== selection.preferredOrder.length) context.addIssue({ code: "custom", path: ["preferredOrder"], message: "Provider preference identities must be unique." });
+  if (selection.requiredCapabilities && new Set(selection.requiredCapabilities).size !== selection.requiredCapabilities.length) context.addIssue({ code: "custom", path: ["requiredCapabilities"], message: "Required capabilities must be unique." });
+  if (selection.comparisonLocks) {
+    const ids = /* @__PURE__ */ new Set();
+    for (const [index2, lock] of selection.comparisonLocks.entries()) {
+      if (ids.has(lock.id)) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "id"], message: `Duplicate comparison identity ${lock.id}.` });
+      ids.add(lock.id);
+      if (new Set(lock.members).size !== lock.members.length) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "members"], message: "Comparison members must be unique." });
+    }
+  }
+});
+var selectionFingerprintSchema = external_exports.string().regex(/^[a-f\d]{64}$/i);
+var runProviderSelectionShape = {
+  provider: providerConfigSchema.optional(),
+  providerSelection: providerSelectionSchema.optional(),
+  expectedSelectionFingerprint: selectionFingerprintSchema.optional()
+};
+function requireProviderChoice(request, context) {
+  if (request.provider === void 0 === (request.providerSelection === void 0)) context.addIssue({ code: "custom", path: ["providerSelection"], message: "Specify either an explicit provider or automatic provider selection." });
+}
+function validateMaterialChoices(questions, material, context) {
+  const materials = new Map(material.map((item) => [item.id, item]));
+  questions.forEach((question, questionIndex) => {
+    if (question.type !== void 0 && question.type !== "choice" || !question.materialOptions || !question.options) return;
+    for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
+      const issuePath = ["questions", questionIndex, "materialOptions", optionId];
+      const candidate = materials.get(materialId);
+      if (!candidate) {
+        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} references unknown material ${materialId}.` });
+        continue;
+      }
+      if (isImageMaterial(candidate)) {
+        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
+      if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
+        context.addIssue({ code: "custom", path: issuePath, message: `Material ${materialId} requires source identity and digest before it can be linked.` });
+      }
+      if (question.options[optionId] !== candidate.text) {
+        context.addIssue({ code: "custom", path: ["questions", questionIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
+      }
+    }
+  });
+}
+function validateVisualBindings(questions, material, context, path7) {
+  const byId = new Map(material.map((item) => [item.id, item]));
+  const bound = /* @__PURE__ */ new Set();
+  questions.forEach((question, questionIndex) => {
+    for (const materialId of question.visual?.materialIds ?? []) {
+      const candidate = byId.get(materialId);
+      if (!candidate || !isImageMaterial(candidate)) {
+        context.addIssue({ code: "custom", path: [path7, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
+        continue;
+      }
+      bound.add(materialId);
+    }
+  });
+  for (const item of material) {
+    if (isImageMaterial(item) && !bound.has(item.id)) context.addIssue({ code: "custom", path: [path7], message: `Image material ${item.id} must be bound to a visual question.` });
+  }
+}
+var inlineRunRequestSchema = external_exports.object({
+  kind: external_exports.literal("poll"),
+  label: external_exports.string().min(1).max(120).optional(),
+  respondents: external_exports.array(respondentProfileSchema).min(1),
+  material: external_exports.array(materialItemSchema).min(1),
+  questions: external_exports.array(decisionQuestionSchema).min(1),
+  ...runProviderSelectionShape,
+  maxCalls: external_exports.number().int().positive()
+}).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
+  const respondentIds = request.respondents.map(({ id }) => id);
+  if (new Set(respondentIds).size !== respondentIds.length) {
+    context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
+  }
+  const materialIds = request.material.map(({ id }) => id);
+  if (new Set(materialIds).size !== materialIds.length) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a run." });
+  }
+  const questionIds = request.questions.map(({ id }) => id);
+  if (new Set(questionIds).size !== questionIds.length) {
+    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
+  }
+  validateMaterialChoices(request.questions, request.material, context);
+  validateVisualBindings(request.questions, request.material, context, "questions");
+  if (request.questions.some((question) => question.visual?.mode === "pixels") && request.provider && String(request.provider.kind) !== "clef") {
+    context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
+  }
+});
+var inlineJourneyRequestSchema = external_exports.object({
+  kind: external_exports.literal("journey"),
+  label: external_exports.string().min(1).max(120).optional(),
+  respondents: external_exports.array(respondentProfileSchema).min(1),
+  journey: journeyDefinitionSchema,
+  ...runProviderSelectionShape,
+  maxCalls: external_exports.number().int().positive()
+}).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
+  const respondentIds = request.respondents.map(({ id }) => id);
+  if (new Set(respondentIds).size !== respondentIds.length) {
+    context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
+  }
+  const visualTasks = request.journey.tasks.filter((task) => task.visual !== void 0);
+  if (visualTasks.some((task) => task.visual?.mode === "pixels") && request.provider && String(request.provider.kind) !== "clef") {
+    context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
+  }
+});
+var evidenceAnswerCriterionSchema = external_exports.discriminatedUnion("type", [
+  external_exports.object({ type: external_exports.literal("choice"), choiceId: external_exports.string().min(1) }).strict(),
+  external_exports.object({ type: external_exports.literal("score"), operator: external_exports.enum(["eq", "lt", "lte", "gt", "gte"]), value: external_exports.number().finite() }).strict(),
+  external_exports.object({ type: external_exports.literal("noul"), operator: external_exports.enum(["eq", "lt", "lte", "gt", "gte"]), value: external_exports.number().finite().min(0).max(1) }).strict()
+]);
+var evidenceCriteriaSchema = external_exports.object({
+  respondentId: external_exports.string().min(1).optional(),
+  status: external_exports.enum(["pending", "answered", "failed", "unreached"]).optional(),
+  questionId: external_exports.string().min(1).optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
+  answer: evidenceAnswerCriterionSchema.optional(),
+  outcome: external_exports.string().min(1).optional()
+}).strict();
+var followOnReferenceSchema = external_exports.object({ evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict();
+var followOnSelectionSchema = external_exports.union([
+  external_exports.object({ criteria: evidenceCriteriaSchema }).strict(),
+  external_exports.object({ references: external_exports.array(followOnReferenceSchema).min(1).max(1e4) }).strict().superRefine((selection, context) => {
+    if (new Set(selection.references.map(({ evaluationId }) => evaluationId)).size !== selection.references.length) {
+      context.addIssue({ code: "custom", path: ["references"], message: "Evaluation references must be unique." });
+    }
+  })
+]);
+var followOnContextSchema = external_exports.object({
+  mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
+  materialIds: external_exports.array(stimulusItemSchema.shape.id).min(1).optional(),
+  includeSelectedMaterial: external_exports.boolean().optional()
+}).strict().superRefine((contextInput, context) => {
+  if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
+    context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
+  }
+  if (contextInput.mode === "recorded" && contextInput.materialIds) {
+    context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
+  }
+  if (contextInput.includeSelectedMaterial && contextInput.mode !== "fresh-material" && contextInput.mode !== "omit-history") {
+    context.addIssue({ code: "custom", path: ["includeSelectedMaterial"], message: "Selected Choice material requires fresh-material or omit-history context." });
+  }
+});
+var followOnRunRequestSchema = external_exports.object({
+  kind: external_exports.literal("follow-on"),
+  label: external_exports.string().min(1).max(120).optional(),
+  sourceRunId: external_exports.string().uuid(),
+  selection: followOnSelectionSchema,
+  context: followOnContextSchema,
+  material: external_exports.array(materialItemSchema).min(1).optional(),
+  questions: external_exports.array(decisionQuestionSchema).min(1),
+  ...runProviderSelectionShape,
+  maxCalls: external_exports.number().int().positive()
+}).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
+  const questionIds = request.questions.map(({ id }) => id);
+  if (new Set(questionIds).size !== questionIds.length) {
+    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
+  }
+  if (request.context.includeSelectedMaterial && "criteria" in request.selection) {
+    if (!request.selection.criteria.questionId) {
+      context.addIssue({ code: "custom", path: ["selection", "criteria", "questionId"], message: "Selected-material criteria must identify the source Choice question." });
+    }
+    if (request.selection.criteria.answer) {
+      context.addIssue({ code: "custom", path: ["selection", "criteria", "answer"], message: "Selected-material criteria must include all answers to report mapped and unmapped selections." });
+    }
+  }
+  const hasMaterial = Boolean(request.context.includeSelectedMaterial || request.material?.length || request.context.materialIds?.length);
+  if ((request.context.mode === "fresh-material" || request.context.mode === "omit-history") && !hasMaterial) {
+    context.addIssue({ code: "custom", path: ["context", "materialIds"], message: `${request.context.mode} context requires explicit material or material references.` });
+  }
+  if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
+  }
+  if (request.material) {
+    if (request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs is not supported in this slice." });
+    validateVisualBindings(request.questions, request.material, context, "questions");
+  }
+  if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
+  }
+  if (request.context.mode === "recorded" && request.material) {
+    context.addIssue({ code: "custom", path: ["material"], message: "Recorded context does not allow material changes." });
+  }
+});
+var followOnExclusionSchema = external_exports.object({
+  sourceEvaluationId: external_exports.string().uuid(),
+  sourceContextId: external_exports.string().uuid(),
+  respondentId: external_exports.string().min(1),
+  status: evaluationStatusSchema,
+  reason: external_exports.enum(["pending", "failed", "unreached", "nonChoice", "unmappedChoice"]),
+  choiceId: external_exports.string().min(1).optional(),
+  choiceMeaning: external_exports.string().min(1).optional()
+}).strict();
+var selectionCoverageSchema = external_exports.object({
+  matched: external_exports.number().int().nonnegative(),
+  eligible: external_exports.number().int().nonnegative(),
+  excluded: external_exports.object({
+    pending: external_exports.number().int().nonnegative(),
+    failed: external_exports.number().int().nonnegative(),
+    unreached: external_exports.number().int().nonnegative(),
+    nonChoice: external_exports.number().int().nonnegative(),
+    unmappedChoice: external_exports.number().int().nonnegative()
+  }).strict()
+}).strict().superRefine((coverage, context) => {
+  const excludedCount = Object.values(coverage.excluded).reduce((sum2, count2) => sum2 + count2, 0);
+  if (coverage.eligible > coverage.matched || coverage.eligible + excludedCount !== coverage.matched) {
+    context.addIssue({ code: "custom", path: ["excluded"], message: "Eligible and excluded counts must account for every matched source evaluation." });
+  }
+});
+var selectedMaterialEvidenceSchema = external_exports.object({
+  materialId: stimulusItemSchema.shape.id,
+  text: stimulusItemSchema.shape.text,
+  sourceId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+  textSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var followOnLineageSchema = external_exports.object({
+  sourceRunId: external_exports.string().uuid(),
+  sourceStatusAtAcceptance: runStatusSchema,
+  sourceCompleteAtAcceptance: external_exports.boolean(),
+  sourceVersion: external_exports.object({ status: runStatusSchema, usedCalls: external_exports.number().int().nonnegative(), reservedCalls: external_exports.number().int().nonnegative(), maxOrdinal: external_exports.number().int().min(-1) }).strict(),
+  sourceAvailable: external_exports.boolean().optional(),
+  sourceRecordState: external_exports.enum(["live", "historical"]).optional(),
+  selectionCoverage: selectionCoverageSchema.optional(),
+  excludedSelections: external_exports.array(followOnExclusionSchema).default([]),
+  selections: external_exports.array(external_exports.object({
+    sourceEvaluationId: external_exports.string().uuid(),
+    sourceContextId: external_exports.string().uuid(),
+    respondentId: external_exports.string().min(1),
+    evaluationId: external_exports.string().uuid(),
+    contextId: external_exports.string().uuid(),
+    selectedMaterial: selectedMaterialEvidenceSchema.optional()
+  }).strict()),
+  materialSnapshots: external_exports.array(external_exports.object({ contextId: external_exports.string().uuid(), respondentId: external_exports.string().min(1), materials: external_exports.array(materialItemSchema) }).strict()).default([])
+}).strict();
+var runListQuerySchema = external_exports.object({
+  status: runStatusSchema.optional(),
+  label: external_exports.string().min(1).optional(),
+  createdAfter: external_exports.string().datetime().optional(),
+  createdBefore: external_exports.string().datetime().optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
+  cursor: external_exports.string().optional(),
+  limit: external_exports.number().int().min(1).max(200).optional()
+}).strict().superRefine((query, context) => {
+  if (query.createdAfter && query.createdBefore && Date.parse(query.createdAfter) > Date.parse(query.createdBefore)) {
+    context.addIssue({ code: "custom", path: ["createdBefore"], message: "createdBefore must not precede createdAfter." });
+  }
+});
+var runEvidenceQuerySchema = external_exports.object({
+  sourceRunId: external_exports.string().uuid(),
+  criteria: evidenceCriteriaSchema.default({}),
+  cursor: external_exports.string().optional(),
+  limit: external_exports.number().int().min(1).max(200).optional()
+}).strict();
+var runEvidenceItemSchema = external_exports.object({
+  sourceRunId: external_exports.string().uuid(),
+  evaluationId: external_exports.string().uuid(),
+  contextId: external_exports.string().uuid(),
+  respondentId: external_exports.string().min(1),
+  questionId: external_exports.string().min(1),
+  status: evaluationStatusSchema,
+  result: decisionResultSchema.optional(),
+  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
+  selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+  execution: providerExecutionEvidenceSchema.optional(),
+  turnId: external_exports.string().min(1).optional(),
+  nodeId: external_exports.string().min(1).optional(),
+  occurrence: external_exports.number().int().positive().optional(),
+  outcome: external_exports.string().optional(),
+  provenance: external_exports.object({ provider: providerKindSchema, model: external_exports.string().min(1), endpoint: external_exports.string().optional(), compilerFingerprint: external_exports.string().min(1), contextFingerprint: external_exports.string().min(1) }).strict()
+}).strict();
+var runLifecycleSchema = external_exports.object({
+  state: runLifecycleStateSchema,
+  resume: external_exports.discriminatedUnion("eligible", [
+    external_exports.object({ eligible: external_exports.literal(true) }).strict(),
+    external_exports.object({ eligible: external_exports.literal(false), reason: resumeRefusalReasonSchema }).strict()
+  ])
+}).strict();
+var runEvidencePageSchema = external_exports.object({
+  items: external_exports.array(runEvidenceItemSchema),
+  totalMatches: external_exports.number().int().nonnegative(),
+  sourceRunId: external_exports.string().uuid(),
+  sourceStatus: runStatusSchema,
+  sourceComplete: external_exports.boolean(),
+  lifecycle: runLifecycleSchema,
+  coverage: external_exports.object({
+    totalEvaluations: external_exports.number().int().nonnegative(),
+    completedEvaluations: external_exports.number().int().nonnegative(),
+    failedEvaluations: external_exports.number().int().nonnegative(),
+    respondents: external_exports.object({ total: external_exports.number().int().nonnegative(), active: external_exports.number().int().nonnegative(), completed: external_exports.number().int().nonnegative(), failed: external_exports.number().int().nonnegative(), unreached: external_exports.number().int().nonnegative() }).strict()
+  }).strict(),
+  matchedCoverage: external_exports.object({
+    evaluations: external_exports.object({ total: external_exports.number().int().nonnegative(), pending: external_exports.number().int().nonnegative(), answered: external_exports.number().int().nonnegative(), failed: external_exports.number().int().nonnegative(), unreached: external_exports.number().int().nonnegative() }).strict(),
+    representedRespondents: external_exports.number().int().nonnegative(),
+    selectedMaterials: external_exports.object({ evaluations: external_exports.number().int().nonnegative(), respondents: external_exports.number().int().nonnegative(), distinctMaterials: external_exports.number().int().nonnegative() }).strict()
+  }).strict(),
+  nextCursor: external_exports.string().min(1).optional()
+}).strict();
+var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
+function requireExplicitProvider(request) {
+  if (!request.provider) throw new Error("Automatic provider selection has been accepted as a request contract but is not yet available in this execution path.");
+  return providerConfigSchema.parse(request.provider);
+}
+
 // src/application/question-worker.ts
 var HEARTBEAT_MS = 2e3;
 async function executeQuestionRun(persistence, runId2, providerFactory, providerOptions = {}) {
@@ -20391,7 +21209,7 @@ async function executeQuestionRun(persistence, runId2, providerFactory, provider
 }
 async function executePoll(reads, commands, runId2, claim2, providerFactory, providerOptions) {
   const prepared = reads.getRequest(runId2);
-  const provider = providerFactory(prepared.request.provider, providerOptions);
+  const provider = providerFactory(requireExplicitProvider(prepared.request), providerOptions);
   const answers = new Map(reads.evaluationStatuses(runId2).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations2 = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
@@ -20449,7 +21267,7 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory, pro
 }
 async function executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions) {
   const accepted = reads.getJourneyRun(runId2);
-  const provider = providerFactory(accepted.request.provider, providerOptions);
+  const provider = providerFactory(requireExplicitProvider(accepted.request), providerOptions);
   while (true) {
     if (!commands.heartbeat(claim2, Date.now())) return;
     const reservation = commands.reserveNext(claim2, Date.now());
@@ -25575,64 +26393,6 @@ function parseJsonRecord(value, label) {
   return parsed;
 }
 
-// src/domain/run/lifecycle.ts
-var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
-var runStatusSchema = external_exports.enum(runStatuses);
-var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
-var evaluationStatusSchema = external_exports.enum(evaluationStatuses);
-var journeyRespondentStatuses = ["active", "completed", "failed", "unreached"];
-var journeyRespondentStatusSchema = external_exports.enum(journeyRespondentStatuses);
-var attemptStatuses = ["reserved", "answered", "failed", "uncertain"];
-var attemptStatusSchema = external_exports.enum(attemptStatuses);
-var runLifecycleStates = ["active", "stopped", "complete"];
-var runLifecycleStateSchema = external_exports.enum(runLifecycleStates);
-var resumeRefusalReasons = ["already_active", "already_completed", "cancelled", "unsupported_status", "partial_journey", "cancellation_requested", "attempt_unresolved", "call_allowance_exhausted", "no_unfinished_work"];
-var resumeRefusalReasonSchema = external_exports.enum(resumeRefusalReasons);
-function deriveRunLifecycle(facts) {
-  const state = facts.status === "completed" ? "complete" : facts.status === "prepared" || facts.status === "running" ? "active" : "stopped";
-  const refuse = (reason) => ({ state, resume: { eligible: false, reason } });
-  if (facts.status === "prepared" || facts.status === "running") return refuse("already_active");
-  if (facts.status === "completed") return refuse("already_completed");
-  if (facts.status === "cancelled") return refuse("cancelled");
-  if (facts.status !== "interrupted" && facts.status !== "failed" && facts.status !== "partial") return refuse("unsupported_status");
-  if (facts.cancelRequested) return refuse("cancellation_requested");
-  if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
-  if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
-  if (facts.status === "partial" && facts.kind === "journey" && !facts.hasRetryableJourneyFailure) return refuse("partial_journey");
-  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && (facts.kind === "journey" ? facts.hasRetryableJourneyFailure : facts.hasFailedEvaluations) || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
-  if (!hasResumableWork) return refuse("no_unfinished_work");
-  return { state, resume: { eligible: true } };
-}
-function resumeRefusalMessage(reason) {
-  switch (reason) {
-    case "already_active":
-      return "A run that is already active does not need to be resumed.";
-    case "already_completed":
-      return "A completed run cannot be resumed.";
-    case "cancelled":
-      return "A cancelled run cannot be resumed.";
-    case "unsupported_status":
-      return "This run state cannot be resumed.";
-    case "partial_journey":
-      return "A partial journey run cannot be resumed from this state.";
-    case "cancellation_requested":
-      return "A run with a cancellation request cannot be resumed.";
-    case "attempt_unresolved":
-      return "A run with an unresolved provider attempt cannot be resumed.";
-    case "call_allowance_exhausted":
-      return "This run has no remaining provider-call allowance.";
-    case "no_unfinished_work":
-      return "This run has no resumable unfinished work.";
-  }
-}
-var journeyRouteEntrySchema = external_exports.object({
-  nodeId: external_exports.string().min(1),
-  response: decisionValueSchema,
-  toNodeId: external_exports.string().min(1)
-}).strict();
-var journeyEventsSchema = external_exports.array(promptHistoryEventSchema);
-var journeyRouteSchema = external_exports.array(journeyRouteEntrySchema);
-
 // src/infrastructure/sqlite/tables.ts
 var runs = sqliteTable("runs", {
   runId: text("run_id").notNull(),
@@ -26238,662 +26998,6 @@ function openSqliteConnection(databasePath, dataRoot) {
 
 // src/infrastructure/sqlite/command-repository.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-
-// src/providers/jev/config.ts
-var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
-var routeDefaults = {
-  openrouter: {
-    model: "typesafe/jev-1.13",
-    endpoint: "https://openrouter.ai/api/alpha/decisions"
-  },
-  typesafe: {
-    model: "jev-latest",
-    endpoint: "https://api.typesafe.ai/v1/systemone"
-  }
-};
-var jevConfigInputSchema = external_exports.object({
-  kind: external_exports.literal("jev"),
-  route: jevRouteSchema.optional(),
-  model: external_exports.string().min(1).optional(),
-  endpoint: external_exports.string().url().optional(),
-  timeoutMs: external_exports.number().int().positive().optional()
-}).strict().superRefine((input2, context) => {
-  if (input2.endpoint === void 0) return;
-  let endpoint;
-  try {
-    endpoint = new URL(input2.endpoint);
-  } catch {
-    return;
-  }
-  const expectedOrigin = new URL(routeDefaults[input2.route ?? "openrouter"].endpoint).origin;
-  if (endpoint.origin !== expectedOrigin || endpoint.username || endpoint.password) {
-    context.addIssue({ code: "custom", path: ["endpoint"], message: "Jev endpoint must use the selected provider HTTPS origin without URL credentials." });
-  }
-});
-var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
-  const route = input2.route ?? "openrouter";
-  const defaults = routeDefaults[route];
-  return {
-    kind: "jev",
-    route,
-    model: input2.model ?? defaults.model,
-    endpoint: input2.endpoint ?? defaults.endpoint,
-    timeoutMs: input2.timeoutMs ?? 3e4
-  };
-});
-
-// src/providers/clef/config.ts
-var clefConfigSchema = external_exports.object({
-  kind: external_exports.literal("clef"),
-  accountId: external_exports.string().regex(/^[a-f0-9]{32}$/),
-  model: external_exports.enum(["clef", "clef-flash"]).default("clef"),
-  timeoutMs: external_exports.number().int().positive().default(3e4)
-}).strict();
-function clefEndpoint(config2) {
-  return `https://api.cloudflare.com/client/v4/accounts/${config2.accountId}/ai/run/@cf/cloudflare/${config2.model}`;
-}
-
-// src/providers/config.ts
-var layaConfigSchema = external_exports.object({
-  kind: external_exports.literal(providerKinds[1]),
-  baseUrl: external_exports.string().url(),
-  checkpoint: external_exports.string().min(1),
-  contextLimit: external_exports.number().int().positive(),
-  headLimit: external_exports.number().int().positive(),
-  tokenizerJsonPath: external_exports.string().min(1),
-  tokenizerSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  precision: external_exports.string().min(1).optional(),
-  timeoutMs: external_exports.number().int().positive()
-}).strict();
-var providerConfigSchema = external_exports.union([
-  jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
-  layaConfigSchema,
-  clefConfigSchema
-]);
-
-// src/domain/study/presentation.ts
-var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var nodeSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ id: identifier3, kind: external_exports.literal("expose"), itemId: identifier3 }).strict(),
-  external_exports.object({ id: identifier3, kind: external_exports.literal("ask"), taskId: identifier3 }).strict(),
-  external_exports.object({ id: identifier3, kind: external_exports.literal("terminal"), outcome: identifier3 }).strict()
-]);
-var responseIntervalSchema = external_exports.object({
-  type: routeableDecisionTypeSchema,
-  minimum: external_exports.number().finite(),
-  maximum: external_exports.number().finite(),
-  minimumInclusive: external_exports.boolean(),
-  maximumInclusive: external_exports.boolean()
-}).strict();
-var transitionSchema = external_exports.object({
-  fromNodeId: identifier3,
-  optionId: identifier3.optional(),
-  when: responseIntervalSchema.optional(),
-  toNodeId: identifier3
-}).strict();
-var presentationSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
-  external_exports.object({
-    kind: external_exports.literal("graph"),
-    nodes: external_exports.array(nodeSchema).min(1),
-    transitions: external_exports.array(transitionSchema),
-    entryNodeId: identifier3,
-    maxDecisions: external_exports.number().int().positive()
-  }).strict()
-]);
-
-// src/domain/study/task.ts
-var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose2 = external_exports.string().trim().min(1);
-var choiceText2 = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
-var taskFields = {
-  id: identifier4,
-  instructions: prose2,
-  comparisonKey: identifier4.optional(),
-  responseHistory: external_exports.enum(["include", "omit"]).optional(),
-  visual: visualBindingSchema.optional()
-};
-var options = external_exports.record(identifier4, choiceText2).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
-var materialOptions = external_exports.record(identifier4, identifier4).optional();
-function validateChoiceTask(task, context) {
-  if (typeof task !== "object" || task === null || !("options" in task)) return;
-  const optionsValue = task.options;
-  if (typeof optionsValue !== "object" || optionsValue === null || Array.isArray(optionsValue)) return;
-  const choiceOptions = optionsValue;
-  if ("answerKeyOptionId" in task) {
-    const answerKeyOptionId = task.answerKeyOptionId;
-    if (typeof answerKeyOptionId === "string" && answerKeyOptionId && !Object.hasOwn(choiceOptions, answerKeyOptionId)) {
-      context.addIssue({ code: "custom", path: ["answerKeyOptionId"], message: `Answer key must identify an offered option. Unknown option ${answerKeyOptionId}.` });
-    }
-  }
-  if ("materialOptions" in task && typeof task.materialOptions === "object" && task.materialOptions !== null && !Array.isArray(task.materialOptions)) {
-    const materialOptions2 = task.materialOptions;
-    for (const optionId of Object.keys(materialOptions2)) {
-      if (!Object.hasOwn(choiceOptions, optionId)) {
-        context.addIssue({ code: "custom", path: ["materialOptions", optionId], message: `Material link references unknown option ${optionId}.` });
-      }
-    }
-    if (new Set(Object.values(materialOptions2)).size !== Object.keys(materialOptions2).length) {
-      context.addIssue({ code: "custom", path: ["materialOptions"], message: "Each material may be linked from at most one option." });
-    }
-  }
-}
-var legacyChoiceTaskSchema = external_exports.object({
-  ...taskFields,
-  options,
-  materialOptions,
-  answerKeyOptionId: identifier4.optional()
-}).strict().superRefine(validateChoiceTask);
-var typedChoiceTaskSchema = external_exports.object({
-  ...taskFields,
-  type: external_exports.literal(decisionTypes.choice),
-  options,
-  materialOptions,
-  answerKeyOptionId: identifier4.optional()
-}).strict().superRefine(validateChoiceTask);
-var scoreTaskSchema = external_exports.object({
-  ...taskFields,
-  type: external_exports.literal(decisionTypes.score),
-  rubric: external_exports.array(prose2).min(2)
-}).strict();
-var noulTaskSchema = external_exports.object({
-  ...taskFields,
-  type: external_exports.literal(decisionTypes.noul),
-  criteria: external_exports.object({ true: prose2.optional(), false: prose2.optional() }).strict().optional()
-}).strict();
-var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
-var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
-
-// src/domain/study/arm.ts
-var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var prose3 = external_exports.string().trim().min(1);
-var journeyDefinitionFields = {
-  id: identifier5,
-  label: prose3,
-  items: external_exports.array(materialItemSchema).min(1),
-  tasks: external_exports.array(taskSchema).min(1),
-  presentation: presentationSchema
-};
-var journeyDefinitionSchema = external_exports.object(journeyDefinitionFields).strict().superRefine(validateJourneyDefinition);
-var studyArmSchema = external_exports.object({
-  ...journeyDefinitionFields,
-  sources: external_exports.array(sourceReferenceSchema).min(1)
-}).strict().superRefine(validateJourneyDefinition);
-function validateJourneyDefinition(arm, context) {
-  const presentation = arm.presentation;
-  const nodeValues = presentation.kind === "sequence" ? [] : presentation.nodes;
-  const nodeIdValues = nodeValues.map((node2) => node2.id);
-  const itemIdValues = arm.items.map((item) => item.id);
-  const taskIdValues = arm.tasks.map((task) => task.id);
-  const itemIds = new Set(itemIdValues);
-  const taskById = new Map(arm.tasks.map((task) => [task.id, task]));
-  const allIds = [...itemIdValues, ...taskIdValues, ...nodeIdValues];
-  if (new Set(allIds).size !== allIds.length) {
-    context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
-  }
-  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
-  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
-    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
-  }
-  for (const [taskIndex, task] of arm.tasks.entries()) {
-    if (task.type !== "choice" || !task.materialOptions) continue;
-    for (const [optionId, materialId] of Object.entries(task.materialOptions)) {
-      const item = arm.items.find((candidate) => candidate.id === materialId);
-      if (!item) {
-        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
-        continue;
-      }
-      if (isImageMaterial(item)) {
-        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can only link to text material.` });
-        continue;
-      }
-      if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
-        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
-      }
-      if (task.options[optionId] !== item.text) {
-        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
-      }
-    }
-  }
-  const imageIds = new Set(arm.items.filter(isImageMaterial).map((item) => item.id));
-  for (const [taskIndex, task] of arm.tasks.entries()) {
-    if (!task.visual) continue;
-    for (const materialId of task.visual.materialIds) {
-      if (!imageIds.has(materialId)) context.addIssue({ code: "custom", path: ["tasks", taskIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
-    }
-  }
-  if (presentation.kind === "sequence") return;
-  const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
-  if (!nodesById.has(presentation.entryNodeId)) {
-    context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
-  }
-  for (const [index2, node2] of presentation.nodes.entries()) {
-    if (node2.kind === "expose" && !itemIds.has(node2.itemId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index2, "itemId"], message: `Node references unknown item ${node2.itemId}.` });
-    }
-    if (node2.kind === "ask" && !taskById.has(node2.taskId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes", index2, "taskId"], message: `Node references unknown task ${node2.taskId}.` });
-    }
-  }
-  const outgoing = /* @__PURE__ */ new Map();
-  for (const [index2, edge] of presentation.transitions.entries()) {
-    const source = nodesById.get(edge.fromNodeId);
-    if (!source) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2, "fromNodeId"], message: `Transition references unknown source node ${edge.fromNodeId}.` });
-      continue;
-    }
-    if (!nodesById.has(edge.toNodeId)) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2, "toNodeId"], message: `Transition references unknown target node ${edge.toNodeId}.` });
-    }
-    const edges = outgoing.get(edge.fromNodeId) ?? [];
-    outgoing.set(edge.fromNodeId, [...edges, edge]);
-    if (source.kind === "terminal") {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Terminal nodes cannot have outgoing transitions." });
-    }
-    if (source.kind === "expose" && (edge.optionId !== void 0 || edge.when !== void 0)) {
-      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Exposure transitions must be unconditional." });
-    }
-  }
-  for (const [index2, node2] of presentation.nodes.entries()) {
-    const edges = outgoing.get(node2.id) ?? [];
-    if (node2.kind === "terminal") {
-      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Terminal nodes cannot have outgoing transitions." });
-      continue;
-    }
-    if (node2.kind === "expose") {
-      if (edges.length !== 1 || edges[0]?.optionId !== void 0 || edges[0]?.when !== void 0) {
-        context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Each exposure node must have exactly one unconditional transition." });
-      }
-      continue;
-    }
-    const task = taskById.get(node2.taskId);
-    if (!task) continue;
-    if (task.type !== "score" && task.type !== "noul") {
-      const optionIds = Object.keys(task.options);
-      const edgeOptionIds = edges.map((edge) => edge.optionId);
-      if (edges.some((edge) => edge.when !== void 0) || edgeOptionIds.some((optionId) => optionId === void 0) || new Set(edgeOptionIds).size !== edgeOptionIds.length || edgeOptionIds.length !== optionIds.length || optionIds.some((optionId) => !edgeOptionIds.includes(optionId))) {
-        context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Choice task transitions must contain exactly one edge for every offered option and no others." });
-      }
-    } else {
-      const maximum = task.type === "score" ? task.rubric.length - 1 : 1;
-      validateResponseIntervals(edges, task.type, maximum, context, index2);
-    }
-  }
-  if (nodesById.has(presentation.entryNodeId)) {
-    const visited = /* @__PURE__ */ new Set();
-    const pending = [presentation.entryNodeId];
-    while (pending.length > 0) {
-      const current = pending.pop();
-      if (visited.has(current)) continue;
-      visited.add(current);
-      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
-    }
-    const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
-    if (unreachable.length > 0) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains unreachable nodes: ${unreachable.join(", ")}.` });
-    }
-    const state = /* @__PURE__ */ new Map();
-    const decisionsToTerminal = /* @__PURE__ */ new Map();
-    let containsCycle = false;
-    const longestDecisionsToTerminal = (nodeId) => {
-      const node2 = nodesById.get(nodeId);
-      if (!node2) return null;
-      if (state.get(nodeId) === "visiting") {
-        containsCycle = true;
-        return null;
-      }
-      if (state.get(nodeId) === "visited") return decisionsToTerminal.get(nodeId) ?? null;
-      state.set(nodeId, "visiting");
-      let longest;
-      if (node2.kind === "terminal") {
-        longest = 0;
-      } else {
-        const edges = outgoing.get(nodeId) ?? [];
-        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
-        const completedContinuations = continuations.filter((count2) => count2 !== null);
-        if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
-          longest = null;
-        } else {
-          const nextDecisionCount = Math.max(...completedContinuations);
-          longest = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
-        }
-      }
-      state.set(nodeId, "visited");
-      decisionsToTerminal.set(nodeId, longest);
-      return longest;
-    };
-    const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
-    if (containsCycle) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Graph contains a cycle; every journey must terminate." });
-    } else if (longestPath === null) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Every graph branch must reach a terminal node." });
-    } else if (longestPath > presentation.maxDecisions) {
-      context.addIssue({
-        code: "custom",
-        path: ["presentation", "maxDecisions"],
-        message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`
-      });
-    }
-  }
-}
-function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
-  const issues = context;
-  const ranges = edges.map((edge, index2) => ({ edge, index: index2, range: edge.when }));
-  const fail = (message) => issues.addIssue({
-    code: "custom",
-    path: ["presentation", "nodes", nodeIndex],
-    message
-  });
-  if (ranges.some(({ edge, range }) => edge.optionId !== void 0 || range === void 0 || range.type !== type)) {
-    fail(`${type.toUpperCase()} task transitions must use matching typed response intervals only.`);
-    return;
-  }
-  const ordered = ranges.toSorted((left, right) => left.range.minimum - right.range.minimum || Number(right.range.minimumInclusive) - Number(left.range.minimumInclusive));
-  for (const { range } of ordered) {
-    if (range.minimum > range.maximum || range.minimum < 0 || range.maximum > maximum || range.minimum === range.maximum && !(range.minimumInclusive && range.maximumInclusive)) {
-      fail(`${type.toUpperCase()} route interval is reversed, empty, or outside its response domain.`);
-      return;
-    }
-  }
-  const first = ordered[0]?.range;
-  const last = ordered.at(-1)?.range;
-  if (!first || !last || first.minimum !== 0 || !first.minimumInclusive || last.maximum !== maximum || !last.maximumInclusive) {
-    fail(`${type.toUpperCase()} route intervals must cover the complete response domain.`);
-    return;
-  }
-  for (let index2 = 1; index2 < ordered.length; index2 += 1) {
-    const previous = ordered[index2 - 1].range;
-    const current = ordered[index2].range;
-    if (previous.maximum > current.minimum || previous.maximum === current.minimum && previous.maximumInclusive && current.minimumInclusive) {
-      fail(`${type.toUpperCase()} route intervals overlap or leave an ambiguous boundary.`);
-      return;
-    }
-    if (previous.maximum < current.minimum || previous.maximum === current.minimum && !previous.maximumInclusive && !current.minimumInclusive) {
-      fail(`${type.toUpperCase()} route intervals leave a gap in the response domain.`);
-      return;
-    }
-  }
-}
-
-// src/domain/run/request.ts
-function validateMaterialChoices(questions, material, context) {
-  const materials = new Map(material.map((item) => [item.id, item]));
-  questions.forEach((question, questionIndex) => {
-    if (question.type !== void 0 && question.type !== "choice" || !question.materialOptions || !question.options) return;
-    for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
-      const issuePath = ["questions", questionIndex, "materialOptions", optionId];
-      const candidate = materials.get(materialId);
-      if (!candidate) {
-        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} references unknown material ${materialId}.` });
-        continue;
-      }
-      if (isImageMaterial(candidate)) {
-        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
-        continue;
-      }
-      if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
-        context.addIssue({ code: "custom", path: issuePath, message: `Material ${materialId} requires source identity and digest before it can be linked.` });
-      }
-      if (question.options[optionId] !== candidate.text) {
-        context.addIssue({ code: "custom", path: ["questions", questionIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
-      }
-    }
-  });
-}
-function validateVisualBindings(questions, material, context, path7) {
-  const byId = new Map(material.map((item) => [item.id, item]));
-  const bound = /* @__PURE__ */ new Set();
-  questions.forEach((question, questionIndex) => {
-    for (const materialId of question.visual?.materialIds ?? []) {
-      const candidate = byId.get(materialId);
-      if (!candidate || !isImageMaterial(candidate)) {
-        context.addIssue({ code: "custom", path: [path7, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
-        continue;
-      }
-      bound.add(materialId);
-    }
-  });
-  for (const item of material) {
-    if (isImageMaterial(item) && !bound.has(item.id)) context.addIssue({ code: "custom", path: [path7], message: `Image material ${item.id} must be bound to a visual question.` });
-  }
-}
-var inlineRunRequestSchema = external_exports.object({
-  kind: external_exports.literal("poll"),
-  label: external_exports.string().min(1).max(120).optional(),
-  respondents: external_exports.array(respondentProfileSchema).min(1),
-  material: external_exports.array(materialItemSchema).min(1),
-  questions: external_exports.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
-  maxCalls: external_exports.number().int().positive()
-}).strict().superRefine((request, context) => {
-  const respondentIds = request.respondents.map(({ id }) => id);
-  if (new Set(respondentIds).size !== respondentIds.length) {
-    context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
-  }
-  const materialIds = request.material.map(({ id }) => id);
-  if (new Set(materialIds).size !== materialIds.length) {
-    context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a run." });
-  }
-  const questionIds = request.questions.map(({ id }) => id);
-  if (new Set(questionIds).size !== questionIds.length) {
-    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
-  }
-  validateMaterialChoices(request.questions, request.material, context);
-  validateVisualBindings(request.questions, request.material, context, "questions");
-  if (request.questions.some((question) => question.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
-    context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
-  }
-});
-var inlineJourneyRequestSchema = external_exports.object({
-  kind: external_exports.literal("journey"),
-  label: external_exports.string().min(1).max(120).optional(),
-  respondents: external_exports.array(respondentProfileSchema).min(1),
-  journey: journeyDefinitionSchema,
-  provider: providerConfigSchema,
-  maxCalls: external_exports.number().int().positive()
-}).strict().superRefine((request, context) => {
-  const respondentIds = request.respondents.map(({ id }) => id);
-  if (new Set(respondentIds).size !== respondentIds.length) {
-    context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
-  }
-  const visualTasks = request.journey.tasks.filter((task) => task.visual !== void 0);
-  if (visualTasks.some((task) => task.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
-    context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
-  }
-});
-var evidenceAnswerCriterionSchema = external_exports.discriminatedUnion("type", [
-  external_exports.object({ type: external_exports.literal("choice"), choiceId: external_exports.string().min(1) }).strict(),
-  external_exports.object({ type: external_exports.literal("score"), operator: external_exports.enum(["eq", "lt", "lte", "gt", "gte"]), value: external_exports.number().finite() }).strict(),
-  external_exports.object({ type: external_exports.literal("noul"), operator: external_exports.enum(["eq", "lt", "lte", "gt", "gte"]), value: external_exports.number().finite().min(0).max(1) }).strict()
-]);
-var evidenceCriteriaSchema = external_exports.object({
-  respondentId: external_exports.string().min(1).optional(),
-  status: external_exports.enum(["pending", "answered", "failed", "unreached"]).optional(),
-  questionId: external_exports.string().min(1).optional(),
-  materialId: stimulusItemSchema.shape.id.optional(),
-  answer: evidenceAnswerCriterionSchema.optional(),
-  outcome: external_exports.string().min(1).optional()
-}).strict();
-var followOnReferenceSchema = external_exports.object({ evaluationId: external_exports.string().uuid(), contextId: external_exports.string().uuid() }).strict();
-var followOnSelectionSchema = external_exports.union([
-  external_exports.object({ criteria: evidenceCriteriaSchema }).strict(),
-  external_exports.object({ references: external_exports.array(followOnReferenceSchema).min(1).max(1e4) }).strict().superRefine((selection, context) => {
-    if (new Set(selection.references.map(({ evaluationId }) => evaluationId)).size !== selection.references.length) {
-      context.addIssue({ code: "custom", path: ["references"], message: "Evaluation references must be unique." });
-    }
-  })
-]);
-var followOnContextSchema = external_exports.object({
-  mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
-  materialIds: external_exports.array(stimulusItemSchema.shape.id).min(1).optional(),
-  includeSelectedMaterial: external_exports.boolean().optional()
-}).strict().superRefine((contextInput, context) => {
-  if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
-    context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
-  }
-  if (contextInput.mode === "recorded" && contextInput.materialIds) {
-    context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
-  }
-  if (contextInput.includeSelectedMaterial && contextInput.mode !== "fresh-material" && contextInput.mode !== "omit-history") {
-    context.addIssue({ code: "custom", path: ["includeSelectedMaterial"], message: "Selected Choice material requires fresh-material or omit-history context." });
-  }
-});
-var followOnRunRequestSchema = external_exports.object({
-  kind: external_exports.literal("follow-on"),
-  label: external_exports.string().min(1).max(120).optional(),
-  sourceRunId: external_exports.string().uuid(),
-  selection: followOnSelectionSchema,
-  context: followOnContextSchema,
-  material: external_exports.array(materialItemSchema).min(1).optional(),
-  questions: external_exports.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
-  maxCalls: external_exports.number().int().positive()
-}).strict().superRefine((request, context) => {
-  const questionIds = request.questions.map(({ id }) => id);
-  if (new Set(questionIds).size !== questionIds.length) {
-    context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
-  }
-  if (request.context.includeSelectedMaterial && "criteria" in request.selection) {
-    if (!request.selection.criteria.questionId) {
-      context.addIssue({ code: "custom", path: ["selection", "criteria", "questionId"], message: "Selected-material criteria must identify the source Choice question." });
-    }
-    if (request.selection.criteria.answer) {
-      context.addIssue({ code: "custom", path: ["selection", "criteria", "answer"], message: "Selected-material criteria must include all answers to report mapped and unmapped selections." });
-    }
-  }
-  const hasMaterial = Boolean(request.context.includeSelectedMaterial || request.material?.length || request.context.materialIds?.length);
-  if ((request.context.mode === "fresh-material" || request.context.mode === "omit-history") && !hasMaterial) {
-    context.addIssue({ code: "custom", path: ["context", "materialIds"], message: `${request.context.mode} context requires explicit material or material references.` });
-  }
-  if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
-    context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
-  }
-  if (request.material) {
-    if (request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs is not supported in this slice." });
-    validateVisualBindings(request.questions, request.material, context, "questions");
-  }
-  if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
-    context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
-  }
-  if (request.context.mode === "recorded" && request.material) {
-    context.addIssue({ code: "custom", path: ["material"], message: "Recorded context does not allow material changes." });
-  }
-});
-var followOnExclusionSchema = external_exports.object({
-  sourceEvaluationId: external_exports.string().uuid(),
-  sourceContextId: external_exports.string().uuid(),
-  respondentId: external_exports.string().min(1),
-  status: evaluationStatusSchema,
-  reason: external_exports.enum(["pending", "failed", "unreached", "nonChoice", "unmappedChoice"]),
-  choiceId: external_exports.string().min(1).optional(),
-  choiceMeaning: external_exports.string().min(1).optional()
-}).strict();
-var selectionCoverageSchema = external_exports.object({
-  matched: external_exports.number().int().nonnegative(),
-  eligible: external_exports.number().int().nonnegative(),
-  excluded: external_exports.object({
-    pending: external_exports.number().int().nonnegative(),
-    failed: external_exports.number().int().nonnegative(),
-    unreached: external_exports.number().int().nonnegative(),
-    nonChoice: external_exports.number().int().nonnegative(),
-    unmappedChoice: external_exports.number().int().nonnegative()
-  }).strict()
-}).strict().superRefine((coverage, context) => {
-  const excludedCount = Object.values(coverage.excluded).reduce((sum2, count2) => sum2 + count2, 0);
-  if (coverage.eligible > coverage.matched || coverage.eligible + excludedCount !== coverage.matched) {
-    context.addIssue({ code: "custom", path: ["excluded"], message: "Eligible and excluded counts must account for every matched source evaluation." });
-  }
-});
-var selectedMaterialEvidenceSchema = external_exports.object({
-  materialId: stimulusItemSchema.shape.id,
-  text: stimulusItemSchema.shape.text,
-  sourceId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
-  textSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-}).strict();
-var followOnLineageSchema = external_exports.object({
-  sourceRunId: external_exports.string().uuid(),
-  sourceStatusAtAcceptance: runStatusSchema,
-  sourceCompleteAtAcceptance: external_exports.boolean(),
-  sourceVersion: external_exports.object({ status: runStatusSchema, usedCalls: external_exports.number().int().nonnegative(), reservedCalls: external_exports.number().int().nonnegative(), maxOrdinal: external_exports.number().int().min(-1) }).strict(),
-  sourceAvailable: external_exports.boolean().optional(),
-  sourceRecordState: external_exports.enum(["live", "historical"]).optional(),
-  selectionCoverage: selectionCoverageSchema.optional(),
-  excludedSelections: external_exports.array(followOnExclusionSchema).default([]),
-  selections: external_exports.array(external_exports.object({
-    sourceEvaluationId: external_exports.string().uuid(),
-    sourceContextId: external_exports.string().uuid(),
-    respondentId: external_exports.string().min(1),
-    evaluationId: external_exports.string().uuid(),
-    contextId: external_exports.string().uuid(),
-    selectedMaterial: selectedMaterialEvidenceSchema.optional()
-  }).strict()),
-  materialSnapshots: external_exports.array(external_exports.object({ contextId: external_exports.string().uuid(), respondentId: external_exports.string().min(1), materials: external_exports.array(materialItemSchema) }).strict()).default([])
-}).strict();
-var runListQuerySchema = external_exports.object({
-  status: runStatusSchema.optional(),
-  label: external_exports.string().min(1).optional(),
-  createdAfter: external_exports.string().datetime().optional(),
-  createdBefore: external_exports.string().datetime().optional(),
-  materialId: stimulusItemSchema.shape.id.optional(),
-  cursor: external_exports.string().optional(),
-  limit: external_exports.number().int().min(1).max(200).optional()
-}).strict().superRefine((query, context) => {
-  if (query.createdAfter && query.createdBefore && Date.parse(query.createdAfter) > Date.parse(query.createdBefore)) {
-    context.addIssue({ code: "custom", path: ["createdBefore"], message: "createdBefore must not precede createdAfter." });
-  }
-});
-var runEvidenceQuerySchema = external_exports.object({
-  sourceRunId: external_exports.string().uuid(),
-  criteria: evidenceCriteriaSchema.default({}),
-  cursor: external_exports.string().optional(),
-  limit: external_exports.number().int().min(1).max(200).optional()
-}).strict();
-var runEvidenceItemSchema = external_exports.object({
-  sourceRunId: external_exports.string().uuid(),
-  evaluationId: external_exports.string().uuid(),
-  contextId: external_exports.string().uuid(),
-  respondentId: external_exports.string().min(1),
-  questionId: external_exports.string().min(1),
-  status: evaluationStatusSchema,
-  result: decisionResultSchema.optional(),
-  failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
-  selectedMaterial: selectedMaterialEvidenceSchema.optional(),
-  execution: providerExecutionEvidenceSchema.optional(),
-  turnId: external_exports.string().min(1).optional(),
-  nodeId: external_exports.string().min(1).optional(),
-  occurrence: external_exports.number().int().positive().optional(),
-  outcome: external_exports.string().optional(),
-  provenance: external_exports.object({ provider: providerKindSchema, model: external_exports.string().min(1), endpoint: external_exports.string().optional(), compilerFingerprint: external_exports.string().min(1), contextFingerprint: external_exports.string().min(1) }).strict()
-}).strict();
-var runLifecycleSchema = external_exports.object({
-  state: runLifecycleStateSchema,
-  resume: external_exports.discriminatedUnion("eligible", [
-    external_exports.object({ eligible: external_exports.literal(true) }).strict(),
-    external_exports.object({ eligible: external_exports.literal(false), reason: resumeRefusalReasonSchema }).strict()
-  ])
-}).strict();
-var runEvidencePageSchema = external_exports.object({
-  items: external_exports.array(runEvidenceItemSchema),
-  totalMatches: external_exports.number().int().nonnegative(),
-  sourceRunId: external_exports.string().uuid(),
-  sourceStatus: runStatusSchema,
-  sourceComplete: external_exports.boolean(),
-  lifecycle: runLifecycleSchema,
-  coverage: external_exports.object({
-    totalEvaluations: external_exports.number().int().nonnegative(),
-    completedEvaluations: external_exports.number().int().nonnegative(),
-    failedEvaluations: external_exports.number().int().nonnegative(),
-    respondents: external_exports.object({ total: external_exports.number().int().nonnegative(), active: external_exports.number().int().nonnegative(), completed: external_exports.number().int().nonnegative(), failed: external_exports.number().int().nonnegative(), unreached: external_exports.number().int().nonnegative() }).strict()
-  }).strict(),
-  matchedCoverage: external_exports.object({
-    evaluations: external_exports.object({ total: external_exports.number().int().nonnegative(), pending: external_exports.number().int().nonnegative(), answered: external_exports.number().int().nonnegative(), failed: external_exports.number().int().nonnegative(), unreached: external_exports.number().int().nonnegative() }).strict(),
-    representedRespondents: external_exports.number().int().nonnegative(),
-    selectedMaterials: external_exports.object({ evaluations: external_exports.number().int().nonnegative(), respondents: external_exports.number().int().nonnegative(), distinctMaterials: external_exports.number().int().nonnegative() }).strict()
-  }).strict(),
-  nextCursor: external_exports.string().min(1).optional()
-}).strict();
-var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
 
 // src/infrastructure/sqlite/commands/reservation.ts
 function reservePhysicalAttempt(database, attempt) {
@@ -28638,8 +28742,9 @@ function queryEvidencePage(context, input2) {
         WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.kind === "laya" ? parsedRequest.data.provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${parsedRequest.data.provider.accountId}/ai/run/@cf/cloudflare/${parsedRequest.data.provider.model}`;
-    const model = parsedRequest.data.provider.kind === "jev" || parsedRequest.data.provider.kind === "clef" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
+    const provider = requireExplicitProvider(parsedRequest.data);
+    const endpoint = provider.kind === "jev" ? provider.endpoint : provider.kind === "laya" ? provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
+    const model = provider.kind === "jev" || provider.kind === "clef" ? provider.model : provider.checkpoint;
     const items = pageRows.map((row) => {
       const contextId = asText(row.context_id, "context ID");
       const respondentId = asText(row.respondent_id, "respondent ID");
@@ -28677,7 +28782,7 @@ function queryEvidencePage(context, input2) {
         ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
         ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
         provenance: {
-          provider: parsedRequest.data.provider.kind,
+          provider: provider.kind,
           model,
           endpoint,
           compilerFingerprint,

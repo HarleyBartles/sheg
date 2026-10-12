@@ -10,6 +10,7 @@ import type { ProviderFactory } from './run-service.js';
 import type { ProviderFactoryOptions } from '../providers/config.js';
 import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionBatchRequest, DecisionBatchResult } from '../domain/decision/decision.js';
+import { requireExplicitProvider } from '../domain/run/request.js';
 
 const HEARTBEAT_MS = 2_000;
 export async function executeQuestionRun(persistence: RunPersistence, runId: string, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions = {}): Promise<void> {
@@ -38,7 +39,7 @@ export async function executeQuestionRun(persistence: RunPersistence, runId: str
 
 async function executePoll(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions): Promise<void> {
   const prepared = reads.getRequest(runId);
-  const provider = providerFactory(prepared.request.provider, providerOptions);
+  const provider = providerFactory(requireExplicitProvider(prepared.request), providerOptions);
   const answers = new Map(reads.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
@@ -90,7 +91,7 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
 
 async function executeJourney(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions): Promise<void> {
   const accepted = reads.getJourneyRun(runId);
-  const provider = providerFactory(accepted.request.provider, providerOptions);
+  const provider = providerFactory(requireExplicitProvider(accepted.request), providerOptions);
   while (true) {
     if (!commands.heartbeat(claim, Date.now())) return;
     const reservation = commands.reserveNext(claim, Date.now());
