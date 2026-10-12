@@ -25,7 +25,7 @@ const compileWasm = (bytes: Uint8Array): Promise<object> =>
   (globalThis as unknown as { WebAssembly: { compile(input: Uint8Array): Promise<object> } }).WebAssembly.compile(bytes);
 
 type ImageDataValue = { data: Uint8ClampedArray; width: number; height: number };
-type Codec = {
+export type StaticImageCodec = {
   decode(bytes: Uint8Array): Promise<DecodedImage>;
   scale(image: DecodedImage, width: number, height: number): Promise<DecodedImage>;
   encode(image: DecodedImage): Promise<Uint8Array>;
@@ -138,7 +138,7 @@ function orient(image: ImageDataValue, orientation: number): ImageDataValue {
   return { data, width, height };
 }
 
-export function createStaticImageCodec(assetDirectory = fileURLToPath(new URL('./codec-assets/', import.meta.url))): Codec {
+export function createStaticImageCodec(assetDirectory = fileURLToPath(new URL('./codec-assets/', import.meta.url))): StaticImageCodec {
   const asset = (name: string) => readFile(path.join(assetDirectory, name));
   let initialized: Promise<void> | undefined;
   async function initialize(): Promise<void> {
