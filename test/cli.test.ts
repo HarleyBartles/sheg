@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,27 @@ import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js'
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { InlineRunRequest } from '../src/domain/run/request.js';
 import type { StaticImageCodec } from '../src/infrastructure/images/codecs.js';
+import { ClefProvider } from '../src/providers/clef.js';
+import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
+import type { ProviderConfigInput } from '../src/providers/config.js';
+import { fileURLToPath } from 'node:url';
+import { createStaticImageCodec } from '../src/infrastructure/images/codecs.js';
+
+async function localImageCodec(root: string) {
+  const directory = path.join(root, 'codec-assets');
+  await mkdir(directory);
+  const packages = fileURLToPath(new URL('../node_modules/@jsquash/', import.meta.url));
+  const assets = [
+    ['png/codec/pkg/squoosh_png_bg.wasm', 'squoosh_png_bg.wasm'],
+    ['jpeg/codec/dec/mozjpeg_dec.wasm', 'mozjpeg_dec.wasm'],
+    ['jpeg/codec/enc/mozjpeg_enc.wasm', 'mozjpeg_enc.wasm'],
+    ['webp/codec/dec/webp_dec.wasm', 'webp_dec.wasm'],
+    ['webp/codec/enc/webp_enc_simd.wasm', 'webp_enc_simd.wasm'],
+    ['resize/lib/resize/pkg/squoosh_resize_bg.wasm', 'squoosh_resize_bg.wasm'],
+  ];
+  await Promise.all(assets.map(([source, target]) => copyFile(path.join(packages, source!), path.join(directory, target!))));
+  return createStaticImageCodec(directory);
+}
 
 test('CLI and MCP share durable execution, submission retries, recall and cancellation', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-entrypoints-'));
@@ -55,7 +76,31 @@ test('CLI help lists all supported workflow commands', async () => {
   const lines: string[] = [];
   const status = await runCli(['--help'], { out: (text) => { lines.push(text); return true; }, error: (text) => { lines.push(text); return true; } });
   assert.equal(status, 0);
-  for (const command of ['inspect', 'preflight', 'trace', 'start', 'list', 'query', 'get', 'cancel', 'resume', 'storage', 'image-import', 'image-scale', 'image-get']) assert.match(lines[0] ?? '', new RegExp(command));
+  for (const command of ['inspect', 'preflight', 'trace', 'start', 'list', 'query', 'get', 'cancel', 'resume', 'storage', 'image-import', 'image-scale', 'image-get', 'provider-credential']) assert.match(lines[0] ?? '', new RegExp(command));
+});
+
+test('CLI provider credential status, setup and removal share the fixed Clef route without accepting secret or endpoint values', async () => {
+  const calls: string[] = [];
+  let available: 'available' | 'missing' = 'missing';
+  const credentialStore = {
+    async availability(route: string) { calls.push(`status:${route}`); return available; },
+    async setup(route: string) { calls.push(`setup:${route}`); available = 'available'; },
+    async remove(route: string) { calls.push(`remove:${route}`); available = 'missing'; },
+  };
+  const output: string[] = []; const errors: string[] = [];
+  const io = { out: (value: string) => { output.push(value); return true; }, error: (value: string) => { errors.push(value); return true; } };
+  const run = (operation: string) => runCli(['provider-credential', '--route', 'clef', '--operation', operation], io, undefined, undefined, credentialStore);
+  assert.equal(await run('status'), 0);
+  assert.deepEqual(JSON.parse(output.pop()!), { route: 'clef', operation: 'status', availability: 'missing' });
+  assert.equal(await run('setup'), 0);
+  assert.deepEqual(JSON.parse(output.pop()!), { route: 'clef', operation: 'setup', availability: 'available' });
+  assert.equal(await run('remove'), 0);
+  assert.deepEqual(JSON.parse(output.pop()!), { route: 'clef', operation: 'remove', availability: 'missing' });
+  assert.equal(await runCli(['provider-credential', '--route', 'clef', '--operation', 'status', '--endpoint', 'https://attacker.invalid'], io, undefined, undefined, credentialStore), 1);
+  assert.equal(calls.includes('status:clef'), true);
+  assert.equal(calls.some((call) => call.includes('attacker.invalid')), false);
+  assert.equal(JSON.stringify(output).includes('secret'), false);
+  assert.deepEqual(calls, ['status:clef', 'setup:clef', 'status:clef', 'remove:clef', 'status:clef']);
 });
 
 test('CLI resolves image paths against the request file and rejects edit controls', async (t) => {
@@ -90,6 +135,75 @@ test('CLI resolves image paths against the request file and rejects edit control
   assert.equal(await runCli(['image-scale', '--request', requestPath, '--data-root', root], io, service, codec), 1);
   assert.deepEqual(JSON.parse(errors.at(-1) ?? '{}'), { error: 'The image request is invalid.' });
   assert.equal(decodeCalls, 1);
+});
+
+test('CLI imports, inspects and accepts a Clef visual poll whose worker uses retained image bytes after source deletion', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-cli-clef-'));
+  const store = openRunStore(root);
+  const imageRepository = openImageAssetRepository(root);
+  const codec = await localImageCodec(root);
+  let releaseDispatch!: () => void;
+  let dispatchStarted!: () => void;
+  const dispatchGate = new Promise<void>((resolve) => { releaseDispatch = resolve; });
+  const dispatched = new Promise<void>((resolve) => { dispatchStarted = resolve; });
+  let workerPromise: Promise<void> | undefined;
+  let requestUrl = '';
+  let requestImages: string[] = [];
+  const source = path.join(root, 'source.png');
+  const requestPath = path.join(root, 'import.json');
+  const runRequestPath = path.join(root, 'visual-run.json');
+  const getRequestPath = path.join(root, 'get.json');
+  const original = await readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
+  await copyFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url), source);
+  const credentials = { async readForAuthentication(route: string) { assert.equal(route, 'clef'); return 'fixture-clef-secret'; } };
+  const fetchRequest = (async (url: string | URL | Request, init?: RequestInit) => {
+    requestUrl = String(url);
+    requestImages = (JSON.parse(String(init?.body)) as { images: string[] }).images;
+    dispatchStarted();
+    await dispatchGate;
+    return Response.json({ success: true, result: { model: 'clef', answers: { 'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } } }, usage: { input_tokens: 20, output_tokens: 0 } }, errors: [], messages: [] });
+  }) as typeof fetch;
+  const resolver = { resolve: (assetId: string) => ({ metadata: imageRepository.metadata(assetId), bytes: imageRepository.bytes(assetId) }) };
+  const providerFactory = (config: ProviderConfigInput) => {
+    if (config.kind !== 'clef') throw new Error('This fixture accepts only Clef.');
+    return new ClefProvider(config, fetchRequest, { credentialStore: credentials, imageResolver: resolver });
+  };
+  const service = createRunService(store, root, providerFactory, { async launch(_dataRoot, runId) { workerPromise = executeQuestionRun(splitRunStore(store), runId, providerFactory); } });
+  const output: string[] = []; const errors: string[] = [];
+  const io = { out: (value: string) => { output.push(value); return true; }, error: (value: string) => { errors.push(value); return true; } };
+  const credentialStore = { async availability() { return 'available' as const; }, async setup() {}, async remove() {} };
+  const run = (args: string[]) => runCli(args, io, service, codec, credentialStore);
+  t.after(async () => { releaseDispatch(); await workerPromise; imageRepository.close(); store.close(); await rm(root, { recursive: true, force: true }); });
+  await writeFile(requestPath, JSON.stringify({ source: { path: 'source.png', sha256: createHash('sha256').update(original).digest('hex') } }));
+  assert.equal(await run(['image-import', '--request', requestPath, '--data-root', root]), 0, errors.at(-1));
+  const imported = JSON.parse(output.pop() ?? '{}') as { asset: { assetId: string; sha256: string; width: number; height: number; bytes: number; format: 'png' }; sourcePath: string };
+  assert.equal(imported.sourcePath, source);
+  const request: InlineRunRequest = {
+    kind: 'poll', respondents: [{ id: 'reader', intent: 'Read the recommendation', context: 'Curious', desired_outcome: 'Understand the proposal', engagement_cues: 'Examples', friction_cues: 'Distraction' }],
+    material: [{ id: 'section-four', text: 'The recommendation follows.' }, { id: 'portrait', type: 'image', text: '', altText: 'A determined specialist in a teal coat checks a ledger.', caption: 'Writ prepares the records.', asset: imported.asset }],
+    questions: [{ type: 'choice', id: 'image-fit', instructions: 'Does the image support the recommendation?', options: { yes: 'It supports the section', no: 'It distracts from the section' }, visual: { mode: 'pixels', materialIds: ['portrait'] } }],
+    provider: { kind: 'clef', accountId: '3327878972ea82e6b454069bba62f3d9', model: 'clef', timeoutMs: 30_000 }, maxCalls: 1,
+  };
+  await writeFile(runRequestPath, JSON.stringify(request));
+  assert.equal(await run(['inspect', '--request', runRequestPath, '--data-root', root]), 0, errors.at(-1));
+  assert.equal((JSON.parse(output.pop() ?? '{}') as { valid: boolean }).valid, true);
+  assert.equal(await run(['start', '--request', runRequestPath, '--submission-id', randomUUID(), '--data-root', root]), 0, errors.at(-1));
+  const accepted = JSON.parse(output.pop() ?? '{}') as { runId: string };
+  await writeFile(getRequestPath, JSON.stringify({ runId: accepted.runId, view: 'request' }));
+  assert.equal(await run(['get', '--request', getRequestPath, '--data-root', root]), 0, errors.at(-1));
+  const frozen = JSON.parse(output.pop() ?? '{}') as { evaluations: Array<{ packet: { visualMaterials?: Array<{ asset: { assetId: string } }> } }> };
+  assert.equal(frozen.evaluations[0]?.packet.visualMaterials?.[0]?.asset.assetId, imported.asset.assetId);
+  await dispatched;
+  await unlink(source);
+  releaseDispatch();
+  await workerPromise;
+  assert.equal(requestUrl, 'https://api.cloudflare.com/client/v4/accounts/3327878972ea82e6b454069bba62f3d9/ai/run/@cf/cloudflare/clef');
+  assert.deepEqual(requestImages, [`data:image/png;base64,${original.toString('base64')}`]);
+  await writeFile(getRequestPath, JSON.stringify({ runId: accepted.runId, view: 'answers' }));
+  assert.equal(await run(['get', '--request', getRequestPath, '--data-root', root]), 0, errors.at(-1));
+  assert.equal((JSON.parse(output.pop() ?? '{}') as { items: Array<{ status: string; execution: { provider: string } }> }).items[0]?.execution.provider, 'clef');
+  assert.equal(store.attempts(accepted.runId).items.length, 1);
+  assert.equal(JSON.stringify(output).includes('fixture-clef-secret'), false);
 });
 
 test('CLI inspect validates current inline requests without starting a run', async (t) => {

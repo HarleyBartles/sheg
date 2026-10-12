@@ -11,11 +11,14 @@ import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '..
 import { productVersion } from '../infrastructure/product-identity.js';
 import { ImageAssetError, ImageGetRequestSchema, ImageImportRequestSchema, ScaleRequestSchema, type ImageSource } from '../domain/assets/image.js';
 import type { StaticImageCodec } from '../infrastructure/images/codecs.js';
+import { manageProviderCredential, providerCredentialRequestSchema, ProviderCredentialOperationError, type ProviderCredentialStore } from '../application/provider-credentials.js';
+import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 
 const runListSchema = runListQuerySchema;
-export function createPollingServer(service?: RunService, dataRoot?: string, imageCodec?: StaticImageCodec): McpServer {
+export function createPollingServer(service?: RunService, dataRoot?: string, imageCodec?: StaticImageCodec, credentialStore: ProviderCredentialStore = new WindowsCredentialStore()): McpServer {
   const runtime = createRunRuntime(dataRoot, service, imageCodec === undefined ? {} : { imageCodec });
   const server = new McpServer({ name: 'sheg', version: productVersion }, { instructions: 'Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work.' });
+  server.registerTool('provider_credential', { description: 'Check, set up, or remove a provider API key in Windows Credential Manager. Setup reads the secret through Sheg secure input; secrets are never accepted as tool input or returned. Clef always uses its fixed Cloudflare credential target.', inputSchema: providerCredentialRequestSchema }, async (input) => safeResult(() => manageProviderCredential(input, credentialStore)));
   server.registerTool('run_inspect', { description: 'Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Journey fit is measured for initial respondent inputs; each later reached turn is checked immediately before inference and may stop only that respondent if it does not fit. Independent questions in one group share one frozen state; fit entries identify measured inputs and the minimum physical-call count.', inputSchema: z.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
   server.registerTool('run_start', { description: 'Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.', inputSchema: z.object({ submissionId: z.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
   server.registerTool('run_list', { description: 'Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.', inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
@@ -47,8 +50,8 @@ export function createPollingServer(service?: RunService, dataRoot?: string, ima
 async function safeResult(operation: () => unknown | Promise<unknown>) {
   try { return jsonResult(await operation()); }
   catch (error) {
-    const code = error instanceof RunServiceError || error instanceof RunStoreError || error instanceof ImageAssetError ? error.code : 'internal_error';
-    const message = error instanceof RunServiceError || error instanceof RunStoreError || error instanceof ImageAssetError ? error.message : 'The Sheg operation failed.';
+    const code = error instanceof RunServiceError || error instanceof RunStoreError || error instanceof ImageAssetError || error instanceof ProviderCredentialOperationError ? error.code : 'internal_error';
+    const message = error instanceof RunServiceError || error instanceof RunStoreError || error instanceof ImageAssetError || error instanceof ProviderCredentialOperationError ? error.message : 'The Sheg operation failed.';
     const result = { error: { code, message } };
     return { ...jsonResult(result), isError: true };
   }

@@ -40826,11 +40826,34 @@ function recoveryRequiredError() {
   return new RunServiceError("datastore_recovery_required", "The Sheg datastore requires recovery. Inspect storage before using study operations.");
 }
 
+// src/application/provider-credentials.ts
+var providerCredentialRequestSchema = external_exports.object({
+  route: external_exports.enum(["typesafe", "openrouter", "clef"]),
+  operation: external_exports.enum(["status", "setup", "remove"])
+}).strict();
+var ProviderCredentialOperationError = class extends Error {
+  code = "credential_operation_failed";
+  constructor() {
+    super("The provider credential operation could not be completed.");
+    this.name = "ProviderCredentialOperationError";
+  }
+};
+async function manageProviderCredential(input2, store = new WindowsCredentialStore()) {
+  const request = providerCredentialRequestSchema.parse(input2);
+  try {
+    if (request.operation === "setup") await store.setup(request.route);
+    else if (request.operation === "remove") await store.remove(request.route);
+    return { route: request.route, operation: request.operation, availability: await store.availability(request.route) };
+  } catch {
+    throw new ProviderCredentialOperationError();
+  }
+}
+
 // src/entrypoints/cli.ts
 var outputIo = { out: (value) => process.stdout.write(`${value}
 `), error: (value) => process.stderr.write(`${value}
 `) };
-async function runCli(args, io = outputIo, service, imageCodec) {
+async function runCli(args, io = outputIo, service, imageCodec, credentialStore = new WindowsCredentialStore()) {
   const [command, ...rest] = args;
   if (command === "--help" || command === "help" || command === void 0) {
     io.out(helpText);
@@ -40839,6 +40862,12 @@ async function runCli(args, io = outputIo, service, imageCodec) {
   try {
     const options2 = parseArgs(rest);
     validateOptions(command, options2);
+    if (command === "provider-credential") {
+      const parsed = providerCredentialRequestSchema.safeParse(options2);
+      if (!parsed.success) throw new CliInputError("Provider credential route or operation is invalid.");
+      io.out(JSON.stringify(await manageProviderCredential(parsed.data, credentialStore)));
+      return 0;
+    }
     if (command === "preflight") {
       const mode = options2.mode ?? "frozen-cohort";
       if (mode !== "frozen-cohort" && mode !== "maximum-profile") throw new CliInputError("Preflight mode must be frozen-cohort or maximum-profile.");
@@ -40861,7 +40890,7 @@ async function runCli(args, io = outputIo, service, imageCodec) {
       runtime.close();
     }
   } catch (error62) {
-    const result = error62 instanceof ImageAssetError ? { error: { code: error62.code, message: error62.message } } : error62 instanceof CliInputError || error62 instanceof RunServiceError || error62 instanceof RunStoreError ? { error: error62.message } : { error: "The Sheg command failed. Check the command arguments and local datastore." };
+    const result = error62 instanceof ImageAssetError ? { error: { code: error62.code, message: error62.message } } : error62 instanceof CliInputError || error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ProviderCredentialOperationError ? { error: error62.message } : { error: "The Sheg command failed. Check the command arguments and local datastore." };
     io.error(JSON.stringify(result));
     return 1;
   }
@@ -40974,7 +41003,8 @@ function validateOptions(command, options2) {
     storage: ["request", "data-root"],
     "image-import": ["request", "data-root"],
     "image-scale": ["request", "data-root"],
-    "image-get": ["request", "data-root"]
+    "image-get": ["request", "data-root"],
+    "provider-credential": ["route", "operation"]
   };
   const allowed = commands[command ?? ""];
   if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ""}`);
@@ -41013,6 +41043,7 @@ Commands:
   image-import --request <json-file>             Validate and save one digest-verified image
   image-scale --request <json-file>               Create a proportional image candidate
   image-get --request <json-file>                 Read metadata or explicitly export a preview
+  provider-credential --route clef --operation status|setup|remove  Manage a provider key in Windows Credential Manager
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
   CLI and MCP share the platform's Sheg data directory by default.

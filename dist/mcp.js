@@ -55024,11 +55024,35 @@ var package_default = {
 // src/infrastructure/product-identity.ts
 var productVersion = package_default.version;
 
+// src/application/provider-credentials.ts
+var providerCredentialRequestSchema = external_exports.object({
+  route: external_exports.enum(["typesafe", "openrouter", "clef"]),
+  operation: external_exports.enum(["status", "setup", "remove"])
+}).strict();
+var ProviderCredentialOperationError = class extends Error {
+  code = "credential_operation_failed";
+  constructor() {
+    super("The provider credential operation could not be completed.");
+    this.name = "ProviderCredentialOperationError";
+  }
+};
+async function manageProviderCredential(input2, store = new WindowsCredentialStore()) {
+  const request = providerCredentialRequestSchema.parse(input2);
+  try {
+    if (request.operation === "setup") await store.setup(request.route);
+    else if (request.operation === "remove") await store.remove(request.route);
+    return { route: request.route, operation: request.operation, availability: await store.availability(request.route) };
+  } catch {
+    throw new ProviderCredentialOperationError();
+  }
+}
+
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
-function createPollingServer(service, dataRoot, imageCodec) {
+function createPollingServer(service, dataRoot, imageCodec, credentialStore = new WindowsCredentialStore()) {
   const runtime = createRunRuntime(dataRoot, service, imageCodec === void 0 ? {} : { imageCodec });
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
+  server.registerTool("provider_credential", { description: "Check, set up, or remove a provider API key in Windows Credential Manager. Setup reads the secret through Sheg secure input; secrets are never accepted as tool input or returned. Clef always uses its fixed Cloudflare credential target.", inputSchema: providerCredentialRequestSchema }, async (input2) => safeResult(() => manageProviderCredential(input2, credentialStore)));
   server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Journey fit is measured for initial respondent inputs; each later reached turn is checked immediately before inference and may stop only that respondent if it does not fit. Independent questions in one group share one frozen state; fit entries identify measured inputs and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
   server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
@@ -55060,8 +55084,8 @@ async function safeResult(operation) {
   try {
     return jsonResult(await operation());
   } catch (error62) {
-    const code = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError ? error62.code : "internal_error";
-    const message = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError ? error62.message : "The Sheg operation failed.";
+    const code = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError || error62 instanceof ProviderCredentialOperationError ? error62.code : "internal_error";
+    const message = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError || error62 instanceof ProviderCredentialOperationError ? error62.message : "The Sheg operation failed.";
     const result = { error: { code, message } };
     return { ...jsonResult(result), isError: true };
   }

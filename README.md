@@ -19,7 +19,7 @@ Start with a request such as: “I am choosing a pull quote for this article. He
 ## Learn more
 
 - [Design a study](skills/study-design/SKILL.md) and [run polls, queries, and follow-ups](skills/stimulus-response-polling/SKILL.md).
-- Configure [Jev](docs/providers/jev.md) or review the separately operated [Laya service](docs/providers/laya.md).
+- Configure [Jev](docs/providers/jev.md), use [native Cloudflare Clef for image-backed studies](docs/providers/clef.md), or review the separately operated [Laya service](docs/providers/laya.md).
 - Read the [study manifest guide](docs/reference/study-manifest.md), [data contracts](docs/reference/data-contracts.md), and [run and recovery guide](skills/stimulus-response-polling/references/run-and-recovery.md).
 - Browse the [architecture decisions](docs/decisions/README.md) and [release guide](docs/guides/releases.md).
 

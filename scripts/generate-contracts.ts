@@ -7,6 +7,7 @@ import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
 import { runRequestSchema } from '../src/domain/run/request.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 import { ImageGetRequestSchema, ImageImportRequestSchema, ScaleRequestSchema } from '../src/domain/assets/image.js';
+import { providerCredentialRequestSchema } from '../src/application/provider-credentials.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const schemaBaseUri = 'urn:sheg:schema:';
@@ -47,6 +48,10 @@ const contracts: Array<{ filename: string; title: string; schema: z.ZodType; val
   ] },
   { filename: 'image-get-request.schema.json', title: 'Sheg image inspection request', schema: ImageGetRequestSchema, validationRules: [
     'Metadata reads do not scale or export; set export true to explicitly request a local preview path.',
+  ] },
+  { filename: 'provider-credential-request.schema.json', title: 'Sheg provider credential operation', schema: providerCredentialRequestSchema, validationRules: [
+    'Credential status, setup, and removal accept only a provider route and operation; secret values and endpoint overrides are not request fields.',
+    'Clef credentials use Sheg/Clef/Cloudflare in Windows Credential Manager.',
   ] },
 ];
 await rm(contractDirectory, { recursive: true, force: true });

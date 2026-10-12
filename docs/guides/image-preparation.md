@@ -1,6 +1,6 @@
 # Prepare and inspect images
 
-Sheg can validate, store, scale, and export static image files for inspection. These operations run locally and do not call an inference provider. They prepare image assets for a later visual study; the current `run_*` study tools do not accept image inputs.
+Sheg can validate, store, scale, and export static image files for inspection. These operations run locally and do not call an inference provider. A saved image can be bound to a Clef visual question; see the [native Cloudflare Clef guide](../providers/clef.md) for request design and limits.
 
 ## Supported images and limits
 
@@ -78,7 +78,7 @@ For MCP, send an absolute local path or an existing saved `assetId`; relative pa
 
 Keep the original asset and inspect any scaled candidate at its returned preview path. Check that the details relevant to the user's question remain visible at the prepared size. Smaller files can erase typography, facial expression, or other distinctions. If a candidate loses information, prepare a larger candidate or use the original in a future inference request that can admit it.
 
-An inference-capable agent must author the image description and decide what visual evidence to present. Sheg does not describe image content, judge visual suitability, estimate full-request context fit from `maxBytes`, or make editorial decisions in this preparation flow. Image custody and preview export do not mean that visual respondent studies are available through `run_*` yet.
+An inference-capable agent must author the image description and decide what visual evidence to present. Sheg does not describe image content, judge visual suitability, estimate full-request context fit from `maxBytes`, or make editorial decisions in this preparation flow. Inspect the complete study request before accepting it for provider execution.
 
 ## Storage and recovery
 
