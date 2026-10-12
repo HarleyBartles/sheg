@@ -15,6 +15,26 @@ export type ImageFormat = 'png' | 'jpeg' | 'webp';
 export type DecodedImage = { data: Uint8ClampedArray; width: number; height: number; format: ImageFormat; orientation: number };
 export class ImageCodecError extends ImageAssetError {}
 
+let activeJpegDecoderWarnings: string[] | undefined;
+let jpegDecodeQueue = Promise.resolve();
+
+async function decodeCompleteJpeg(bytes: ArrayBuffer): Promise<ImageDataValue> {
+  const previous = jpegDecodeQueue;
+  let release!: () => void;
+  jpegDecodeQueue = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    const warnings: string[] = [];
+    activeJpegDecoderWarnings = warnings;
+    const decoded = await jpegDecode(bytes as never) as unknown as ImageDataValue;
+    if (warnings.length > 0) throw new Error('JPEG decoder reported an incomplete or corrupt stream');
+    return decoded;
+  } finally {
+    activeJpegDecoderWarnings = undefined;
+    release();
+  }
+}
+
 const MAX_ENCODED_BYTES = 16 * 1024 * 1024;
 const MAX_PIXELS = 16_000_000;
 const WASM = {
@@ -25,6 +45,7 @@ const compileWasm = (bytes: Uint8Array): Promise<object> =>
   (globalThis as unknown as { WebAssembly: { compile(input: Uint8Array): Promise<object> } }).WebAssembly.compile(bytes);
 
 type ImageDataValue = { data: Uint8ClampedArray; width: number; height: number };
+const initJpegDecoder = initJpegDecode as unknown as (module: WebAssembly.Module, overrides: { printErr: (message: string) => void }) => Promise<void>;
 export type StaticImageCodec = {
   decode(bytes: Uint8Array): Promise<DecodedImage>;
   scale(image: DecodedImage, width: number, height: number): Promise<DecodedImage>;
@@ -146,7 +167,7 @@ export function createStaticImageCodec(assetDirectory = fileURLToPath(new URL('.
       const [png, jpegDec, jpegEnc, webpDec, webpEnc, resizeWasm] = await Promise.all(Object.values(WASM).map(asset));
       await initPngDecode(await compileWasm(png!) as never);
       await initPngEncode(await compileWasm(png!) as never);
-      await initJpegDecode(await compileWasm(jpegDec!) as never);
+      await initJpegDecoder(await compileWasm(jpegDec!) as WebAssembly.Module, { printErr: (message) => activeJpegDecoderWarnings?.push(message) });
       await initJpegEncode(await compileWasm(jpegEnc!) as never);
       await initWebpDecode(await compileWasm(webpDec!) as never);
       await initWebpEncode(await compileWasm(webpEnc!) as never);
@@ -163,10 +184,14 @@ export function createStaticImageCodec(assetDirectory = fileURLToPath(new URL('.
         if (header.width * header.height > MAX_PIXELS) throw new ImageCodecError('image_source_limit', 'The image exceeds the 16 megapixel image limit.');
         await initialize();
         const imageBuffer = Uint8Array.from(bytes).buffer;
-        const decoded = header.format === 'png' ? await pngDecode(bytes as never)
-          : header.format === 'jpeg' ? await jpegDecode(imageBuffer as never)
-            : await webpDecode(imageBuffer as never);
-        const display = orient(decoded as unknown as ImageDataValue, header.orientation);
+        let decoded: ImageDataValue;
+        if (header.format === 'jpeg') {
+          decoded = await decodeCompleteJpeg(imageBuffer);
+        } else {
+          decoded = header.format === 'png' ? await pngDecode(bytes as never) as unknown as ImageDataValue
+            : await webpDecode(imageBuffer as never) as unknown as ImageDataValue;
+        }
+        const display = orient(decoded, header.orientation);
         const image = view(display);
         if (image.width !== (header.orientation >= 5 && header.orientation <= 8 ? header.height : header.width) || image.height !== (header.orientation >= 5 && header.orientation <= 8 ? header.width : header.height) || image.data.length !== image.width * image.height * 4) throw new Error('decoded dimensions mismatch');
         return { ...image, format: header.format, orientation: header.orientation };

@@ -66,6 +66,14 @@ test('rejects animated WebP before decode', async () => {
 test('rejects truncated containers and applies JPEG display orientation', async () => {
   const local = await codec();
   await assert.rejects(local.codec.decode(await fixture('truncated.png')), { code: 'image_decode_failed' });
+  const jpeg = await fixture('four-corners.jpeg');
+  const [truncated, intact] = await Promise.allSettled([
+    local.codec.decode(jpeg.subarray(0, jpeg.length - 100)),
+    local.codec.decode(jpeg),
+  ]);
+  assert.equal(truncated.status, 'rejected');
+  if (truncated.status === 'rejected') assert.equal(truncated.reason.code, 'image_decode_failed');
+  assert.equal(intact.status, 'fulfilled');
   const oriented = await local.codec.decode(await fixture('orientation-6.jpeg'));
   assert.deepEqual([oriented.width, oriented.height, oriented.orientation], [40, 80, 6]);
   await local.dispose();

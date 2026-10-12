@@ -21,7 +21,15 @@ function metadata(bytes: Uint8Array, decoded: DecodedImage): ImageMetadata {
 function readTarget(source: ImageSource): Promise<Uint8Array> {
   if ('assetId' in source) return Promise.reject(new Error('saved source must be read from repository'));
   return (async () => {
-    const handle = await open(source.path, 'r');
+    let handle;
+    try { handle = await open(source.path, 'r'); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EACCES' || code === 'EPERM' || code === 'EISDIR' || code === 'ENOTDIR') {
+        throw new ImageAssetError('image_source_path_invalid', 'The image source file could not be read.');
+      }
+      throw error;
+    }
     try {
       const limit = 16 * 1024 * 1024;
       const buffer = Buffer.allocUnsafe(limit + 1);

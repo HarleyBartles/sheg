@@ -73,6 +73,16 @@ test('rejects oversized files before image decode or asset persistence', async (
   } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
 });
 
+test('reports a missing image source as a bounded input error', async () => {
+  const state = await setup();
+  try {
+    await assert.rejects(state.service.import({ path: path.join(state.root, 'missing-private-name.jpeg'), sha256: '0'.repeat(64) }), {
+      code: 'image_source_path_invalid',
+      message: 'The image source file could not be read.',
+    });
+  } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
+});
+
 test('does not upscale or re-encode an already fitting saved image', async () => {
   const state = await setup();
   try {

@@ -34536,7 +34536,16 @@ function metadata2(bytes, decoded) {
 function readTarget(source) {
   if ("assetId" in source) return Promise.reject(new Error("saved source must be read from repository"));
   return (async () => {
-    const handle = await open3(source.path, "r");
+    let handle;
+    try {
+      handle = await open3(source.path, "r");
+    } catch (error62) {
+      const code = error62.code;
+      if (code === "ENOENT" || code === "EACCES" || code === "EPERM" || code === "EISDIR" || code === "ENOTDIR") {
+        throw new ImageAssetError("image_source_path_invalid", "The image source file could not be read.");
+      }
+      throw error62;
+    }
     try {
       const limit = 16 * 1024 * 1024;
       const buffer = Buffer.allocUnsafe(limit + 1);
@@ -39767,6 +39776,26 @@ var codecAssetNames = [
 // src/infrastructure/images/codecs.ts
 var ImageCodecError = class extends ImageAssetError {
 };
+var activeJpegDecoderWarnings;
+var jpegDecodeQueue = Promise.resolve();
+async function decodeCompleteJpeg(bytes) {
+  const previous = jpegDecodeQueue;
+  let release;
+  jpegDecodeQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const warnings = [];
+    activeJpegDecoderWarnings = warnings;
+    const decoded = await decode5(bytes);
+    if (warnings.length > 0) throw new Error("JPEG decoder reported an incomplete or corrupt stream");
+    return decoded;
+  } finally {
+    activeJpegDecoderWarnings = void 0;
+    release();
+  }
+}
 var MAX_ENCODED_BYTES = 16 * 1024 * 1024;
 var MAX_PIXELS = 16e6;
 var WASM = {
@@ -39778,6 +39807,7 @@ var WASM = {
   resize: codecAssetNames[5]
 };
 var compileWasm = (bytes) => globalThis.WebAssembly.compile(bytes);
+var initJpegDecoder = init3;
 function readPngHeader(bytes) {
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (bytes.length < 33 || signature.some((value, index2) => bytes[index2] !== value)) throw new Error("invalid PNG");
@@ -39899,7 +39929,7 @@ function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec
       const [png, jpegDec, jpegEnc, webpDec, webpEnc, resizeWasm] = await Promise.all(Object.values(WASM).map(asset));
       await init(await compileWasm(png));
       await init2(await compileWasm(png));
-      await init3(await compileWasm(jpegDec));
+      await initJpegDecoder(await compileWasm(jpegDec), { printErr: (message) => activeJpegDecoderWarnings?.push(message) });
       await init4(await compileWasm(jpegEnc));
       await init5(await compileWasm(webpDec));
       await init6(await compileWasm(webpEnc));
@@ -39920,7 +39950,12 @@ function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec
         if (header.width * header.height > MAX_PIXELS) throw new ImageCodecError("image_source_limit", "The image exceeds the 16 megapixel image limit.");
         await initialize2();
         const imageBuffer = Uint8Array.from(bytes).buffer;
-        const decoded = header.format === "png" ? await decode_default(bytes) : header.format === "jpeg" ? await decode5(imageBuffer) : await decode6(imageBuffer);
+        let decoded;
+        if (header.format === "jpeg") {
+          decoded = await decodeCompleteJpeg(imageBuffer);
+        } else {
+          decoded = header.format === "png" ? await decode_default(bytes) : await decode6(imageBuffer);
+        }
         const display = orient(decoded, header.orientation);
         const image = view(display);
         if (image.width !== (header.orientation >= 5 && header.orientation <= 8 ? header.height : header.width) || image.height !== (header.orientation >= 5 && header.orientation <= 8 ? header.width : header.height) || image.data.length !== image.width * image.height * 4) throw new Error("decoded dimensions mismatch");
