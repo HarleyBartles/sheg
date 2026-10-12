@@ -3,7 +3,7 @@ import { hashCanonical } from '../../identity.js';
 import { decisionPacketSchema } from '../../../domain/decision/prompt.js';
 import { validateDecision } from '../../../domain/decision/validate.js';
 import { runRequestSchema } from '../../../domain/run/request.js';
-import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord } from '../../../domain/run/lifecycle.js';
+import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, providerSelectionPolicySnapshotSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord } from '../../../domain/run/lifecycle.js';
 import { RunStoreError } from '../../../application/run-store.js';
 import { asNumber, asNullableText, asText, parseJson, parseJsonRecord, parseStored, type DatabaseRow } from '../rows.js';
 import { decodeResultAndExecution, storedEvaluationFailure } from '../evidence-records.js';
@@ -67,5 +67,6 @@ export function readJourneyRun(database: DatabaseSync, runId: string, notFound: 
       respondents.some((state) => state.status !== 'active' && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
     throw new RunStoreError('data_integrity_error', 'Stored journey respondent states do not match the reached turns.');
   }
-  return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations, respondents };
+  return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint,
+    ...(stored.providerSelectionSnapshot === undefined ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) }), evaluations, respondents };
 }

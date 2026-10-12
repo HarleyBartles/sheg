@@ -19,6 +19,7 @@ import { failOwnedRun, failPreparedLaunch, finishRun, refreshWorkerLease, reques
 import { PREPARED_LAUNCH_WINDOW_MS, RECONCILE_SELECTION_LIMIT, WORKER_LEASE_DURATION_MS } from './work-policy.js';
 import type { SqliteRepositoryContext } from './repository-context.js';
 import { validateRunIds } from './run-ids.js';
+import { writeProviderSettings } from './provider-settings.js';
 
 export function createSqliteCommandRepository(
   context: SqliteRepositoryContext,
@@ -46,6 +47,7 @@ export function createSqliteCommandRepository(
   }
 
   return {
+    setProviderSettings(settings, expectedRevision) { return writeProviderSettings(context, settings, expectedRevision); },
     accept(submissionId: string, preparedInput: PreparedRun) {
       context.ensureOpen();
       return acceptPreparedRun(acceptanceContext(context), submissionId, preparedInput);

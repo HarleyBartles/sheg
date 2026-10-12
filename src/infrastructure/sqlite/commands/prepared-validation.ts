@@ -3,6 +3,7 @@ import { decisionRequestSchema } from '../../../domain/decision/decision.js';
 import { compileDecisionPacketForCompiler } from '../../../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../../../domain/study/arm.js';
 import type { JourneyRespondentState } from '../../../domain/run/lifecycle.js';
+import { providerSelectionPolicySnapshotSchema } from '../../../domain/run/lifecycle.js';
 import { followOnLineageSchema, runRequestSchema, type FollowOnLineage, type PreparedJourneyRun, type PreparedRun } from '../../../domain/run/request.js';
 import { RunStoreError } from '../../../application/run-store.js';
 import { hashCanonical } from '../../identity.js';
@@ -14,6 +15,7 @@ function isJourneyAskNode(journey: JourneyDefinition, nodeId: string, questionId
   return node?.kind === 'ask' && node.taskId === questionId;
 }
 export function validatePrepared(prepared: PreparedRun): PreparedRun {
+  if (prepared.providerSelectionSnapshot !== undefined && !providerSelectionPolicySnapshotSchema.safeParse(prepared.providerSelectionSnapshot).success) throw new RunStoreError('invalid_prepared_run', 'Prepared provider selection snapshot is invalid.');
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 ||
       hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
@@ -128,6 +130,7 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
 }
 
 export function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJourneyRun {
+  if (prepared.providerSelectionSnapshot !== undefined && !providerSelectionPolicySnapshotSchema.safeParse(prepared.providerSelectionSnapshot).success) throw new RunStoreError('invalid_prepared_run', 'Prepared provider selection snapshot is invalid.');
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || parsedRequest.data.kind !== 'journey' || prepared.compilerFingerprint.length === 0 ||
       hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {

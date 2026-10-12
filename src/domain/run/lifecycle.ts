@@ -7,22 +7,15 @@ import { promptHistoryEventSchema, type PromptHistoryEvent } from '../decision/p
 import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
+import { providerCatalogueEntrySchema, providerPreferenceSchema } from '../../providers/config.js';
 
 export const providerSelectionPolicySnapshotSchema = z.object({
   version: z.literal(1),
   catalogueRevision: z.number().int().nonnegative(),
   catalogue: z.object({
-    entries: z.array(z.object({
-      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-      enabled: z.boolean(),
-      provider: z.record(z.string(), z.unknown()),
-      execution: z.enum(['local', 'hosted']),
-      capabilities: z.array(z.enum(['text', 'pixels'])),
-      questionTypes: z.array(z.enum(['choice', 'score', 'noul'])),
-      pricing: z.record(z.string(), z.unknown()),
-    }).strict()),
+    entries: z.array(providerCatalogueEntrySchema),
   }).strict(),
-  preferences: z.object({ preferredOrder: z.array(z.string()) }).strict(),
+  preferences: providerPreferenceSchema,
   policy: z.object({ batching: z.enum(['automatic', 'singleton']) }).strict(),
 }).strict();
 export type ProviderSelectionPolicySnapshot = z.infer<typeof providerSelectionPolicySnapshotSchema>;
@@ -137,6 +130,7 @@ export type JourneyRunRecord = {
   request: import('./request.js').ParsedInlineJourneyRequest;
   requestFingerprint: string;
   compilerFingerprint: string;
+  providerSelectionSnapshot?: ProviderSelectionPolicySnapshot;
   evaluations: JourneyEvaluationRecord[];
   respondents: JourneyRespondentState[];
 };
@@ -158,6 +152,7 @@ export type Inspection = {
   problems: RunProblem[];
   warnings?: RunProblem[];
   fits: Array<{ respondentId: string; groupId?: string; contextId?: string; questionIds?: string[]; nodeId?: string; pathId?: string; packetId?: string; fit: ProviderContextFit }>;
+  selectionFingerprint?: string;
 };
 
 export type RunStatusView = {

@@ -2,6 +2,9 @@ import type { ProviderFailureEvidence } from '../domain/decision/provider-failur
 import type { DecisionFailureDetail, DecisionResult, DecisionBatchResult } from '../domain/decision/decision.js';
 import type { AnswerRow, AttemptReservation, JourneyEvaluation, JourneyRespondentState, JourneyRunRecord, JourneyWorkerTurn, Page, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
 import type { FollowOnSourceSet, FrozenEvaluation, ParsedFollowOnRunRequest, PreparedJourneyRun, PreparedRun, RunListQueryInput } from '../domain/run/request.js';
+import type { ProviderCatalogue, ProviderPreference } from '../providers/config.js';
+
+export type ProviderSettings = { catalogue: ProviderCatalogue; preferences: ProviderPreference };
 
 export type AttemptOutcome =
   | { kind: 'answered'; result: DecisionResult }
@@ -27,6 +30,7 @@ export class RunStoreError extends Error {
 }
 
 export interface RunReadRepository {
+  getProviderSettings(): ProviderSettings;
   findSubmission(submissionId: string, requestFingerprint: string): RunStatusView | null;
   getStatus(runId: string): RunStatusView;
   evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }>;
@@ -46,6 +50,7 @@ export interface RunReadRepository {
 }
 
 export interface RunCommandRepository {
+  setProviderSettings(settings: { catalogue: Omit<ProviderCatalogue, 'revision'>; preferences: ProviderPreference }, expectedRevision: number): ProviderSettings;
   accept(submissionId: string, prepared: PreparedRun): { created: boolean; run: RunStatusView };
   acceptJourney(submissionId: string, prepared: PreparedJourneyRun): { created: boolean; run: RunStatusView };
   requestCancel(runId: string): RunStatusView;

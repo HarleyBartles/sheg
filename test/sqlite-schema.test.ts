@@ -6,21 +6,21 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 
-test('fresh stores apply the schema 9 baseline and sequential image asset custody migrations', async () => {
+test('fresh stores apply the schema 9 baseline and sequential feature migrations', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-nine-'));
   try {
     const store = openRunStore(root);
     store.close();
     const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
     try {
-      assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 11);
+      assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 12);
       const runIdentity = (database.prepare('PRAGMA table_info(runs)').all() as Array<{ name: string; notnull: number }>).find(({ name }) => name === 'run_id');
       assert.equal(runIdentity?.notnull, 1);
       const attemptColumns = new Set((database.prepare('PRAGMA table_info(attempts)').all() as Array<{ name: string }>).map(({ name }) => name));
       assert.ok(attemptColumns.has('charged_calls'));
       const migrations = database.prepare('SELECT version, migration_id, checksum, schema_fingerprint FROM schema_migrations ORDER BY version').all() as Array<{ version: number; migration_id: string; checksum: string; schema_fingerprint: string }>;
       assert.deepEqual(migrations.map(({ version, migration_id }) => ({ version, migration_id })), [
-        { version: 9, migration_id: 'baseline-v9' }, { version: 10, migration_id: 'image-assets-v10' }, { version: 11, migration_id: 'run-visual-assets-v11' },
+        { version: 9, migration_id: 'baseline-v9' }, { version: 10, migration_id: 'image-assets-v10' }, { version: 11, migration_id: 'run-visual-assets-v11' }, { version: 12, migration_id: 'provider-selection-v12' },
       ]);
       for (const migration of migrations) {
         assert.match(migration.checksum, /^[a-f0-9]{64}$/);

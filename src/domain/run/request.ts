@@ -385,6 +385,7 @@ export type PreparedRun = {
   request: ParsedInlineRunRequest | ParsedFollowOnRunRequest;
   requestFingerprint: string;
   compilerFingerprint: string;
+  providerSelectionSnapshot?: import('./lifecycle.js').ProviderSelectionPolicySnapshot;
   evaluations: FrozenEvaluation[];
   groups?: PreparedQuestionGroup[];
   lineage?: FollowOnLineage;
@@ -414,6 +415,7 @@ export type PreparedJourneyRun = {
   request: ParsedInlineJourneyRequest;
   requestFingerprint: string;
   compilerFingerprint: string;
+  providerSelectionSnapshot?: import('./lifecycle.js').ProviderSelectionPolicySnapshot;
   evaluations: JourneyEvaluation[];
   respondents: JourneyRespondentState[];
 };

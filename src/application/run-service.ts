@@ -1,12 +1,13 @@
 import path from 'node:path';
 import type { DecisionProvider } from '../domain/decision/provider.js';
-import type { AnswerRow, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunStatusView } from '../domain/run/lifecycle.js';
+import type { AnswerRow, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunStatusView, ProviderSelectionPolicySnapshot } from '../domain/run/lifecycle.js';
 import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
-import type { PreparedRun, RunRequest } from '../domain/run/request.js';
+import type { ParsedRunRequest, PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, requireExplicitProvider, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput, ProviderFactoryOptions } from '../providers/config.js';
 import type { DeletePreview, DeleteResult, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
 import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
+import { providerSelectionFingerprint } from './provider-selection-fingerprint.js';
 
 export class RunServiceError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -38,7 +39,7 @@ export interface RunService {
   cancel(runId: string): RunStatusView;
 }
 
-function normalizeRequest(input: unknown): RunRequest {
+function normalizeRequest(input: unknown): ParsedRunRequest {
   const parsed = runRequestSchema.safeParse(input);
   if (!parsed.success) throw new RunServiceError('invalid_request', parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   if (parsed.data.provider?.kind === 'laya') {
@@ -55,6 +56,11 @@ export function createRunService(
   options: RunServiceOptions = {},
 ): RunService {
   const { reads, commands } = persistence;
+  function selectionSnapshot(request: ParsedRunRequest): ProviderSelectionPolicySnapshot {
+    const settings = reads.getProviderSettings();
+    return { version: 1, catalogueRevision: settings.catalogue.revision, catalogue: { entries: settings.catalogue.entries },
+      preferences: settings.preferences, policy: { batching: request.providerSelection?.batching ?? 'automatic' } };
+  }
   async function assertReady(provider: ProviderConfigInput): Promise<void> {
     try { await options.assertProviderReady?.(provider); }
     catch (error) {
@@ -69,27 +75,38 @@ export function createRunService(
   }
 
   async function inspect(input: unknown) {
-    let request: RunRequest;
+    let request: ParsedRunRequest;
     try { request = normalizeRequest(input); }
     catch (error) {
       return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: 'invalid_request', message: error instanceof Error ? error.message : 'Request is invalid.' }], fits: [] };
     }
+    const snapshot = request.providerSelection ? selectionSnapshot(request) : undefined;
+    const selectionFingerprint = snapshot ? providerSelectionFingerprint(request, snapshot) : undefined;
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        return (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
+        const inspection = (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
+        return { ...inspection, ...(selectionFingerprint ? { selectionFingerprint } : {}) };
       } catch (error) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error instanceof Error && 'code' in error ? String(error.code) : 'follow_on_resolution_failed', message: error instanceof Error ? error.message : 'Follow-on request could not be resolved.' }], fits: [] };
       }
     }
-    return (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
+    if (!request.provider && snapshot) {
+      return { valid: false, respondentCount: request.respondents.length, minimumCalls: 0, problems: [{ code: 'provider_selection_not_ready', message: 'Automatic provider eligibility and fit are being resolved by the provider selection planner.' }], fits: [], ...(selectionFingerprint ? { selectionFingerprint } : {}) };
+    }
+    const inspection = (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
+    return { ...inspection, ...(selectionFingerprint ? { selectionFingerprint } : {}) };
   }
 
   async function start(submissionId: string, input: RunRequest): Promise<RunStatusView> {
     if (typeof submissionId !== 'string' || !submissionId.trim()) throw new RunServiceError('invalid_submission_id', 'A submission ID is required.');
     const request = normalizeRequest(input);
+    if (request.providerSelection && request.expectedSelectionFingerprint) {
+      const currentFingerprint = providerSelectionFingerprint(request, selectionSnapshot(request));
+      if (currentFingerprint !== request.expectedSelectionFingerprint) throw new RunServiceError('provider_selection_fingerprint_stale', 'Provider selection settings or study inputs changed after inspection. Inspect the request again before starting it.');
+    }
     const requestFingerprint = fingerprintRunRequest(request);
     if (!requestFingerprint) throw new RunServiceError('invalid_request', 'Request is invalid.');
     const prior = reads.findSubmission(submissionId, requestFingerprint);

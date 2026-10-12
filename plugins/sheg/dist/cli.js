@@ -25655,17 +25655,9 @@ var providerSelectionPolicySnapshotSchema = external_exports.object({
   version: external_exports.literal(1),
   catalogueRevision: external_exports.number().int().nonnegative(),
   catalogue: external_exports.object({
-    entries: external_exports.array(external_exports.object({
-      id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-      enabled: external_exports.boolean(),
-      provider: external_exports.record(external_exports.string(), external_exports.unknown()),
-      execution: external_exports.enum(["local", "hosted"]),
-      capabilities: external_exports.array(external_exports.enum(["text", "pixels"])),
-      questionTypes: external_exports.array(external_exports.enum(["choice", "score", "noul"])),
-      pricing: external_exports.record(external_exports.string(), external_exports.unknown())
-    }).strict())
+    entries: external_exports.array(providerCatalogueEntrySchema)
   }).strict(),
-  preferences: external_exports.object({ preferredOrder: external_exports.array(external_exports.string()) }).strict(),
+  preferences: providerPreferenceSchema,
   policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict()
 }).strict();
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
@@ -26675,6 +26667,13 @@ async function prepareJourneyAdmission(request, provider) {
   };
 }
 
+// src/application/provider-selection-fingerprint.ts
+function providerSelectionFingerprint(request, snapshot) {
+  const requestInputs = { ...request };
+  delete requestInputs.expectedSelectionFingerprint;
+  return hashCanonical({ policyVersion: snapshot.version, request: requestInputs, snapshot });
+}
+
 // src/application/run-service.ts
 var RunServiceError = class extends Error {
   constructor(code, message, options2) {
@@ -26694,6 +26693,16 @@ function normalizeRequest(input2) {
 }
 function createRunService(persistence, dataRoot, providerFactory, launcher, options2 = {}) {
   const { reads, commands } = persistence;
+  function selectionSnapshot(request) {
+    const settings = reads.getProviderSettings();
+    return {
+      version: 1,
+      catalogueRevision: settings.catalogue.revision,
+      catalogue: { entries: settings.catalogue.entries },
+      preferences: settings.preferences,
+      policy: { batching: request.providerSelection?.batching ?? "automatic" }
+    };
+  }
   async function assertReady(provider) {
     try {
       await options2.assertProviderReady?.(provider);
@@ -26714,21 +26723,32 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
     } catch (error62) {
       return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: "invalid_request", message: error62 instanceof Error ? error62.message : "Request is invalid." }], fits: [] };
     }
+    const snapshot = request.providerSelection ? selectionSnapshot(request) : void 0;
+    const selectionFingerprint = snapshot ? providerSelectionFingerprint(request, snapshot) : void 0;
     if (request.kind === "follow-on") {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        return (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
+        const inspection2 = (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
+        return { ...inspection2, ...selectionFingerprint ? { selectionFingerprint } : {} };
       } catch (error62) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error62 instanceof Error && "code" in error62 ? String(error62.code) : "follow_on_resolution_failed", message: error62 instanceof Error ? error62.message : "Follow-on request could not be resolved." }], fits: [] };
       }
     }
-    return (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
+    if (!request.provider && snapshot) {
+      return { valid: false, respondentCount: request.respondents.length, minimumCalls: 0, problems: [{ code: "provider_selection_not_ready", message: "Automatic provider eligibility and fit are being resolved by the provider selection planner." }], fits: [], ...selectionFingerprint ? { selectionFingerprint } : {} };
+    }
+    const inspection = (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
+    return { ...inspection, ...selectionFingerprint ? { selectionFingerprint } : {} };
   }
   async function start(submissionId, input2) {
     if (typeof submissionId !== "string" || !submissionId.trim()) throw new RunServiceError("invalid_submission_id", "A submission ID is required.");
     const request = normalizeRequest(input2);
+    if (request.providerSelection && request.expectedSelectionFingerprint) {
+      const currentFingerprint = providerSelectionFingerprint(request, selectionSnapshot(request));
+      if (currentFingerprint !== request.expectedSelectionFingerprint) throw new RunServiceError("provider_selection_fingerprint_stale", "Provider selection settings or study inputs changed after inspection. Inspect the request again before starting it.");
+    }
     const requestFingerprint = fingerprintRunRequest(request);
     if (!requestFingerprint) throw new RunServiceError("invalid_request", "Request is invalid.");
     const prior = reads.findSubmission(submissionId, requestFingerprint);
@@ -32065,6 +32085,16 @@ var runs = sqliteTable("runs", {
   index("runs_created_identity").on(table.createdMs, table.runId),
   index("runs_expired_lease").on(table.leaseExpiresMs, table.runId)
 ]);
+var providerSettings = sqliteTable("provider_settings", {
+  singletonId: integer2("singleton_id").notNull(),
+  revision: integer2("revision").notNull(),
+  catalogueJson: text("catalogue_json").notNull(),
+  preferencesJson: text("preferences_json").notNull()
+}, (table) => [
+  primaryKey({ name: "provider_settings_pk", columns: [table.singletonId] }),
+  check2("provider_settings_singleton_ck", sql`${table.singletonId} = 1`),
+  check2("provider_settings_revision_ck", sql`${table.revision} >= 0`)
+]);
 var questionGroups = sqliteTable("question_groups", {
   groupId: text("group_id").notNull(),
   runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
@@ -32229,6 +32259,7 @@ var runVisualAssets = sqliteTable("run_visual_assets", {
 ]);
 var sqliteTables = {
   runs,
+  providerSettings,
   questionGroups,
   evaluations,
   journeyRespondents,
@@ -32248,10 +32279,11 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 11;
+var SCHEMA_VERSION = 12;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
+var PROVIDER_SELECTION_MIGRATION_ID = "provider-selection-v12";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -32290,8 +32322,17 @@ function runVisualAssetsMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 11 run visual asset migration is missing from this Sheg installation.");
   return { id: RUN_VISUAL_ASSETS_MIGRATION_ID, fromVersion: 10, toVersion: 11, sql: readFileSync(match, "utf8") };
 }
+function providerSelectionMigration() {
+  const candidates = [
+    fileURLToPath2(new URL("../../../migrations/0003_provider_selection/migration.sql", import.meta.url)),
+    fileURLToPath2(new URL("./migrations/0003_provider_selection/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync2);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 12 provider selection migration is missing from this Sheg installation.");
+  return { id: PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 11, toVersion: 12, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration()];
 }
 function migrationChecksum(migration) {
   return createHash8("sha256").update(migration.sql).digest("hex");
@@ -33199,6 +33240,7 @@ function isJourneyAskNode(journey, nodeId, questionId) {
   return node2?.kind === "ask" && node2.taskId === questionId;
 }
 function validatePrepared(prepared) {
+  if (prepared.providerSelectionSnapshot !== void 0 && !providerSelectionPolicySnapshotSchema.safeParse(prepared.providerSelectionSnapshot).success) throw new RunStoreError("invalid_prepared_run", "Prepared provider selection snapshot is invalid.");
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError("invalid_prepared_run", "Prepared run request or fingerprint is invalid.");
@@ -33304,6 +33346,7 @@ function validatePrepared(prepared) {
   return { ...prepared, request: parsedRequest.data };
 }
 function validatePreparedJourney(prepared) {
+  if (prepared.providerSelectionSnapshot !== void 0 && !providerSelectionPolicySnapshotSchema.safeParse(prepared.providerSelectionSnapshot).success) throw new RunStoreError("invalid_prepared_run", "Prepared provider selection snapshot is invalid.");
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError("invalid_prepared_run", "Prepared journey request or fingerprint is invalid.");
@@ -33371,6 +33414,7 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
       context.reconcileInside(runId2, context.now());
       return { created: false, run: context.statusInside(runId2) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
     if (prepared.request.kind === "follow-on") {
       const lineage = prepared.lineage;
       if (!lineage) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage is missing.");
@@ -33408,6 +33452,7 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
       context.reconcileInside(runId2, context.now());
       return { created: false, run: context.statusInside(runId2) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID4();
     const nowMs = context.now();
@@ -33416,6 +33461,16 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
     insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
+}
+function assertProviderSettingsSnapshot(database, snapshot, request) {
+  if (!snapshot) return;
+  const row = database.prepare("SELECT revision, catalogue_json, preferences_json FROM provider_settings WHERE singleton_id = 1").get();
+  if (!row || asNumber(row.revision, "provider settings revision") !== snapshot.catalogueRevision || asText(row.catalogue_json, "provider catalogue") !== JSON.stringify({ revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }) || asText(row.preferences_json, "provider preferences") !== JSON.stringify(snapshot.preferences)) {
+    throw new RunStoreError("provider_settings_revision_conflict", "Provider settings changed after inspection. Inspect the request again before accepting it.");
+  }
+  if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
+    throw new RunStoreError("provider_selection_fingerprint_stale", "Provider selection inputs changed after inspection. Inspect the request again before accepting it.");
+  }
 }
 function requestedImageMaterials(request) {
   if (request.kind === "poll") {
@@ -33482,6 +33537,7 @@ function insertAcceptedRun(database, identity, prepared) {
       request: prepared.request,
       requestFingerprint: prepared.requestFingerprint,
       compilerFingerprint: prepared.compilerFingerprint,
+      ...prepared.providerSelectionSnapshot ? { providerSelectionSnapshot: prepared.providerSelectionSnapshot } : {},
       ..."lineage" in prepared && prepared.lineage ? { lineage: prepared.lineage } : {}
     }),
     evaluationCount: prepared.evaluations.length,
@@ -33681,6 +33737,33 @@ function validateRunIds(runIds) {
   }
 }
 
+// src/infrastructure/sqlite/provider-settings.ts
+function readProviderSettings(context) {
+  context.ensureOpen();
+  const row = context.database.prepare("SELECT revision, catalogue_json, preferences_json FROM provider_settings WHERE singleton_id = 1").get();
+  if (!row) throw new RunStoreError("data_integrity_error", "Provider settings are missing from the Sheg datastore.");
+  const revision = asNumber(row.revision, "provider settings revision");
+  const catalogue = providerCatalogueSchema.safeParse(parseJson(row.catalogue_json, "provider catalogue"));
+  const preferences = providerPreferenceSchema.safeParse(parseJson(row.preferences_json, "provider preferences"));
+  if (!catalogue.success || catalogue.data.revision !== revision || !preferences.success) throw new RunStoreError("data_integrity_error", "Stored provider settings do not match their schema or revision.");
+  return { catalogue: catalogue.data, preferences: preferences.data };
+}
+function writeProviderSettings(context, input2, expectedRevision) {
+  context.ensureOpen();
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new RunStoreError("invalid_provider_settings_revision", "Expected provider settings revision must be a nonnegative safe integer.");
+  return context.transaction(() => {
+    const current = readProviderSettings(context);
+    if (current.catalogue.revision !== expectedRevision) throw new RunStoreError("provider_settings_revision_conflict", "Provider settings changed after they were read. Read the current settings and try again.");
+    const catalogue = providerCatalogueSchema.safeParse({ ...input2.catalogue, revision: current.catalogue.revision + 1 });
+    const preferences = providerPreferenceSchema.safeParse(input2.preferences);
+    if (!catalogue.success || !preferences.success) throw new RunStoreError("invalid_provider_settings", "Provider catalogue or preferences do not match the supported contract.");
+    const ids = new Set(catalogue.data.entries.map(({ id }) => id));
+    if (preferences.data.preferredOrder.some((id) => !ids.has(id))) throw new RunStoreError("invalid_provider_settings", "Provider preferences must reference identities in the saved catalogue.");
+    context.database.prepare("UPDATE provider_settings SET revision = ?, catalogue_json = ?, preferences_json = ? WHERE singleton_id = 1").run(catalogue.data.revision, JSON.stringify(catalogue.data), JSON.stringify(preferences.data));
+    return { catalogue: catalogue.data, preferences: preferences.data };
+  });
+}
+
 // src/infrastructure/sqlite/command-repository.ts
 function createSqliteCommandRepository(context, storageInfo) {
   function optimizeStorage() {
@@ -33706,6 +33789,9 @@ function createSqliteCommandRepository(context, storageInfo) {
     }, runIds);
   }
   return {
+    setProviderSettings(settings, expectedRevision) {
+      return writeProviderSettings(context, settings, expectedRevision);
+    },
     accept(submissionId, preparedInput) {
       context.ensureOpen();
       return acceptPreparedRun(acceptanceContext(context), submissionId, preparedInput);
@@ -34516,6 +34602,7 @@ var preparedRunRecordSchema = external_exports.object({
   request: external_exports.union([inlineRunRequestSchema, followOnRunRequestSchema]),
   requestFingerprint: external_exports.string().min(1),
   compilerFingerprint: external_exports.string().min(1),
+  providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.optional(),
   lineage: followOnLineageSchema.optional()
 });
 function readRunKind(database, runId, notFound) {
@@ -34530,10 +34617,10 @@ function readPreparedRun(database, runId, options2) {
   const row = loadAcceptedRequest(database, runId);
   if (!row) throw options2.notFound();
   const stored = parseStored(preparedRunRecordSchema, parseJson(row.requestJson, "request"), "run request");
-  const { lineage, ...storedBase } = stored;
+  const { lineage, providerSelectionSnapshot, ...storedBase } = stored;
   const evaluations2 = loadPreparedEvaluations(database, runId);
   const groups = loadQuestionGroups(database, runId);
-  const parsed = options2.validate({ ...storedBase, ...lineage === void 0 ? {} : { lineage }, groups: groups.map((group) => ({
+  const parsed = options2.validate({ ...storedBase, ...providerSelectionSnapshot === void 0 ? {} : { providerSelectionSnapshot }, ...lineage === void 0 ? {} : { lineage }, groups: groups.map((group) => ({
     groupId: group.groupId,
     contextId: group.contextId,
     respondentId: group.respondentId,
@@ -34617,7 +34704,14 @@ function readJourneyRun(database, runId, notFound) {
   if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some(({ respondentId }) => !respondentIds.has(respondentId)) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) || respondents.some((state) => state.status !== "active" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
     throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
   }
-  return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations: evaluations2, respondents };
+  return {
+    request: parsedRequest.data,
+    requestFingerprint: stored.requestFingerprint,
+    compilerFingerprint: stored.compilerFingerprint,
+    ...stored.providerSelectionSnapshot === void 0 ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) },
+    evaluations: evaluations2,
+    respondents
+  };
 }
 
 // src/infrastructure/sqlite/reads/contexts.ts
@@ -34651,6 +34745,9 @@ var runCursorSchema = external_exports.object({ kind: external_exports.literal("
 var answerCursorSchema = external_exports.object({ kind: external_exports.literal("answers"), runId: external_exports.string().min(1), ordinal: external_exports.number().int().nonnegative() }).strict();
 function createSqliteReadRepository(context) {
   return {
+    getProviderSettings() {
+      return readProviderSettings(context);
+    },
     findSubmission(submissionId, requestFingerprint) {
       context.ensureOpen();
       return context.readSnapshot(() => {

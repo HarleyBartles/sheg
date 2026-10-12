@@ -8,6 +8,7 @@ import { asNumber, asText, type DatabaseRow } from '../rows.js';
 import { hasAllFollowOnSelections } from '../run-identity-queries.js';
 import { validatePrepared, validatePreparedJourney } from './prepared-validation.js';
 import { hashCanonical } from '../../identity.js';
+import { providerSelectionFingerprint } from '../../../application/provider-selection-fingerprint.js';
 import { isImageMaterial } from '../../../domain/study/stimulus.js';
 import type { ParsedRunRequest, RunMaterialItem } from '../../../domain/run/request.js';
 import { evaluations, journeyRespondents, questionGroups, runVisualAssets, runs } from '../tables.js';
@@ -45,6 +46,7 @@ export function acceptPreparedRun(context: AcceptanceContext, submissionId: stri
       context.reconcileInside(runId, context.now());
       return { created: false, run: context.statusInside(runId) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
 
     if (prepared.request.kind === 'follow-on') {
       const lineage = prepared.lineage;
@@ -87,6 +89,7 @@ export function acceptPreparedJourney(context: AcceptanceContext, submissionId: 
       context.reconcileInside(runId, context.now());
       return { created: false, run: context.statusInside(runId) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID();
     const nowMs = context.now();
@@ -95,6 +98,19 @@ export function acceptPreparedJourney(context: AcceptanceContext, submissionId: 
     insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
+}
+
+function assertProviderSettingsSnapshot(database: DatabaseSync, snapshot: PreparedRun['providerSelectionSnapshot'] | PreparedJourneyRun['providerSelectionSnapshot'], request: ParsedRunRequest): void {
+  if (!snapshot) return;
+  const row = database.prepare('SELECT revision, catalogue_json, preferences_json FROM provider_settings WHERE singleton_id = 1').get() as DatabaseRow | undefined;
+  if (!row || asNumber(row.revision, 'provider settings revision') !== snapshot.catalogueRevision ||
+      asText(row.catalogue_json, 'provider catalogue') !== JSON.stringify({ revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }) ||
+      asText(row.preferences_json, 'provider preferences') !== JSON.stringify(snapshot.preferences)) {
+    throw new RunStoreError('provider_settings_revision_conflict', 'Provider settings changed after inspection. Inspect the request again before accepting it.');
+  }
+  if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
+    throw new RunStoreError('provider_selection_fingerprint_stale', 'Provider selection inputs changed after inspection. Inspect the request again before accepting it.');
+  }
 }
 
 function requestedImageMaterials(request: ParsedRunRequest): Extract<RunMaterialItem, { type: 'image' }>[] {
@@ -163,6 +179,7 @@ export function insertAcceptedRun(database: NodeSQLiteDatabase, identity: Accept
       request: prepared.request,
       requestFingerprint: prepared.requestFingerprint,
       compilerFingerprint: prepared.compilerFingerprint,
+      ...(prepared.providerSelectionSnapshot ? { providerSelectionSnapshot: prepared.providerSelectionSnapshot } : {}),
       ...('lineage' in prepared && prepared.lineage ? { lineage: prepared.lineage } : {}),
     }),
     evaluationCount: prepared.evaluations.length,

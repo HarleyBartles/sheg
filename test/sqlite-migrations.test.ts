@@ -101,7 +101,7 @@ test('a sequential upgrade keeps a verified source backup and commits its checks
   } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('a schema 10 datastore upgrades additively and leaves its released run rows unchanged', async () => {
+test('a schema 10 datastore upgrades additively through current schema and leaves its released run rows unchanged', async () => {
   const root = await releasedSchema9();
   const legacy = new DatabaseSync(path.join(root, 'runs.sqlite'));
   applySchemaMigrations(legacy, root, registeredMigrations(), 10);
@@ -115,12 +115,15 @@ test('a schema 10 datastore upgrades additively and leaves its released run rows
   store.close();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
   try {
-    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 11);
+    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 12);
     assert.deepEqual({
       run: { ...(database.prepare("SELECT run_id, request_json, evaluation_count, used_calls FROM runs WHERE run_id = 'run-1'").get() as Record<string, unknown>) },
       packet: { ...(database.prepare("SELECT packet_json, packet_fingerprint, result_json FROM evaluations WHERE evaluation_id = 'evaluation-1'").get() as Record<string, unknown>) },
     }, before);
     assert.equal((database.prepare('SELECT COUNT(*) AS count FROM run_visual_assets').get() as { count: number }).count, 0);
+    assert.deepEqual({ ...(database.prepare('SELECT revision, catalogue_json, preferences_json FROM provider_settings WHERE singleton_id = 1').get() as Record<string, unknown>) }, {
+      revision: 0, catalogue_json: '{"revision":0,"entries":[]}', preferences_json: '{"preferredOrder":[]}',
+    });
     assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
   } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -37,6 +37,17 @@ export const runs = sqliteTable('runs', {
   index('runs_expired_lease').on(table.leaseExpiresMs, table.runId),
 ]);
 
+export const providerSettings = sqliteTable('provider_settings', {
+  singletonId: integer('singleton_id').notNull(),
+  revision: integer('revision').notNull(),
+  catalogueJson: text('catalogue_json').notNull(),
+  preferencesJson: text('preferences_json').notNull(),
+}, (table) => [
+  primaryKey({ name: 'provider_settings_pk', columns: [table.singletonId] }),
+  check('provider_settings_singleton_ck', sql`${table.singletonId} = 1`),
+  check('provider_settings_revision_ck', sql`${table.revision} >= 0`),
+]);
+
 export const questionGroups = sqliteTable('question_groups', {
   groupId: text('group_id').notNull(),
   runId: text('run_id').notNull().references(() => runs.runId, { onDelete: 'cascade' }),
@@ -210,7 +221,7 @@ export const runVisualAssets = sqliteTable('run_visual_assets', {
 ]);
 
 export const sqliteTables = {
-  runs, questionGroups, evaluations, journeyRespondents, attempts,
+  runs, providerSettings, questionGroups, evaluations, journeyRespondents, attempts,
   attemptEvaluations, evaluationAnswerAttempts, schemaMigrations, imageAssets, imageDerivations, runVisualAssets,
 } as const;
 
