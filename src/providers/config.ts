@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { providerKinds } from '../domain/decision/provider.js';
 import { jevConfigInputSchema, jevConfigSchema } from './jev/config.js';
+import { clefConfigSchema } from './clef/config.js';
 
 const layaConfigSchema = z.object({
   kind: z.literal(providerKinds[1]),
@@ -12,13 +13,6 @@ const layaConfigSchema = z.object({
   tokenizerSha256: z.string().regex(/^[a-f\d]{64}$/i),
   precision: z.string().min(1).optional(),
   timeoutMs: z.number().int().positive(),
-}).strict();
-
-const clefConfigSchema = z.object({
-  kind: z.literal('clef'),
-  accountId: z.string().regex(/^[a-f0-9]{32}$/),
-  model: z.enum(['clef', 'clef-flash']).default('clef'),
-  timeoutMs: z.number().int().positive().default(30_000),
 }).strict();
 
 export const providerConfigSchema = z.union([

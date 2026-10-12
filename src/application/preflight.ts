@@ -6,6 +6,7 @@ import type { ProviderContextFit } from '../domain/decision/provider.js';
 import { JevProvider } from '../providers/jev.js';
 import type { CredentialRoute } from '../infrastructure/credentials/windows.js';
 import { LayaProvider } from '../providers/laya.js';
+import { ClefProvider } from '../providers/clef.js';
 import { providerConfigSchema, type ProviderConfigInput } from '../providers/config.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
 import { executionFingerprint, stimulusFingerprint, type ExecutionProvider } from '../infrastructure/identity.js';
@@ -72,16 +73,14 @@ export async function preflightStudy(input: StudyPreflightInput, dependencies: {
   for (const providerInput of config.providers) {
     const providerConfig = providerInput;
     const provider = providerConfig.kind === 'jev' ? new JevProvider(providerConfig, fetch, { credentialStore }) :
-      providerConfig.kind === 'laya' ? new LayaProvider(providerConfig) : undefined;
+      providerConfig.kind === 'laya' ? new LayaProvider(providerConfig) : new ClefProvider(providerConfig, fetch, { credentialStore });
     const overflows: ProviderStudyFit['overflows'] = [];
     const unavailable: ProviderStudyFit['unavailable'] = [];
     let maximumTokens: number | null = null;
     let maximumPacket: ProviderStudyFit['maximumPacket'] = null;
     let measurementMethod: string | null = null;
     let effectiveLimit: number | null = null;
-    if (!provider) for (const packet of packets) unavailable.push({ ...packetRef(packet), reason: 'provider-measurement-unavailable' });
     for (const packet of packets) {
-      if (!provider) break;
       if (!provider.measure) {
         unavailable.push({ ...packetRef(packet), reason: 'provider-measurement-unavailable' });
         break;

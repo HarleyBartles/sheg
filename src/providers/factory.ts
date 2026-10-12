@@ -3,12 +3,13 @@ import type { DecisionProvider } from '../domain/decision/provider.js';
 import type { ProviderConfigInput } from './config.js';
 import { JevProvider } from './jev.js';
 import { LayaProvider } from './laya.js';
+import { ClefProvider } from './clef.js';
 
 export function createProvider(config: ProviderConfigInput): DecisionProvider {
   if (config.kind === 'jev') {
     return new JevProvider(config);
   }
-  if (config.kind === 'clef') throw new Error('Clef provider transport is not available yet.');
+  if (config.kind === 'clef') return new ClefProvider(config);
   return new LayaProvider({
     kind: 'laya', baseUrl: config.baseUrl, checkpoint: config.checkpoint,
     contextLimit: config.contextLimit, headLimit: config.headLimit,

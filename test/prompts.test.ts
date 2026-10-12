@@ -195,6 +195,7 @@ test('explicit packet parts compile to the same validated request as the study a
       { id: 'symptom', text: arm.items.find((item) => item.id === 'symptom')!.text },
       { id: 'investigation', text: arm.items.find((item) => item.id === 'investigation')!.text },
     ],
+    ...(fromArm.state.materialOrder === undefined ? {} : { materialOrder: fromArm.state.materialOrder }),
     trajectory: fromArm.state.trajectory,
     question: { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options } },
   });

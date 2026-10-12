@@ -110,7 +110,7 @@ export function validateDecisionBatch(
     }
     try {
       const enriched = { ...value.data, ...execution };
-      const checked = validateDecision({ state: parsedRequest.data.state, question, ...(question.type === 'choice' ? { optionIds: Object.keys(question.options) } : {}) } as DecisionRequest, enriched, options);
+      const checked = validateDecision({ state: parsedRequest.data.state, question, ...(question.type === 'choice' ? { optionIds: Object.keys(question.options) } : {}), ...(parsedRequest.data.visualMaterials ? { visualMaterials: parsedRequest.data.visualMaterials } : {}) } as DecisionRequest, enriched, options);
       return { questionId: question.id, value: decisionValueFromResult(checked) };
     } catch (error) {
       if (!(error instanceof DecisionError)) throw error;

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { decisionRequestSchema, decisionValueSchema, type DecisionRequest, type DecisionValue } from './decision.js';
+import { decisionRequestSchema, decisionValueSchema, type DecisionRequest, type DecisionValue, type DecisionVisualMaterial } from './decision.js';
 import { respondentPerspectiveSchema, type RespondentPerspective, type RespondentProfile } from '../respondents/profile.js';
 import type { JourneyDefinition } from '../study/arm.js';
 import { isImageMaterial } from '../study/stimulus.js';
@@ -39,6 +39,7 @@ const trajectorySummarySchema = z.object({
 export const promptStateSchema = z.object({
   respondent: z.object({ profile: respondentPerspectiveSchema }).strict(),
   encounteredItems: z.array(z.object({ id: z.string().min(1), text: z.string().min(1) }).strict()),
+  materialOrder: z.array(z.string().min(1)).optional(),
   trajectory: trajectorySummarySchema,
 }).strict();
 export type PromptState = z.infer<typeof promptStateSchema>;
@@ -48,6 +49,8 @@ export type DecisionPacket = z.infer<typeof decisionPacketSchema>;
 export type DecisionPacketParts = {
   respondentProfile: RespondentPerspective;
   encounteredItems: Array<{ id: string; text: string }>;
+  materialOrder?: string[];
+  visualMaterials?: DecisionVisualMaterial[];
   trajectory: TrajectorySummary;
   question: DecisionRequest['question'];
 };
@@ -59,8 +62,8 @@ export function questionForTask(task: JourneyDefinition['tasks'][number]): Decis
 }
 
 const promptContract = {
-  version: 8,
-  stateFields: ['respondent.profile', 'encounteredItems', 'trajectory'],
+  version: 9,
+  stateFields: ['respondent.profile', 'encounteredItems', 'materialOrder', 'trajectory'],
   visualBindings: 'question-scoped image material IDs; image descriptors are carried as semantic context and pixel payloads are provider-specific',
   encounteredMaterial: 'all items exposed through the current turn, unique by item ID in first-exposure order',
   trajectory: ['prior task IDs and typed responses with meanings', 'prior exposure IDs', 'event counts and range'],
@@ -280,6 +283,7 @@ function compileDecisionPacketWithMaterialPolicy(
       friction_cues: profile.friction_cues,
     },
     encounteredItems,
+    materialOrder: itemIds,
     trajectory: compactTrajectory(
       arm,
       task.responseHistory === 'omit'
@@ -287,24 +291,52 @@ function compileDecisionPacketWithMaterialPolicy(
         : history,
     ),
     question: questionForTask(task),
+    ...(task.visual ? { visualMaterials: task.visual.materialIds.flatMap((id) => {
+      const item = itemsById.get(id);
+      return item && isImageMaterial(item) ? [{ id: item.id, asset: item.asset, altText: item.altText, ...(item.caption === undefined ? {} : { caption: item.caption }) }] : [];
+    }) } : {}),
   });
 }
 
 export function compileDecisionRequest(parts: DecisionPacketParts): DecisionRequest & { state: PromptState } {
+  const visualMaterials = parts.visualMaterials ?? [];
   const state: PromptState = {
     respondent: { profile: { ...parts.respondentProfile } },
     encounteredItems: parts.encounteredItems.map(({ id, text }) => ({ id, text })),
+    ...(parts.materialOrder === undefined ? {} : { materialOrder: [...parts.materialOrder] }),
     trajectory: parts.trajectory,
   };
   const request = decisionRequestSchema.parse({
     state,
     question: parts.question,
     ...(parts.question.type === 'choice' ? { optionIds: Object.keys(parts.question.options) } : {}),
+    ...(visualMaterials.length ? { visualMaterials } : {}),
   });
   return {
     ...request,
     state,
   };
+}
+
+export function textStateWithVisualDescriptions(
+  state: Record<string, unknown>,
+  questions: readonly DecisionRequest['question'][],
+  materials: readonly DecisionVisualMaterial[],
+): Record<string, unknown> {
+  const referenced = new Map<string, 'pixels' | 'described'>();
+  for (const question of questions) for (const id of question.visual?.materialIds ?? []) {
+    const previous = referenced.get(id);
+    if (previous === 'described' || question.visual?.mode === 'described') referenced.set(id, 'described');
+    else referenced.set(id, 'pixels');
+  }
+  const items = Array.isArray(state.encounteredItems) ? state.encounteredItems as Array<{ id: string; text: string }> : [];
+  const visualItems = materials.filter(({ id }) => referenced.has(id)).map((material) => {
+    const mode = referenced.get(material.id);
+    const lines = [mode === 'described' ? `Image description: ${material.altText}` : undefined,
+      material.caption === undefined ? undefined : `Caption: ${material.caption}`].filter((line): line is string => line !== undefined);
+    return lines.length ? { id: material.id, text: lines.join('\n') } : undefined;
+  }).filter((item): item is { id: string; text: string } => item !== undefined);
+  return visualItems.length ? { ...state, encounteredItems: [...items, ...visualItems] } : state;
 }
 
 export function promptContractHash(): string {

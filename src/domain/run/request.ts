@@ -81,8 +81,8 @@ export const inlineRunRequestSchema = z.object({
   }
   validateMaterialChoices(request.questions, request.material, context);
   validateVisualBindings(request.questions, request.material, context, 'questions');
-  if ((request.material.some(isImageMaterial) || request.questions.some((question) => question.visual !== undefined)) && String(request.provider.kind) !== 'clef') {
-    context.addIssue({ code: 'custom', path: ['provider'], message: 'Image-bound visual questions require the explicit Clef provider.' });
+  if (request.questions.some((question) => question.visual?.mode === 'pixels') && String(request.provider.kind) !== 'clef') {
+    context.addIssue({ code: 'custom', path: ['provider'], message: 'Pixel-inspection questions require the explicit Clef provider.' });
   }
 });
 
@@ -98,10 +98,9 @@ export const inlineJourneyRequestSchema = z.object({
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });
   }
-  const images = request.journey.items.filter(isImageMaterial);
   const visualTasks = request.journey.tasks.filter((task) => task.visual !== undefined);
-  if ((images.length > 0 || visualTasks.length > 0) && String(request.provider.kind) !== 'clef') {
-    context.addIssue({ code: 'custom', path: ['provider'], message: 'Image-bound visual questions require the explicit Clef provider.' });
+  if (visualTasks.some((task) => task.visual?.mode === 'pixels') && String(request.provider.kind) !== 'clef') {
+    context.addIssue({ code: 'custom', path: ['provider'], message: 'Pixel-inspection questions require the explicit Clef provider.' });
   }
 });
 

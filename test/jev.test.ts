@@ -251,6 +251,32 @@ test('sends mixed independent questions in one Jev request with one shared execu
   } finally { restoreKey(); }
 });
 
+test('Jev carries authored image descriptions as text and refuses pixel-dependent requests', async () => {
+  const described: DecisionRequest = {
+    ...request,
+    question: { ...request.question, visual: { mode: 'described', materialIds: ['portrait'] } },
+    visualMaterials: [{ id: 'portrait', altText: 'A compact lawful standards agent in brown tweed with a ledger.', asset: { assetId: `sha256:${'a'.repeat(64)}`, sha256: 'a'.repeat(64), format: 'png', width: 20, height: 20, bytes: 40 } }],
+  };
+  const restoreKey = installTestKey();
+  try {
+    let body: Record<string, unknown> | undefined;
+    const provider = makeJevProvider(fakeFetch(async (_url, init) => {
+      body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return response();
+    }));
+    await provider.decide(described, 1);
+    assert.deepEqual((body?.state as { encounteredItems: unknown[] }).encounteredItems.at(-1), {
+      id: 'portrait', text: 'Image description: A compact lawful standards agent in brown tweed with a ledger.',
+    });
+    const pixels = { ...described, question: { ...described.question, visual: { mode: 'pixels' as const, materialIds: ['portrait'] } } } as DecisionRequest;
+    assert.equal(provider.measure(pixels).status, 'unavailable');
+    let calls = 0;
+    const noCall = makeJevProvider(async () => { calls += 1; return response(); });
+    await assert.rejects(noCall.decide(pixels, 1), /visual-pixels-require-clef/);
+    assert.equal(calls, 0);
+  } finally { restoreKey(); }
+});
+
 test('batch Jev failures stay question-scoped except malformed envelopes and route-wide authorization', async () => {
   const batch: DecisionBatchRequest = {
     state: request.state,
