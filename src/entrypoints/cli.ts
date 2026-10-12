@@ -6,17 +6,19 @@ import { loadStudy } from '../infrastructure/study-loader.js';
 import { preflightStudy, type PreflightProviderConfig } from '../application/preflight.js';
 import { decisionValueSchema, type DecisionValue } from '../domain/decision/decision.js';
 import { runEvidenceQuerySchema, runListQuerySchema, runRequestSchema } from '../domain/run/request.js';
-import { dispatchRunGet, runDeleteSchema, runGetSchema, runStorageSchema, type StorageOperation } from '../application/run-operations.js';
+import { dispatchRunGet, runDeleteSchema, runGetSchema, runStorageSchema } from '../application/run-operations.js';
 import { createRunRuntime } from '../infrastructure/run-runtime.js';
 import { RunServiceError } from '../application/run-service.js';
 import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import { RunStoreError } from '../infrastructure/run-store.js';
 import type { RunService } from '../application/run-service.js';
+import { ImageAssetError, ImageGetRequestSchema, ImageImportRequestSchema, ScaleRequestSchema } from '../domain/assets/image.js';
+import type { StaticImageCodec } from '../infrastructure/images/codecs.js';
 
 type CliIo = { out(value: string): unknown; error(value: string): unknown };
 const outputIo: CliIo = { out: (value) => process.stdout.write(`${value}\n`), error: (value) => process.stderr.write(`${value}\n`) };
 
-export async function runCli(args: readonly string[], io: CliIo = outputIo, service?: RunService): Promise<number> {
+export async function runCli(args: readonly string[], io: CliIo = outputIo, service?: RunService, imageCodec?: StaticImageCodec): Promise<number> {
   const [command, ...rest] = args;
   if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
   try {
@@ -35,14 +37,16 @@ export async function runCli(args: readonly string[], io: CliIo = outputIo, serv
       io.out(JSON.stringify(result));
       return 0;
     }
-    const runtime = createRunRuntime(options['data-root'] === undefined ? undefined : path.resolve(options['data-root']), service);
+    const runtime = createRunRuntime(options['data-root'] === undefined ? undefined : path.resolve(options['data-root']), service, imageCodec === undefined ? {} : { imageCodec });
     try {
-      const result = await durableOperation(command ?? '', options, runtime.service, runtime.storage);
+      const result = await durableOperation(command ?? '', options, runtime);
       io.out(JSON.stringify(result));
       return 0;
     } finally { runtime.close(); }
   } catch (error) {
-    const result = error instanceof CliInputError || error instanceof RunServiceError || error instanceof RunStoreError
+    const result = error instanceof ImageAssetError
+      ? { error: { code: error.code, message: error.message } }
+      : error instanceof CliInputError || error instanceof RunServiceError || error instanceof RunStoreError
       ? { error: error.message }
       : { error: 'The Sheg command failed. Check the command arguments and local datastore.' };
     io.error(JSON.stringify(result));
@@ -52,7 +56,8 @@ export async function runCli(args: readonly string[], io: CliIo = outputIo, serv
 
 class CliInputError extends Error {}
 
-async function durableOperation(command: string, options: Record<string, string>, service: RunService, storage: (input: StorageOperation) => Promise<unknown>): Promise<unknown> {
+async function durableOperation(command: string, options: Record<string, string>, runtime: ReturnType<typeof createRunRuntime>): Promise<unknown> {
+  const { service, storage } = runtime;
   if (command === 'inspect') return service.inspect(await readRequest(options));
   if (command === 'start') return service.start(uuid(required(options, 'submission-id')), await readRequest(options));
   if (command === 'list') return service.list(runListQuerySchema.parse(await readJson(required(options, 'query'))));
@@ -68,7 +73,39 @@ async function durableOperation(command: string, options: Record<string, string>
     return input.dryRun ? service.previewDelete(input.runIds) : service.deleteRuns(input.runIds);
   }
   if (command === 'storage') return storage(runStorageSchema.parse(await readJson(required(options, 'request'))));
+  if (command === 'image-import') {
+    const requestPath = path.resolve(required(options, 'request'));
+    const request = parseImageRequest(ImageImportRequestSchema, await readJson(requestPath));
+    const source = request.source;
+    if (!('path' in source)) return { asset: await runtime.image.import(source) };
+    const sourcePath = resolveImageSourcePath(requestPath, source.path);
+    const asset = await runtime.image.import({ path: sourcePath, sha256: source.sha256 });
+    return { asset, sourcePath };
+  }
+  if (command === 'image-scale') {
+    const requestPath = path.resolve(required(options, 'request'));
+    const request = parseImageRequest(ScaleRequestSchema, await readJson(requestPath));
+    const source = request.source;
+    if (!('path' in source)) return runtime.image.scale(request);
+    const sourcePath = resolveImageSourcePath(requestPath, source.path);
+    const resolvedRequest = { ...request, source: { path: sourcePath, sha256: source.sha256 } };
+    return { ...await runtime.image.scale(resolvedRequest), sourcePath };
+  }
+  if (command === 'image-get') {
+    const request = parseImageRequest(ImageGetRequestSchema, await readJson(required(options, 'request')));
+    return request.export ? runtime.image.export(request.assetId) : { asset: runtime.image.get(request.assetId) };
+  }
   throw new CliInputError(`Unknown command: ${command}`);
+}
+
+function parseImageRequest<T>(schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } }, input: unknown): T {
+  const result = schema.safeParse(input);
+  if (!result.success) throw new CliInputError('The image request is invalid.');
+  return result.data;
+}
+
+function resolveImageSourcePath(requestPath: string, sourcePath: string): string {
+  return path.isAbsolute(sourcePath) ? path.normalize(sourcePath) : path.resolve(path.dirname(requestPath), sourcePath);
 }
 
 async function readRequest(options: Record<string, string>) {
@@ -122,6 +159,7 @@ function validateOptions(command: string | undefined, options: Record<string, st
     inspect: ['request', 'data-root'], start: ['request', 'submission-id', 'data-root'],
     list: ['query', 'data-root'], query: ['query', 'data-root'], get: ['request', 'data-root'],
     cancel: ['run-id', 'data-root'], resume: ['run-id', 'data-root'], delete: ['request', 'data-root'], storage: ['request', 'data-root'],
+    'image-import': ['request', 'data-root'], 'image-scale': ['request', 'data-root'], 'image-get': ['request', 'data-root'],
   };
   const allowed = commands[command ?? ''];
   if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ''}`);
@@ -156,6 +194,9 @@ Commands:
   cancel|resume --run-id <uuid>                 Cancel or explicitly resume an eligible run
   delete --request <json-file>                  Preview or delete selected terminal runs
   storage --request <json-file>                 Inspect, optimize or explicitly reset the datastore
+  image-import --request <json-file>             Validate and save one digest-verified image
+  image-scale --request <json-file>               Create a proportional image candidate
+  image-get --request <json-file>                 Read metadata or explicitly export a preview
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
   CLI and MCP share the platform's Sheg data directory by default.

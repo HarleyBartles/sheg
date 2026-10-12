@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { openRunStore } from '../src/infrastructure/run-store.js';
+import { createStaticImageCodec } from '../src/infrastructure/images/codecs.js';
 
 function closeTestServer(server: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -57,9 +59,15 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   await assertSkillLinksResolve(path.join(plugin, 'skills/study-design'), plugin);
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
   assert.equal(await exists(path.join(plugin, 'dist/migrations/0000_baseline_v9/migration.sql')), true);
+  assert.equal(await exists(path.join(plugin, 'dist/migrations/0001_image_assets/migration.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/queries/load-journey-worker-turn.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/drizzle-orm-Apache-2.0.txt')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/THIRD-PARTY-NOTICES.md')), true);
+  for (const asset of ['squoosh_png_bg.wasm', 'mozjpeg_dec.wasm', 'mozjpeg_enc.wasm', 'webp_dec.wasm', 'webp_enc_simd.wasm', 'squoosh_resize_bg.wasm']) assert.equal(await exists(path.join(plugin, 'dist/codec-assets', asset)), true);
+  assert.deepEqual((await readdir(path.join(plugin, 'dist/codec-assets'))).sort(), ['mozjpeg_dec.wasm', 'mozjpeg_enc.wasm', 'squoosh_png_bg.wasm', 'squoosh_resize_bg.wasm', 'webp_dec.wasm', 'webp_enc_simd.wasm']);
+  for (const packageName of ['png', 'jpeg', 'webp', 'resize']) assert.equal(await exists(path.join(plugin, `dist/licenses/jsquash/${packageName}/LICENSE`)), true);
+  for (const packageName of ['png', 'jpeg', 'webp']) assert.equal(await exists(path.join(plugin, `dist/licenses/jsquash/${packageName}/LICENSE.codec.md`)), true);
+  assert.match(await readFile(path.join(plugin, 'dist/licenses/jsquash/jpeg/LICENSE.codec.md'), 'utf8'), /libjpeg-turbo/i);
   const credentialHelper = path.join(plugin, 'dist/credentials/windows-credential.ps1');
   assert.equal(await exists(credentialHelper), true);
   if (process.platform === 'win32') {
@@ -72,7 +80,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
     assert.match(status.stdout.trim(), /^(AVAILABLE|MISSING)$/);
     assert.equal(status.stderr, '');
   }
-  for (const contract of ['run-request.schema.json', 'respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
+  for (const contract of ['run-request.schema.json', 'respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json', 'image-import-request.schema.json', 'image-scale-request.schema.json', 'image-get-request.schema.json']) {
     assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets', contract)), true);
   }
   assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets/reader-archetype.schema.json')), false);
@@ -119,9 +127,113 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), false);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
   const initialized = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { readOnly: true });
-  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9); }
+  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10); }
   finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
+});
+
+test('a copied plugin imports, scales, and exports all image formats without checkout, network, or native helpers', async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-installed-images-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const plugin = path.join(sandbox, 'installed', 'sheg');
+  await mkdir(path.dirname(plugin), { recursive: true });
+  await cp(pluginPackageSource(), plugin, { recursive: true });
+  assert.equal(await exists(path.join(plugin, 'node_modules')), false);
+  const dataRoot = path.join(sandbox, 'data');
+  const inputDirectory = path.join(sandbox, 'inputs');
+  const requestDirectory = path.join(sandbox, 'requests');
+  const temporaryDirectory = path.join(sandbox, 'tmp');
+  await Promise.all([mkdir(inputDirectory), mkdir(requestDirectory), mkdir(temporaryDirectory)]);
+  const networkBlocker = path.join(sandbox, 'deny-network.mjs');
+  await writeFile(networkBlocker, 'globalThis.fetch = async () => { throw new Error("Network is disabled in this installed-package test."); };\n');
+  const env = isolatedImagePluginEnvironment(sandbox, dataRoot);
+  const client = new Client({ name: 'sheg-installed-image-test', version: '1.0.0' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ['--import', pathToFileURL(networkBlocker).href, path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
+  const candidateRecords: Array<{ assetId: string; sha256: string; format: string }> = [];
+  try {
+    await client.connect(transport);
+    for (const format of ['png', 'jpeg', 'webp'] as const) {
+      const source = path.join(inputDirectory, `source.${format}`);
+      const fixture = new URL(format === 'png' ? './fixtures/images/four-corners-transparent.png' : `./fixtures/images/four-corners.${format}`, import.meta.url);
+      await copyFile(fixture, source);
+      const bytes = await readFile(source);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const imported = await client.callTool({ name: 'image_import', arguments: { source: { path: source, sha256: digest } } });
+      assert.equal(imported.isError ?? false, false, JSON.stringify(imported.structuredContent));
+      const sourceAssetId = (imported.structuredContent as { assetId: string }).assetId;
+      await rm(source);
+      const scaled = await client.callTool({ name: 'image_scale', arguments: { source: { assetId: sourceAssetId }, maxWidth: 40 } });
+      assert.equal(scaled.isError ?? false, false, JSON.stringify(scaled.structuredContent));
+      const candidate = scaled.structuredContent as { candidate: { assetId: string; sha256: string; format: string; width: number; height: number } };
+      assert.deepEqual([candidate.candidate.format, candidate.candidate.width, candidate.candidate.height], [format, 40, 20]);
+      candidateRecords.push(candidate.candidate);
+    }
+    await client.close();
+    await transport.close();
+
+    const decoderAssets = path.join(sandbox, 'test-decoder-assets');
+    await copyJsquashWasmAssets(decoderAssets);
+    const decoder = createStaticImageCodec(decoderAssets);
+    for (const candidate of candidateRecords) {
+      const requestPath = path.join(requestDirectory, `${candidate.format}.json`);
+      await writeFile(requestPath, JSON.stringify({ assetId: candidate.assetId, export: true }));
+      const exported = spawnSync(process.execPath, ['--import', pathToFileURL(networkBlocker).href, path.join(plugin, 'dist', 'cli.js'), 'image-get', '--request', requestPath, '--data-root', dataRoot], {
+        cwd: sandbox, env, encoding: 'utf8', timeout: 30000, maxBuffer: 2 * 1024 * 1024, windowsHide: true,
+      });
+      assert.equal(exported.error, undefined, exported.stderr);
+      assert.equal(exported.status, 0, exported.stderr);
+      const result = JSON.parse(exported.stdout.trim()) as { asset: { sha256: string }; path: string };
+      const outputBytes = await readFile(result.path);
+      assert.equal(createHash('sha256').update(outputBytes).digest('hex'), candidate.sha256);
+      const decoded = await decoder.decode(outputBytes);
+      assert.deepEqual([decoded.format, decoded.width, decoded.height], [candidate.format, 40, 20]);
+      assertPackageCornerColors(decoded.data, decoded.width, decoded.height);
+    }
+  } finally {
+    await client.close().catch(() => undefined);
+    await transport.close().catch(() => undefined);
+  }
+});
+
+test('an installed plugin reports missing WASM and a bad migration without losing maintenance access', async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-installed-image-failures-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const source = new URL('./fixtures/images/four-corners-transparent.png', import.meta.url);
+  const sourcePath = path.join(sandbox, 'source.png');
+  await copyFile(source, sourcePath);
+  const bytes = await readFile(sourcePath);
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  const networkBlocker = path.join(sandbox, 'deny-network.mjs');
+  await writeFile(networkBlocker, 'globalThis.fetch = async () => { throw new Error("Network is disabled in this installed-package test."); };\n');
+
+  const pluginWithoutCodec = path.join(sandbox, 'without-codec');
+  await cp(pluginPackageSource(), pluginWithoutCodec, { recursive: true });
+  await rm(path.join(pluginWithoutCodec, 'dist/codec-assets/squoosh_resize_bg.wasm'));
+  const codecDataRoot = path.join(sandbox, 'codec-data');
+  const { client: codecClient, transport: codecTransport } = await connectInstalledMcp(pluginWithoutCodec, sandbox, codecDataRoot, networkBlocker);
+  try {
+    const failed = await codecClient.callTool({ name: 'image_import', arguments: { source: { path: sourcePath, sha256: digest } } });
+    assert.equal(failed.isError, true);
+    assert.equal((failed.structuredContent as { error: { code: string } }).error.code, 'image_codec_unavailable');
+    const storage = await codecClient.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
+    assert.equal((storage.structuredContent as { recoveryRequired: boolean }).recoveryRequired, false);
+  } finally { await codecClient.close(); await codecTransport.close(); }
+
+  const pluginWithBadMigration = path.join(sandbox, 'bad-migration');
+  await cp(pluginPackageSource(), pluginWithBadMigration, { recursive: true });
+  await writeFile(path.join(pluginWithBadMigration, 'dist/migrations/0001_image_assets/migration.sql'), 'THIS IS NOT VALID SQLITE;\n');
+  const migrationDataRoot = path.join(sandbox, 'migration-data');
+  const { client: migrationClient, transport: migrationTransport } = await connectInstalledMcp(pluginWithBadMigration, sandbox, migrationDataRoot, networkBlocker);
+  try {
+    const storage = await migrationClient.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
+    const state = storage.structuredContent as { recoveryRequired: boolean; compatibility: { status: string }; issue: { code: string } };
+    assert.equal(state.recoveryRequired, true);
+    assert.equal(state.compatibility.status, 'migration_failed');
+    assert.equal(state.issue.code, 'migration_failed');
+    const blocked = await migrationClient.callTool({ name: 'image_scale', arguments: { source: { assetId: `sha256:${'a'.repeat(64)}` }, maxWidth: 40 } });
+    assert.equal(blocked.isError, true);
+    assert.equal((blocked.structuredContent as { error: { code: string } }).error.code, 'datastore_recovery_required');
+  } finally { await migrationClient.close(); await migrationTransport.close(); }
 });
 
 test('a packaged run survives its MCP and is recalled by standalone CLI and a new plugin connection', async (t) => {
@@ -677,6 +789,45 @@ test('a copied MCP splits local independent questions and resumes without replay
     await killMcpConnection(clientA, transportA);
   }
 });
+
+function isolatedImagePluginEnvironment(sandbox: string, dataRoot: string): Record<string, string> {
+  const temporary = path.join(sandbox, 'tmp');
+  const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR ?? '';
+  return { PATH: path.dirname(process.execPath), SystemRoot: windowsRoot, SYSTEMROOT: windowsRoot, TEMP: temporary, TMP: temporary, SHEG_DATA_DIR: dataRoot };
+}
+
+async function connectInstalledMcp(plugin: string, sandbox: string, dataRoot: string, networkBlocker: string): Promise<{ client: Client; transport: StdioClientTransport }> {
+  await mkdir(path.join(sandbox, 'tmp'), { recursive: true });
+  const client = new Client({ name: 'sheg-installed-image-failure-test', version: '1.0.0' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ['--import', pathToFileURL(networkBlocker).href, path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env: isolatedImagePluginEnvironment(sandbox, dataRoot) });
+  await client.connect(transport);
+  return { client, transport };
+}
+
+async function copyJsquashWasmAssets(directory: string): Promise<void> {
+  await mkdir(directory);
+  const packageRoot = path.resolve('node_modules/@jsquash');
+  const assets = [
+    ['png/codec/pkg/squoosh_png_bg.wasm', 'squoosh_png_bg.wasm'],
+    ['jpeg/codec/dec/mozjpeg_dec.wasm', 'mozjpeg_dec.wasm'],
+    ['jpeg/codec/enc/mozjpeg_enc.wasm', 'mozjpeg_enc.wasm'],
+    ['webp/codec/dec/webp_dec.wasm', 'webp_dec.wasm'],
+    ['webp/codec/enc/webp_enc_simd.wasm', 'webp_enc_simd.wasm'],
+    ['resize/lib/resize/pkg/squoosh_resize_bg.wasm', 'squoosh_resize_bg.wasm'],
+  ];
+  await Promise.all(assets.map(([source, target]) => cp(path.join(packageRoot, source!), path.join(directory, target!))));
+}
+
+function assertPackageCornerColors(data: Uint8ClampedArray, width: number, height: number): void {
+  const samples = [
+    [5, 5, [255, 0, 0]], [width - 6, 5, [0, 255, 0]],
+    [5, height - 6, [0, 0, 255]], [width - 6, height - 6, [255, 255, 0]],
+  ] as const;
+  for (const [x, y, expected] of samples) {
+    const offset = (y * width + x) * 4;
+    for (let channel = 0; channel < 3; channel += 1) assert.ok(Math.abs(data[offset + channel]! - expected[channel]!) < 70, `corner at ${x},${y} lost its expected color`);
+  }
+}
 
 async function killMcpConnection(client: Client, transport: StdioClientTransport): Promise<void> {
   const pid = transport.pid;

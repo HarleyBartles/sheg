@@ -7,13 +7,18 @@ import type { RunPersistence } from '../application/run-store.js';
 import { DetachedWorkerLauncher } from './worker-launcher.js';
 import { assertProviderReady, createProvider } from '../providers/factory.js';
 import type { StorageOperation } from '../application/run-operations.js';
+import { createImagePreparationService, type ImagePreparationService } from '../application/image-preparation.js';
+import { createStaticImageCodec, type StaticImageCodec } from './images/codecs.js';
+import { openImageAssetRepository } from './sqlite/image-assets.js';
 
 // Composition and datastore recovery are shared by all public entrypoints.
-export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platform, os.homedir()), service?: RunService) {
+export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platform, os.homedir()), service?: RunService, options: { imageCodec?: StaticImageCodec } = {}) {
   let runtimeService: RunService;
   let ownedStore: RunPersistence | undefined;
   let storeReady = service !== undefined;
   let startupFailure: unknown;
+  let ownedImageRepository: ReturnType<typeof openImageAssetRepository> | undefined;
+  let imagePreparation: ImagePreparationService | undefined;
   if (service) runtimeService = service;
   else {
     try { const runtime = createDefaultRunService(dataRoot); runtimeService = runtime.service; ownedStore = runtime.store; storeReady = true; }
@@ -67,7 +72,15 @@ export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process
 
   return {
     get service(): RunService { return runtimeService; },
-    close(): void { ownedStore?.close(); ownedStore = undefined; },
+    get image(): ImagePreparationService {
+      if (!storeReady || inspectRunStoreCompatibility(dataRoot).status !== 'current') throw recoveryRequiredError();
+      if (!imagePreparation) {
+        ownedImageRepository = openImageAssetRepository(dataRoot);
+        imagePreparation = createImagePreparationService(ownedImageRepository, options.imageCodec ?? createStaticImageCodec(), dataRoot);
+      }
+      return imagePreparation;
+    },
+    close(): void { ownedImageRepository?.close(); ownedImageRepository = undefined; imagePreparation = undefined; ownedStore?.close(); ownedStore = undefined; },
     storage,
   };
 }

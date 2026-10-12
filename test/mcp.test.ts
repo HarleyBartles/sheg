@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
@@ -15,8 +16,26 @@ import { CredentialStoreError } from '../src/infrastructure/credentials/windows.
 import { seedWorkflowState } from '../scripts/skill-testing/workflow-seeds.js';
 import { createControlledRecoveryProvider } from '../scripts/skill-testing/controlled-recovery.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
+import { createStaticImageCodec } from '../src/infrastructure/images/codecs.js';
+import { runCli } from '../src/entrypoints/cli.js';
 
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+
+async function localImageCodec(root: string) {
+  const directory = path.join(root, 'codec-assets');
+  await mkdir(directory);
+  const packages = fileURLToPath(new URL('../node_modules/@jsquash/', import.meta.url));
+  const assets = [
+    ['png/codec/pkg/squoosh_png_bg.wasm', 'squoosh_png_bg.wasm'],
+    ['jpeg/codec/dec/mozjpeg_dec.wasm', 'mozjpeg_dec.wasm'],
+    ['jpeg/codec/enc/mozjpeg_enc.wasm', 'mozjpeg_enc.wasm'],
+    ['webp/codec/dec/webp_dec.wasm', 'webp_dec.wasm'],
+    ['webp/codec/enc/webp_enc_simd.wasm', 'webp_enc_simd.wasm'],
+    ['resize/lib/resize/pkg/squoosh_resize_bg.wasm', 'squoosh_resize_bg.wasm'],
+  ];
+  await Promise.all(assets.map(([source, target]) => copyFile(path.join(packages, source!), path.join(directory, target!))));
+  return createStaticImageCodec(directory);
+}
 
 function request(): InlineRunRequest {
   return { kind: 'poll', respondents: [{ id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }], material: [{ id: 'opening', text: 'A short passage.' }], questions: [{ type: 'choice', id: 'interest', instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } }], provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1 };
@@ -36,17 +55,18 @@ function journeyRequest() {
   };
 }
 
-async function connectedFixture(assertProviderReady: () => Promise<void> = async () => undefined) {
+async function connectedFixture(assertProviderReady: () => Promise<void> = async () => undefined, imageCodec?: Parameters<typeof createPollingServer>[2]) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-'));
   const store = openRunStore(root);
   const fit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
-  const provider: DecisionProvider = { measure: () => fit, measureBatch: () => fit, async decide() { throw new Error('MCP admission must not infer.'); }, async decideBatch() { throw new Error('MCP admission must not infer.'); } };
-  const service = createRunService(store, root, () => provider, { async launch() {} }, { assertProviderReady });
-  const server = createPollingServer(service);
+  const calls = { providerFactory: 0, measure: 0, infer: 0, launch: 0, credentials: 0 };
+  const provider: DecisionProvider = { measure() { calls.measure += 1; return fit; }, measureBatch() { calls.measure += 1; return fit; }, async decide() { calls.infer += 1; throw new Error('MCP admission must not infer.'); }, async decideBatch() { calls.infer += 1; throw new Error('MCP admission must not infer.'); } };
+  const service = createRunService(store, root, () => { calls.providerFactory += 1; return provider; }, { async launch() { calls.launch += 1; } }, { assertProviderReady: async () => { calls.credentials += 1; await assertProviderReady(); } });
+  const server = createPollingServer(service, root, imageCodec);
   const client = new Client({ name: 'sheg-mcp-test', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-  return { root, store, server, client, close: async () => { await client.close(); await server.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
+  return { root, store, service, calls, server, client, close: async () => { await client.close(); await server.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
 test('MCP advertises the package product version', async () => {
@@ -58,11 +78,106 @@ test('MCP advertises the package product version', async () => {
   }
 });
 
+test('MCP imports an image, scales its saved reference on a later connection, and CLI explicitly exports it', async () => {
+  const codecRoot = await mkdtemp(path.join(os.tmpdir(), 'sheg-image-codec-'));
+  const baseCodec = await localImageCodec(codecRoot);
+  let decodeCalls = 0;
+  const codec = { ...baseCodec, async decode(bytes: Uint8Array) { decodeCalls += 1; return baseCodec.decode(bytes); } };
+  const f = await connectedFixture(async () => undefined, codec);
+  const source = path.join(f.root, 'source.png');
+  const original = new URL('./fixtures/images/four-corners-transparent.png', import.meta.url);
+  let secondClient: Client | undefined;
+  let secondServer: ReturnType<typeof createPollingServer> | undefined;
+  try {
+    await copyFile(original, source);
+    const bytes = await readFile(source);
+    const relative = await f.client.callTool({ name: 'image_import', arguments: { source: { path: 'source.png', sha256: createHash('sha256').update(bytes).digest('hex') } } });
+    assert.equal(relative.isError, true);
+    assert.equal((relative.structuredContent as { error: { code: string } }).error.code, 'image_source_path_invalid');
+    const imported = await f.client.callTool({ name: 'image_import', arguments: { source: { path: source, sha256: createHash('sha256').update(bytes).digest('hex') } } });
+    assert.equal(imported.isError ?? false, false, JSON.stringify(imported.structuredContent));
+    const sourceAsset = (imported.structuredContent as { assetId: string }).assetId;
+    await f.client.close();
+    await f.server.close();
+    await unlink(source);
+
+    secondServer = createPollingServer(f.service, f.root, codec);
+    secondClient = new Client({ name: 'sheg-image-test-next-connection', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([secondServer.connect(serverTransport), secondClient.connect(clientTransport)]);
+    decodeCalls = 0;
+    const missing = await secondClient.callTool({ name: 'image_scale', arguments: { source: { assetId: `sha256:${'f'.repeat(64)}` }, maxWidth: 40 } });
+    assert.equal(missing.isError, true);
+    assert.equal((missing.structuredContent as { error: { code: string } }).error.code, 'image_asset_not_found');
+    assert.equal(decodeCalls, 0);
+    const extraControl = await secondClient.callTool({ name: 'image_scale', arguments: { source: { assetId: sourceAsset }, maxWidth: 40, quality: 50 } });
+    assert.equal(extraControl.isError, true);
+    const scaled = await secondClient.callTool({ name: 'image_scale', arguments: { source: { assetId: sourceAsset }, maxWidth: 40 } });
+    assert.equal(scaled.isError ?? false, false);
+    const prepared = scaled.structuredContent as { source: { assetId: string }; candidate: { assetId: string; width: number; height: number } };
+    assert.equal(prepared.source.assetId, sourceAsset);
+    assert.deepEqual([prepared.candidate.width, prepared.candidate.height], [40, 20]);
+    const metadata = await secondClient.callTool({ name: 'image_get', arguments: { assetId: prepared.candidate.assetId } });
+    assert.equal(metadata.isError ?? false, false);
+    assert.equal((metadata.structuredContent as { asset: { assetId: string } }).asset.assetId, prepared.candidate.assetId);
+    const previewRoot = path.join(f.root, 'asset-previews');
+    await assert.rejects(access(previewRoot), { code: 'ENOENT' });
+
+    await secondClient.close();
+    await secondServer.close();
+    secondClient = undefined;
+    secondServer = undefined;
+    const requestPath = path.join(f.root, 'get.json');
+    await writeFile(requestPath, JSON.stringify({ assetId: prepared.candidate.assetId, export: true }));
+    const output: string[] = []; const errors: string[] = [];
+    const status = await runCli(['image-get', '--request', requestPath, '--data-root', f.root], { out: (value) => { output.push(value); return true; }, error: (value) => { errors.push(value); return true; } }, f.service, codec);
+    assert.equal(status, 0, errors.join('\n'));
+    const exported = JSON.parse(output[0] ?? '{}') as { asset: { assetId: string }; path: string };
+    assert.equal(exported.asset.assetId, prepared.candidate.assetId);
+    const exportedBytes = await readFile(exported.path);
+    assert.equal(createHash('sha256').update(exportedBytes).digest('hex'), (metadata.structuredContent as { asset: { sha256: string } }).asset.sha256);
+    assert.equal((await codec.decode(exportedBytes)).width, 40);
+    assert.deepEqual(f.calls, { providerFactory: 0, measure: 0, infer: 0, launch: 0, credentials: 0 });
+  } finally {
+    if (secondClient) await secondClient.close();
+    if (secondServer) await secondServer.close();
+    await f.client.close().catch(() => undefined);
+    await f.server.close().catch(() => undefined);
+    f.store.close();
+    await rm(f.root, { recursive: true, force: true });
+    await rm(codecRoot, { recursive: true, force: true });
+  }
+});
+
+test('missing image codec is bounded and leaves storage maintenance usable', async () => {
+  const f = await connectedFixture();
+  const source = fileURLToPath(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
+  const bytes = await readFile(source);
+  const missingCodecRoot = await mkdtemp(path.join(os.tmpdir(), 'sheg-missing-codec-'));
+  const server = createPollingServer(f.service, f.root, createStaticImageCodec(missingCodecRoot));
+  const client = new Client({ name: 'sheg-missing-image-codec-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const result = await client.callTool({ name: 'image_import', arguments: { source: { path: source, sha256: createHash('sha256').update(bytes).digest('hex') } } });
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent as { error: { code: string } }).error.code, 'image_codec_unavailable');
+    const storage = await client.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
+    assert.equal(storage.isError ?? false, false);
+    assert.equal((storage.structuredContent as { recoveryRequired: boolean }).recoveryRequired, false);
+  } finally {
+    await client.close();
+    await server.close();
+    await f.close();
+    await rm(missingCodecRoot, { recursive: true, force: true });
+  }
+});
+
 test('MCP accepts, discovers, reads, and cancels durable direct requests with structured errors', async () => {
   const f = await connectedFixture();
   try {
     const tools = await f.client.listTools();
-    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_query', 'run_resume', 'run_start', 'run_storage']);
+    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['image_get', 'image_import', 'image_scale', 'run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_query', 'run_resume', 'run_start', 'run_storage']);
     assert.match(tools.tools.find(({ name }) => name === 'run_resume')?.description ?? '', /partial journey/i);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);

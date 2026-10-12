@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { runCli } from '../src/entrypoints/cli.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { createPollingServer } from '../src/entrypoints/mcp.js';
 import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
 import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { InlineRunRequest } from '../src/domain/run/request.js';
+import type { StaticImageCodec } from '../src/infrastructure/images/codecs.js';
 
 test('CLI and MCP share durable execution, submission retries, recall and cancellation', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-entrypoints-'));
@@ -54,7 +55,41 @@ test('CLI help lists all supported workflow commands', async () => {
   const lines: string[] = [];
   const status = await runCli(['--help'], { out: (text) => { lines.push(text); return true; }, error: (text) => { lines.push(text); return true; } });
   assert.equal(status, 0);
-  for (const command of ['inspect', 'preflight', 'trace', 'start', 'list', 'query', 'get', 'cancel', 'resume', 'storage']) assert.match(lines[0] ?? '', new RegExp(command));
+  for (const command of ['inspect', 'preflight', 'trace', 'start', 'list', 'query', 'get', 'cancel', 'resume', 'storage', 'image-import', 'image-scale', 'image-get']) assert.match(lines[0] ?? '', new RegExp(command));
+});
+
+test('CLI resolves image paths against the request file and rejects edit controls', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-cli-image-'));
+  const store = openRunStore(root);
+  t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });
+  const requestDirectory = path.join(root, 'requests');
+  const imagesDirectory = path.join(root, 'images');
+  await Promise.all([mkdir(requestDirectory), mkdir(imagesDirectory)]);
+  const sourcePath = path.join(imagesDirectory, 'source.png');
+  const sourceBytes = await readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
+  await copyFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url), sourcePath);
+  const requestPath = path.join(requestDirectory, 'import.json');
+  await writeFile(requestPath, JSON.stringify({ source: { path: '../images/source.png', sha256: createHash('sha256').update(sourceBytes).digest('hex') } }));
+  let decodeCalls = 0;
+  const codec = {
+    async decode() { decodeCalls += 1; return { data: new Uint8ClampedArray(80 * 40 * 4), width: 80, height: 40, format: 'png' as const, orientation: 1 }; },
+    async scale() { throw new Error('CLI import must not scale'); },
+    async encode() { throw new Error('CLI import must not encode'); },
+  } satisfies StaticImageCodec;
+  const output: string[] = []; const errors: string[] = [];
+  const io = { out: (value: string) => { output.push(value); return true; }, error: (value: string) => { errors.push(value); return true; } };
+  const service = {} as never;
+  const status = await runCli(['image-import', '--request', requestPath, '--data-root', root], io, service, codec);
+  assert.equal(status, 0, errors.join('\n'));
+  const result = JSON.parse(output[0] ?? '{}') as { sourcePath: string; asset: { assetId: string; sha256: string } };
+  assert.equal(result.sourcePath, sourcePath);
+  assert.equal(result.asset.sha256, createHash('sha256').update(sourceBytes).digest('hex'));
+  assert.equal(decodeCalls, 1);
+
+  await writeFile(requestPath, JSON.stringify({ source: { assetId: result.asset.assetId }, maxWidth: 20, quality: 70 }));
+  assert.equal(await runCli(['image-scale', '--request', requestPath, '--data-root', root], io, service, codec), 1);
+  assert.deepEqual(JSON.parse(errors.at(-1) ?? '{}'), { error: 'The image request is invalid.' });
+  assert.equal(decodeCalls, 1);
 });
 
 test('CLI inspect validates current inline requests without starting a run', async (t) => {

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "assetId": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "export": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "assetId"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:sheg:schema:image-get-request.schema.json",
+  "title": "Sheg image inspection request",
+  "x-validation-rules": [
+    "Metadata reads do not scale or export; set export true to explicitly request a local preview path."
+  ]
+}

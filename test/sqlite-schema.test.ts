@@ -6,23 +6,28 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 
-test('fresh stores use the explicit schema 9 baseline with non-null identities and per-attempt call accounting', async () => {
+test('fresh stores apply the schema 9 baseline and additive schema 10 image asset migration', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-nine-'));
   try {
     const store = openRunStore(root);
     store.close();
     const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
     try {
-      assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9);
+      assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10);
       const runIdentity = (database.prepare('PRAGMA table_info(runs)').all() as Array<{ name: string; notnull: number }>).find(({ name }) => name === 'run_id');
       assert.equal(runIdentity?.notnull, 1);
       const attemptColumns = new Set((database.prepare('PRAGMA table_info(attempts)').all() as Array<{ name: string }>).map(({ name }) => name));
       assert.ok(attemptColumns.has('charged_calls'));
-      const migration = database.prepare('SELECT version, migration_id, checksum, schema_fingerprint FROM schema_migrations').get() as { version: number; migration_id: string; checksum: string; schema_fingerprint: string };
-      assert.equal(migration.version, 9);
-      assert.equal(migration.migration_id, 'baseline-v9');
-      assert.match(migration.checksum, /^[a-f0-9]{64}$/);
-      assert.match(migration.schema_fingerprint, /^[a-f0-9]{64}$/);
+      const migrations = database.prepare('SELECT version, migration_id, checksum, schema_fingerprint FROM schema_migrations ORDER BY version').all() as Array<{ version: number; migration_id: string; checksum: string; schema_fingerprint: string }>;
+      assert.deepEqual(migrations.map(({ version, migration_id }) => ({ version, migration_id })), [{ version: 9, migration_id: 'baseline-v9' }, { version: 10, migration_id: 'image-assets-v10' }]);
+      for (const migration of migrations) {
+        assert.match(migration.checksum, /^[a-f0-9]{64}$/);
+        assert.match(migration.schema_fingerprint, /^[a-f0-9]{64}$/);
+      }
+      const imageAssets = new Set((database.prepare('PRAGMA table_info(image_assets)').all() as Array<{ name: string }>).map(({ name }) => name));
+      assert.deepEqual([...imageAssets].sort(), ['asset_id', 'byte_length', 'content', 'format', 'height', 'sha256', 'width']);
+      const derivations = new Set((database.prepare('PRAGMA table_info(image_derivations)').all() as Array<{ name: string }>).map(({ name }) => name));
+      assert.deepEqual([...derivations].sort(), ['algorithm', 'candidate_asset_id', 'created_at', 'height', 'policy_version', 'source_asset_id', 'width']);
       assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
     } finally { database.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }

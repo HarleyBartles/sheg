@@ -43,6 +43,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0035](0035-drop-pre-release-file-backed-reports.md) | Drop pre-release file-backed run reports | Accepted |
 | [0036](0036-share-the-default-datastore-across-harnesses.md) | Share the default datastore across harnesses | Accepted |
 | [0037](0037-adopt-gitflow-and-semver-cadence.md) | Adopt Gitflow and SemVer with integration checkpoints | Accepted |
+| [0038](0038-store-and-scale-image-assets-locally.md) | Store and scale image assets locally | Accepted |
 
 ## Writing and changing decisions
 

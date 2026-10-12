@@ -10,8 +10,10 @@ import { sqliteTables } from './tables.js';
 import { PREPARED_LAUNCH_WINDOW_MS } from './work-policy.js';
 
 export const BASELINE_SCHEMA_VERSION = 9;
-export const SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
+export const SCHEMA_VERSION = 10;
 export const BASELINE_MIGRATION_ID = 'baseline-v9';
+export const IMAGE_ASSET_MIGRATION_ID = 'image-assets-v10';
+export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets'] as const;
 const MIGRATION_BACKUP_RETRIES = 3;
 const SQLITE_TRANSIENT_LOCK_CODES = new Set([5, 6]);
 const SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -42,8 +44,18 @@ export function baselineMigration(): SqliteMigration {
   };
 }
 
+function imageAssetMigration(): SqliteMigration {
+  const candidates = [
+    fileURLToPath(new URL('../../../migrations/0001_image_assets/migration.sql', import.meta.url)),
+    fileURLToPath(new URL('./migrations/0001_image_assets/migration.sql', import.meta.url)),
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError('datastore_schema_invalid', 'The schema 10 image asset migration is missing from this Sheg installation.');
+  return { id: IMAGE_ASSET_MIGRATION_ID, fromVersion: 9, toVersion: 10, sql: readFileSync(match, 'utf8') };
+}
+
 export function registeredMigrations(): SqliteMigration[] {
-  return [baselineMigration()];
+  return [baselineMigration(), imageAssetMigration()];
 }
 
 function migrationChecksum(migration: SqliteMigration): string {
@@ -268,7 +280,7 @@ export function applySchemaMigrations(database: DatabaseSync, dataRoot: string, 
         database.prepare('INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)')
           .run(migration.toVersion, migration.id, migrationChecksum(migration), schemaFingerprint(database), new Date(now()).toISOString());
         checkDatabaseIntegrity(database);
-        validateSchemaShape(database);
+        if (migration.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
         database.exec('COMMIT');
       } catch (error) {
         try { database.exec('ROLLBACK'); } catch { /* Preserve the initialization error. */ }

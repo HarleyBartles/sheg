@@ -45,7 +45,7 @@ async function connectDefault(root: string) {
   return { server, client, close: async () => { await client.close(); await server.close(); } };
 }
 
-test('a fresh supported datastore registers the normal tools and reports schema 9', async () => {
+test('a fresh supported datastore registers the normal tools and reports schema 10', async () => {
   const root = await temporaryRoot();
   const f = await connectDefault(root);
   try {
@@ -55,7 +55,7 @@ test('a fresh supported datastore registers the normal tools and reports schema 
     assert.equal(result.isError ?? false, false);
     const details = result.structuredContent as { recoveryRequired: boolean; compatibility: { status: string; schemaVersion: number } };
     assert.equal(details.recoveryRequired, false);
-    assert.deepEqual(details.compatibility, { status: 'current', schemaVersion: 9 });
+    assert.deepEqual(details.compatibility, { status: 'current', schemaVersion: 10 });
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -83,6 +83,7 @@ test('a future schema keeps the MCP handshake and maintenance inspection while b
       ['run_cancel', { runId: randomUUID() }],
       ['run_resume', { runId: randomUUID() }],
       ['run_delete', { runIds: [randomUUID()] }],
+      ['image_scale', { source: { assetId: `sha256:${'a'.repeat(64)}` }, maxWidth: 40 }],
       ['run_storage', { operation: 'optimize' }],
     ] as const;
     for (const [name, args] of calls) {
@@ -90,13 +91,14 @@ test('a future schema keeps the MCP handshake and maintenance inspection while b
       assert.equal(blocked.isError, true, `${name} must be blocked during recovery`);
       assert.equal((blocked.structuredContent as { error: { code: string } }).error.code, 'datastore_recovery_required', `${name} must report the recovery state`);
     }
+    assert.deepEqual(await readFile(path.join(root, 'runs.sqlite')), original, 'image preparation must not create a parallel fresh store during recovery');
     const wrongConfirmation = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'reset', confirmation: 'yes' } });
     assert.equal(wrongConfirmation.isError, true);
     const reset = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'reset', confirmation: resetConfirmation } });
     assert.equal(reset.isError ?? false, false, JSON.stringify(reset.structuredContent));
     assert.equal((reset.structuredContent as { reset: boolean; backupRetained: boolean; schemaVersion: number }).reset, true);
     assert.equal((reset.structuredContent as { backupRetained: boolean }).backupRetained, true);
-    assert.equal((reset.structuredContent as { schemaVersion: number }).schemaVersion, 9);
+    assert.equal((reset.structuredContent as { schemaVersion: number }).schemaVersion, 10);
     const markerDatabase = new DatabaseSync(path.join(root, 'runs.sqlite'));
     try { markerDatabase.prepare('UPDATE schema_migrations SET applied_at = ? WHERE version = 9').run('saved-after-reset'); }
     finally { markerDatabase.close(); }
@@ -130,7 +132,7 @@ test('an unreadable datastore can be explicitly reset after its original files a
     assert.equal((blocked.structuredContent as { error: { code: string } }).error.code, 'datastore_recovery_required');
     const reset = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'reset', confirmation: resetConfirmation } });
     assert.equal(reset.isError ?? false, false, JSON.stringify(reset.structuredContent));
-    assert.deepEqual(reset.structuredContent, { reset: true, backupRetained: false, preservation: 'quarantined-original-files', schemaVersion: 9, recoveryRequired: false, compatibility: { status: 'current', schemaVersion: 9 } });
+    assert.deepEqual(reset.structuredContent, { reset: true, backupRetained: false, preservation: 'quarantined-original-files', schemaVersion: 10, recoveryRequired: false, compatibility: { status: 'current', schemaVersion: 10 } });
     const directories = await readdir(path.join(root, 'recovery'));
     assert.equal(directories.length, 1);
     assert.deepEqual(await readFile(path.join(root, 'recovery', directories[0]!, 'runs.sqlite')), corruptBytes);
@@ -250,6 +252,6 @@ test('an unsupported pre-release schema remains inspectable and explicitly reset
     const status = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
     assert.equal((status.structuredContent as { recoveryRequired: boolean }).recoveryRequired, false);
     const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
-    try { assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9); } finally { database.close(); }
+    try { assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10); } finally { database.close(); }
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });

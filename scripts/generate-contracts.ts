@@ -6,6 +6,7 @@ import { respondentCohortSchema } from '../src/domain/respondents/cohort.js';
 import { respondentProfileSchema } from '../src/domain/respondents/profile.js';
 import { runRequestSchema } from '../src/domain/run/request.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
+import { ImageGetRequestSchema, ImageImportRequestSchema, ScaleRequestSchema } from '../src/domain/assets/image.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const schemaBaseUri = 'urn:sheg:schema:';
@@ -34,6 +35,18 @@ const contracts: Array<{ filename: string; title: string; schema: z.ZodType; val
     'Graph transitions cover every Choice option or typed response domain exactly once; all nodes are reachable.',
     'Per-task responseHistory controls prior answer context independently from graph routing and respondent eligibility.',
     'Typed comparisons require matching task meanings.',
+  ] },
+  { filename: 'image-import-request.schema.json', title: 'Sheg image import request', schema: ImageImportRequestSchema, validationRules: [
+    'MCP file sources use absolute paths; CLI file sources resolve relative to the JSON request file.',
+    'Import validates static image content and stores exact source bytes without calling a model.',
+  ] },
+  { filename: 'image-scale-request.schema.json', title: 'Sheg image scale request', schema: ScaleRequestSchema, validationRules: [
+    'A file source includes its expected SHA-256 digest; saved asset references use Sheg custody.',
+    'maxBytes constrains only the prepared image bytes and does not guarantee inference context fit.',
+    'Scaling preserves format and image content with proportional dimensions; it does not crop or tune quality.',
+  ] },
+  { filename: 'image-get-request.schema.json', title: 'Sheg image inspection request', schema: ImageGetRequestSchema, validationRules: [
+    'Metadata reads do not scale or export; set export true to explicitly request a local preview path.',
   ] },
 ];
 await rm(contractDirectory, { recursive: true, force: true });

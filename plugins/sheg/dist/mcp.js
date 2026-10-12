@@ -1,14 +1,2959 @@
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
 var __export = (target, all) => {
   for (var name2 in all)
     __defProp(target, name2, { get: all[name2], enumerable: true });
 };
 
+// node_modules/@jsquash/webp/codec/enc/webp_enc_simd.js
+var webp_enc_simd_exports = {};
+__export(webp_enc_simd_exports, {
+  default: () => webp_enc_simd_default
+});
+var Module4, webp_enc_simd_default;
+var init_webp_enc_simd = __esm({
+  "node_modules/@jsquash/webp/codec/enc/webp_enc_simd.js"() {
+    Module4 = (() => {
+      var _scriptDir = import.meta.url;
+      return (function(Module6 = {}) {
+        var Module6 = typeof Module6 != "undefined" ? Module6 : {};
+        var readyPromiseResolve, readyPromiseReject;
+        Module6["ready"] = new Promise(function(resolve, reject) {
+          readyPromiseResolve = resolve;
+          readyPromiseReject = reject;
+        });
+        const isServiceWorker5 = globalThis.ServiceWorkerGlobalScope !== void 0;
+        const isRunningInCloudFlareWorkers5 = isServiceWorker5 && typeof self !== "undefined" && caches.default !== void 0;
+        if (isRunningInCloudFlareWorkers5) {
+          if (!globalThis.ImageData) {
+            globalThis.ImageData = class ImageData {
+              constructor(data, width, height) {
+                this.data = data;
+                this.width = width;
+                this.height = height;
+              }
+            };
+          }
+          if (import.meta.url === void 0) {
+            import.meta.url = "https://localhost";
+          }
+          if (self.location === void 0) {
+            self.location = { href: "" };
+          }
+        }
+        var moduleOverrides = Object.assign({}, Module6);
+        var arguments_ = [];
+        var thisProgram = "./this.program";
+        var quit_ = (status, toThrow) => {
+          throw toThrow;
+        };
+        var ENVIRONMENT_IS_WEB = typeof window == "object";
+        var ENVIRONMENT_IS_WORKER = typeof importScripts == "function";
+        var ENVIRONMENT_IS_NODE = typeof process == "object" && typeof process.versions == "object" && typeof process.versions.node == "string";
+        var scriptDirectory = "";
+        function locateFile(path15) {
+          if (Module6["locateFile"]) {
+            return Module6["locateFile"](path15, scriptDirectory);
+          }
+          return scriptDirectory + path15;
+        }
+        var read_, readAsync, readBinary, setWindowTitle;
+        if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
+          if (ENVIRONMENT_IS_WORKER) {
+            scriptDirectory = self.location.href;
+          } else if (typeof document != "undefined" && document.currentScript) {
+            scriptDirectory = document.currentScript.src;
+          }
+          if (_scriptDir) {
+            scriptDirectory = _scriptDir;
+          }
+          if (scriptDirectory.indexOf("blob:") !== 0) {
+            scriptDirectory = scriptDirectory.substr(0, scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1);
+          } else {
+            scriptDirectory = "";
+          }
+          {
+            read_ = (url2) => {
+              var xhr = new XMLHttpRequest();
+              xhr.open("GET", url2, false);
+              xhr.send(null);
+              return xhr.responseText;
+            };
+            if (ENVIRONMENT_IS_WORKER) {
+              readBinary = (url2) => {
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", url2, false);
+                xhr.responseType = "arraybuffer";
+                xhr.send(null);
+                return new Uint8Array(xhr.response);
+              };
+            }
+            readAsync = (url2, onload, onerror) => {
+              var xhr = new XMLHttpRequest();
+              xhr.open("GET", url2, true);
+              xhr.responseType = "arraybuffer";
+              xhr.onload = () => {
+                if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
+                  onload(xhr.response);
+                  return;
+                }
+                onerror();
+              };
+              xhr.onerror = onerror;
+              xhr.send(null);
+            };
+          }
+          setWindowTitle = (title) => document.title = title;
+        } else {
+        }
+        var out = Module6["print"] || console.log.bind(console);
+        var err = Module6["printErr"] || console.warn.bind(console);
+        Object.assign(Module6, moduleOverrides);
+        moduleOverrides = null;
+        if (Module6["arguments"]) arguments_ = Module6["arguments"];
+        if (Module6["thisProgram"]) thisProgram = Module6["thisProgram"];
+        if (Module6["quit"]) quit_ = Module6["quit"];
+        var wasmBinary;
+        if (Module6["wasmBinary"]) wasmBinary = Module6["wasmBinary"];
+        var noExitRuntime = Module6["noExitRuntime"] || true;
+        if (typeof WebAssembly != "object") {
+          abort("no native wasm support detected");
+        }
+        var wasmMemory;
+        var ABORT = false;
+        var EXITSTATUS;
+        function UTF8ArrayToString(heapOrArray, idx, maxBytesToRead) {
+          var endIdx = idx + maxBytesToRead;
+          var str = "";
+          while (!(idx >= endIdx)) {
+            var u0 = heapOrArray[idx++];
+            if (!u0) return str;
+            if (!(u0 & 128)) {
+              str += String.fromCharCode(u0);
+              continue;
+            }
+            var u1 = heapOrArray[idx++] & 63;
+            if ((u0 & 224) == 192) {
+              str += String.fromCharCode((u0 & 31) << 6 | u1);
+              continue;
+            }
+            var u2 = heapOrArray[idx++] & 63;
+            if ((u0 & 240) == 224) {
+              u0 = (u0 & 15) << 12 | u1 << 6 | u2;
+            } else {
+              u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
+            }
+            if (u0 < 65536) {
+              str += String.fromCharCode(u0);
+            } else {
+              var ch = u0 - 65536;
+              str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+            }
+          }
+          return str;
+        }
+        function UTF8ToString(ptr, maxBytesToRead) {
+          return ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : "";
+        }
+        function stringToUTF8Array(str, heap2, outIdx, maxBytesToWrite) {
+          if (!(maxBytesToWrite > 0)) return 0;
+          var startIdx = outIdx;
+          var endIdx = outIdx + maxBytesToWrite - 1;
+          for (var i = 0; i < str.length; ++i) {
+            var u = str.charCodeAt(i);
+            if (u >= 55296 && u <= 57343) {
+              var u1 = str.charCodeAt(++i);
+              u = 65536 + ((u & 1023) << 10) | u1 & 1023;
+            }
+            if (u <= 127) {
+              if (outIdx >= endIdx) break;
+              heap2[outIdx++] = u;
+            } else if (u <= 2047) {
+              if (outIdx + 1 >= endIdx) break;
+              heap2[outIdx++] = 192 | u >> 6;
+              heap2[outIdx++] = 128 | u & 63;
+            } else if (u <= 65535) {
+              if (outIdx + 2 >= endIdx) break;
+              heap2[outIdx++] = 224 | u >> 12;
+              heap2[outIdx++] = 128 | u >> 6 & 63;
+              heap2[outIdx++] = 128 | u & 63;
+            } else {
+              if (outIdx + 3 >= endIdx) break;
+              heap2[outIdx++] = 240 | u >> 18;
+              heap2[outIdx++] = 128 | u >> 12 & 63;
+              heap2[outIdx++] = 128 | u >> 6 & 63;
+              heap2[outIdx++] = 128 | u & 63;
+            }
+          }
+          heap2[outIdx] = 0;
+          return outIdx - startIdx;
+        }
+        function stringToUTF8(str, outPtr, maxBytesToWrite) {
+          return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite);
+        }
+        function lengthBytesUTF8(str) {
+          var len = 0;
+          for (var i = 0; i < str.length; ++i) {
+            var c = str.charCodeAt(i);
+            if (c <= 127) {
+              len++;
+            } else if (c <= 2047) {
+              len += 2;
+            } else if (c >= 55296 && c <= 57343) {
+              len += 4;
+              ++i;
+            } else {
+              len += 3;
+            }
+          }
+          return len;
+        }
+        var HEAP8, HEAPU8, HEAP16, HEAPU16, HEAP32, HEAPU32, HEAPF32, HEAPF64;
+        function updateMemoryViews() {
+          var b = wasmMemory.buffer;
+          Module6["HEAP8"] = HEAP8 = new Int8Array(b);
+          Module6["HEAP16"] = HEAP16 = new Int16Array(b);
+          Module6["HEAP32"] = HEAP32 = new Int32Array(b);
+          Module6["HEAPU8"] = HEAPU8 = new Uint8Array(b);
+          Module6["HEAPU16"] = HEAPU16 = new Uint16Array(b);
+          Module6["HEAPU32"] = HEAPU32 = new Uint32Array(b);
+          Module6["HEAPF32"] = HEAPF32 = new Float32Array(b);
+          Module6["HEAPF64"] = HEAPF64 = new Float64Array(b);
+        }
+        var wasmTable;
+        var __ATPRERUN__ = [];
+        var __ATINIT__ = [];
+        var __ATPOSTRUN__ = [];
+        var runtimeInitialized = false;
+        function preRun() {
+          if (Module6["preRun"]) {
+            if (typeof Module6["preRun"] == "function") Module6["preRun"] = [Module6["preRun"]];
+            while (Module6["preRun"].length) {
+              addOnPreRun(Module6["preRun"].shift());
+            }
+          }
+          callRuntimeCallbacks(__ATPRERUN__);
+        }
+        function initRuntime() {
+          runtimeInitialized = true;
+          callRuntimeCallbacks(__ATINIT__);
+        }
+        function postRun() {
+          if (Module6["postRun"]) {
+            if (typeof Module6["postRun"] == "function") Module6["postRun"] = [Module6["postRun"]];
+            while (Module6["postRun"].length) {
+              addOnPostRun(Module6["postRun"].shift());
+            }
+          }
+          callRuntimeCallbacks(__ATPOSTRUN__);
+        }
+        function addOnPreRun(cb) {
+          __ATPRERUN__.unshift(cb);
+        }
+        function addOnInit(cb) {
+          __ATINIT__.unshift(cb);
+        }
+        function addOnPostRun(cb) {
+          __ATPOSTRUN__.unshift(cb);
+        }
+        var runDependencies = 0;
+        var runDependencyWatcher = null;
+        var dependenciesFulfilled = null;
+        function addRunDependency(id) {
+          runDependencies++;
+          if (Module6["monitorRunDependencies"]) {
+            Module6["monitorRunDependencies"](runDependencies);
+          }
+        }
+        function removeRunDependency(id) {
+          runDependencies--;
+          if (Module6["monitorRunDependencies"]) {
+            Module6["monitorRunDependencies"](runDependencies);
+          }
+          if (runDependencies == 0) {
+            if (runDependencyWatcher !== null) {
+              clearInterval(runDependencyWatcher);
+              runDependencyWatcher = null;
+            }
+            if (dependenciesFulfilled) {
+              var callback = dependenciesFulfilled;
+              dependenciesFulfilled = null;
+              callback();
+            }
+          }
+        }
+        function abort(what) {
+          if (Module6["onAbort"]) {
+            Module6["onAbort"](what);
+          }
+          what = "Aborted(" + what + ")";
+          err(what);
+          ABORT = true;
+          EXITSTATUS = 1;
+          what += ". Build with -sASSERTIONS for more info.";
+          var e = new WebAssembly.RuntimeError(what);
+          readyPromiseReject(e);
+          throw e;
+        }
+        var dataURIPrefix = "data:application/octet-stream;base64,";
+        function isDataURI(filename) {
+          return filename.startsWith(dataURIPrefix);
+        }
+        var wasmBinaryFile;
+        if (Module6["locateFile"]) {
+          wasmBinaryFile = "webp_enc_simd.wasm";
+          if (!isDataURI(wasmBinaryFile)) {
+            wasmBinaryFile = locateFile(wasmBinaryFile);
+          }
+        } else {
+          wasmBinaryFile = new URL("webp_enc_simd.wasm", import.meta.url).href;
+        }
+        function getBinary(file2) {
+          try {
+            if (file2 == wasmBinaryFile && wasmBinary) {
+              return new Uint8Array(wasmBinary);
+            }
+            if (readBinary) {
+              return readBinary(file2);
+            }
+            throw "both async and sync fetching of the wasm failed";
+          } catch (err2) {
+            abort(err2);
+          }
+        }
+        function getBinaryPromise(binaryFile) {
+          if (!wasmBinary && (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER)) {
+            if (typeof fetch == "function") {
+              return fetch(binaryFile, { credentials: "same-origin" }).then(function(response) {
+                if (!response["ok"]) {
+                  throw "failed to load wasm binary file at '" + binaryFile + "'";
+                }
+                return response["arrayBuffer"]();
+              }).catch(function() {
+                return getBinary(binaryFile);
+              });
+            }
+          }
+          return Promise.resolve().then(function() {
+            return getBinary(binaryFile);
+          });
+        }
+        function instantiateArrayBuffer(binaryFile, imports, receiver) {
+          return getBinaryPromise(binaryFile).then(function(binary) {
+            return WebAssembly.instantiate(binary, imports);
+          }).then(function(instance) {
+            return instance;
+          }).then(receiver, function(reason) {
+            err("failed to asynchronously prepare wasm: " + reason);
+            abort(reason);
+          });
+        }
+        function instantiateAsync(binary, binaryFile, imports, callback) {
+          if (!binary && typeof WebAssembly.instantiateStreaming == "function" && !isDataURI(binaryFile) && typeof fetch == "function") {
+            return fetch(binaryFile, { credentials: "same-origin" }).then(function(response) {
+              var result = WebAssembly.instantiateStreaming(response, imports);
+              return result.then(callback, function(reason) {
+                err("wasm streaming compile failed: " + reason);
+                err("falling back to ArrayBuffer instantiation");
+                return instantiateArrayBuffer(binaryFile, imports, callback);
+              });
+            });
+          } else {
+            return instantiateArrayBuffer(binaryFile, imports, callback);
+          }
+        }
+        function createWasm() {
+          var info = { "a": wasmImports };
+          function receiveInstance(instance, module) {
+            var exports = instance.exports;
+            Module6["asm"] = exports;
+            wasmMemory = Module6["asm"]["x"];
+            updateMemoryViews();
+            wasmTable = Module6["asm"]["D"];
+            addOnInit(Module6["asm"]["y"]);
+            removeRunDependency("wasm-instantiate");
+            return exports;
+          }
+          addRunDependency("wasm-instantiate");
+          function receiveInstantiationResult(result) {
+            receiveInstance(result["instance"]);
+          }
+          if (Module6["instantiateWasm"]) {
+            try {
+              return Module6["instantiateWasm"](info, receiveInstance);
+            } catch (e) {
+              err("Module.instantiateWasm callback failed with error: " + e);
+              readyPromiseReject(e);
+            }
+          }
+          instantiateAsync(wasmBinary, wasmBinaryFile, info, receiveInstantiationResult).catch(readyPromiseReject);
+          return {};
+        }
+        function callRuntimeCallbacks(callbacks) {
+          while (callbacks.length > 0) {
+            callbacks.shift()(Module6);
+          }
+        }
+        function ExceptionInfo(excPtr) {
+          this.excPtr = excPtr;
+          this.ptr = excPtr - 24;
+          this.set_type = function(type) {
+            HEAPU32[this.ptr + 4 >> 2] = type;
+          };
+          this.get_type = function() {
+            return HEAPU32[this.ptr + 4 >> 2];
+          };
+          this.set_destructor = function(destructor) {
+            HEAPU32[this.ptr + 8 >> 2] = destructor;
+          };
+          this.get_destructor = function() {
+            return HEAPU32[this.ptr + 8 >> 2];
+          };
+          this.set_refcount = function(refcount) {
+            HEAP32[this.ptr >> 2] = refcount;
+          };
+          this.set_caught = function(caught) {
+            caught = caught ? 1 : 0;
+            HEAP8[this.ptr + 12 >> 0] = caught;
+          };
+          this.get_caught = function() {
+            return HEAP8[this.ptr + 12 >> 0] != 0;
+          };
+          this.set_rethrown = function(rethrown) {
+            rethrown = rethrown ? 1 : 0;
+            HEAP8[this.ptr + 13 >> 0] = rethrown;
+          };
+          this.get_rethrown = function() {
+            return HEAP8[this.ptr + 13 >> 0] != 0;
+          };
+          this.init = function(type, destructor) {
+            this.set_adjusted_ptr(0);
+            this.set_type(type);
+            this.set_destructor(destructor);
+            this.set_refcount(0);
+            this.set_caught(false);
+            this.set_rethrown(false);
+          };
+          this.add_ref = function() {
+            var value = HEAP32[this.ptr >> 2];
+            HEAP32[this.ptr >> 2] = value + 1;
+          };
+          this.release_ref = function() {
+            var prev = HEAP32[this.ptr >> 2];
+            HEAP32[this.ptr >> 2] = prev - 1;
+            return prev === 1;
+          };
+          this.set_adjusted_ptr = function(adjustedPtr) {
+            HEAPU32[this.ptr + 16 >> 2] = adjustedPtr;
+          };
+          this.get_adjusted_ptr = function() {
+            return HEAPU32[this.ptr + 16 >> 2];
+          };
+          this.get_exception_ptr = function() {
+            var isPointer = ___cxa_is_pointer_type(this.get_type());
+            if (isPointer) {
+              return HEAPU32[this.excPtr >> 2];
+            }
+            var adjusted = this.get_adjusted_ptr();
+            if (adjusted !== 0) return adjusted;
+            return this.excPtr;
+          };
+        }
+        var exceptionLast = 0;
+        var uncaughtExceptionCount = 0;
+        function ___cxa_throw(ptr, type, destructor) {
+          var info = new ExceptionInfo(ptr);
+          info.init(type, destructor);
+          exceptionLast = ptr;
+          uncaughtExceptionCount++;
+          throw ptr;
+        }
+        var structRegistrations = {};
+        function runDestructors(destructors) {
+          while (destructors.length) {
+            var ptr = destructors.pop();
+            var del = destructors.pop();
+            del(ptr);
+          }
+        }
+        function simpleReadValueFromPointer(pointer) {
+          return this["fromWireType"](HEAP32[pointer >> 2]);
+        }
+        var awaitingDependencies = {};
+        var registeredTypes = {};
+        var typeDependencies = {};
+        var char_0 = 48;
+        var char_9 = 57;
+        function makeLegalFunctionName(name2) {
+          if (void 0 === name2) {
+            return "_unknown";
+          }
+          name2 = name2.replace(/[^a-zA-Z0-9_]/g, "$");
+          var f = name2.charCodeAt(0);
+          if (f >= char_0 && f <= char_9) {
+            return "_" + name2;
+          }
+          return name2;
+        }
+        function createNamedFunction(name2, body) {
+          name2 = makeLegalFunctionName(name2);
+          return { [name2]: function() {
+            return body.apply(this, arguments);
+          } }[name2];
+        }
+        function extendError(baseErrorType, errorName) {
+          var errorClass = createNamedFunction(errorName, function(message) {
+            this.name = errorName;
+            this.message = message;
+            var stack = new Error(message).stack;
+            if (stack !== void 0) {
+              this.stack = this.toString() + "\n" + stack.replace(/^Error(:[^\n]*)?\n/, "");
+            }
+          });
+          errorClass.prototype = Object.create(baseErrorType.prototype);
+          errorClass.prototype.constructor = errorClass;
+          errorClass.prototype.toString = function() {
+            if (this.message === void 0) {
+              return this.name;
+            } else {
+              return this.name + ": " + this.message;
+            }
+          };
+          return errorClass;
+        }
+        var InternalError = void 0;
+        function throwInternalError(message) {
+          throw new InternalError(message);
+        }
+        function whenDependentTypesAreResolved(myTypes, dependentTypes, getTypeConverters) {
+          myTypes.forEach(function(type) {
+            typeDependencies[type] = dependentTypes;
+          });
+          function onComplete(typeConverters2) {
+            var myTypeConverters = getTypeConverters(typeConverters2);
+            if (myTypeConverters.length !== myTypes.length) {
+              throwInternalError("Mismatched type converter count");
+            }
+            for (var i = 0; i < myTypes.length; ++i) {
+              registerType(myTypes[i], myTypeConverters[i]);
+            }
+          }
+          var typeConverters = new Array(dependentTypes.length);
+          var unregisteredTypes = [];
+          var registered = 0;
+          dependentTypes.forEach((dt, i) => {
+            if (registeredTypes.hasOwnProperty(dt)) {
+              typeConverters[i] = registeredTypes[dt];
+            } else {
+              unregisteredTypes.push(dt);
+              if (!awaitingDependencies.hasOwnProperty(dt)) {
+                awaitingDependencies[dt] = [];
+              }
+              awaitingDependencies[dt].push(() => {
+                typeConverters[i] = registeredTypes[dt];
+                ++registered;
+                if (registered === unregisteredTypes.length) {
+                  onComplete(typeConverters);
+                }
+              });
+            }
+          });
+          if (0 === unregisteredTypes.length) {
+            onComplete(typeConverters);
+          }
+        }
+        function __embind_finalize_value_object(structType) {
+          var reg = structRegistrations[structType];
+          delete structRegistrations[structType];
+          var rawConstructor = reg.rawConstructor;
+          var rawDestructor = reg.rawDestructor;
+          var fieldRecords = reg.fields;
+          var fieldTypes = fieldRecords.map((field) => field.getterReturnType).concat(fieldRecords.map((field) => field.setterArgumentType));
+          whenDependentTypesAreResolved([structType], fieldTypes, (fieldTypes2) => {
+            var fields = {};
+            fieldRecords.forEach((field, i) => {
+              var fieldName = field.fieldName;
+              var getterReturnType = fieldTypes2[i];
+              var getter = field.getter;
+              var getterContext = field.getterContext;
+              var setterArgumentType = fieldTypes2[i + fieldRecords.length];
+              var setter = field.setter;
+              var setterContext = field.setterContext;
+              fields[fieldName] = { read: (ptr) => {
+                return getterReturnType["fromWireType"](getter(getterContext, ptr));
+              }, write: (ptr, o) => {
+                var destructors = [];
+                setter(setterContext, ptr, setterArgumentType["toWireType"](destructors, o));
+                runDestructors(destructors);
+              } };
+            });
+            return [{ name: reg.name, "fromWireType": function(ptr) {
+              var rv = {};
+              for (var i in fields) {
+                rv[i] = fields[i].read(ptr);
+              }
+              rawDestructor(ptr);
+              return rv;
+            }, "toWireType": function(destructors, o) {
+              for (var fieldName in fields) {
+                if (!(fieldName in o)) {
+                  throw new TypeError('Missing field:  "' + fieldName + '"');
+                }
+              }
+              var ptr = rawConstructor();
+              for (fieldName in fields) {
+                fields[fieldName].write(ptr, o[fieldName]);
+              }
+              if (destructors !== null) {
+                destructors.push(rawDestructor, ptr);
+              }
+              return ptr;
+            }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: rawDestructor }];
+          });
+        }
+        function __embind_register_bigint(primitiveType, name2, size, minRange, maxRange) {
+        }
+        function getShiftFromSize(size) {
+          switch (size) {
+            case 1:
+              return 0;
+            case 2:
+              return 1;
+            case 4:
+              return 2;
+            case 8:
+              return 3;
+            default:
+              throw new TypeError("Unknown type size: " + size);
+          }
+        }
+        function embind_init_charCodes() {
+          var codes = new Array(256);
+          for (var i = 0; i < 256; ++i) {
+            codes[i] = String.fromCharCode(i);
+          }
+          embind_charCodes = codes;
+        }
+        var embind_charCodes = void 0;
+        function readLatin1String(ptr) {
+          var ret = "";
+          var c = ptr;
+          while (HEAPU8[c]) {
+            ret += embind_charCodes[HEAPU8[c++]];
+          }
+          return ret;
+        }
+        var BindingError = void 0;
+        function throwBindingError(message) {
+          throw new BindingError(message);
+        }
+        function registerType(rawType, registeredInstance, options2 = {}) {
+          if (!("argPackAdvance" in registeredInstance)) {
+            throw new TypeError("registerType registeredInstance requires argPackAdvance");
+          }
+          var name2 = registeredInstance.name;
+          if (!rawType) {
+            throwBindingError('type "' + name2 + '" must have a positive integer typeid pointer');
+          }
+          if (registeredTypes.hasOwnProperty(rawType)) {
+            if (options2.ignoreDuplicateRegistrations) {
+              return;
+            } else {
+              throwBindingError("Cannot register type '" + name2 + "' twice");
+            }
+          }
+          registeredTypes[rawType] = registeredInstance;
+          delete typeDependencies[rawType];
+          if (awaitingDependencies.hasOwnProperty(rawType)) {
+            var callbacks = awaitingDependencies[rawType];
+            delete awaitingDependencies[rawType];
+            callbacks.forEach((cb) => cb());
+          }
+        }
+        function __embind_register_bool(rawType, name2, size, trueValue, falseValue) {
+          var shift = getShiftFromSize(size);
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": function(wt) {
+            return !!wt;
+          }, "toWireType": function(destructors, o) {
+            return o ? trueValue : falseValue;
+          }, "argPackAdvance": 8, "readValueFromPointer": function(pointer) {
+            var heap2;
+            if (size === 1) {
+              heap2 = HEAP8;
+            } else if (size === 2) {
+              heap2 = HEAP16;
+            } else if (size === 4) {
+              heap2 = HEAP32;
+            } else {
+              throw new TypeError("Unknown boolean type size: " + name2);
+            }
+            return this["fromWireType"](heap2[pointer >> shift]);
+          }, destructorFunction: null });
+        }
+        var emval_free_list = [];
+        var emval_handle_array = [{}, { value: void 0 }, { value: null }, { value: true }, { value: false }];
+        function __emval_decref(handle) {
+          if (handle > 4 && 0 === --emval_handle_array[handle].refcount) {
+            emval_handle_array[handle] = void 0;
+            emval_free_list.push(handle);
+          }
+        }
+        function count_emval_handles() {
+          var count2 = 0;
+          for (var i = 5; i < emval_handle_array.length; ++i) {
+            if (emval_handle_array[i] !== void 0) {
+              ++count2;
+            }
+          }
+          return count2;
+        }
+        function get_first_emval() {
+          for (var i = 5; i < emval_handle_array.length; ++i) {
+            if (emval_handle_array[i] !== void 0) {
+              return emval_handle_array[i];
+            }
+          }
+          return null;
+        }
+        function init_emval() {
+          Module6["count_emval_handles"] = count_emval_handles;
+          Module6["get_first_emval"] = get_first_emval;
+        }
+        var Emval = { toValue: (handle) => {
+          if (!handle) {
+            throwBindingError("Cannot use deleted val. handle = " + handle);
+          }
+          return emval_handle_array[handle].value;
+        }, toHandle: (value) => {
+          switch (value) {
+            case void 0:
+              return 1;
+            case null:
+              return 2;
+            case true:
+              return 3;
+            case false:
+              return 4;
+            default: {
+              var handle = emval_free_list.length ? emval_free_list.pop() : emval_handle_array.length;
+              emval_handle_array[handle] = { refcount: 1, value };
+              return handle;
+            }
+          }
+        } };
+        function __embind_register_emval(rawType, name2) {
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": function(handle) {
+            var rv = Emval.toValue(handle);
+            __emval_decref(handle);
+            return rv;
+          }, "toWireType": function(destructors, value) {
+            return Emval.toHandle(value);
+          }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: null });
+        }
+        function ensureOverloadTable(proto, methodName, humanName) {
+          if (void 0 === proto[methodName].overloadTable) {
+            var prevFunc = proto[methodName];
+            proto[methodName] = function() {
+              if (!proto[methodName].overloadTable.hasOwnProperty(arguments.length)) {
+                throwBindingError("Function '" + humanName + "' called with an invalid number of arguments (" + arguments.length + ") - expects one of (" + proto[methodName].overloadTable + ")!");
+              }
+              return proto[methodName].overloadTable[arguments.length].apply(this, arguments);
+            };
+            proto[methodName].overloadTable = [];
+            proto[methodName].overloadTable[prevFunc.argCount] = prevFunc;
+          }
+        }
+        function exposePublicSymbol(name2, value, numArguments) {
+          if (Module6.hasOwnProperty(name2)) {
+            if (void 0 === numArguments || void 0 !== Module6[name2].overloadTable && void 0 !== Module6[name2].overloadTable[numArguments]) {
+              throwBindingError("Cannot register public name '" + name2 + "' twice");
+            }
+            ensureOverloadTable(Module6, name2, name2);
+            if (Module6.hasOwnProperty(numArguments)) {
+              throwBindingError("Cannot register multiple overloads of a function with the same number of arguments (" + numArguments + ")!");
+            }
+            Module6[name2].overloadTable[numArguments] = value;
+          } else {
+            Module6[name2] = value;
+            if (void 0 !== numArguments) {
+              Module6[name2].numArguments = numArguments;
+            }
+          }
+        }
+        function enumReadValueFromPointer(name2, shift, signed) {
+          switch (shift) {
+            case 0:
+              return function(pointer) {
+                var heap2 = signed ? HEAP8 : HEAPU8;
+                return this["fromWireType"](heap2[pointer]);
+              };
+            case 1:
+              return function(pointer) {
+                var heap2 = signed ? HEAP16 : HEAPU16;
+                return this["fromWireType"](heap2[pointer >> 1]);
+              };
+            case 2:
+              return function(pointer) {
+                var heap2 = signed ? HEAP32 : HEAPU32;
+                return this["fromWireType"](heap2[pointer >> 2]);
+              };
+            default:
+              throw new TypeError("Unknown integer type: " + name2);
+          }
+        }
+        function __embind_register_enum(rawType, name2, size, isSigned) {
+          var shift = getShiftFromSize(size);
+          name2 = readLatin1String(name2);
+          function ctor() {
+          }
+          ctor.values = {};
+          registerType(rawType, { name: name2, constructor: ctor, "fromWireType": function(c) {
+            return this.constructor.values[c];
+          }, "toWireType": function(destructors, c) {
+            return c.value;
+          }, "argPackAdvance": 8, "readValueFromPointer": enumReadValueFromPointer(name2, shift, isSigned), destructorFunction: null });
+          exposePublicSymbol(name2, ctor);
+        }
+        function getTypeName(type) {
+          var ptr = ___getTypeName(type);
+          var rv = readLatin1String(ptr);
+          _free(ptr);
+          return rv;
+        }
+        function requireRegisteredType(rawType, humanName) {
+          var impl = registeredTypes[rawType];
+          if (void 0 === impl) {
+            throwBindingError(humanName + " has unknown type " + getTypeName(rawType));
+          }
+          return impl;
+        }
+        function __embind_register_enum_value(rawEnumType, name2, enumValue) {
+          var enumType = requireRegisteredType(rawEnumType, "enum");
+          name2 = readLatin1String(name2);
+          var Enum = enumType.constructor;
+          var Value = Object.create(enumType.constructor.prototype, { value: { value: enumValue }, constructor: { value: createNamedFunction(enumType.name + "_" + name2, function() {
+          }) } });
+          Enum.values[enumValue] = Value;
+          Enum[name2] = Value;
+        }
+        function floatReadValueFromPointer(name2, shift) {
+          switch (shift) {
+            case 2:
+              return function(pointer) {
+                return this["fromWireType"](HEAPF32[pointer >> 2]);
+              };
+            case 3:
+              return function(pointer) {
+                return this["fromWireType"](HEAPF64[pointer >> 3]);
+              };
+            default:
+              throw new TypeError("Unknown float type: " + name2);
+          }
+        }
+        function __embind_register_float(rawType, name2, size) {
+          var shift = getShiftFromSize(size);
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": function(value) {
+            return value;
+          }, "toWireType": function(destructors, value) {
+            return value;
+          }, "argPackAdvance": 8, "readValueFromPointer": floatReadValueFromPointer(name2, shift), destructorFunction: null });
+        }
+        function craftInvokerFunction(humanName, argTypes, classType, cppInvokerFunc, cppTargetFunc, isAsync) {
+          var argCount = argTypes.length;
+          if (argCount < 2) {
+            throwBindingError("argTypes array size mismatch! Must at least get return value and 'this' types!");
+          }
+          var isClassMethodFunc = argTypes[1] !== null && classType !== null;
+          var needsDestructorStack = false;
+          for (var i = 1; i < argTypes.length; ++i) {
+            if (argTypes[i] !== null && argTypes[i].destructorFunction === void 0) {
+              needsDestructorStack = true;
+              break;
+            }
+          }
+          var returns = argTypes[0].name !== "void";
+          var expectedArgCount = argCount - 2;
+          var argsWired = new Array(expectedArgCount);
+          var invokerFuncArgs = [];
+          var destructors = [];
+          return function() {
+            if (arguments.length !== expectedArgCount) {
+              throwBindingError("function " + humanName + " called with " + arguments.length + " arguments, expected " + expectedArgCount + " args!");
+            }
+            destructors.length = 0;
+            var thisWired;
+            invokerFuncArgs.length = isClassMethodFunc ? 2 : 1;
+            invokerFuncArgs[0] = cppTargetFunc;
+            if (isClassMethodFunc) {
+              thisWired = argTypes[1]["toWireType"](destructors, this);
+              invokerFuncArgs[1] = thisWired;
+            }
+            for (var i2 = 0; i2 < expectedArgCount; ++i2) {
+              argsWired[i2] = argTypes[i2 + 2]["toWireType"](destructors, arguments[i2]);
+              invokerFuncArgs.push(argsWired[i2]);
+            }
+            var rv = cppInvokerFunc.apply(null, invokerFuncArgs);
+            function onDone(rv2) {
+              if (needsDestructorStack) {
+                runDestructors(destructors);
+              } else {
+                for (var i3 = isClassMethodFunc ? 1 : 2; i3 < argTypes.length; i3++) {
+                  var param2 = i3 === 1 ? thisWired : argsWired[i3 - 2];
+                  if (argTypes[i3].destructorFunction !== null) {
+                    argTypes[i3].destructorFunction(param2);
+                  }
+                }
+              }
+              if (returns) {
+                return argTypes[0]["fromWireType"](rv2);
+              }
+            }
+            return onDone(rv);
+          };
+        }
+        function heap32VectorToArray(count2, firstElement) {
+          var array2 = [];
+          for (var i = 0; i < count2; i++) {
+            array2.push(HEAPU32[firstElement + i * 4 >> 2]);
+          }
+          return array2;
+        }
+        function replacePublicSymbol(name2, value, numArguments) {
+          if (!Module6.hasOwnProperty(name2)) {
+            throwInternalError("Replacing nonexistant public symbol");
+          }
+          if (void 0 !== Module6[name2].overloadTable && void 0 !== numArguments) {
+            Module6[name2].overloadTable[numArguments] = value;
+          } else {
+            Module6[name2] = value;
+            Module6[name2].argCount = numArguments;
+          }
+        }
+        function dynCallLegacy(sig, ptr, args) {
+          var f = Module6["dynCall_" + sig];
+          return args && args.length ? f.apply(null, [ptr].concat(args)) : f.call(null, ptr);
+        }
+        var wasmTableMirror = [];
+        function getWasmTableEntry(funcPtr) {
+          var func = wasmTableMirror[funcPtr];
+          if (!func) {
+            if (funcPtr >= wasmTableMirror.length) wasmTableMirror.length = funcPtr + 1;
+            wasmTableMirror[funcPtr] = func = wasmTable.get(funcPtr);
+          }
+          return func;
+        }
+        function dynCall(sig, ptr, args) {
+          if (sig.includes("j")) {
+            return dynCallLegacy(sig, ptr, args);
+          }
+          var rtn = getWasmTableEntry(ptr).apply(null, args);
+          return rtn;
+        }
+        function getDynCaller(sig, ptr) {
+          var argCache = [];
+          return function() {
+            argCache.length = 0;
+            Object.assign(argCache, arguments);
+            return dynCall(sig, ptr, argCache);
+          };
+        }
+        function embind__requireFunction(signature, rawFunction) {
+          signature = readLatin1String(signature);
+          function makeDynCaller() {
+            if (signature.includes("j")) {
+              return getDynCaller(signature, rawFunction);
+            }
+            return getWasmTableEntry(rawFunction);
+          }
+          var fp = makeDynCaller();
+          if (typeof fp != "function") {
+            throwBindingError("unknown function pointer with signature " + signature + ": " + rawFunction);
+          }
+          return fp;
+        }
+        var UnboundTypeError = void 0;
+        function throwUnboundTypeError(message, types) {
+          var unboundTypes = [];
+          var seen = {};
+          function visit2(type) {
+            if (seen[type]) {
+              return;
+            }
+            if (registeredTypes[type]) {
+              return;
+            }
+            if (typeDependencies[type]) {
+              typeDependencies[type].forEach(visit2);
+              return;
+            }
+            unboundTypes.push(type);
+            seen[type] = true;
+          }
+          types.forEach(visit2);
+          throw new UnboundTypeError(message + ": " + unboundTypes.map(getTypeName).join([", "]));
+        }
+        function __embind_register_function(name2, argCount, rawArgTypesAddr, signature, rawInvoker, fn, isAsync) {
+          var argTypes = heap32VectorToArray(argCount, rawArgTypesAddr);
+          name2 = readLatin1String(name2);
+          rawInvoker = embind__requireFunction(signature, rawInvoker);
+          exposePublicSymbol(name2, function() {
+            throwUnboundTypeError("Cannot call " + name2 + " due to unbound types", argTypes);
+          }, argCount - 1);
+          whenDependentTypesAreResolved([], argTypes, function(argTypes2) {
+            var invokerArgsArray = [argTypes2[0], null].concat(argTypes2.slice(1));
+            replacePublicSymbol(name2, craftInvokerFunction(name2, invokerArgsArray, null, rawInvoker, fn, isAsync), argCount - 1);
+            return [];
+          });
+        }
+        function integerReadValueFromPointer(name2, shift, signed) {
+          switch (shift) {
+            case 0:
+              return signed ? function readS8FromPointer(pointer) {
+                return HEAP8[pointer];
+              } : function readU8FromPointer(pointer) {
+                return HEAPU8[pointer];
+              };
+            case 1:
+              return signed ? function readS16FromPointer(pointer) {
+                return HEAP16[pointer >> 1];
+              } : function readU16FromPointer(pointer) {
+                return HEAPU16[pointer >> 1];
+              };
+            case 2:
+              return signed ? function readS32FromPointer(pointer) {
+                return HEAP32[pointer >> 2];
+              } : function readU32FromPointer(pointer) {
+                return HEAPU32[pointer >> 2];
+              };
+            default:
+              throw new TypeError("Unknown integer type: " + name2);
+          }
+        }
+        function __embind_register_integer(primitiveType, name2, size, minRange, maxRange) {
+          name2 = readLatin1String(name2);
+          if (maxRange === -1) {
+            maxRange = 4294967295;
+          }
+          var shift = getShiftFromSize(size);
+          var fromWireType = (value) => value;
+          if (minRange === 0) {
+            var bitshift = 32 - 8 * size;
+            fromWireType = (value) => value << bitshift >>> bitshift;
+          }
+          var isUnsignedType = name2.includes("unsigned");
+          var checkAssertions = (value, toTypeName) => {
+          };
+          var toWireType;
+          if (isUnsignedType) {
+            toWireType = function(destructors, value) {
+              checkAssertions(value, this.name);
+              return value >>> 0;
+            };
+          } else {
+            toWireType = function(destructors, value) {
+              checkAssertions(value, this.name);
+              return value;
+            };
+          }
+          registerType(primitiveType, { name: name2, "fromWireType": fromWireType, "toWireType": toWireType, "argPackAdvance": 8, "readValueFromPointer": integerReadValueFromPointer(name2, shift, minRange !== 0), destructorFunction: null });
+        }
+        function __embind_register_memory_view(rawType, dataTypeIndex, name2) {
+          var typeMapping = [Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
+          var TA = typeMapping[dataTypeIndex];
+          function decodeMemoryView(handle) {
+            handle = handle >> 2;
+            var heap2 = HEAPU32;
+            var size = heap2[handle];
+            var data = heap2[handle + 1];
+            return new TA(heap2.buffer, data, size);
+          }
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": decodeMemoryView, "argPackAdvance": 8, "readValueFromPointer": decodeMemoryView }, { ignoreDuplicateRegistrations: true });
+        }
+        function __embind_register_std_string(rawType, name2) {
+          name2 = readLatin1String(name2);
+          var stdStringIsUTF8 = name2 === "std::string";
+          registerType(rawType, { name: name2, "fromWireType": function(value) {
+            var length = HEAPU32[value >> 2];
+            var payload = value + 4;
+            var str;
+            if (stdStringIsUTF8) {
+              var decodeStartPtr = payload;
+              for (var i = 0; i <= length; ++i) {
+                var currentBytePtr = payload + i;
+                if (i == length || HEAPU8[currentBytePtr] == 0) {
+                  var maxRead = currentBytePtr - decodeStartPtr;
+                  var stringSegment = UTF8ToString(decodeStartPtr, maxRead);
+                  if (str === void 0) {
+                    str = stringSegment;
+                  } else {
+                    str += String.fromCharCode(0);
+                    str += stringSegment;
+                  }
+                  decodeStartPtr = currentBytePtr + 1;
+                }
+              }
+            } else {
+              var a = new Array(length);
+              for (var i = 0; i < length; ++i) {
+                a[i] = String.fromCharCode(HEAPU8[payload + i]);
+              }
+              str = a.join("");
+            }
+            _free(value);
+            return str;
+          }, "toWireType": function(destructors, value) {
+            if (value instanceof ArrayBuffer) {
+              value = new Uint8Array(value);
+            }
+            var length;
+            var valueIsOfTypeString = typeof value == "string";
+            if (!(valueIsOfTypeString || value instanceof Uint8Array || value instanceof Uint8ClampedArray || value instanceof Int8Array)) {
+              throwBindingError("Cannot pass non-string to std::string");
+            }
+            if (stdStringIsUTF8 && valueIsOfTypeString) {
+              length = lengthBytesUTF8(value);
+            } else {
+              length = value.length;
+            }
+            var base = _malloc(4 + length + 1);
+            var ptr = base + 4;
+            HEAPU32[base >> 2] = length;
+            if (stdStringIsUTF8 && valueIsOfTypeString) {
+              stringToUTF8(value, ptr, length + 1);
+            } else {
+              if (valueIsOfTypeString) {
+                for (var i = 0; i < length; ++i) {
+                  var charCode = value.charCodeAt(i);
+                  if (charCode > 255) {
+                    _free(ptr);
+                    throwBindingError("String has UTF-16 code units that do not fit in 8 bits");
+                  }
+                  HEAPU8[ptr + i] = charCode;
+                }
+              } else {
+                for (var i = 0; i < length; ++i) {
+                  HEAPU8[ptr + i] = value[i];
+                }
+              }
+            }
+            if (destructors !== null) {
+              destructors.push(_free, base);
+            }
+            return base;
+          }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: function(ptr) {
+            _free(ptr);
+          } });
+        }
+        function UTF16ToString(ptr, maxBytesToRead) {
+          var str = "";
+          for (var i = 0; !(i >= maxBytesToRead / 2); ++i) {
+            var codeUnit = HEAP16[ptr + i * 2 >> 1];
+            if (codeUnit == 0) break;
+            str += String.fromCharCode(codeUnit);
+          }
+          return str;
+        }
+        function stringToUTF16(str, outPtr, maxBytesToWrite) {
+          if (maxBytesToWrite === void 0) {
+            maxBytesToWrite = 2147483647;
+          }
+          if (maxBytesToWrite < 2) return 0;
+          maxBytesToWrite -= 2;
+          var startPtr = outPtr;
+          var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+          for (var i = 0; i < numCharsToWrite; ++i) {
+            var codeUnit = str.charCodeAt(i);
+            HEAP16[outPtr >> 1] = codeUnit;
+            outPtr += 2;
+          }
+          HEAP16[outPtr >> 1] = 0;
+          return outPtr - startPtr;
+        }
+        function lengthBytesUTF16(str) {
+          return str.length * 2;
+        }
+        function UTF32ToString(ptr, maxBytesToRead) {
+          var i = 0;
+          var str = "";
+          while (!(i >= maxBytesToRead / 4)) {
+            var utf32 = HEAP32[ptr + i * 4 >> 2];
+            if (utf32 == 0) break;
+            ++i;
+            if (utf32 >= 65536) {
+              var ch = utf32 - 65536;
+              str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+            } else {
+              str += String.fromCharCode(utf32);
+            }
+          }
+          return str;
+        }
+        function stringToUTF32(str, outPtr, maxBytesToWrite) {
+          if (maxBytesToWrite === void 0) {
+            maxBytesToWrite = 2147483647;
+          }
+          if (maxBytesToWrite < 4) return 0;
+          var startPtr = outPtr;
+          var endPtr = startPtr + maxBytesToWrite - 4;
+          for (var i = 0; i < str.length; ++i) {
+            var codeUnit = str.charCodeAt(i);
+            if (codeUnit >= 55296 && codeUnit <= 57343) {
+              var trailSurrogate = str.charCodeAt(++i);
+              codeUnit = 65536 + ((codeUnit & 1023) << 10) | trailSurrogate & 1023;
+            }
+            HEAP32[outPtr >> 2] = codeUnit;
+            outPtr += 4;
+            if (outPtr + 4 > endPtr) break;
+          }
+          HEAP32[outPtr >> 2] = 0;
+          return outPtr - startPtr;
+        }
+        function lengthBytesUTF32(str) {
+          var len = 0;
+          for (var i = 0; i < str.length; ++i) {
+            var codeUnit = str.charCodeAt(i);
+            if (codeUnit >= 55296 && codeUnit <= 57343) ++i;
+            len += 4;
+          }
+          return len;
+        }
+        function __embind_register_std_wstring(rawType, charSize, name2) {
+          name2 = readLatin1String(name2);
+          var decodeString, encodeString, getHeap, lengthBytesUTF, shift;
+          if (charSize === 2) {
+            decodeString = UTF16ToString;
+            encodeString = stringToUTF16;
+            lengthBytesUTF = lengthBytesUTF16;
+            getHeap = () => HEAPU16;
+            shift = 1;
+          } else if (charSize === 4) {
+            decodeString = UTF32ToString;
+            encodeString = stringToUTF32;
+            lengthBytesUTF = lengthBytesUTF32;
+            getHeap = () => HEAPU32;
+            shift = 2;
+          }
+          registerType(rawType, { name: name2, "fromWireType": function(value) {
+            var length = HEAPU32[value >> 2];
+            var HEAP = getHeap();
+            var str;
+            var decodeStartPtr = value + 4;
+            for (var i = 0; i <= length; ++i) {
+              var currentBytePtr = value + 4 + i * charSize;
+              if (i == length || HEAP[currentBytePtr >> shift] == 0) {
+                var maxReadBytes = currentBytePtr - decodeStartPtr;
+                var stringSegment = decodeString(decodeStartPtr, maxReadBytes);
+                if (str === void 0) {
+                  str = stringSegment;
+                } else {
+                  str += String.fromCharCode(0);
+                  str += stringSegment;
+                }
+                decodeStartPtr = currentBytePtr + charSize;
+              }
+            }
+            _free(value);
+            return str;
+          }, "toWireType": function(destructors, value) {
+            if (!(typeof value == "string")) {
+              throwBindingError("Cannot pass non-string to C++ string type " + name2);
+            }
+            var length = lengthBytesUTF(value);
+            var ptr = _malloc(4 + length + charSize);
+            HEAPU32[ptr >> 2] = length >> shift;
+            encodeString(value, ptr + 4, length + charSize);
+            if (destructors !== null) {
+              destructors.push(_free, ptr);
+            }
+            return ptr;
+          }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: function(ptr) {
+            _free(ptr);
+          } });
+        }
+        function __embind_register_value_object(rawType, name2, constructorSignature, rawConstructor, destructorSignature, rawDestructor) {
+          structRegistrations[rawType] = { name: readLatin1String(name2), rawConstructor: embind__requireFunction(constructorSignature, rawConstructor), rawDestructor: embind__requireFunction(destructorSignature, rawDestructor), fields: [] };
+        }
+        function __embind_register_value_object_field(structType, fieldName, getterReturnType, getterSignature, getter, getterContext, setterArgumentType, setterSignature, setter, setterContext) {
+          structRegistrations[structType].fields.push({ fieldName: readLatin1String(fieldName), getterReturnType, getter: embind__requireFunction(getterSignature, getter), getterContext, setterArgumentType, setter: embind__requireFunction(setterSignature, setter), setterContext });
+        }
+        function __embind_register_void(rawType, name2) {
+          name2 = readLatin1String(name2);
+          registerType(rawType, { isVoid: true, name: name2, "argPackAdvance": 0, "fromWireType": function() {
+            return void 0;
+          }, "toWireType": function(destructors, o) {
+            return void 0;
+          } });
+        }
+        var emval_symbols = {};
+        function getStringOrSymbol(address) {
+          var symbol2 = emval_symbols[address];
+          if (symbol2 === void 0) {
+            return readLatin1String(address);
+          }
+          return symbol2;
+        }
+        function emval_get_global() {
+          if (typeof globalThis == "object") {
+            return globalThis;
+          }
+          function testGlobal(obj) {
+            obj["$$$embind_global$$$"] = obj;
+            var success2 = typeof $$$embind_global$$$ == "object" && obj["$$$embind_global$$$"] == obj;
+            if (!success2) {
+              delete obj["$$$embind_global$$$"];
+            }
+            return success2;
+          }
+          if (typeof $$$embind_global$$$ == "object") {
+            return $$$embind_global$$$;
+          }
+          if (typeof global == "object" && testGlobal(global)) {
+            $$$embind_global$$$ = global;
+          } else if (typeof self == "object" && testGlobal(self)) {
+            $$$embind_global$$$ = self;
+          }
+          if (typeof $$$embind_global$$$ == "object") {
+            return $$$embind_global$$$;
+          }
+          throw Error("unable to get global object.");
+        }
+        function __emval_get_global(name2) {
+          if (name2 === 0) {
+            return Emval.toHandle(emval_get_global());
+          } else {
+            name2 = getStringOrSymbol(name2);
+            return Emval.toHandle(emval_get_global()[name2]);
+          }
+        }
+        function __emval_incref(handle) {
+          if (handle > 4) {
+            emval_handle_array[handle].refcount += 1;
+          }
+        }
+        function craftEmvalAllocator(argCount) {
+          var argsList = new Array(argCount + 1);
+          return function(constructor, argTypes, args) {
+            argsList[0] = constructor;
+            for (var i = 0; i < argCount; ++i) {
+              var argType = requireRegisteredType(HEAPU32[argTypes + i * 4 >> 2], "parameter " + i);
+              argsList[i + 1] = argType["readValueFromPointer"](args);
+              args += argType["argPackAdvance"];
+            }
+            var obj = new (constructor.bind.apply(constructor, argsList))();
+            return Emval.toHandle(obj);
+          };
+        }
+        var emval_newers = {};
+        function __emval_new(handle, argCount, argTypes, args) {
+          handle = Emval.toValue(handle);
+          var newer = emval_newers[argCount];
+          if (!newer) {
+            newer = craftEmvalAllocator(argCount);
+            emval_newers[argCount] = newer;
+          }
+          return newer(handle, argTypes, args);
+        }
+        function _abort() {
+          abort("");
+        }
+        function _emscripten_memcpy_big(dest, src, num) {
+          HEAPU8.copyWithin(dest, src, src + num);
+        }
+        function getHeapMax() {
+          return 2147483648;
+        }
+        function emscripten_realloc_buffer(size) {
+          var b = wasmMemory.buffer;
+          try {
+            wasmMemory.grow(size - b.byteLength + 65535 >>> 16);
+            updateMemoryViews();
+            return 1;
+          } catch (e) {
+          }
+        }
+        function _emscripten_resize_heap(requestedSize) {
+          var oldSize = HEAPU8.length;
+          requestedSize = requestedSize >>> 0;
+          var maxHeapSize = getHeapMax();
+          if (requestedSize > maxHeapSize) {
+            return false;
+          }
+          let alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
+          for (var cutDown = 1; cutDown <= 4; cutDown *= 2) {
+            var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown);
+            overGrownHeapSize = Math.min(overGrownHeapSize, requestedSize + 100663296);
+            var newSize = Math.min(maxHeapSize, alignUp(Math.max(requestedSize, overGrownHeapSize), 65536));
+            var replacement = emscripten_realloc_buffer(newSize);
+            if (replacement) {
+              return true;
+            }
+          }
+          return false;
+        }
+        InternalError = Module6["InternalError"] = extendError(Error, "InternalError");
+        embind_init_charCodes();
+        BindingError = Module6["BindingError"] = extendError(Error, "BindingError");
+        init_emval();
+        UnboundTypeError = Module6["UnboundTypeError"] = extendError(Error, "UnboundTypeError");
+        var wasmImports = { "k": ___cxa_throw, "m": __embind_finalize_value_object, "o": __embind_register_bigint, "t": __embind_register_bool, "s": __embind_register_emval, "q": __embind_register_enum, "d": __embind_register_enum_value, "h": __embind_register_float, "f": __embind_register_function, "c": __embind_register_integer, "b": __embind_register_memory_view, "i": __embind_register_std_string, "e": __embind_register_std_wstring, "n": __embind_register_value_object, "a": __embind_register_value_object_field, "u": __embind_register_void, "j": __emval_decref, "w": __emval_get_global, "l": __emval_incref, "v": __emval_new, "g": _abort, "r": _emscripten_memcpy_big, "p": _emscripten_resize_heap };
+        var asm = createWasm();
+        var ___wasm_call_ctors = function() {
+          return (___wasm_call_ctors = Module6["asm"]["y"]).apply(null, arguments);
+        };
+        var _malloc = function() {
+          return (_malloc = Module6["asm"]["z"]).apply(null, arguments);
+        };
+        var _free = function() {
+          return (_free = Module6["asm"]["A"]).apply(null, arguments);
+        };
+        var ___getTypeName = Module6["___getTypeName"] = function() {
+          return (___getTypeName = Module6["___getTypeName"] = Module6["asm"]["B"]).apply(null, arguments);
+        };
+        var __embind_initialize_bindings = Module6["__embind_initialize_bindings"] = function() {
+          return (__embind_initialize_bindings = Module6["__embind_initialize_bindings"] = Module6["asm"]["C"]).apply(null, arguments);
+        };
+        var ___errno_location = function() {
+          return (___errno_location = Module6["asm"]["__errno_location"]).apply(null, arguments);
+        };
+        var ___cxa_is_pointer_type = function() {
+          return (___cxa_is_pointer_type = Module6["asm"]["E"]).apply(null, arguments);
+        };
+        var dynCall_jiiii = Module6["dynCall_jiiii"] = function() {
+          return (dynCall_jiiii = Module6["dynCall_jiiii"] = Module6["asm"]["F"]).apply(null, arguments);
+        };
+        var calledRun;
+        dependenciesFulfilled = function runCaller() {
+          if (!calledRun) run();
+          if (!calledRun) dependenciesFulfilled = runCaller;
+        };
+        function run() {
+          if (runDependencies > 0) {
+            return;
+          }
+          preRun();
+          if (runDependencies > 0) {
+            return;
+          }
+          function doRun() {
+            if (calledRun) return;
+            calledRun = true;
+            Module6["calledRun"] = true;
+            if (ABORT) return;
+            initRuntime();
+            readyPromiseResolve(Module6);
+            if (Module6["onRuntimeInitialized"]) Module6["onRuntimeInitialized"]();
+            postRun();
+          }
+          if (Module6["setStatus"]) {
+            Module6["setStatus"]("Running...");
+            setTimeout(function() {
+              setTimeout(function() {
+                Module6["setStatus"]("");
+              }, 1);
+              doRun();
+            }, 1);
+          } else {
+            doRun();
+          }
+        }
+        if (Module6["preInit"]) {
+          if (typeof Module6["preInit"] == "function") Module6["preInit"] = [Module6["preInit"]];
+          while (Module6["preInit"].length > 0) {
+            Module6["preInit"].pop()();
+          }
+        }
+        run();
+        return Module6.ready;
+      });
+    })();
+    webp_enc_simd_default = Module4;
+  }
+});
+
+// node_modules/@jsquash/webp/codec/enc/webp_enc.js
+var webp_enc_exports = {};
+__export(webp_enc_exports, {
+  default: () => webp_enc_default
+});
+var Module5, webp_enc_default;
+var init_webp_enc = __esm({
+  "node_modules/@jsquash/webp/codec/enc/webp_enc.js"() {
+    Module5 = (() => {
+      var _scriptDir = import.meta.url;
+      return (function(Module6 = {}) {
+        var Module6 = typeof Module6 != "undefined" ? Module6 : {};
+        var readyPromiseResolve, readyPromiseReject;
+        Module6["ready"] = new Promise(function(resolve, reject) {
+          readyPromiseResolve = resolve;
+          readyPromiseReject = reject;
+        });
+        const isServiceWorker5 = globalThis.ServiceWorkerGlobalScope !== void 0;
+        const isRunningInCloudFlareWorkers5 = isServiceWorker5 && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+        const isRunningInNode5 = typeof process === "object" && process.release && process.release.name === "node";
+        if (isRunningInCloudFlareWorkers5 || isRunningInNode5) {
+          if (!globalThis.ImageData) {
+            globalThis.ImageData = class ImageData {
+              constructor(data, width, height) {
+                this.data = data;
+                this.width = width;
+                this.height = height;
+              }
+            };
+          }
+          if (import.meta.url === void 0) {
+            import.meta.url = "https://localhost";
+          }
+          if (typeof self !== "undefined" && self.location === void 0) {
+            self.location = { href: "" };
+          }
+        }
+        var moduleOverrides = Object.assign({}, Module6);
+        var arguments_ = [];
+        var thisProgram = "./this.program";
+        var quit_ = (status, toThrow) => {
+          throw toThrow;
+        };
+        var ENVIRONMENT_IS_WEB = typeof window == "object";
+        var ENVIRONMENT_IS_WORKER = typeof importScripts == "function";
+        var ENVIRONMENT_IS_NODE = typeof process == "object" && typeof process.versions == "object" && typeof process.versions.node == "string";
+        var scriptDirectory = "";
+        function locateFile(path15) {
+          if (Module6["locateFile"]) {
+            return Module6["locateFile"](path15, scriptDirectory);
+          }
+          return scriptDirectory + path15;
+        }
+        var read_, readAsync, readBinary, setWindowTitle;
+        if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
+          if (ENVIRONMENT_IS_WORKER) {
+            scriptDirectory = self.location.href;
+          } else if (typeof document != "undefined" && document.currentScript) {
+            scriptDirectory = document.currentScript.src;
+          }
+          if (_scriptDir) {
+            scriptDirectory = _scriptDir;
+          }
+          if (scriptDirectory.indexOf("blob:") !== 0) {
+            scriptDirectory = scriptDirectory.substr(0, scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1);
+          } else {
+            scriptDirectory = "";
+          }
+          {
+            read_ = (url2) => {
+              var xhr = new XMLHttpRequest();
+              xhr.open("GET", url2, false);
+              xhr.send(null);
+              return xhr.responseText;
+            };
+            if (ENVIRONMENT_IS_WORKER) {
+              readBinary = (url2) => {
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", url2, false);
+                xhr.responseType = "arraybuffer";
+                xhr.send(null);
+                return new Uint8Array(xhr.response);
+              };
+            }
+            readAsync = (url2, onload, onerror) => {
+              var xhr = new XMLHttpRequest();
+              xhr.open("GET", url2, true);
+              xhr.responseType = "arraybuffer";
+              xhr.onload = () => {
+                if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
+                  onload(xhr.response);
+                  return;
+                }
+                onerror();
+              };
+              xhr.onerror = onerror;
+              xhr.send(null);
+            };
+          }
+          setWindowTitle = (title) => document.title = title;
+        } else {
+        }
+        var out = Module6["print"] || console.log.bind(console);
+        var err = Module6["printErr"] || console.warn.bind(console);
+        Object.assign(Module6, moduleOverrides);
+        moduleOverrides = null;
+        if (Module6["arguments"]) arguments_ = Module6["arguments"];
+        if (Module6["thisProgram"]) thisProgram = Module6["thisProgram"];
+        if (Module6["quit"]) quit_ = Module6["quit"];
+        var wasmBinary;
+        if (Module6["wasmBinary"]) wasmBinary = Module6["wasmBinary"];
+        var noExitRuntime = Module6["noExitRuntime"] || true;
+        if (typeof WebAssembly != "object") {
+          abort("no native wasm support detected");
+        }
+        var wasmMemory;
+        var ABORT = false;
+        var EXITSTATUS;
+        function UTF8ArrayToString(heapOrArray, idx, maxBytesToRead) {
+          var endIdx = idx + maxBytesToRead;
+          var str = "";
+          while (!(idx >= endIdx)) {
+            var u0 = heapOrArray[idx++];
+            if (!u0) return str;
+            if (!(u0 & 128)) {
+              str += String.fromCharCode(u0);
+              continue;
+            }
+            var u1 = heapOrArray[idx++] & 63;
+            if ((u0 & 224) == 192) {
+              str += String.fromCharCode((u0 & 31) << 6 | u1);
+              continue;
+            }
+            var u2 = heapOrArray[idx++] & 63;
+            if ((u0 & 240) == 224) {
+              u0 = (u0 & 15) << 12 | u1 << 6 | u2;
+            } else {
+              u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
+            }
+            if (u0 < 65536) {
+              str += String.fromCharCode(u0);
+            } else {
+              var ch = u0 - 65536;
+              str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+            }
+          }
+          return str;
+        }
+        function UTF8ToString(ptr, maxBytesToRead) {
+          return ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : "";
+        }
+        function stringToUTF8Array(str, heap2, outIdx, maxBytesToWrite) {
+          if (!(maxBytesToWrite > 0)) return 0;
+          var startIdx = outIdx;
+          var endIdx = outIdx + maxBytesToWrite - 1;
+          for (var i = 0; i < str.length; ++i) {
+            var u = str.charCodeAt(i);
+            if (u >= 55296 && u <= 57343) {
+              var u1 = str.charCodeAt(++i);
+              u = 65536 + ((u & 1023) << 10) | u1 & 1023;
+            }
+            if (u <= 127) {
+              if (outIdx >= endIdx) break;
+              heap2[outIdx++] = u;
+            } else if (u <= 2047) {
+              if (outIdx + 1 >= endIdx) break;
+              heap2[outIdx++] = 192 | u >> 6;
+              heap2[outIdx++] = 128 | u & 63;
+            } else if (u <= 65535) {
+              if (outIdx + 2 >= endIdx) break;
+              heap2[outIdx++] = 224 | u >> 12;
+              heap2[outIdx++] = 128 | u >> 6 & 63;
+              heap2[outIdx++] = 128 | u & 63;
+            } else {
+              if (outIdx + 3 >= endIdx) break;
+              heap2[outIdx++] = 240 | u >> 18;
+              heap2[outIdx++] = 128 | u >> 12 & 63;
+              heap2[outIdx++] = 128 | u >> 6 & 63;
+              heap2[outIdx++] = 128 | u & 63;
+            }
+          }
+          heap2[outIdx] = 0;
+          return outIdx - startIdx;
+        }
+        function stringToUTF8(str, outPtr, maxBytesToWrite) {
+          return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite);
+        }
+        function lengthBytesUTF8(str) {
+          var len = 0;
+          for (var i = 0; i < str.length; ++i) {
+            var c = str.charCodeAt(i);
+            if (c <= 127) {
+              len++;
+            } else if (c <= 2047) {
+              len += 2;
+            } else if (c >= 55296 && c <= 57343) {
+              len += 4;
+              ++i;
+            } else {
+              len += 3;
+            }
+          }
+          return len;
+        }
+        var HEAP8, HEAPU8, HEAP16, HEAPU16, HEAP32, HEAPU32, HEAPF32, HEAPF64;
+        function updateMemoryViews() {
+          var b = wasmMemory.buffer;
+          Module6["HEAP8"] = HEAP8 = new Int8Array(b);
+          Module6["HEAP16"] = HEAP16 = new Int16Array(b);
+          Module6["HEAP32"] = HEAP32 = new Int32Array(b);
+          Module6["HEAPU8"] = HEAPU8 = new Uint8Array(b);
+          Module6["HEAPU16"] = HEAPU16 = new Uint16Array(b);
+          Module6["HEAPU32"] = HEAPU32 = new Uint32Array(b);
+          Module6["HEAPF32"] = HEAPF32 = new Float32Array(b);
+          Module6["HEAPF64"] = HEAPF64 = new Float64Array(b);
+        }
+        var wasmTable;
+        var __ATPRERUN__ = [];
+        var __ATINIT__ = [];
+        var __ATPOSTRUN__ = [];
+        var runtimeInitialized = false;
+        function preRun() {
+          if (Module6["preRun"]) {
+            if (typeof Module6["preRun"] == "function") Module6["preRun"] = [Module6["preRun"]];
+            while (Module6["preRun"].length) {
+              addOnPreRun(Module6["preRun"].shift());
+            }
+          }
+          callRuntimeCallbacks(__ATPRERUN__);
+        }
+        function initRuntime() {
+          runtimeInitialized = true;
+          callRuntimeCallbacks(__ATINIT__);
+        }
+        function postRun() {
+          if (Module6["postRun"]) {
+            if (typeof Module6["postRun"] == "function") Module6["postRun"] = [Module6["postRun"]];
+            while (Module6["postRun"].length) {
+              addOnPostRun(Module6["postRun"].shift());
+            }
+          }
+          callRuntimeCallbacks(__ATPOSTRUN__);
+        }
+        function addOnPreRun(cb) {
+          __ATPRERUN__.unshift(cb);
+        }
+        function addOnInit(cb) {
+          __ATINIT__.unshift(cb);
+        }
+        function addOnPostRun(cb) {
+          __ATPOSTRUN__.unshift(cb);
+        }
+        var runDependencies = 0;
+        var runDependencyWatcher = null;
+        var dependenciesFulfilled = null;
+        function addRunDependency(id) {
+          runDependencies++;
+          if (Module6["monitorRunDependencies"]) {
+            Module6["monitorRunDependencies"](runDependencies);
+          }
+        }
+        function removeRunDependency(id) {
+          runDependencies--;
+          if (Module6["monitorRunDependencies"]) {
+            Module6["monitorRunDependencies"](runDependencies);
+          }
+          if (runDependencies == 0) {
+            if (runDependencyWatcher !== null) {
+              clearInterval(runDependencyWatcher);
+              runDependencyWatcher = null;
+            }
+            if (dependenciesFulfilled) {
+              var callback = dependenciesFulfilled;
+              dependenciesFulfilled = null;
+              callback();
+            }
+          }
+        }
+        function abort(what) {
+          if (Module6["onAbort"]) {
+            Module6["onAbort"](what);
+          }
+          what = "Aborted(" + what + ")";
+          err(what);
+          ABORT = true;
+          EXITSTATUS = 1;
+          what += ". Build with -sASSERTIONS for more info.";
+          var e = new WebAssembly.RuntimeError(what);
+          readyPromiseReject(e);
+          throw e;
+        }
+        var dataURIPrefix = "data:application/octet-stream;base64,";
+        function isDataURI(filename) {
+          return filename.startsWith(dataURIPrefix);
+        }
+        var wasmBinaryFile;
+        if (Module6["locateFile"]) {
+          wasmBinaryFile = "webp_enc.wasm";
+          if (!isDataURI(wasmBinaryFile)) {
+            wasmBinaryFile = locateFile(wasmBinaryFile);
+          }
+        } else {
+          wasmBinaryFile = new URL("webp_enc.wasm", import.meta.url).href;
+        }
+        function getBinary(file2) {
+          try {
+            if (file2 == wasmBinaryFile && wasmBinary) {
+              return new Uint8Array(wasmBinary);
+            }
+            if (readBinary) {
+              return readBinary(file2);
+            }
+            throw "both async and sync fetching of the wasm failed";
+          } catch (err2) {
+            abort(err2);
+          }
+        }
+        function getBinaryPromise(binaryFile) {
+          if (!wasmBinary && (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER)) {
+            if (typeof fetch == "function") {
+              return fetch(binaryFile, { credentials: "same-origin" }).then(function(response) {
+                if (!response["ok"]) {
+                  throw "failed to load wasm binary file at '" + binaryFile + "'";
+                }
+                return response["arrayBuffer"]();
+              }).catch(function() {
+                return getBinary(binaryFile);
+              });
+            }
+          }
+          return Promise.resolve().then(function() {
+            return getBinary(binaryFile);
+          });
+        }
+        function instantiateArrayBuffer(binaryFile, imports, receiver) {
+          return getBinaryPromise(binaryFile).then(function(binary) {
+            return WebAssembly.instantiate(binary, imports);
+          }).then(function(instance) {
+            return instance;
+          }).then(receiver, function(reason) {
+            err("failed to asynchronously prepare wasm: " + reason);
+            abort(reason);
+          });
+        }
+        function instantiateAsync(binary, binaryFile, imports, callback) {
+          if (!binary && typeof WebAssembly.instantiateStreaming == "function" && !isDataURI(binaryFile) && typeof fetch == "function") {
+            return fetch(binaryFile, { credentials: "same-origin" }).then(function(response) {
+              var result = WebAssembly.instantiateStreaming(response, imports);
+              return result.then(callback, function(reason) {
+                err("wasm streaming compile failed: " + reason);
+                err("falling back to ArrayBuffer instantiation");
+                return instantiateArrayBuffer(binaryFile, imports, callback);
+              });
+            });
+          } else {
+            return instantiateArrayBuffer(binaryFile, imports, callback);
+          }
+        }
+        function createWasm() {
+          var info = { "a": wasmImports };
+          function receiveInstance(instance, module) {
+            var exports = instance.exports;
+            Module6["asm"] = exports;
+            wasmMemory = Module6["asm"]["x"];
+            updateMemoryViews();
+            wasmTable = Module6["asm"]["D"];
+            addOnInit(Module6["asm"]["y"]);
+            removeRunDependency("wasm-instantiate");
+            return exports;
+          }
+          addRunDependency("wasm-instantiate");
+          function receiveInstantiationResult(result) {
+            receiveInstance(result["instance"]);
+          }
+          if (Module6["instantiateWasm"]) {
+            try {
+              return Module6["instantiateWasm"](info, receiveInstance);
+            } catch (e) {
+              err("Module.instantiateWasm callback failed with error: " + e);
+              readyPromiseReject(e);
+            }
+          }
+          instantiateAsync(wasmBinary, wasmBinaryFile, info, receiveInstantiationResult).catch(readyPromiseReject);
+          return {};
+        }
+        function callRuntimeCallbacks(callbacks) {
+          while (callbacks.length > 0) {
+            callbacks.shift()(Module6);
+          }
+        }
+        function ExceptionInfo(excPtr) {
+          this.excPtr = excPtr;
+          this.ptr = excPtr - 24;
+          this.set_type = function(type) {
+            HEAPU32[this.ptr + 4 >> 2] = type;
+          };
+          this.get_type = function() {
+            return HEAPU32[this.ptr + 4 >> 2];
+          };
+          this.set_destructor = function(destructor) {
+            HEAPU32[this.ptr + 8 >> 2] = destructor;
+          };
+          this.get_destructor = function() {
+            return HEAPU32[this.ptr + 8 >> 2];
+          };
+          this.set_refcount = function(refcount) {
+            HEAP32[this.ptr >> 2] = refcount;
+          };
+          this.set_caught = function(caught) {
+            caught = caught ? 1 : 0;
+            HEAP8[this.ptr + 12 >> 0] = caught;
+          };
+          this.get_caught = function() {
+            return HEAP8[this.ptr + 12 >> 0] != 0;
+          };
+          this.set_rethrown = function(rethrown) {
+            rethrown = rethrown ? 1 : 0;
+            HEAP8[this.ptr + 13 >> 0] = rethrown;
+          };
+          this.get_rethrown = function() {
+            return HEAP8[this.ptr + 13 >> 0] != 0;
+          };
+          this.init = function(type, destructor) {
+            this.set_adjusted_ptr(0);
+            this.set_type(type);
+            this.set_destructor(destructor);
+            this.set_refcount(0);
+            this.set_caught(false);
+            this.set_rethrown(false);
+          };
+          this.add_ref = function() {
+            var value = HEAP32[this.ptr >> 2];
+            HEAP32[this.ptr >> 2] = value + 1;
+          };
+          this.release_ref = function() {
+            var prev = HEAP32[this.ptr >> 2];
+            HEAP32[this.ptr >> 2] = prev - 1;
+            return prev === 1;
+          };
+          this.set_adjusted_ptr = function(adjustedPtr) {
+            HEAPU32[this.ptr + 16 >> 2] = adjustedPtr;
+          };
+          this.get_adjusted_ptr = function() {
+            return HEAPU32[this.ptr + 16 >> 2];
+          };
+          this.get_exception_ptr = function() {
+            var isPointer = ___cxa_is_pointer_type(this.get_type());
+            if (isPointer) {
+              return HEAPU32[this.excPtr >> 2];
+            }
+            var adjusted = this.get_adjusted_ptr();
+            if (adjusted !== 0) return adjusted;
+            return this.excPtr;
+          };
+        }
+        var exceptionLast = 0;
+        var uncaughtExceptionCount = 0;
+        function ___cxa_throw(ptr, type, destructor) {
+          var info = new ExceptionInfo(ptr);
+          info.init(type, destructor);
+          exceptionLast = ptr;
+          uncaughtExceptionCount++;
+          throw ptr;
+        }
+        var structRegistrations = {};
+        function runDestructors(destructors) {
+          while (destructors.length) {
+            var ptr = destructors.pop();
+            var del = destructors.pop();
+            del(ptr);
+          }
+        }
+        function simpleReadValueFromPointer(pointer) {
+          return this["fromWireType"](HEAP32[pointer >> 2]);
+        }
+        var awaitingDependencies = {};
+        var registeredTypes = {};
+        var typeDependencies = {};
+        var char_0 = 48;
+        var char_9 = 57;
+        function makeLegalFunctionName(name2) {
+          if (void 0 === name2) {
+            return "_unknown";
+          }
+          name2 = name2.replace(/[^a-zA-Z0-9_]/g, "$");
+          var f = name2.charCodeAt(0);
+          if (f >= char_0 && f <= char_9) {
+            return "_" + name2;
+          }
+          return name2;
+        }
+        function createNamedFunction(name2, body) {
+          name2 = makeLegalFunctionName(name2);
+          return { [name2]: function() {
+            return body.apply(this, arguments);
+          } }[name2];
+        }
+        function extendError(baseErrorType, errorName) {
+          var errorClass = createNamedFunction(errorName, function(message) {
+            this.name = errorName;
+            this.message = message;
+            var stack = new Error(message).stack;
+            if (stack !== void 0) {
+              this.stack = this.toString() + "\n" + stack.replace(/^Error(:[^\n]*)?\n/, "");
+            }
+          });
+          errorClass.prototype = Object.create(baseErrorType.prototype);
+          errorClass.prototype.constructor = errorClass;
+          errorClass.prototype.toString = function() {
+            if (this.message === void 0) {
+              return this.name;
+            } else {
+              return this.name + ": " + this.message;
+            }
+          };
+          return errorClass;
+        }
+        var InternalError = void 0;
+        function throwInternalError(message) {
+          throw new InternalError(message);
+        }
+        function whenDependentTypesAreResolved(myTypes, dependentTypes, getTypeConverters) {
+          myTypes.forEach(function(type) {
+            typeDependencies[type] = dependentTypes;
+          });
+          function onComplete(typeConverters2) {
+            var myTypeConverters = getTypeConverters(typeConverters2);
+            if (myTypeConverters.length !== myTypes.length) {
+              throwInternalError("Mismatched type converter count");
+            }
+            for (var i = 0; i < myTypes.length; ++i) {
+              registerType(myTypes[i], myTypeConverters[i]);
+            }
+          }
+          var typeConverters = new Array(dependentTypes.length);
+          var unregisteredTypes = [];
+          var registered = 0;
+          dependentTypes.forEach((dt, i) => {
+            if (registeredTypes.hasOwnProperty(dt)) {
+              typeConverters[i] = registeredTypes[dt];
+            } else {
+              unregisteredTypes.push(dt);
+              if (!awaitingDependencies.hasOwnProperty(dt)) {
+                awaitingDependencies[dt] = [];
+              }
+              awaitingDependencies[dt].push(() => {
+                typeConverters[i] = registeredTypes[dt];
+                ++registered;
+                if (registered === unregisteredTypes.length) {
+                  onComplete(typeConverters);
+                }
+              });
+            }
+          });
+          if (0 === unregisteredTypes.length) {
+            onComplete(typeConverters);
+          }
+        }
+        function __embind_finalize_value_object(structType) {
+          var reg = structRegistrations[structType];
+          delete structRegistrations[structType];
+          var rawConstructor = reg.rawConstructor;
+          var rawDestructor = reg.rawDestructor;
+          var fieldRecords = reg.fields;
+          var fieldTypes = fieldRecords.map((field) => field.getterReturnType).concat(fieldRecords.map((field) => field.setterArgumentType));
+          whenDependentTypesAreResolved([structType], fieldTypes, (fieldTypes2) => {
+            var fields = {};
+            fieldRecords.forEach((field, i) => {
+              var fieldName = field.fieldName;
+              var getterReturnType = fieldTypes2[i];
+              var getter = field.getter;
+              var getterContext = field.getterContext;
+              var setterArgumentType = fieldTypes2[i + fieldRecords.length];
+              var setter = field.setter;
+              var setterContext = field.setterContext;
+              fields[fieldName] = { read: (ptr) => {
+                return getterReturnType["fromWireType"](getter(getterContext, ptr));
+              }, write: (ptr, o) => {
+                var destructors = [];
+                setter(setterContext, ptr, setterArgumentType["toWireType"](destructors, o));
+                runDestructors(destructors);
+              } };
+            });
+            return [{ name: reg.name, "fromWireType": function(ptr) {
+              var rv = {};
+              for (var i in fields) {
+                rv[i] = fields[i].read(ptr);
+              }
+              rawDestructor(ptr);
+              return rv;
+            }, "toWireType": function(destructors, o) {
+              for (var fieldName in fields) {
+                if (!(fieldName in o)) {
+                  throw new TypeError('Missing field:  "' + fieldName + '"');
+                }
+              }
+              var ptr = rawConstructor();
+              for (fieldName in fields) {
+                fields[fieldName].write(ptr, o[fieldName]);
+              }
+              if (destructors !== null) {
+                destructors.push(rawDestructor, ptr);
+              }
+              return ptr;
+            }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: rawDestructor }];
+          });
+        }
+        function __embind_register_bigint(primitiveType, name2, size, minRange, maxRange) {
+        }
+        function getShiftFromSize(size) {
+          switch (size) {
+            case 1:
+              return 0;
+            case 2:
+              return 1;
+            case 4:
+              return 2;
+            case 8:
+              return 3;
+            default:
+              throw new TypeError("Unknown type size: " + size);
+          }
+        }
+        function embind_init_charCodes() {
+          var codes = new Array(256);
+          for (var i = 0; i < 256; ++i) {
+            codes[i] = String.fromCharCode(i);
+          }
+          embind_charCodes = codes;
+        }
+        var embind_charCodes = void 0;
+        function readLatin1String(ptr) {
+          var ret = "";
+          var c = ptr;
+          while (HEAPU8[c]) {
+            ret += embind_charCodes[HEAPU8[c++]];
+          }
+          return ret;
+        }
+        var BindingError = void 0;
+        function throwBindingError(message) {
+          throw new BindingError(message);
+        }
+        function registerType(rawType, registeredInstance, options2 = {}) {
+          if (!("argPackAdvance" in registeredInstance)) {
+            throw new TypeError("registerType registeredInstance requires argPackAdvance");
+          }
+          var name2 = registeredInstance.name;
+          if (!rawType) {
+            throwBindingError('type "' + name2 + '" must have a positive integer typeid pointer');
+          }
+          if (registeredTypes.hasOwnProperty(rawType)) {
+            if (options2.ignoreDuplicateRegistrations) {
+              return;
+            } else {
+              throwBindingError("Cannot register type '" + name2 + "' twice");
+            }
+          }
+          registeredTypes[rawType] = registeredInstance;
+          delete typeDependencies[rawType];
+          if (awaitingDependencies.hasOwnProperty(rawType)) {
+            var callbacks = awaitingDependencies[rawType];
+            delete awaitingDependencies[rawType];
+            callbacks.forEach((cb) => cb());
+          }
+        }
+        function __embind_register_bool(rawType, name2, size, trueValue, falseValue) {
+          var shift = getShiftFromSize(size);
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": function(wt) {
+            return !!wt;
+          }, "toWireType": function(destructors, o) {
+            return o ? trueValue : falseValue;
+          }, "argPackAdvance": 8, "readValueFromPointer": function(pointer) {
+            var heap2;
+            if (size === 1) {
+              heap2 = HEAP8;
+            } else if (size === 2) {
+              heap2 = HEAP16;
+            } else if (size === 4) {
+              heap2 = HEAP32;
+            } else {
+              throw new TypeError("Unknown boolean type size: " + name2);
+            }
+            return this["fromWireType"](heap2[pointer >> shift]);
+          }, destructorFunction: null });
+        }
+        var emval_free_list = [];
+        var emval_handle_array = [{}, { value: void 0 }, { value: null }, { value: true }, { value: false }];
+        function __emval_decref(handle) {
+          if (handle > 4 && 0 === --emval_handle_array[handle].refcount) {
+            emval_handle_array[handle] = void 0;
+            emval_free_list.push(handle);
+          }
+        }
+        function count_emval_handles() {
+          var count2 = 0;
+          for (var i = 5; i < emval_handle_array.length; ++i) {
+            if (emval_handle_array[i] !== void 0) {
+              ++count2;
+            }
+          }
+          return count2;
+        }
+        function get_first_emval() {
+          for (var i = 5; i < emval_handle_array.length; ++i) {
+            if (emval_handle_array[i] !== void 0) {
+              return emval_handle_array[i];
+            }
+          }
+          return null;
+        }
+        function init_emval() {
+          Module6["count_emval_handles"] = count_emval_handles;
+          Module6["get_first_emval"] = get_first_emval;
+        }
+        var Emval = { toValue: (handle) => {
+          if (!handle) {
+            throwBindingError("Cannot use deleted val. handle = " + handle);
+          }
+          return emval_handle_array[handle].value;
+        }, toHandle: (value) => {
+          switch (value) {
+            case void 0:
+              return 1;
+            case null:
+              return 2;
+            case true:
+              return 3;
+            case false:
+              return 4;
+            default: {
+              var handle = emval_free_list.length ? emval_free_list.pop() : emval_handle_array.length;
+              emval_handle_array[handle] = { refcount: 1, value };
+              return handle;
+            }
+          }
+        } };
+        function __embind_register_emval(rawType, name2) {
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": function(handle) {
+            var rv = Emval.toValue(handle);
+            __emval_decref(handle);
+            return rv;
+          }, "toWireType": function(destructors, value) {
+            return Emval.toHandle(value);
+          }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: null });
+        }
+        function ensureOverloadTable(proto, methodName, humanName) {
+          if (void 0 === proto[methodName].overloadTable) {
+            var prevFunc = proto[methodName];
+            proto[methodName] = function() {
+              if (!proto[methodName].overloadTable.hasOwnProperty(arguments.length)) {
+                throwBindingError("Function '" + humanName + "' called with an invalid number of arguments (" + arguments.length + ") - expects one of (" + proto[methodName].overloadTable + ")!");
+              }
+              return proto[methodName].overloadTable[arguments.length].apply(this, arguments);
+            };
+            proto[methodName].overloadTable = [];
+            proto[methodName].overloadTable[prevFunc.argCount] = prevFunc;
+          }
+        }
+        function exposePublicSymbol(name2, value, numArguments) {
+          if (Module6.hasOwnProperty(name2)) {
+            if (void 0 === numArguments || void 0 !== Module6[name2].overloadTable && void 0 !== Module6[name2].overloadTable[numArguments]) {
+              throwBindingError("Cannot register public name '" + name2 + "' twice");
+            }
+            ensureOverloadTable(Module6, name2, name2);
+            if (Module6.hasOwnProperty(numArguments)) {
+              throwBindingError("Cannot register multiple overloads of a function with the same number of arguments (" + numArguments + ")!");
+            }
+            Module6[name2].overloadTable[numArguments] = value;
+          } else {
+            Module6[name2] = value;
+            if (void 0 !== numArguments) {
+              Module6[name2].numArguments = numArguments;
+            }
+          }
+        }
+        function enumReadValueFromPointer(name2, shift, signed) {
+          switch (shift) {
+            case 0:
+              return function(pointer) {
+                var heap2 = signed ? HEAP8 : HEAPU8;
+                return this["fromWireType"](heap2[pointer]);
+              };
+            case 1:
+              return function(pointer) {
+                var heap2 = signed ? HEAP16 : HEAPU16;
+                return this["fromWireType"](heap2[pointer >> 1]);
+              };
+            case 2:
+              return function(pointer) {
+                var heap2 = signed ? HEAP32 : HEAPU32;
+                return this["fromWireType"](heap2[pointer >> 2]);
+              };
+            default:
+              throw new TypeError("Unknown integer type: " + name2);
+          }
+        }
+        function __embind_register_enum(rawType, name2, size, isSigned) {
+          var shift = getShiftFromSize(size);
+          name2 = readLatin1String(name2);
+          function ctor() {
+          }
+          ctor.values = {};
+          registerType(rawType, { name: name2, constructor: ctor, "fromWireType": function(c) {
+            return this.constructor.values[c];
+          }, "toWireType": function(destructors, c) {
+            return c.value;
+          }, "argPackAdvance": 8, "readValueFromPointer": enumReadValueFromPointer(name2, shift, isSigned), destructorFunction: null });
+          exposePublicSymbol(name2, ctor);
+        }
+        function getTypeName(type) {
+          var ptr = ___getTypeName(type);
+          var rv = readLatin1String(ptr);
+          _free(ptr);
+          return rv;
+        }
+        function requireRegisteredType(rawType, humanName) {
+          var impl = registeredTypes[rawType];
+          if (void 0 === impl) {
+            throwBindingError(humanName + " has unknown type " + getTypeName(rawType));
+          }
+          return impl;
+        }
+        function __embind_register_enum_value(rawEnumType, name2, enumValue) {
+          var enumType = requireRegisteredType(rawEnumType, "enum");
+          name2 = readLatin1String(name2);
+          var Enum = enumType.constructor;
+          var Value = Object.create(enumType.constructor.prototype, { value: { value: enumValue }, constructor: { value: createNamedFunction(enumType.name + "_" + name2, function() {
+          }) } });
+          Enum.values[enumValue] = Value;
+          Enum[name2] = Value;
+        }
+        function floatReadValueFromPointer(name2, shift) {
+          switch (shift) {
+            case 2:
+              return function(pointer) {
+                return this["fromWireType"](HEAPF32[pointer >> 2]);
+              };
+            case 3:
+              return function(pointer) {
+                return this["fromWireType"](HEAPF64[pointer >> 3]);
+              };
+            default:
+              throw new TypeError("Unknown float type: " + name2);
+          }
+        }
+        function __embind_register_float(rawType, name2, size) {
+          var shift = getShiftFromSize(size);
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": function(value) {
+            return value;
+          }, "toWireType": function(destructors, value) {
+            return value;
+          }, "argPackAdvance": 8, "readValueFromPointer": floatReadValueFromPointer(name2, shift), destructorFunction: null });
+        }
+        function craftInvokerFunction(humanName, argTypes, classType, cppInvokerFunc, cppTargetFunc, isAsync) {
+          var argCount = argTypes.length;
+          if (argCount < 2) {
+            throwBindingError("argTypes array size mismatch! Must at least get return value and 'this' types!");
+          }
+          var isClassMethodFunc = argTypes[1] !== null && classType !== null;
+          var needsDestructorStack = false;
+          for (var i = 1; i < argTypes.length; ++i) {
+            if (argTypes[i] !== null && argTypes[i].destructorFunction === void 0) {
+              needsDestructorStack = true;
+              break;
+            }
+          }
+          var returns = argTypes[0].name !== "void";
+          var expectedArgCount = argCount - 2;
+          var argsWired = new Array(expectedArgCount);
+          var invokerFuncArgs = [];
+          var destructors = [];
+          return function() {
+            if (arguments.length !== expectedArgCount) {
+              throwBindingError("function " + humanName + " called with " + arguments.length + " arguments, expected " + expectedArgCount + " args!");
+            }
+            destructors.length = 0;
+            var thisWired;
+            invokerFuncArgs.length = isClassMethodFunc ? 2 : 1;
+            invokerFuncArgs[0] = cppTargetFunc;
+            if (isClassMethodFunc) {
+              thisWired = argTypes[1]["toWireType"](destructors, this);
+              invokerFuncArgs[1] = thisWired;
+            }
+            for (var i2 = 0; i2 < expectedArgCount; ++i2) {
+              argsWired[i2] = argTypes[i2 + 2]["toWireType"](destructors, arguments[i2]);
+              invokerFuncArgs.push(argsWired[i2]);
+            }
+            var rv = cppInvokerFunc.apply(null, invokerFuncArgs);
+            function onDone(rv2) {
+              if (needsDestructorStack) {
+                runDestructors(destructors);
+              } else {
+                for (var i3 = isClassMethodFunc ? 1 : 2; i3 < argTypes.length; i3++) {
+                  var param2 = i3 === 1 ? thisWired : argsWired[i3 - 2];
+                  if (argTypes[i3].destructorFunction !== null) {
+                    argTypes[i3].destructorFunction(param2);
+                  }
+                }
+              }
+              if (returns) {
+                return argTypes[0]["fromWireType"](rv2);
+              }
+            }
+            return onDone(rv);
+          };
+        }
+        function heap32VectorToArray(count2, firstElement) {
+          var array2 = [];
+          for (var i = 0; i < count2; i++) {
+            array2.push(HEAPU32[firstElement + i * 4 >> 2]);
+          }
+          return array2;
+        }
+        function replacePublicSymbol(name2, value, numArguments) {
+          if (!Module6.hasOwnProperty(name2)) {
+            throwInternalError("Replacing nonexistant public symbol");
+          }
+          if (void 0 !== Module6[name2].overloadTable && void 0 !== numArguments) {
+            Module6[name2].overloadTable[numArguments] = value;
+          } else {
+            Module6[name2] = value;
+            Module6[name2].argCount = numArguments;
+          }
+        }
+        function dynCallLegacy(sig, ptr, args) {
+          var f = Module6["dynCall_" + sig];
+          return args && args.length ? f.apply(null, [ptr].concat(args)) : f.call(null, ptr);
+        }
+        var wasmTableMirror = [];
+        function getWasmTableEntry(funcPtr) {
+          var func = wasmTableMirror[funcPtr];
+          if (!func) {
+            if (funcPtr >= wasmTableMirror.length) wasmTableMirror.length = funcPtr + 1;
+            wasmTableMirror[funcPtr] = func = wasmTable.get(funcPtr);
+          }
+          return func;
+        }
+        function dynCall(sig, ptr, args) {
+          if (sig.includes("j")) {
+            return dynCallLegacy(sig, ptr, args);
+          }
+          var rtn = getWasmTableEntry(ptr).apply(null, args);
+          return rtn;
+        }
+        function getDynCaller(sig, ptr) {
+          var argCache = [];
+          return function() {
+            argCache.length = 0;
+            Object.assign(argCache, arguments);
+            return dynCall(sig, ptr, argCache);
+          };
+        }
+        function embind__requireFunction(signature, rawFunction) {
+          signature = readLatin1String(signature);
+          function makeDynCaller() {
+            if (signature.includes("j")) {
+              return getDynCaller(signature, rawFunction);
+            }
+            return getWasmTableEntry(rawFunction);
+          }
+          var fp = makeDynCaller();
+          if (typeof fp != "function") {
+            throwBindingError("unknown function pointer with signature " + signature + ": " + rawFunction);
+          }
+          return fp;
+        }
+        var UnboundTypeError = void 0;
+        function throwUnboundTypeError(message, types) {
+          var unboundTypes = [];
+          var seen = {};
+          function visit2(type) {
+            if (seen[type]) {
+              return;
+            }
+            if (registeredTypes[type]) {
+              return;
+            }
+            if (typeDependencies[type]) {
+              typeDependencies[type].forEach(visit2);
+              return;
+            }
+            unboundTypes.push(type);
+            seen[type] = true;
+          }
+          types.forEach(visit2);
+          throw new UnboundTypeError(message + ": " + unboundTypes.map(getTypeName).join([", "]));
+        }
+        function __embind_register_function(name2, argCount, rawArgTypesAddr, signature, rawInvoker, fn, isAsync) {
+          var argTypes = heap32VectorToArray(argCount, rawArgTypesAddr);
+          name2 = readLatin1String(name2);
+          rawInvoker = embind__requireFunction(signature, rawInvoker);
+          exposePublicSymbol(name2, function() {
+            throwUnboundTypeError("Cannot call " + name2 + " due to unbound types", argTypes);
+          }, argCount - 1);
+          whenDependentTypesAreResolved([], argTypes, function(argTypes2) {
+            var invokerArgsArray = [argTypes2[0], null].concat(argTypes2.slice(1));
+            replacePublicSymbol(name2, craftInvokerFunction(name2, invokerArgsArray, null, rawInvoker, fn, isAsync), argCount - 1);
+            return [];
+          });
+        }
+        function integerReadValueFromPointer(name2, shift, signed) {
+          switch (shift) {
+            case 0:
+              return signed ? function readS8FromPointer(pointer) {
+                return HEAP8[pointer];
+              } : function readU8FromPointer(pointer) {
+                return HEAPU8[pointer];
+              };
+            case 1:
+              return signed ? function readS16FromPointer(pointer) {
+                return HEAP16[pointer >> 1];
+              } : function readU16FromPointer(pointer) {
+                return HEAPU16[pointer >> 1];
+              };
+            case 2:
+              return signed ? function readS32FromPointer(pointer) {
+                return HEAP32[pointer >> 2];
+              } : function readU32FromPointer(pointer) {
+                return HEAPU32[pointer >> 2];
+              };
+            default:
+              throw new TypeError("Unknown integer type: " + name2);
+          }
+        }
+        function __embind_register_integer(primitiveType, name2, size, minRange, maxRange) {
+          name2 = readLatin1String(name2);
+          if (maxRange === -1) {
+            maxRange = 4294967295;
+          }
+          var shift = getShiftFromSize(size);
+          var fromWireType = (value) => value;
+          if (minRange === 0) {
+            var bitshift = 32 - 8 * size;
+            fromWireType = (value) => value << bitshift >>> bitshift;
+          }
+          var isUnsignedType = name2.includes("unsigned");
+          var checkAssertions = (value, toTypeName) => {
+          };
+          var toWireType;
+          if (isUnsignedType) {
+            toWireType = function(destructors, value) {
+              checkAssertions(value, this.name);
+              return value >>> 0;
+            };
+          } else {
+            toWireType = function(destructors, value) {
+              checkAssertions(value, this.name);
+              return value;
+            };
+          }
+          registerType(primitiveType, { name: name2, "fromWireType": fromWireType, "toWireType": toWireType, "argPackAdvance": 8, "readValueFromPointer": integerReadValueFromPointer(name2, shift, minRange !== 0), destructorFunction: null });
+        }
+        function __embind_register_memory_view(rawType, dataTypeIndex, name2) {
+          var typeMapping = [Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
+          var TA = typeMapping[dataTypeIndex];
+          function decodeMemoryView(handle) {
+            handle = handle >> 2;
+            var heap2 = HEAPU32;
+            var size = heap2[handle];
+            var data = heap2[handle + 1];
+            return new TA(heap2.buffer, data, size);
+          }
+          name2 = readLatin1String(name2);
+          registerType(rawType, { name: name2, "fromWireType": decodeMemoryView, "argPackAdvance": 8, "readValueFromPointer": decodeMemoryView }, { ignoreDuplicateRegistrations: true });
+        }
+        function __embind_register_std_string(rawType, name2) {
+          name2 = readLatin1String(name2);
+          var stdStringIsUTF8 = name2 === "std::string";
+          registerType(rawType, { name: name2, "fromWireType": function(value) {
+            var length = HEAPU32[value >> 2];
+            var payload = value + 4;
+            var str;
+            if (stdStringIsUTF8) {
+              var decodeStartPtr = payload;
+              for (var i = 0; i <= length; ++i) {
+                var currentBytePtr = payload + i;
+                if (i == length || HEAPU8[currentBytePtr] == 0) {
+                  var maxRead = currentBytePtr - decodeStartPtr;
+                  var stringSegment = UTF8ToString(decodeStartPtr, maxRead);
+                  if (str === void 0) {
+                    str = stringSegment;
+                  } else {
+                    str += String.fromCharCode(0);
+                    str += stringSegment;
+                  }
+                  decodeStartPtr = currentBytePtr + 1;
+                }
+              }
+            } else {
+              var a = new Array(length);
+              for (var i = 0; i < length; ++i) {
+                a[i] = String.fromCharCode(HEAPU8[payload + i]);
+              }
+              str = a.join("");
+            }
+            _free(value);
+            return str;
+          }, "toWireType": function(destructors, value) {
+            if (value instanceof ArrayBuffer) {
+              value = new Uint8Array(value);
+            }
+            var length;
+            var valueIsOfTypeString = typeof value == "string";
+            if (!(valueIsOfTypeString || value instanceof Uint8Array || value instanceof Uint8ClampedArray || value instanceof Int8Array)) {
+              throwBindingError("Cannot pass non-string to std::string");
+            }
+            if (stdStringIsUTF8 && valueIsOfTypeString) {
+              length = lengthBytesUTF8(value);
+            } else {
+              length = value.length;
+            }
+            var base = _malloc(4 + length + 1);
+            var ptr = base + 4;
+            HEAPU32[base >> 2] = length;
+            if (stdStringIsUTF8 && valueIsOfTypeString) {
+              stringToUTF8(value, ptr, length + 1);
+            } else {
+              if (valueIsOfTypeString) {
+                for (var i = 0; i < length; ++i) {
+                  var charCode = value.charCodeAt(i);
+                  if (charCode > 255) {
+                    _free(ptr);
+                    throwBindingError("String has UTF-16 code units that do not fit in 8 bits");
+                  }
+                  HEAPU8[ptr + i] = charCode;
+                }
+              } else {
+                for (var i = 0; i < length; ++i) {
+                  HEAPU8[ptr + i] = value[i];
+                }
+              }
+            }
+            if (destructors !== null) {
+              destructors.push(_free, base);
+            }
+            return base;
+          }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: function(ptr) {
+            _free(ptr);
+          } });
+        }
+        function UTF16ToString(ptr, maxBytesToRead) {
+          var str = "";
+          for (var i = 0; !(i >= maxBytesToRead / 2); ++i) {
+            var codeUnit = HEAP16[ptr + i * 2 >> 1];
+            if (codeUnit == 0) break;
+            str += String.fromCharCode(codeUnit);
+          }
+          return str;
+        }
+        function stringToUTF16(str, outPtr, maxBytesToWrite) {
+          if (maxBytesToWrite === void 0) {
+            maxBytesToWrite = 2147483647;
+          }
+          if (maxBytesToWrite < 2) return 0;
+          maxBytesToWrite -= 2;
+          var startPtr = outPtr;
+          var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+          for (var i = 0; i < numCharsToWrite; ++i) {
+            var codeUnit = str.charCodeAt(i);
+            HEAP16[outPtr >> 1] = codeUnit;
+            outPtr += 2;
+          }
+          HEAP16[outPtr >> 1] = 0;
+          return outPtr - startPtr;
+        }
+        function lengthBytesUTF16(str) {
+          return str.length * 2;
+        }
+        function UTF32ToString(ptr, maxBytesToRead) {
+          var i = 0;
+          var str = "";
+          while (!(i >= maxBytesToRead / 4)) {
+            var utf32 = HEAP32[ptr + i * 4 >> 2];
+            if (utf32 == 0) break;
+            ++i;
+            if (utf32 >= 65536) {
+              var ch = utf32 - 65536;
+              str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+            } else {
+              str += String.fromCharCode(utf32);
+            }
+          }
+          return str;
+        }
+        function stringToUTF32(str, outPtr, maxBytesToWrite) {
+          if (maxBytesToWrite === void 0) {
+            maxBytesToWrite = 2147483647;
+          }
+          if (maxBytesToWrite < 4) return 0;
+          var startPtr = outPtr;
+          var endPtr = startPtr + maxBytesToWrite - 4;
+          for (var i = 0; i < str.length; ++i) {
+            var codeUnit = str.charCodeAt(i);
+            if (codeUnit >= 55296 && codeUnit <= 57343) {
+              var trailSurrogate = str.charCodeAt(++i);
+              codeUnit = 65536 + ((codeUnit & 1023) << 10) | trailSurrogate & 1023;
+            }
+            HEAP32[outPtr >> 2] = codeUnit;
+            outPtr += 4;
+            if (outPtr + 4 > endPtr) break;
+          }
+          HEAP32[outPtr >> 2] = 0;
+          return outPtr - startPtr;
+        }
+        function lengthBytesUTF32(str) {
+          var len = 0;
+          for (var i = 0; i < str.length; ++i) {
+            var codeUnit = str.charCodeAt(i);
+            if (codeUnit >= 55296 && codeUnit <= 57343) ++i;
+            len += 4;
+          }
+          return len;
+        }
+        function __embind_register_std_wstring(rawType, charSize, name2) {
+          name2 = readLatin1String(name2);
+          var decodeString, encodeString, getHeap, lengthBytesUTF, shift;
+          if (charSize === 2) {
+            decodeString = UTF16ToString;
+            encodeString = stringToUTF16;
+            lengthBytesUTF = lengthBytesUTF16;
+            getHeap = () => HEAPU16;
+            shift = 1;
+          } else if (charSize === 4) {
+            decodeString = UTF32ToString;
+            encodeString = stringToUTF32;
+            lengthBytesUTF = lengthBytesUTF32;
+            getHeap = () => HEAPU32;
+            shift = 2;
+          }
+          registerType(rawType, { name: name2, "fromWireType": function(value) {
+            var length = HEAPU32[value >> 2];
+            var HEAP = getHeap();
+            var str;
+            var decodeStartPtr = value + 4;
+            for (var i = 0; i <= length; ++i) {
+              var currentBytePtr = value + 4 + i * charSize;
+              if (i == length || HEAP[currentBytePtr >> shift] == 0) {
+                var maxReadBytes = currentBytePtr - decodeStartPtr;
+                var stringSegment = decodeString(decodeStartPtr, maxReadBytes);
+                if (str === void 0) {
+                  str = stringSegment;
+                } else {
+                  str += String.fromCharCode(0);
+                  str += stringSegment;
+                }
+                decodeStartPtr = currentBytePtr + charSize;
+              }
+            }
+            _free(value);
+            return str;
+          }, "toWireType": function(destructors, value) {
+            if (!(typeof value == "string")) {
+              throwBindingError("Cannot pass non-string to C++ string type " + name2);
+            }
+            var length = lengthBytesUTF(value);
+            var ptr = _malloc(4 + length + charSize);
+            HEAPU32[ptr >> 2] = length >> shift;
+            encodeString(value, ptr + 4, length + charSize);
+            if (destructors !== null) {
+              destructors.push(_free, ptr);
+            }
+            return ptr;
+          }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: function(ptr) {
+            _free(ptr);
+          } });
+        }
+        function __embind_register_value_object(rawType, name2, constructorSignature, rawConstructor, destructorSignature, rawDestructor) {
+          structRegistrations[rawType] = { name: readLatin1String(name2), rawConstructor: embind__requireFunction(constructorSignature, rawConstructor), rawDestructor: embind__requireFunction(destructorSignature, rawDestructor), fields: [] };
+        }
+        function __embind_register_value_object_field(structType, fieldName, getterReturnType, getterSignature, getter, getterContext, setterArgumentType, setterSignature, setter, setterContext) {
+          structRegistrations[structType].fields.push({ fieldName: readLatin1String(fieldName), getterReturnType, getter: embind__requireFunction(getterSignature, getter), getterContext, setterArgumentType, setter: embind__requireFunction(setterSignature, setter), setterContext });
+        }
+        function __embind_register_void(rawType, name2) {
+          name2 = readLatin1String(name2);
+          registerType(rawType, { isVoid: true, name: name2, "argPackAdvance": 0, "fromWireType": function() {
+            return void 0;
+          }, "toWireType": function(destructors, o) {
+            return void 0;
+          } });
+        }
+        var emval_symbols = {};
+        function getStringOrSymbol(address) {
+          var symbol2 = emval_symbols[address];
+          if (symbol2 === void 0) {
+            return readLatin1String(address);
+          }
+          return symbol2;
+        }
+        function emval_get_global() {
+          if (typeof globalThis == "object") {
+            return globalThis;
+          }
+          function testGlobal(obj) {
+            obj["$$$embind_global$$$"] = obj;
+            var success2 = typeof $$$embind_global$$$ == "object" && obj["$$$embind_global$$$"] == obj;
+            if (!success2) {
+              delete obj["$$$embind_global$$$"];
+            }
+            return success2;
+          }
+          if (typeof $$$embind_global$$$ == "object") {
+            return $$$embind_global$$$;
+          }
+          if (typeof global == "object" && testGlobal(global)) {
+            $$$embind_global$$$ = global;
+          } else if (typeof self == "object" && testGlobal(self)) {
+            $$$embind_global$$$ = self;
+          }
+          if (typeof $$$embind_global$$$ == "object") {
+            return $$$embind_global$$$;
+          }
+          throw Error("unable to get global object.");
+        }
+        function __emval_get_global(name2) {
+          if (name2 === 0) {
+            return Emval.toHandle(emval_get_global());
+          } else {
+            name2 = getStringOrSymbol(name2);
+            return Emval.toHandle(emval_get_global()[name2]);
+          }
+        }
+        function __emval_incref(handle) {
+          if (handle > 4) {
+            emval_handle_array[handle].refcount += 1;
+          }
+        }
+        function craftEmvalAllocator(argCount) {
+          var argsList = new Array(argCount + 1);
+          return function(constructor, argTypes, args) {
+            argsList[0] = constructor;
+            for (var i = 0; i < argCount; ++i) {
+              var argType = requireRegisteredType(HEAPU32[argTypes + i * 4 >> 2], "parameter " + i);
+              argsList[i + 1] = argType["readValueFromPointer"](args);
+              args += argType["argPackAdvance"];
+            }
+            var obj = new (constructor.bind.apply(constructor, argsList))();
+            return Emval.toHandle(obj);
+          };
+        }
+        var emval_newers = {};
+        function __emval_new(handle, argCount, argTypes, args) {
+          handle = Emval.toValue(handle);
+          var newer = emval_newers[argCount];
+          if (!newer) {
+            newer = craftEmvalAllocator(argCount);
+            emval_newers[argCount] = newer;
+          }
+          return newer(handle, argTypes, args);
+        }
+        function _abort() {
+          abort("");
+        }
+        function _emscripten_memcpy_big(dest, src, num) {
+          HEAPU8.copyWithin(dest, src, src + num);
+        }
+        function getHeapMax() {
+          return 2147483648;
+        }
+        function emscripten_realloc_buffer(size) {
+          var b = wasmMemory.buffer;
+          try {
+            wasmMemory.grow(size - b.byteLength + 65535 >>> 16);
+            updateMemoryViews();
+            return 1;
+          } catch (e) {
+          }
+        }
+        function _emscripten_resize_heap(requestedSize) {
+          var oldSize = HEAPU8.length;
+          requestedSize = requestedSize >>> 0;
+          var maxHeapSize = getHeapMax();
+          if (requestedSize > maxHeapSize) {
+            return false;
+          }
+          let alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
+          for (var cutDown = 1; cutDown <= 4; cutDown *= 2) {
+            var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown);
+            overGrownHeapSize = Math.min(overGrownHeapSize, requestedSize + 100663296);
+            var newSize = Math.min(maxHeapSize, alignUp(Math.max(requestedSize, overGrownHeapSize), 65536));
+            var replacement = emscripten_realloc_buffer(newSize);
+            if (replacement) {
+              return true;
+            }
+          }
+          return false;
+        }
+        InternalError = Module6["InternalError"] = extendError(Error, "InternalError");
+        embind_init_charCodes();
+        BindingError = Module6["BindingError"] = extendError(Error, "BindingError");
+        init_emval();
+        UnboundTypeError = Module6["UnboundTypeError"] = extendError(Error, "UnboundTypeError");
+        var wasmImports = { "k": ___cxa_throw, "m": __embind_finalize_value_object, "o": __embind_register_bigint, "t": __embind_register_bool, "s": __embind_register_emval, "q": __embind_register_enum, "d": __embind_register_enum_value, "h": __embind_register_float, "f": __embind_register_function, "c": __embind_register_integer, "b": __embind_register_memory_view, "i": __embind_register_std_string, "e": __embind_register_std_wstring, "n": __embind_register_value_object, "a": __embind_register_value_object_field, "u": __embind_register_void, "j": __emval_decref, "w": __emval_get_global, "l": __emval_incref, "v": __emval_new, "g": _abort, "r": _emscripten_memcpy_big, "p": _emscripten_resize_heap };
+        var asm = createWasm();
+        var ___wasm_call_ctors = function() {
+          return (___wasm_call_ctors = Module6["asm"]["y"]).apply(null, arguments);
+        };
+        var _malloc = function() {
+          return (_malloc = Module6["asm"]["z"]).apply(null, arguments);
+        };
+        var _free = function() {
+          return (_free = Module6["asm"]["A"]).apply(null, arguments);
+        };
+        var ___getTypeName = Module6["___getTypeName"] = function() {
+          return (___getTypeName = Module6["___getTypeName"] = Module6["asm"]["B"]).apply(null, arguments);
+        };
+        var __embind_initialize_bindings = Module6["__embind_initialize_bindings"] = function() {
+          return (__embind_initialize_bindings = Module6["__embind_initialize_bindings"] = Module6["asm"]["C"]).apply(null, arguments);
+        };
+        var ___errno_location = function() {
+          return (___errno_location = Module6["asm"]["__errno_location"]).apply(null, arguments);
+        };
+        var ___cxa_is_pointer_type = function() {
+          return (___cxa_is_pointer_type = Module6["asm"]["E"]).apply(null, arguments);
+        };
+        var calledRun;
+        dependenciesFulfilled = function runCaller() {
+          if (!calledRun) run();
+          if (!calledRun) dependenciesFulfilled = runCaller;
+        };
+        function run() {
+          if (runDependencies > 0) {
+            return;
+          }
+          preRun();
+          if (runDependencies > 0) {
+            return;
+          }
+          function doRun() {
+            if (calledRun) return;
+            calledRun = true;
+            Module6["calledRun"] = true;
+            if (ABORT) return;
+            initRuntime();
+            readyPromiseResolve(Module6);
+            if (Module6["onRuntimeInitialized"]) Module6["onRuntimeInitialized"]();
+            postRun();
+          }
+          if (Module6["setStatus"]) {
+            Module6["setStatus"]("Running...");
+            setTimeout(function() {
+              setTimeout(function() {
+                Module6["setStatus"]("");
+              }, 1);
+              doRun();
+            }, 1);
+          } else {
+            doRun();
+          }
+        }
+        if (Module6["preInit"]) {
+          if (typeof Module6["preInit"] == "function") Module6["preInit"] = [Module6["preInit"]];
+          while (Module6["preInit"].length > 0) {
+            Module6["preInit"].pop()();
+          }
+        }
+        run();
+        return Module6.ready;
+      });
+    })();
+    webp_enc_default = Module5;
+  }
+});
+
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create = Object.create;
 var __defProp2 = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getOwnPropNames2 = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
@@ -27,7 +2972,7 @@ var __exportAll = (all, symbols) => {
 };
 var __copyProps = (to, from, except2, desc2) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
+    for (var keys = __getOwnPropNames2(from), i = 0, n = keys.length, key; i < n; i++) {
       key = keys[i];
       if (!__hasOwnProp.call(to, key) && key !== except2) {
         __defProp2(to, key, {
@@ -877,10 +3822,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path15) {
+  if (!path15)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path15.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1220,11 +4165,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path15, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path15);
     return iss;
   });
 }
@@ -1522,7 +4467,7 @@ function $constructor(name2, initializer3, proto, params) {
   Internals.prototype = zodProto;
   const protoMembers = proto;
   const initialized = protoMembers && /* @__PURE__ */ new WeakSet();
-  function init(inst, def) {
+  function init7(inst, def) {
     if (!inst._zod) {
       _zodDesc.value = new Internals(def);
       try {
@@ -1562,7 +4507,7 @@ function $constructor(name2, initializer3, proto, params) {
   Object.defineProperty(Definition, "name", { value: name2 });
   function _(def) {
     const inst = params?.Parent ? newError(Definition) : this;
-    init(inst, def);
+    init7(inst, def);
     const deferred = inst._zod.deferred;
     if (deferred) {
       for (const fn of deferred) {
@@ -1575,7 +4520,7 @@ function $constructor(name2, initializer3, proto, params) {
       pp(inst);
     return inst;
   }
-  Object.defineProperty(_, "init", { value: init });
+  Object.defineProperty(_, "init", { value: init7 });
   Object.defineProperty(_, Symbol.hasInstance, {
     value: (inst) => {
       if (params?.Parent && inst instanceof params.Parent)
@@ -1674,16 +4619,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path12 = []) => {
+  const processError = (error63, path15 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path15, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1722,17 +4667,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path12 = []) => {
+  const processError = (error63, path15 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path15, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1771,8 +4716,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path12 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path12) {
+  const path15 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path15) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -15540,12 +18485,12 @@ function describe(description) {
   return ch;
 }
 // @__NO_SIDE_EFFECTS__
-function meta(metadata2) {
+function meta(metadata3) {
   const ch = new $ZodCheck({ check: "meta" });
   ch._zod.onattach = [
     (inst) => {
       const existing = globalRegistry.get(inst) ?? {};
-      globalRegistry.add(inst, { ...existing, ...metadata2 });
+      globalRegistry.add(inst, { ...existing, ...metadata3 });
     }
   ];
   ch._zod.check = () => {
@@ -17221,15 +20166,15 @@ var initializer2 = (inst, issues) => {
   if (_installedErrorProtos.has(proto))
     return;
   _installedErrorProtos.add(proto);
-  _lazyMethod(proto, "format", (self) => (mapper) => formatError(self, mapper));
-  _lazyMethod(proto, "flatten", (self) => (mapper) => flattenError(self, mapper));
-  _lazyMethod(proto, "addIssue", (self) => (issue2) => {
-    self.issues.push(issue2);
-    self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
+  _lazyMethod(proto, "format", (self2) => (mapper) => formatError(self2, mapper));
+  _lazyMethod(proto, "flatten", (self2) => (mapper) => flattenError(self2, mapper));
+  _lazyMethod(proto, "addIssue", (self2) => (issue2) => {
+    self2.issues.push(issue2);
+    self2.message = JSON.stringify(self2.issues, jsonStringifyReplacer, 2);
   });
-  _lazyMethod(proto, "addIssues", (self) => (issues2) => {
-    self.issues.push(...issues2);
-    self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
+  _lazyMethod(proto, "addIssues", (self2) => (issues2) => {
+    self2.issues.push(...issues2);
+    self2.message = JSON.stringify(self2.issues, jsonStringifyReplacer, 2);
   });
   Object.defineProperty(proto, "isEmpty", {
     configurable: true,
@@ -18075,7 +21020,7 @@ var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
   $ZodObjectJIT.init(inst, def);
   ZodType.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json2, params) => objectProcessor(inst, ctx, json2, params);
-  util_exports.installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
+  util_exports.installLazyProp(inst, "shape", (self2) => self2._zod.def.shape, false);
 }, {
   keyof() {
     return _enum2(Object.keys(this._zod.def.shape));
@@ -18874,13 +21819,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path12 = ref.slice(1).split("/").filter(Boolean);
-  if (path12.length === 0) {
+  const path15 = ref.slice(1).split("/").filter(Boolean);
+  if (path15.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path12[0] === defsKey) {
-    const key = path12[1] === void 0 ? void 0 : decodeJSONPointerSegment(path12[1]);
+  if (path15[0] === defsKey) {
+    const key = path15[1] === void 0 ? void 0 : decodeJSONPointerSegment(path15[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -23303,9 +26248,9 @@ var rev2026Codec = {
     });
     const parsed = buildSchemas2026().RequestMetaEnvelopeSchema.safeParse(meta3);
     if (!parsed.success) for (const issue2 of parsed.error.issues) {
-      const path12 = issue2.path.map(String);
-      const key = path12.length > 0 ? path12.join(".") : "_meta";
-      if (path12.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
+      const path15 = issue2.path.map(String);
+      const key = path15.length > 0 ? path15.join(".") : "_meta";
+      if (path15.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
       issues.push({
         key,
         problem: issue2.message
@@ -23626,29 +26571,29 @@ var PERMITTED_X_MCP_HEADER_TYPES = /* @__PURE__ */ new Set([
 function scanXMcpHeaderDeclarations(inputSchema) {
   const declarations = [];
   const seenLower = /* @__PURE__ */ new Map();
-  const visit2 = (node2, path12, reachable) => {
+  const visit2 = (node2, path15, reachable) => {
     if (node2 === null || typeof node2 !== "object") return void 0;
     const schema = node2;
     if (X_MCP_HEADER_KEY in schema) {
-      if (!reachable || path12.length === 0) return `${pathName(path12)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
+      if (!reachable || path15.length === 0) return `${pathName(path15)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
       const raw = schema[X_MCP_HEADER_KEY];
-      if (typeof raw !== "string" || raw.length === 0) return `${pathName(path12)}: x-mcp-header MUST be a non-empty string`;
-      if (!RFC9110_TOKEN.test(raw)) return `${pathName(path12)}: x-mcp-header '${raw}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
+      if (typeof raw !== "string" || raw.length === 0) return `${pathName(path15)}: x-mcp-header MUST be a non-empty string`;
+      if (!RFC9110_TOKEN.test(raw)) return `${pathName(path15)}: x-mcp-header '${raw}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
       const type = typeof schema.type === "string" ? schema.type : void 0;
-      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path12)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
+      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path15)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
       const lower = raw.toLowerCase();
       const prior = seenLower.get(lower);
       if (prior !== void 0) return `x-mcp-header '${raw}' is not case-insensitively unique (also declared as '${prior}')`;
       seenLower.set(lower, raw);
       declarations.push({
-        path: path12,
+        path: path15,
         headerName: raw,
         type
       });
     }
     const properties = schema.properties;
     if (properties !== null && typeof properties === "object") for (const [key, child] of Object.entries(properties)) {
-      const fault$1 = visit2(child, [...path12, key], reachable);
+      const fault$1 = visit2(child, [...path15, key], reachable);
       if (fault$1 !== void 0) return fault$1;
     }
     for (const k of NON_REACHABLE_SUBSCHEMA_KEYWORDS) {
@@ -23656,7 +26601,7 @@ function scanXMcpHeaderDeclarations(inputSchema) {
       if (sub === void 0) continue;
       const branches = Array.isArray(sub) ? sub : sub !== null && typeof sub === "object" && OBJECT_VALUED_SUBSCHEMA_KEYWORDS.has(k) ? Object.values(sub) : [sub];
       for (const branch of branches) {
-        const fault$1 = visit2(branch, [...path12, `<${k}>`], false);
+        const fault$1 = visit2(branch, [...path15, `<${k}>`], false);
         if (fault$1 !== void 0) return fault$1;
       }
     }
@@ -23696,8 +26641,8 @@ var OBJECT_VALUED_SUBSCHEMA_KEYWORDS = /* @__PURE__ */ new Set([
   "$defs",
   "definitions"
 ]);
-function pathName(path12) {
-  return path12.length === 0 ? "<root>" : path12.join(".");
+function pathName(path15) {
+  return path15.length === 0 ? "<root>" : path15.join(".");
 }
 var HEADER_MISMATCH_ERROR_CODE = -32020;
 var INBOUND_VALIDATION_LADDER = [
@@ -23986,7 +26931,7 @@ var PROPERTY_KEYS_BY_TYPE = {
   array: shapeKeys([UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema])
 };
 var SUPPORTED_STRING_FORMATS = new Set(StringSchemaSchema.shape.format.unwrap().options);
-function walkProperty(node2, path12, vendor, unsupported) {
+function walkProperty(node2, path15, vendor, unsupported) {
   if (!isJsonObject(node2)) return node2;
   const allowedKeys = typeof node2.type === "string" && Object.hasOwn(PROPERTY_KEYS_BY_TYPE, node2.type) ? PROPERTY_KEYS_BY_TYPE[node2.type] : void 0;
   if (allowedKeys === void 0) return node2;
@@ -23994,8 +26939,8 @@ function walkProperty(node2, path12, vendor, unsupported) {
   for (const [key, value] of Object.entries(node2)) if (allowedKeys.has(key) || isAnnotationOnlyJsonSchemaKeyword(key)) pruned[key] = value;
   else if (key === "pattern" && node2.type === "string" && typeof node2.format === "string") {
     if (!SUPPORTED_STRING_FORMATS.has(node2.format)) pruned[key] = value;
-    else if (typeof value !== "string" || !isLibraryFormatPattern(node2.format, value, vendor)) unsupported.push(`${path12}.${key}`);
-  } else unsupported.push(`${path12}.${key}`);
+    else if (typeof value !== "string" || !isLibraryFormatPattern(node2.format, value, vendor)) unsupported.push(`${path15}.${key}`);
+  } else unsupported.push(`${path15}.${key}`);
   return pruned;
 }
 function walkRequestedSchema(converted, vendor) {
@@ -24012,11 +26957,11 @@ function describeUnsupportedProperties(pruned, fallback) {
   const offenders = Object.entries(pruned.properties).filter(([, node2]) => !parseSchema(PrimitiveSchemaDefinitionSchema, node2).success).map(([name2]) => `properties.${name2}`);
   return offenders.length > 0 ? offenders.join(", ") : fallback;
 }
-function findDroppedConstraintPaths(original, parsed, path12 = "") {
-  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index2) => findDroppedConstraintPaths(item, parsed[index2], `${path12}[${index2}]`));
+function findDroppedConstraintPaths(original, parsed, path15 = "") {
+  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index2) => findDroppedConstraintPaths(item, parsed[index2], `${path15}[${index2}]`));
   if (!isJsonObject(original) || !isJsonObject(parsed)) return [];
   return Object.entries(original).flatMap(([key, value]) => {
-    const childPath = path12 ? `${path12}.${key}` : key;
+    const childPath = path15 ? `${path15}.${key}` : key;
     if (!Object.prototype.hasOwnProperty.call(parsed, key)) return isAnnotationOnlyJsonSchemaKeyword(key) ? [] : [childPath];
     return findDroppedConstraintPaths(value, parsed[key], childPath);
   });
@@ -26270,10 +29215,10 @@ var require_util = /* @__PURE__ */ __commonJSMin(((exports) => {
   }
   exports.alwaysValidSchema = alwaysValidSchema;
   function checkUnknownRules(it, schema = it.schema) {
-    const { opts, self } = it;
+    const { opts, self: self2 } = it;
     if (!opts.strictSchema) return;
     if (typeof schema === "boolean") return;
-    const rules = self.RULES.keywords;
+    const rules = self2.RULES.keywords;
     for (const key in schema) if (!rules[key]) checkStrictMode(it, `unknown keyword: "${key}"`);
   }
   exports.checkUnknownRules = checkUnknownRules;
@@ -26605,8 +29550,8 @@ var require_rules = /* @__PURE__ */ __commonJSMin(((exports) => {
 var require_applicability = /* @__PURE__ */ __commonJSMin(((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
-  function schemaHasRulesForType({ schema, self }, type) {
-    const group = self.RULES.types[type];
+  function schemaHasRulesForType({ schema, self: self2 }, type) {
+    const group = self2.RULES.types[type];
     return group && group !== true && shouldUseGroup(schema, group);
   }
   exports.schemaHasRulesForType = schemaHasRulesForType;
@@ -27019,14 +29964,14 @@ var require_keyword = /* @__PURE__ */ __commonJSMin(((exports) => {
     return !schemaType.length || schemaType.some((st) => st === "array" ? Array.isArray(schema) : st === "object" ? schema && typeof schema == "object" && !Array.isArray(schema) : typeof schema == st || allowUndefined && typeof schema == "undefined");
   }
   exports.validSchemaType = validSchemaType;
-  function validateKeywordUsage({ schema, opts, self, errSchemaPath }, def, keyword) {
+  function validateKeywordUsage({ schema, opts, self: self2, errSchemaPath }, def, keyword) {
     if (Array.isArray(def.keyword) ? !def.keyword.includes(keyword) : def.keyword !== keyword) throw new Error("ajv implementation error");
     const deps = def.dependencies;
     if (deps === null || deps === void 0 ? void 0 : deps.some((kwd) => !Object.prototype.hasOwnProperty.call(schema, kwd))) throw new Error(`parent schema must have dependencies of ${keyword}: ${deps.join(",")}`);
     if (def.validateSchema) {
       if (!def.validateSchema(schema[keyword])) {
-        const msg = `keyword "${keyword}" value is invalid at path "${errSchemaPath}": ` + self.errorsText(def.validateSchema.errors);
-        if (opts.validateSchema === "log") self.logger.error(msg);
+        const msg = `keyword "${keyword}" value is invalid at path "${errSchemaPath}": ` + self2.errorsText(def.validateSchema.errors);
+        if (opts.validateSchema === "log") self2.logger.error(msg);
         else throw new Error(msg);
       }
     }
@@ -27410,9 +30355,9 @@ var require_validate = /* @__PURE__ */ __commonJSMin(((exports) => {
     }
     (0, boolSchema_1.boolOrEmptySchema)(it, valid);
   }
-  function schemaCxtHasRules({ schema, self }) {
+  function schemaCxtHasRules({ schema, self: self2 }) {
     if (typeof schema == "boolean") return !schema;
-    for (const key in schema) if (self.RULES.all[key]) return true;
+    for (const key in schema) if (self2.RULES.all[key]) return true;
     return false;
   }
   function isSchemaObj(it) {
@@ -27437,8 +30382,8 @@ var require_validate = /* @__PURE__ */ __commonJSMin(((exports) => {
     schemaKeywords(it, types, !(0, dataType_1.coerceAndCheckDataType)(it, types), errsCount);
   }
   function checkRefsAndKeywords(it) {
-    const { schema, errSchemaPath, opts, self } = it;
-    if (schema.$ref && opts.ignoreKeywordsWithRef && (0, util_1.schemaHasRulesButRef)(schema, self.RULES)) self.logger.warn(`$ref: keywords ignored in schema at path "${errSchemaPath}"`);
+    const { schema, errSchemaPath, opts, self: self2 } = it;
+    if (schema.$ref && opts.ignoreKeywordsWithRef && (0, util_1.schemaHasRulesButRef)(schema, self2.RULES)) self2.logger.warn(`$ref: keywords ignored in schema at path "${errSchemaPath}"`);
   }
   function checkNoDefault(it) {
     const { schema, opts } = it;
@@ -27474,8 +30419,8 @@ var require_validate = /* @__PURE__ */ __commonJSMin(((exports) => {
     if (items instanceof codegen_1.Name) gen.assign((0, codegen_1._)`${evaluated}.items`, items);
   }
   function schemaKeywords(it, types, typeErrors, errsCount) {
-    const { gen, schema, data, allErrors, opts, self } = it;
-    const { RULES } = self;
+    const { gen, schema, data, allErrors, opts, self: self2 } = it;
+    const { RULES } = self2;
     if (schema.$ref && (opts.ignoreKeywordsWithRef || !(0, util_1.schemaHasRulesButRef)(schema, RULES))) {
       gen.block(() => keywordCode(it, "$ref", RULES.all.$ref.definition));
       return;
@@ -28095,8 +31040,8 @@ var require_utils = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     for (let i = 0; i < str.length; i++) if (str[i] === token) ind++;
     return ind;
   }
-  function removeDotSegments(path12) {
-    let input2 = path12;
+  function removeDotSegments(path15) {
+    let input2 = path15;
     const output2 = [];
     let nextSlash = -1;
     let len = 0;
@@ -28249,8 +31194,8 @@ var require_schemes = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       wsComponent.secure = void 0;
     }
     if (wsComponent.resourceName) {
-      const [path12, query] = wsComponent.resourceName.split("?");
-      wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
+      const [path15, query] = wsComponent.resourceName.split("?");
+      wsComponent.path = path15 && path15 !== "/" ? path15 : void 0;
       wsComponent.query = query;
       wsComponent.resourceName = void 0;
     }
@@ -29144,10 +32089,10 @@ var require_ref = /* @__PURE__ */ __commonJSMin(((exports) => {
     schemaType: "string",
     code(cxt) {
       const { gen, schema: $ref, it } = cxt;
-      const { baseId, schemaEnv: env, validateName, opts, self } = it;
+      const { baseId, schemaEnv: env, validateName, opts, self: self2 } = it;
       const { root } = env;
       if (($ref === "#" || $ref === "#/") && baseId === root.baseId) return callRootRef();
-      const schOrEnv = compile_1.resolveRef.call(self, root, baseId, $ref);
+      const schOrEnv = compile_1.resolveRef.call(self2, root, baseId, $ref);
       if (schOrEnv === void 0) throw new ref_error_1.default(it.opts.uriResolver, baseId, $ref);
       if (schOrEnv instanceof compile_1.SchemaEnv) return callValidate(schOrEnv);
       return inlineRefSchema(schOrEnv);
@@ -30407,13 +33352,13 @@ var require_format$2 = /* @__PURE__ */ __commonJSMin(((exports) => {
     },
     code(cxt, ruleType) {
       const { gen, data, $data, schema, schemaCode, it } = cxt;
-      const { opts, errSchemaPath, schemaEnv, self } = it;
+      const { opts, errSchemaPath, schemaEnv, self: self2 } = it;
       if (!opts.validateFormats) return;
       if ($data) validate$DataFormat();
       else validateFormat();
       function validate$DataFormat() {
         const fmts = gen.scopeValue("formats", {
-          ref: self.formats,
+          ref: self2.formats,
           code: opts.code.formats
         });
         const fDef = gen.const("fDef", (0, codegen_1._)`${fmts}[${schemaCode}]`);
@@ -30432,7 +33377,7 @@ var require_format$2 = /* @__PURE__ */ __commonJSMin(((exports) => {
         }
       }
       function validateFormat() {
-        const formatDef = self.formats[schema];
+        const formatDef = self2.formats[schema];
         if (!formatDef) {
           unknownFormat();
           return;
@@ -30442,7 +33387,7 @@ var require_format$2 = /* @__PURE__ */ __commonJSMin(((exports) => {
         if (fmtType === ruleType) cxt.pass(validCondition());
         function unknownFormat() {
           if (opts.strictSchema === false) {
-            self.logger.warn(unknownMsg());
+            self2.logger.warn(unknownMsg());
             return;
           }
           throw new Error(unknownMsg());
@@ -30868,9 +33813,9 @@ var require_dynamicAnchor = /* @__PURE__ */ __commonJSMin(((exports) => {
   }
   exports.dynamicAnchor = dynamicAnchor;
   function _getValidate(cxt) {
-    const { schemaEnv, schema, self } = cxt.it;
+    const { schemaEnv, schema, self: self2 } = cxt.it;
     const { root, baseId, localRefs, meta: meta3 } = schemaEnv.root;
-    const { schemaId } = self.opts;
+    const { schemaId } = self2.opts;
     const sch = new compile_1.SchemaEnv({
       schema,
       schemaId,
@@ -30879,7 +33824,7 @@ var require_dynamicAnchor = /* @__PURE__ */ __commonJSMin(((exports) => {
       localRefs,
       meta: meta3
     });
-    compile_1.compileSchema.call(self, sch);
+    compile_1.compileSchema.call(self2, sch);
     return (0, ref_1.getValidate)(cxt, sch);
   }
   exports.default = def;
@@ -31385,7 +34330,7 @@ var require_json_schema_2019_09 = /* @__PURE__ */ __commonJSMin(((exports) => {
   const content = require_content$1();
   const core = require_core$1();
   const format = require_format();
-  const metadata2 = require_meta_data$1();
+  const metadata3 = require_meta_data$1();
   const validation = require_validation$1();
   const META_SUPPORT_DATA = ["/properties"];
   function addMetaSchema2019($data) {
@@ -31395,7 +34340,7 @@ var require_json_schema_2019_09 = /* @__PURE__ */ __commonJSMin(((exports) => {
       content,
       core,
       with$data(this, format),
-      metadata2,
+      metadata3,
       with$data(this, validation)
     ].forEach((sch) => this.addMetaSchema(sch, void 0, false));
     return this;
@@ -31835,7 +34780,7 @@ var require_json_schema_2020_12 = /* @__PURE__ */ __commonJSMin(((exports) => {
   const content = require_content();
   const core = require_core();
   const format = require_format_annotation();
-  const metadata2 = require_meta_data();
+  const metadata3 = require_meta_data();
   const validation = require_validation();
   const META_SUPPORT_DATA = ["/properties"];
   function addMetaSchema2020($data) {
@@ -31846,7 +34791,7 @@ var require_json_schema_2020_12 = /* @__PURE__ */ __commonJSMin(((exports) => {
       content,
       core,
       with$data(this, format),
-      metadata2,
+      metadata3,
       with$data(this, validation)
     ].forEach((sch) => this.addMetaSchema(sch, void 0, false));
     return this;
@@ -32179,14 +35124,14 @@ var require_limit = /* @__PURE__ */ __commonJSMin(((exports) => {
     error: error62,
     code(cxt) {
       const { gen, data, schemaCode, keyword, it } = cxt;
-      const { opts, self } = it;
+      const { opts, self: self2 } = it;
       if (!opts.validateFormats) return;
-      const fCxt = new ajv_1.KeywordCxt(it, self.RULES.all.format.definition, "format");
+      const fCxt = new ajv_1.KeywordCxt(it, self2.RULES.all.format.definition, "format");
       if (fCxt.$data) validate$DataFormat();
       else validateFormat();
       function validate$DataFormat() {
         const fmts = gen.scopeValue("formats", {
-          ref: self.formats,
+          ref: self2.formats,
           code: opts.code.formats
         });
         const fmt = gen.const("fmt", (0, codegen_1._)`${fmts}[${fCxt.schemaCode}]`);
@@ -32194,7 +35139,7 @@ var require_limit = /* @__PURE__ */ __commonJSMin(((exports) => {
       }
       function validateFormat() {
         const format = fCxt.schema;
-        const fmtDef = self.formats[format];
+        const fmtDef = self2.formats[format];
         if (!fmtDef || fmtDef === true) return;
         if (typeof fmtDef != "object" || fmtDef instanceof RegExp || typeof fmtDef.compare != "function") throw new Error(`"${keyword}": format "${format}" does not define "compare" function`);
         const fmt = gen.scopeValue("formats", {
@@ -33575,29 +36520,29 @@ var McpServer = class {
   }
   registerResource(name2, uriOrTemplate, config2, readCallback) {
     const { cacheHint, scopeChallenge, ...resourceMetadata } = config2;
-    const metadata2 = resourceMetadata;
+    const metadata3 = resourceMetadata;
     if (cacheHint !== void 0) assertValidCacheHint(cacheHint, `resource ${name2}`);
     if (typeof uriOrTemplate === "string") {
       if (this._registeredResources[uriOrTemplate]) throw new Error(`Resource ${uriOrTemplate} is already registered`);
-      const registeredResource = this._createRegisteredResource(name2, config2.title, uriOrTemplate, metadata2, scopeChallenge, readCallback);
+      const registeredResource = this._createRegisteredResource(name2, config2.title, uriOrTemplate, metadata3, scopeChallenge, readCallback);
       if (cacheHint !== void 0) registeredResource.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
       this.sendResourceListChanged();
       return registeredResource;
     } else {
       if (this._registeredResourceTemplates[name2]) throw new Error(`Resource template ${name2} is already registered`);
-      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name2, config2.title, uriOrTemplate, metadata2, scopeChallenge, readCallback);
+      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name2, config2.title, uriOrTemplate, metadata3, scopeChallenge, readCallback);
       if (cacheHint !== void 0) registeredResourceTemplate.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
       this.sendResourceListChanged();
       return registeredResourceTemplate;
     }
   }
-  _createRegisteredResource(name2, title, uri, metadata2, scopeChallenge, readCallback) {
+  _createRegisteredResource(name2, title, uri, metadata3, scopeChallenge, readCallback) {
     const registeredResource = {
       name: name2,
       title,
-      metadata: metadata2,
+      metadata: metadata3,
       readCallback,
       scopeChallenge,
       enabled: true,
@@ -33621,11 +36566,11 @@ var McpServer = class {
     this._registeredResources[uri] = registeredResource;
     return registeredResource;
   }
-  _createRegisteredResourceTemplate(name2, title, template, metadata2, scopeChallenge, readCallback) {
+  _createRegisteredResourceTemplate(name2, title, template, metadata3, scopeChallenge, readCallback) {
     const registeredResourceTemplate = {
       resourceTemplate: template,
       title,
-      metadata: metadata2,
+      metadata: metadata3,
       readCallback,
       scopeChallenge,
       enabled: true,
@@ -34392,7 +37337,7 @@ function toError(value) {
 }
 
 // src/entrypoints/mcp.ts
-import path11 from "node:path";
+import path14 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/application/run-service.ts
@@ -37070,7 +40015,7 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
   const objectIds = {};
   const decodes = Array.from({ length: columns.length });
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { field, path: path12, codec: codec2, arrayDimensions } = columns[idx];
+    const { field, path: path15, codec: codec2, arrayDimensions } = columns[idx];
     let decoder;
     let decoderStr;
     let decoderFieldDestructure;
@@ -37098,26 +40043,26 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
     if (codec2) decodedValue = `codec${idx}(${decodedValue}, ${arrayDimensions})`;
     if (decoderStr) decodedValue = `${decoderStr}(${decodedValue})`;
     decodes[idx] = colStr === decodedValue ? `${colStr}` : `${colStr} === null ? ${colStr} : ${decodedValue}`;
-    if (path12.length !== 2 || !isColumn) continue;
-    if (objectIds[path12[0]] === void 0) objectIds[path12[0]] = [`c${idx}`];
-    else objectIds[path12[0]]?.push(`c${idx}`);
-    const [objectName] = path12;
+    if (path15.length !== 2 || !isColumn) continue;
+    if (objectIds[path15[0]] === void 0) objectIds[path15[0]] = [`c${idx}`];
+    else objectIds[path15[0]]?.push(`c${idx}`);
+    const [objectName] = path15;
     const tableName = getTableName(field.table);
     nullifyMap[objectName] = joinsNotNullableMap[tableName] ? false : typeof nullifyMap[objectName] === "string" ? nullifyMap[objectName] === tableName ? tableName : false : tableName;
   }
   fn.push(`mapped[i] = {`);
   let currentObjectPath = [];
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { path: path12 } = columns[idx];
-    const jsonPath = path12.map((e) => JSON.stringify(e));
+    const { path: path15 } = columns[idx];
+    const jsonPath = path15.map((e) => JSON.stringify(e));
     const decodedValue = decodes[idx];
-    const objectPath = path12.slice(0, -1);
+    const objectPath = path15.slice(0, -1);
     let commonLen = 0;
     while (commonLen < currentObjectPath.length && commonLen < objectPath.length && currentObjectPath[commonLen] === objectPath[commonLen]) commonLen++;
     for (let d = currentObjectPath.length - 1; d >= commonLen; --d) fn.push(`${"	".repeat(d + 1)}},`);
-    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path12[0]] === "string" ? `${objectIds[path12[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
+    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path15[0]] === "string" ? `${objectIds[path15[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
     currentObjectPath = objectPath;
-    fn.push(`${"	".repeat(path12.length)}${jsonPath[path12.length - 1]}: ${decodedValue},`);
+    fn.push(`${"	".repeat(path15.length)}${jsonPath[path15.length - 1]}: ${decodedValue},`);
   }
   for (let d = currentObjectPath.length - 1; d >= 0; --d) fn.push(`${"	".repeat(d + 1)}},`);
   fn.push(`};`);
@@ -37154,13 +40099,13 @@ function jitCompatCheck(isEnabled) {
   }
 }
 function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
-  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path12 }) => {
+  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path15 }) => {
     let processNullifyMap;
     let decoderSrc;
     if (is(field, Column)) {
       decoderSrc = field;
-      if (joinsNotNullableMap && path12.length === 2) {
-        const objectName = path12[0];
+      if (joinsNotNullableMap && path15.length === 2) {
+        const objectName = path15[0];
         processNullifyMap = (nullifyMap, value) => {
           if (!(objectName in nullifyMap)) nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
           else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) nullifyMap[objectName] = false;
@@ -37176,9 +40121,9 @@ function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
   });
   return ((rows) => rows.map((row) => {
     const nullifyMap = {};
-    const result = columns.reduce((result2, { path: path12 }, columnIndex) => {
+    const result = columns.reduce((result2, { path: path15 }, columnIndex) => {
       let node2 = result2;
-      for (const [pathChunkIndex, pathChunk] of path12.entries()) if (pathChunkIndex < path12.length - 1) {
+      for (const [pathChunkIndex, pathChunk] of path15.entries()) if (pathChunkIndex < path15.length - 1) {
         if (!(pathChunk in node2)) node2[pathChunk] = {};
         node2 = node2[pathChunk];
       } else {
@@ -37477,8 +40422,8 @@ var ColumnTableAliasProxyHandler = class {
 };
 var ViewSelectionAliasProxyHandler = class {
   static [entityKind] = "ViewSelectionAliasProxyHandler";
-  constructor(view, selection, ignoreColumnAlias) {
-    this.view = view;
+  constructor(view2, selection, ignoreColumnAlias) {
+    this.view = view2;
     this.selection = selection;
     this.ignoreColumnAlias = ignoreColumnAlias;
   }
@@ -40298,12 +43243,12 @@ var QueryBuilder = class {
     return { as };
   };
   with(...queries) {
-    const self = this;
+    const self2 = this;
     function select(fields) {
       return new SQLiteSelectBuilder({
         fields: fields ?? void 0,
         session: void 0,
-        dialect: self.getDialect(),
+        dialect: self2.getDialect(),
         withList: queries
       });
     }
@@ -40311,7 +43256,7 @@ var QueryBuilder = class {
       return new SQLiteSelectBuilder({
         fields: fields ?? void 0,
         session: void 0,
-        dialect: self.getDialect(),
+        dialect: self2.getDialect(),
         withList: queries,
         distinct: true
       });
@@ -40785,9 +43730,9 @@ var SQLiteAsyncDatabase = class {
   * ```
   */
   $with = (alias, selection) => {
-    const self = this;
+    const self2 = this;
     const as = (qb) => {
-      if (typeof qb === "function") qb = qb(new QueryBuilder(self.dialect));
+      if (typeof qb === "function") qb = qb(new QueryBuilder(self2.dialect));
       return new Proxy(new WithSubquery(qb.getSQL(), selection ?? ("getSelectedFields" in qb ? qb.getSelectedFields() ?? {} : {}), alias, true), new SelectionProxyHandler({
         alias,
         sqlAliasedBehavior: "alias",
@@ -40829,32 +43774,32 @@ var SQLiteAsyncDatabase = class {
   * ```
   */
   with(...queries) {
-    const self = this;
+    const self2 = this;
     function select(fields) {
       return new SQLiteSelectBuilder({
         fields: fields ?? void 0,
-        session: self.session,
-        dialect: self.dialect,
+        session: self2.session,
+        dialect: self2.dialect,
         withList: queries
       }, SQLiteAsyncSelectBase);
     }
     function selectDistinct(fields) {
       return new SQLiteSelectBuilder({
         fields: fields ?? void 0,
-        session: self.session,
-        dialect: self.dialect,
+        session: self2.session,
+        dialect: self2.dialect,
         withList: queries,
         distinct: true
       }, SQLiteAsyncSelectBase);
     }
     function update(table) {
-      return new SQLiteUpdateBuilder(table, self.session, self.dialect, queries, SQLiteAsyncUpdateBase);
+      return new SQLiteUpdateBuilder(table, self2.session, self2.dialect, queries, SQLiteAsyncUpdateBase);
     }
     function insert(into) {
-      return new SQLiteInsertBuilder(into, self.session, self.dialect, queries, SQLiteAsyncInsertBase);
+      return new SQLiteInsertBuilder(into, self2.session, self2.dialect, queries, SQLiteAsyncInsertBase);
     }
     function delete_(from) {
-      return new SQLiteAsyncDeleteBase(from, self.session, self.dialect, queries);
+      return new SQLiteAsyncDeleteBase(from, self2.session, self2.dialect, queries);
     }
     return {
       select,
@@ -41320,8 +44265,8 @@ function drizzle(...params) {
   const { connection, client, ...config2 } = params[0];
   if (client) return construct(client, config2);
   if (typeof connection === "object") {
-    const { path: path12, ...options2 } = connection;
-    return construct(new DatabaseSync(path12 ?? ":memory:", options2), config2);
+    const { path: path15, ...options2 } = connection;
+    return construct(new DatabaseSync(path15 ?? ":memory:", options2), config2);
   }
   return construct(new DatabaseSync(connection ?? ":memory:"), config2);
 }
@@ -41529,6 +44474,37 @@ var schemaMigrations = sqliteTable("schema_migrations", {
   unique("schema_migrations_version_uq").on(table.version),
   check2("schema_migrations_version_ck", sql`${table.version} > 0`)
 ]);
+var imageAssets = sqliteTable("image_assets", {
+  assetId: text("asset_id").notNull(),
+  sha256: text("sha256").notNull(),
+  format: text("format", { enum: ["png", "jpeg", "webp"] }).notNull(),
+  width: integer2("width").notNull(),
+  height: integer2("height").notNull(),
+  byteLength: integer2("byte_length").notNull(),
+  content: blob("content", { mode: "buffer" }).notNull()
+}, (table) => [
+  primaryKey({ name: "image_assets_pk", columns: [table.assetId] }),
+  unique("image_assets_sha256_uq").on(table.sha256),
+  check2("image_assets_digest_ck", sql`${table.assetId} = 'sha256:' || ${table.sha256} AND length(${table.sha256}) = 64 AND ${table.sha256} NOT GLOB '*[^a-f0-9]*'`),
+  check2("image_assets_format_ck", sql`${table.format} IN ('png', 'jpeg', 'webp')`),
+  check2("image_assets_dimensions_ck", sql`${table.width} > 0 AND ${table.height} > 0 AND ${table.width} * ${table.height} <= 16000000`),
+  check2("image_assets_content_ck", sql`${table.byteLength} > 0 AND ${table.byteLength} <= 16777216 AND length(${table.content}) = ${table.byteLength}`)
+]);
+var imageDerivations = sqliteTable("image_derivations", {
+  sourceAssetId: text("source_asset_id").notNull().references(() => imageAssets.assetId, { onDelete: "restrict" }),
+  candidateAssetId: text("candidate_asset_id").notNull().references(() => imageAssets.assetId, { onDelete: "restrict" }),
+  width: integer2("width").notNull(),
+  height: integer2("height").notNull(),
+  algorithm: text("algorithm", { enum: ["lanczos3"] }).notNull(),
+  policyVersion: integer2("policy_version").notNull(),
+  createdAt: text("created_at").notNull()
+}, (table) => [
+  primaryKey({ name: "image_derivations_pk", columns: [table.candidateAssetId] }),
+  index("image_derivations_source_idx").on(table.sourceAssetId, table.candidateAssetId),
+  check2("image_derivations_assets_ck", sql`${table.sourceAssetId} <> ${table.candidateAssetId}`),
+  check2("image_derivations_dimensions_ck", sql`${table.width} > 0 AND ${table.height} > 0`),
+  check2("image_derivations_policy_ck", sql`${table.algorithm} = 'lanczos3' AND ${table.policyVersion} = 1`)
+]);
 var sqliteTables = {
   runs,
   questionGroups,
@@ -41537,7 +44513,9 @@ var sqliteTables = {
   attempts,
   attemptEvaluations,
   evaluationAnswerAttempts,
-  schemaMigrations
+  schemaMigrations,
+  imageAssets,
+  imageDerivations
 };
 
 // src/infrastructure/sqlite/work-policy.ts
@@ -41547,8 +44525,9 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
+var SCHEMA_VERSION = 10;
 var BASELINE_MIGRATION_ID = "baseline-v9";
+var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -41569,8 +44548,17 @@ function baselineMigration() {
     sql: readFileSync(baselineSqlPath(), "utf8")
   };
 }
+function imageAssetMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0001_image_assets/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0001_image_assets/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 10 image asset migration is missing from this Sheg installation.");
+  return { id: IMAGE_ASSET_MIGRATION_ID, fromVersion: 9, toVersion: 10, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration()];
+  return [baselineMigration(), imageAssetMigration()];
 }
 function migrationChecksum(migration) {
   return createHash4("sha256").update(migration.sql).digest("hex");
@@ -41792,7 +44780,7 @@ function applySchemaMigrations(database, dataRoot, migrations, targetVersion, no
         database.exec(`PRAGMA user_version = ${migration.toVersion}`);
         database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), schemaFingerprint(database), new Date(now()).toISOString());
         checkDatabaseIntegrity(database);
-        validateSchemaShape(database);
+        if (migration.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
         database.exec("COMMIT");
       } catch (error62) {
         try {
@@ -44471,11 +47459,11 @@ function resetUnreadableRunStore(dataRoot, databasePath, openFreshStore, operati
     throw new RunStoreError("recovery_reset_failed", `Sheg could not complete the explicit reset. ${restoration}`, { cause: error62 });
   }
 }
-function restoreMovedFiles(moved, rename2) {
+function restoreMovedFiles(moved, rename3) {
   const retained = [];
   for (const item of moved.toReversed()) {
     try {
-      rename2(item.archived, item.original);
+      rename3(item.archived, item.original);
     } catch {
       retained.push(path4.basename(item.archived));
     }
@@ -44938,8 +47926,8 @@ async function executeJevTransport(input2) {
     const parsed = (input2.config.route === "typesafe" ? nativeWireResponseSchema : wireResponseSchema).safeParse(payload);
     if (!parsed.success) throw new JevTransportError("Jev response is missing required identity or usage fields.", attempts2, "evaluation", "provider_unavailable", "envelope");
     const { model, usage } = parsed.data;
-    const metadata2 = jevMetadata(input2.config.route, model);
-    const estimatedAmount = usage.input_tokens !== void 0 && usage.output_tokens !== void 0 && metadata2?.inputUsdPerMillion !== void 0 && metadata2.outputUsdPerMillion !== void 0 ? (usage.input_tokens * metadata2.inputUsdPerMillion + usage.output_tokens * metadata2.outputUsdPerMillion) / 1e6 : void 0;
+    const metadata3 = jevMetadata(input2.config.route, model);
+    const estimatedAmount = usage.input_tokens !== void 0 && usage.output_tokens !== void 0 && metadata3?.inputUsdPerMillion !== void 0 && metadata3.outputUsdPerMillion !== void 0 ? (usage.input_tokens * metadata3.inputUsdPerMillion + usage.output_tokens * metadata3.outputUsdPerMillion) / 1e6 : void 0;
     return {
       response: parsed.data,
       execution: {
@@ -45334,8 +48322,8 @@ var tokenizerCache = /* @__PURE__ */ new Map();
 async function tokenizerPromise(config2) {
   const absolutePath = path10.resolve(config2.tokenizerJsonPath);
   const key = `${absolutePath}:${config2.tokenizerSha256.toLowerCase()}`;
-  const metadata2 = await stat(absolutePath, { bigint: true });
-  const signature = `${metadata2.size}:${metadata2.mtimeNs}:${metadata2.ctimeNs}`;
+  const metadata3 = await stat(absolutePath, { bigint: true });
+  const signature = `${metadata3.size}:${metadata3.mtimeNs}:${metadata3.ctimeNs}`;
   const existing = tokenizerCache.get(key);
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
@@ -45576,12 +48564,5660 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
   if (state === "unavailable") throw new CredentialStoreError("credential_unavailable", route);
 }
 
+// src/application/image-preparation.ts
+import { createHash as createHash10 } from "node:crypto";
+import { open as open3 } from "node:fs/promises";
+
+// src/domain/assets/image.ts
+var IMAGE_FORMATS = ["png", "jpeg", "webp"];
+var ImageFormatSchema = external_exports.enum(IMAGE_FORMATS);
+var digest = external_exports.string().regex(/^[a-f0-9]{64}$/);
+var assetId = external_exports.string().regex(/^sha256:[a-f0-9]{64}$/);
+var ImageSourceSchema = external_exports.union([
+  external_exports.object({ path: external_exports.string().min(1), sha256: digest }).strict(),
+  external_exports.object({ assetId }).strict()
+]);
+var ImageImportRequestSchema = external_exports.object({ source: ImageSourceSchema }).strict();
+var ImageGetRequestSchema = external_exports.object({ assetId, export: external_exports.boolean().optional() }).strict();
+var ImageMetadataSchema = external_exports.object({
+  assetId,
+  sha256: digest,
+  format: ImageFormatSchema,
+  width: external_exports.number().int().positive().max(16e6),
+  height: external_exports.number().int().positive().max(16e6),
+  bytes: external_exports.number().int().positive().max(16 * 1024 * 1024)
+}).strict().refine((metadata3) => metadata3.width * metadata3.height <= 16e6, {
+  message: "Image dimensions exceed the 16 megapixel limit."
+});
+var ScaleRequestSchema = external_exports.object({
+  source: ImageSourceSchema,
+  maxWidth: external_exports.number().int().positive().optional(),
+  maxHeight: external_exports.number().int().positive().optional(),
+  maxBytes: external_exports.number().int().positive().optional()
+}).strict().refine((request) => request.maxWidth !== void 0 || request.maxHeight !== void 0 || request.maxBytes !== void 0, {
+  message: "At least one image target is required."
+});
+var ImageAssetError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "ImageAssetError";
+  }
+  code;
+};
+
+// src/infrastructure/images/asset-export.ts
+import { createHash as createHash9, randomUUID as randomUUID7 } from "node:crypto";
+import { lstat, mkdir as mkdir2, readFile as readFile3, realpath, rename as rename2, rm as rm2, writeFile } from "node:fs/promises";
+import path11 from "node:path";
+async function exportImageAsset(root, asset, bytes) {
+  if (!path11.isAbsolute(root)) throw new ImageAssetError("image_export_failed", "The image preview directory must be absolute.");
+  const expectedHash = createHash9("sha256").update(bytes).digest("hex");
+  if (expectedHash !== asset.sha256 || bytes.byteLength !== asset.bytes) throw new ImageAssetError("image_digest_mismatch", "Stored image bytes do not match their metadata.");
+  const rootPath = path11.resolve(root);
+  const directory = path11.join(rootPath, "asset-previews");
+  const target = path11.join(directory, `${asset.sha256}.${asset.format === "jpeg" ? "jpg" : asset.format}`);
+  const temporary = path11.join(directory, `.${asset.sha256}.${randomUUID7()}.tmp`);
+  try {
+    await mkdir2(directory, { recursive: true });
+    const [realRoot, realDirectory] = await Promise.all([realpath(rootPath), realpath(directory)]);
+    if (realDirectory !== path11.join(realRoot, "asset-previews")) throw new Error("preview directory resolves outside the data root");
+    try {
+      const existing = await lstat(target);
+      if (existing.isSymbolicLink() || !existing.isFile()) throw new Error("preview target is not a regular file");
+      const current = await readFile3(target);
+      const currentHash = createHash9("sha256").update(current).digest("hex");
+      if (currentHash === asset.sha256 && current.byteLength === asset.bytes) return { asset, path: target };
+    } catch (error62) {
+      if (error62.code !== "ENOENT") throw error62;
+    }
+    await writeFile(temporary, bytes, { flag: "wx" });
+    await rename2(temporary, target);
+    return { asset, path: target };
+  } catch {
+    await rm2(temporary, { force: true }).catch(() => void 0);
+    throw new ImageAssetError("image_export_failed", "The image preview could not be safely written under Sheg storage.");
+  }
+}
+
+// src/application/image-preparation.ts
+function digest2(bytes) {
+  return createHash10("sha256").update(bytes).digest("hex");
+}
+function metadata2(bytes, decoded) {
+  const sha256 = digest2(bytes);
+  return ImageMetadataSchema.parse({ assetId: `sha256:${sha256}`, sha256, format: decoded.format, width: decoded.width, height: decoded.height, bytes: bytes.byteLength });
+}
+function readTarget(source) {
+  if ("assetId" in source) return Promise.reject(new Error("saved source must be read from repository"));
+  return (async () => {
+    let handle;
+    try {
+      handle = await open3(source.path, "r");
+    } catch (error62) {
+      const code = error62.code;
+      if (code === "ENOENT" || code === "EACCES" || code === "EPERM" || code === "EISDIR" || code === "ENOTDIR") {
+        throw new ImageAssetError("image_source_path_invalid", "The image source file could not be read.");
+      }
+      throw error62;
+    }
+    try {
+      const limit = 16 * 1024 * 1024;
+      const buffer = Buffer.allocUnsafe(limit + 1);
+      let offset = 0;
+      while (offset < buffer.byteLength) {
+        const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      if (offset > limit) throw new ImageAssetError("image_source_limit", "The image exceeds the 16 MiB encoded image limit.");
+      return new Uint8Array(buffer.subarray(0, offset));
+    } finally {
+      await handle.close();
+    }
+  })();
+}
+function scaledDimensions(image, request, factor = 1) {
+  const fit = Math.min(
+    1,
+    request.maxWidth === void 0 ? 1 : request.maxWidth / image.width,
+    request.maxHeight === void 0 ? 1 : request.maxHeight / image.height,
+    factor
+  );
+  let width = Math.max(1, Math.floor(image.width * fit));
+  let height = Math.max(1, Math.floor(image.height * fit));
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const proportional = Math.min(width / image.width, height / image.height);
+    const nextWidth = Math.max(1, Math.floor(image.width * proportional));
+    const nextHeight = Math.max(1, Math.floor(image.height * proportional));
+    if (nextWidth === width && nextHeight === height) break;
+    width = nextWidth;
+    height = nextHeight;
+  }
+  return { width, height };
+}
+function createImagePreparationService(repository, codec2, exportRoot) {
+  async function verifiedBytes(source) {
+    const parsed = ImageSourceSchema.parse(source);
+    if ("assetId" in parsed) return { bytes: repository.bytes(parsed.assetId) };
+    return { bytes: await readTarget(parsed), expected: parsed.sha256 };
+  }
+  async function decodeSource(source) {
+    const result = await verifiedBytes(source);
+    const actual = digest2(result.bytes);
+    if (result.expected !== void 0 && actual !== result.expected) throw new ImageAssetError("image_digest_mismatch", "Image bytes do not match the expected SHA-256 digest.");
+    const decoded = await codec2.decode(result.bytes);
+    if (digest2(result.bytes) !== actual) throw new ImageAssetError("image_digest_mismatch", "Image bytes changed while being prepared.");
+    return { ...result, decoded, metadata: metadata2(result.bytes, decoded) };
+  }
+  return {
+    async import(source) {
+      const parsed = ImageSourceSchema.parse(source);
+      if ("assetId" in parsed) return repository.metadata(parsed.assetId);
+      const prepared = await decodeSource(parsed);
+      return repository.saveSource(prepared.bytes, prepared.metadata);
+    },
+    async scale(request) {
+      const parsed = ScaleRequestSchema.parse(request);
+      const source = await decodeSource(parsed.source);
+      let dimensions = scaledDimensions(source.decoded, parsed);
+      const needsScale = dimensions.width !== source.decoded.width || dimensions.height !== source.decoded.height;
+      if (!needsScale && parsed.maxBytes === void 0) {
+        const saved2 = repository.saveSource(source.bytes, source.metadata);
+        return { source: saved2, candidate: saved2, scaling: { width: saved2.width, height: saved2.height, algorithm: "lanczos3", policyVersion: 1 }, changed: false };
+      }
+      if (parsed.maxBytes !== void 0 && source.bytes.byteLength <= parsed.maxBytes && !needsScale) {
+        const saved2 = repository.saveSource(source.bytes, source.metadata);
+        return { source: saved2, candidate: saved2, scaling: { width: saved2.width, height: saved2.height, algorithm: "lanczos3", policyVersion: 1 }, changed: false };
+      }
+      let factor = 1;
+      let candidateBytes;
+      let candidateImage;
+      let attempts2 = 0;
+      const maxAttempts = Math.max(1, Math.ceil(Math.log(Math.max(source.decoded.width, source.decoded.height)) / Math.log(1 / 0.8)) + 2);
+      while (attempts2 < maxAttempts) {
+        dimensions = scaledDimensions(source.decoded, parsed, factor);
+        const candidate = await codec2.scale(source.decoded, dimensions.width, dimensions.height);
+        const encoded = await codec2.encode(candidate);
+        attempts2 += 1;
+        if (parsed.maxBytes === void 0 || encoded.byteLength <= parsed.maxBytes) {
+          candidateBytes = encoded;
+          candidateImage = await codec2.decode(encoded);
+          break;
+        }
+        const nextFactor = factor * 0.8;
+        const nextDimensions = scaledDimensions(source.decoded, parsed, nextFactor);
+        if (nextDimensions.width === dimensions.width && nextDimensions.height === dimensions.height) break;
+        factor = nextFactor;
+      }
+      if (!candidateBytes || !candidateImage || parsed.maxBytes !== void 0 && candidateBytes.byteLength > parsed.maxBytes) {
+        throw new ImageAssetError("image_scale_target_unreachable", "The requested image byte target cannot be reached without changing format, quality, or content.");
+      }
+      if (candidateBytes.byteLength === source.bytes.byteLength && digest2(candidateBytes) === digest2(source.bytes)) {
+        const saved2 = repository.saveSource(source.bytes, source.metadata);
+        return { source: saved2, candidate: saved2, scaling: { width: saved2.width, height: saved2.height, algorithm: "lanczos3", policyVersion: 1 }, changed: false };
+      }
+      if (parsed.maxWidth !== void 0 && candidateImage.width > parsed.maxWidth || parsed.maxHeight !== void 0 && candidateImage.height > parsed.maxHeight) {
+        throw new ImageAssetError("image_scale_target_unreachable", "The encoded image did not satisfy the requested dimension bounds.");
+      }
+      const candidateMetadata = metadata2(candidateBytes, candidateImage);
+      if (candidateMetadata.assetId === source.metadata.assetId) throw new ImageAssetError("image_scale_target_unreachable", "The requested target did not produce a distinct image candidate.");
+      const scaling = { width: candidateImage.width, height: candidateImage.height, algorithm: "lanczos3", policyVersion: 1 };
+      const saved = repository.savePrepared(source.bytes, source.metadata, candidateBytes, candidateMetadata, scaling);
+      return { ...saved, changed: true };
+    },
+    get(assetId2) {
+      return repository.metadata(assetId2);
+    },
+    async export(assetId2) {
+      const asset = repository.metadata(assetId2);
+      return exportImageAsset(exportRoot, asset, repository.bytes(assetId2));
+    }
+  };
+}
+
+// src/infrastructure/images/codecs.ts
+import { readFile as readFile4 } from "node:fs/promises";
+import path12 from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+
+// node_modules/@jsquash/png/codec/pkg/squoosh_png.js
+var wasm;
+var heap = new Array(128).fill(void 0);
+heap.push(void 0, null, true, false);
+var heap_next = heap.length;
+function addHeapObject(obj) {
+  if (heap_next === heap.length) heap.push(heap.length + 1);
+  const idx = heap_next;
+  heap_next = heap[idx];
+  heap[idx] = obj;
+  return idx;
+}
+function getObject(idx) {
+  return heap[idx];
+}
+function dropObject(idx) {
+  if (idx < 132) return;
+  heap[idx] = heap_next;
+  heap_next = idx;
+}
+function takeObject(idx) {
+  const ret = getObject(idx);
+  dropObject(idx);
+  return ret;
+}
+var cachedTextDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8", { ignoreBOM: true, fatal: true }) : { decode: () => {
+  throw Error("TextDecoder not available");
+} };
+if (typeof TextDecoder !== "undefined") {
+  cachedTextDecoder.decode();
+}
+var cachedUint8Memory0 = null;
+function getUint8Memory0() {
+  if (cachedUint8Memory0 === null || cachedUint8Memory0.byteLength === 0) {
+    cachedUint8Memory0 = new Uint8Array(wasm.memory.buffer);
+  }
+  return cachedUint8Memory0;
+}
+function getStringFromWasm0(ptr, len) {
+  ptr = ptr >>> 0;
+  return cachedTextDecoder.decode(getUint8Memory0().subarray(ptr, ptr + len));
+}
+var cachedUint8ClampedMemory0 = null;
+function getUint8ClampedMemory0() {
+  if (cachedUint8ClampedMemory0 === null || cachedUint8ClampedMemory0.byteLength === 0) {
+    cachedUint8ClampedMemory0 = new Uint8ClampedArray(wasm.memory.buffer);
+  }
+  return cachedUint8ClampedMemory0;
+}
+function getClampedArrayU8FromWasm0(ptr, len) {
+  ptr = ptr >>> 0;
+  return getUint8ClampedMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+var WASM_VECTOR_LEN = 0;
+function passArray8ToWasm0(arg, malloc) {
+  const ptr = malloc(arg.length * 1, 1) >>> 0;
+  getUint8Memory0().set(arg, ptr / 1);
+  WASM_VECTOR_LEN = arg.length;
+  return ptr;
+}
+var cachedInt32Memory0 = null;
+function getInt32Memory0() {
+  if (cachedInt32Memory0 === null || cachedInt32Memory0.byteLength === 0) {
+    cachedInt32Memory0 = new Int32Array(wasm.memory.buffer);
+  }
+  return cachedInt32Memory0;
+}
+function getArrayU8FromWasm0(ptr, len) {
+  ptr = ptr >>> 0;
+  return getUint8Memory0().subarray(ptr / 1, ptr / 1 + len);
+}
+function encode3(data, width, height, bit_depth) {
+  try {
+    const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.encode(retptr, ptr0, len0, width, height, bit_depth);
+    var r0 = getInt32Memory0()[retptr / 4 + 0];
+    var r1 = getInt32Memory0()[retptr / 4 + 1];
+    var v2 = getArrayU8FromWasm0(r0, r1).slice();
+    wasm.__wbindgen_free(r0, r1 * 1, 1);
+    return v2;
+  } finally {
+    wasm.__wbindgen_add_to_stack_pointer(16);
+  }
+}
+function decode3(data) {
+  const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+  const len0 = WASM_VECTOR_LEN;
+  const ret = wasm.decode(ptr0, len0);
+  return takeObject(ret);
+}
+function decode_rgba16(data) {
+  const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+  const len0 = WASM_VECTOR_LEN;
+  const ret = wasm.decode_rgba16(ptr0, len0);
+  return ImageDataRGBA16.__wrap(ret);
+}
+var ImageDataRGBA16 = class _ImageDataRGBA16 {
+  static __wrap(ptr) {
+    ptr = ptr >>> 0;
+    const obj = Object.create(_ImageDataRGBA16.prototype);
+    obj.__wbg_ptr = ptr;
+    return obj;
+  }
+  __destroy_into_raw() {
+    const ptr = this.__wbg_ptr;
+    this.__wbg_ptr = 0;
+    return ptr;
+  }
+  free() {
+    const ptr = this.__destroy_into_raw();
+    wasm.__wbg_imagedatargba16_free(ptr);
+  }
+  /**
+  * @returns {number}
+  */
+  get width() {
+    const ret = wasm.imagedatargba16_width(this.__wbg_ptr);
+    return ret >>> 0;
+  }
+  /**
+  * @returns {number}
+  */
+  get height() {
+    const ret = wasm.imagedatargba16_height(this.__wbg_ptr);
+    return ret >>> 0;
+  }
+  /**
+  * @returns {Uint16Array}
+  */
+  get data() {
+    const ret = wasm.imagedatargba16_data(this.__wbg_ptr);
+    return takeObject(ret);
+  }
+};
+async function __wbg_load(module, imports) {
+  if (typeof Response === "function" && module instanceof Response) {
+    if (typeof WebAssembly.instantiateStreaming === "function") {
+      try {
+        return await WebAssembly.instantiateStreaming(module, imports);
+      } catch (e) {
+        if (module.headers.get("Content-Type") != "application/wasm") {
+          console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+        } else {
+          throw e;
+        }
+      }
+    }
+    const bytes = await module.arrayBuffer();
+    return await WebAssembly.instantiate(bytes, imports);
+  } else {
+    const instance = await WebAssembly.instantiate(module, imports);
+    if (instance instanceof WebAssembly.Instance) {
+      return { instance, module };
+    } else {
+      return instance;
+    }
+  }
+}
+function __wbg_get_imports() {
+  const imports = {};
+  imports.wbg = {};
+  imports.wbg.__wbindgen_memory = function() {
+    const ret = wasm.memory;
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_buffer_a448f833075b71ba = function(arg0) {
+    const ret = getObject(arg0).buffer;
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_newwithbyteoffsetandlength_099217381c451830 = function(arg0, arg1, arg2) {
+    const ret = new Uint16Array(getObject(arg0), arg1 >>> 0, arg2 >>> 0);
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbindgen_object_drop_ref = function(arg0) {
+    takeObject(arg0);
+  };
+  imports.wbg.__wbg_newwithownedu8clampedarrayandsh_91db5987993a08fb = function(arg0, arg1, arg2, arg3) {
+    var v0 = getClampedArrayU8FromWasm0(arg0, arg1).slice();
+    wasm.__wbindgen_free(arg0, arg1 * 1, 1);
+    const ret = new ImageData(v0, arg2 >>> 0, arg3 >>> 0);
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbindgen_throw = function(arg0, arg1) {
+    throw new Error(getStringFromWasm0(arg0, arg1));
+  };
+  return imports;
+}
+function __wbg_init_memory(imports, maybe_memory) {
+}
+function __wbg_finalize_init(instance, module) {
+  wasm = instance.exports;
+  __wbg_init.__wbindgen_wasm_module = module;
+  cachedInt32Memory0 = null;
+  cachedUint8Memory0 = null;
+  cachedUint8ClampedMemory0 = null;
+  return wasm;
+}
+async function __wbg_init(input2) {
+  if (wasm !== void 0) return wasm;
+  if (typeof input2 === "undefined") {
+    input2 = new URL("squoosh_png_bg.wasm", import.meta.url);
+  }
+  const imports = __wbg_get_imports();
+  if (typeof input2 === "string" || typeof Request === "function" && input2 instanceof Request || typeof URL === "function" && input2 instanceof URL) {
+    input2 = fetch(input2);
+  }
+  __wbg_init_memory(imports);
+  const { instance, module } = await __wbg_load(await input2, imports);
+  return __wbg_finalize_init(instance, module);
+}
+var squoosh_png_default = __wbg_init;
+var isServiceWorker = globalThis.ServiceWorkerGlobalScope !== void 0;
+var isRunningInCloudFlareWorkers = isServiceWorker && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+var isRunningInNode = typeof process === "object" && process.release && process.release.name === "node";
+if (isRunningInCloudFlareWorkers || isRunningInNode) {
+  if (!globalThis.ImageData) {
+    globalThis.ImageData = class ImageData {
+      constructor(data, width, height) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+      }
+    };
+  }
+  if (import.meta.url === void 0) {
+    import.meta.url = "https://localhost";
+  }
+  if (typeof self !== "undefined" && self.location === void 0) {
+    self.location = { href: "" };
+  }
+}
+
+// node_modules/@jsquash/png/decode.js
+var pngModule;
+async function init(moduleOrPath) {
+  if (!pngModule) {
+    pngModule = squoosh_png_default(moduleOrPath);
+  }
+  return pngModule;
+}
+async function decode4(data, options2 = {}) {
+  await init();
+  const { bitDepth = 8 } = options2;
+  if (bitDepth === 16) {
+    const imageData2 = await decode_rgba16(new Uint8Array(data));
+    if (!imageData2)
+      throw new Error("Encoding error.");
+    return imageData2;
+  }
+  const imageData = await decode3(new Uint8Array(data));
+  if (!imageData)
+    throw new Error("Encoding error.");
+  return imageData;
+}
+var decode_default = decode4;
+
+// node_modules/@jsquash/png/encode.js
+var pngModule2;
+async function init2(moduleOrPath) {
+  if (!pngModule2) {
+    pngModule2 = squoosh_png_default(moduleOrPath);
+  }
+  return pngModule2;
+}
+async function encode4(data, options2 = {}) {
+  var _a3;
+  await init2();
+  const bitDepth = (_a3 = options2 === null || options2 === void 0 ? void 0 : options2.bitDepth) !== null && _a3 !== void 0 ? _a3 : 8;
+  if (bitDepth !== 8 && bitDepth !== 16) {
+    throw new Error("Invalid bit depth. Must be either 8 or 16.");
+  }
+  const isUint16Array = data.data instanceof Uint16Array;
+  if (isUint16Array && bitDepth !== 16) {
+    throw new Error("Invalid bit depth, must be 16 for Uint16Array or manually convert to RGB8 values with Uint8Array.");
+  }
+  if (!isUint16Array && bitDepth === 16) {
+    throw new Error("Invalid bit depth, must be 8 for Uint8Array or manually convert to RGB16 values with Uint16Array.");
+  }
+  const encodeData = new Uint8Array(data.data.buffer);
+  const output2 = await encode3(encodeData, data.width, data.height, bitDepth);
+  if (!output2)
+    throw new Error("Encoding error.");
+  return output2.buffer;
+}
+
+// node_modules/@jsquash/jpeg/utils.js
+function initEmscriptenModule(moduleFactory, wasmModule, moduleOptionOverrides = {}) {
+  let instantiateWasm;
+  if (wasmModule) {
+    instantiateWasm = (imports, callback) => {
+      const instance = new WebAssembly.Instance(wasmModule, imports);
+      callback(instance);
+      return instance.exports;
+    };
+  }
+  return moduleFactory({
+    // Just to be safe, don't automatically invoke any wasm functions
+    noInitialRun: true,
+    instantiateWasm,
+    ...moduleOptionOverrides
+  });
+}
+
+// node_modules/@jsquash/jpeg/codec/dec/mozjpeg_dec.js
+var Module = (() => {
+  var _scriptDir = import.meta.url;
+  return (function(moduleArg = {}) {
+    var Module6 = moduleArg;
+    var readyPromiseResolve, readyPromiseReject;
+    var readyPromise = new Promise((resolve, reject) => {
+      readyPromiseResolve = resolve;
+      readyPromiseReject = reject;
+    });
+    const isServiceWorker5 = globalThis.ServiceWorkerGlobalScope !== void 0;
+    const isRunningInCloudFlareWorkers5 = isServiceWorker5 && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+    const isRunningInNode5 = typeof process === "object" && process.release && process.release.name === "node";
+    if (isRunningInCloudFlareWorkers5 || isRunningInNode5) {
+      if (!globalThis.ImageData) {
+        globalThis.ImageData = class ImageData {
+          constructor(data, width, height) {
+            this.data = data;
+            this.width = width;
+            this.height = height;
+          }
+        };
+      }
+      if (import.meta.url === void 0) {
+        import.meta.url = "https://localhost";
+      }
+      if (typeof self !== "undefined" && self.location === void 0) {
+        self.location = { href: "" };
+      }
+    }
+    var moduleOverrides = Object.assign({}, Module6);
+    var arguments_ = [];
+    var thisProgram = "./this.program";
+    var quit_ = (status, toThrow) => {
+      throw toThrow;
+    };
+    var ENVIRONMENT_IS_WEB = typeof window == "object";
+    var ENVIRONMENT_IS_WORKER = typeof importScripts == "function";
+    var ENVIRONMENT_IS_NODE = typeof process == "object" && typeof process.versions == "object" && typeof process.versions.node == "string";
+    var scriptDirectory = "";
+    function locateFile(path15) {
+      if (Module6["locateFile"]) {
+        return Module6["locateFile"](path15, scriptDirectory);
+      }
+      return scriptDirectory + path15;
+    }
+    var read_, readAsync, readBinary;
+    if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
+      if (ENVIRONMENT_IS_WORKER) {
+        scriptDirectory = self.location.href;
+      } else if (typeof document != "undefined" && document.currentScript) {
+        scriptDirectory = document.currentScript.src;
+      }
+      if (_scriptDir) {
+        scriptDirectory = _scriptDir;
+      }
+      if (scriptDirectory.startsWith("blob:")) {
+        scriptDirectory = "";
+      } else {
+        scriptDirectory = scriptDirectory.substr(0, scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1);
+      }
+      {
+        read_ = (url2) => {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", url2, false);
+          xhr.send(null);
+          return xhr.responseText;
+        };
+        if (ENVIRONMENT_IS_WORKER) {
+          readBinary = (url2) => {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url2, false);
+            xhr.responseType = "arraybuffer";
+            xhr.send(null);
+            return new Uint8Array(xhr.response);
+          };
+        }
+        readAsync = (url2, onload, onerror) => {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", url2, true);
+          xhr.responseType = "arraybuffer";
+          xhr.onload = () => {
+            if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
+              onload(xhr.response);
+              return;
+            }
+            onerror();
+          };
+          xhr.onerror = onerror;
+          xhr.send(null);
+        };
+      }
+    } else {
+    }
+    var out = Module6["print"] || console.log.bind(console);
+    var err = Module6["printErr"] || console.error.bind(console);
+    Object.assign(Module6, moduleOverrides);
+    moduleOverrides = null;
+    if (Module6["arguments"]) arguments_ = Module6["arguments"];
+    if (Module6["thisProgram"]) thisProgram = Module6["thisProgram"];
+    if (Module6["quit"]) quit_ = Module6["quit"];
+    var wasmBinary;
+    if (Module6["wasmBinary"]) wasmBinary = Module6["wasmBinary"];
+    var wasmMemory;
+    var ABORT = false;
+    var EXITSTATUS;
+    var HEAP8, HEAPU8, HEAP16, HEAPU16, HEAP32, HEAPU32, HEAPF32, HEAPF64;
+    function updateMemoryViews() {
+      var b = wasmMemory.buffer;
+      Module6["HEAP8"] = HEAP8 = new Int8Array(b);
+      Module6["HEAP16"] = HEAP16 = new Int16Array(b);
+      Module6["HEAPU8"] = HEAPU8 = new Uint8Array(b);
+      Module6["HEAPU16"] = HEAPU16 = new Uint16Array(b);
+      Module6["HEAP32"] = HEAP32 = new Int32Array(b);
+      Module6["HEAPU32"] = HEAPU32 = new Uint32Array(b);
+      Module6["HEAPF32"] = HEAPF32 = new Float32Array(b);
+      Module6["HEAPF64"] = HEAPF64 = new Float64Array(b);
+    }
+    var __ATPRERUN__ = [];
+    var __ATINIT__ = [];
+    var __ATPOSTRUN__ = [];
+    var runtimeInitialized = false;
+    function preRun() {
+      if (Module6["preRun"]) {
+        if (typeof Module6["preRun"] == "function") Module6["preRun"] = [Module6["preRun"]];
+        while (Module6["preRun"].length) {
+          addOnPreRun(Module6["preRun"].shift());
+        }
+      }
+      callRuntimeCallbacks(__ATPRERUN__);
+    }
+    function initRuntime() {
+      runtimeInitialized = true;
+      callRuntimeCallbacks(__ATINIT__);
+    }
+    function postRun() {
+      if (Module6["postRun"]) {
+        if (typeof Module6["postRun"] == "function") Module6["postRun"] = [Module6["postRun"]];
+        while (Module6["postRun"].length) {
+          addOnPostRun(Module6["postRun"].shift());
+        }
+      }
+      callRuntimeCallbacks(__ATPOSTRUN__);
+    }
+    function addOnPreRun(cb) {
+      __ATPRERUN__.unshift(cb);
+    }
+    function addOnInit(cb) {
+      __ATINIT__.unshift(cb);
+    }
+    function addOnPostRun(cb) {
+      __ATPOSTRUN__.unshift(cb);
+    }
+    var runDependencies = 0;
+    var runDependencyWatcher = null;
+    var dependenciesFulfilled = null;
+    function addRunDependency(id) {
+      runDependencies++;
+      Module6["monitorRunDependencies"]?.(runDependencies);
+    }
+    function removeRunDependency(id) {
+      runDependencies--;
+      Module6["monitorRunDependencies"]?.(runDependencies);
+      if (runDependencies == 0) {
+        if (runDependencyWatcher !== null) {
+          clearInterval(runDependencyWatcher);
+          runDependencyWatcher = null;
+        }
+        if (dependenciesFulfilled) {
+          var callback = dependenciesFulfilled;
+          dependenciesFulfilled = null;
+          callback();
+        }
+      }
+    }
+    function abort(what) {
+      Module6["onAbort"]?.(what);
+      what = "Aborted(" + what + ")";
+      err(what);
+      ABORT = true;
+      EXITSTATUS = 1;
+      what += ". Build with -sASSERTIONS for more info.";
+      var e = new WebAssembly.RuntimeError(what);
+      readyPromiseReject(e);
+      throw e;
+    }
+    var dataURIPrefix = "data:application/octet-stream;base64,";
+    var isDataURI = (filename) => filename.startsWith(dataURIPrefix);
+    var wasmBinaryFile;
+    if (Module6["locateFile"]) {
+      wasmBinaryFile = "mozjpeg_dec.wasm";
+      if (!isDataURI(wasmBinaryFile)) {
+        wasmBinaryFile = locateFile(wasmBinaryFile);
+      }
+    } else {
+      wasmBinaryFile = new URL("mozjpeg_dec.wasm", import.meta.url).href;
+    }
+    function getBinarySync(file2) {
+      if (file2 == wasmBinaryFile && wasmBinary) {
+        return new Uint8Array(wasmBinary);
+      }
+      if (readBinary) {
+        return readBinary(file2);
+      }
+      throw "both async and sync fetching of the wasm failed";
+    }
+    function getBinaryPromise(binaryFile) {
+      if (!wasmBinary && (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER)) {
+        if (typeof fetch == "function") {
+          return fetch(binaryFile, { credentials: "same-origin" }).then((response) => {
+            if (!response["ok"]) {
+              throw `failed to load wasm binary file at '${binaryFile}'`;
+            }
+            return response["arrayBuffer"]();
+          }).catch(() => getBinarySync(binaryFile));
+        }
+      }
+      return Promise.resolve().then(() => getBinarySync(binaryFile));
+    }
+    function instantiateArrayBuffer(binaryFile, imports, receiver) {
+      return getBinaryPromise(binaryFile).then((binary) => WebAssembly.instantiate(binary, imports)).then(receiver, (reason) => {
+        err(`failed to asynchronously prepare wasm: ${reason}`);
+        abort(reason);
+      });
+    }
+    function instantiateAsync(binary, binaryFile, imports, callback) {
+      if (!binary && typeof WebAssembly.instantiateStreaming == "function" && !isDataURI(binaryFile) && typeof fetch == "function") {
+        return fetch(binaryFile, { credentials: "same-origin" }).then((response) => {
+          var result = WebAssembly.instantiateStreaming(response, imports);
+          return result.then(callback, function(reason) {
+            err(`wasm streaming compile failed: ${reason}`);
+            err("falling back to ArrayBuffer instantiation");
+            return instantiateArrayBuffer(binaryFile, imports, callback);
+          });
+        });
+      }
+      return instantiateArrayBuffer(binaryFile, imports, callback);
+    }
+    function createWasm() {
+      var info = { "a": wasmImports };
+      function receiveInstance(instance, module) {
+        wasmExports = instance.exports;
+        wasmMemory = wasmExports["A"];
+        updateMemoryViews();
+        wasmTable = wasmExports["F"];
+        addOnInit(wasmExports["B"]);
+        removeRunDependency("wasm-instantiate");
+        return wasmExports;
+      }
+      addRunDependency("wasm-instantiate");
+      function receiveInstantiationResult(result) {
+        receiveInstance(result["instance"]);
+      }
+      if (Module6["instantiateWasm"]) {
+        try {
+          return Module6["instantiateWasm"](info, receiveInstance);
+        } catch (e) {
+          err(`Module.instantiateWasm callback failed with error: ${e}`);
+          readyPromiseReject(e);
+        }
+      }
+      instantiateAsync(wasmBinary, wasmBinaryFile, info, receiveInstantiationResult).catch(readyPromiseReject);
+      return {};
+    }
+    function ExitStatus(status) {
+      this.name = "ExitStatus";
+      this.message = `Program terminated with exit(${status})`;
+      this.status = status;
+    }
+    var callRuntimeCallbacks = (callbacks) => {
+      while (callbacks.length > 0) {
+        callbacks.shift()(Module6);
+      }
+    };
+    var noExitRuntime = Module6["noExitRuntime"] || true;
+    class ExceptionInfo {
+      constructor(excPtr) {
+        this.excPtr = excPtr;
+        this.ptr = excPtr - 24;
+      }
+      set_type(type) {
+        HEAPU32[this.ptr + 4 >> 2] = type;
+      }
+      get_type() {
+        return HEAPU32[this.ptr + 4 >> 2];
+      }
+      set_destructor(destructor) {
+        HEAPU32[this.ptr + 8 >> 2] = destructor;
+      }
+      get_destructor() {
+        return HEAPU32[this.ptr + 8 >> 2];
+      }
+      set_caught(caught) {
+        caught = caught ? 1 : 0;
+        HEAP8[this.ptr + 12] = caught;
+      }
+      get_caught() {
+        return HEAP8[this.ptr + 12] != 0;
+      }
+      set_rethrown(rethrown) {
+        rethrown = rethrown ? 1 : 0;
+        HEAP8[this.ptr + 13] = rethrown;
+      }
+      get_rethrown() {
+        return HEAP8[this.ptr + 13] != 0;
+      }
+      init(type, destructor) {
+        this.set_adjusted_ptr(0);
+        this.set_type(type);
+        this.set_destructor(destructor);
+      }
+      set_adjusted_ptr(adjustedPtr) {
+        HEAPU32[this.ptr + 16 >> 2] = adjustedPtr;
+      }
+      get_adjusted_ptr() {
+        return HEAPU32[this.ptr + 16 >> 2];
+      }
+      get_exception_ptr() {
+        var isPointer = ___cxa_is_pointer_type(this.get_type());
+        if (isPointer) {
+          return HEAPU32[this.excPtr >> 2];
+        }
+        var adjusted = this.get_adjusted_ptr();
+        if (adjusted !== 0) return adjusted;
+        return this.excPtr;
+      }
+    }
+    var exceptionLast = 0;
+    var uncaughtExceptionCount = 0;
+    var ___cxa_throw = (ptr, type, destructor) => {
+      var info = new ExceptionInfo(ptr);
+      info.init(type, destructor);
+      exceptionLast = ptr;
+      uncaughtExceptionCount++;
+      throw exceptionLast;
+    };
+    var __embind_register_bigint = (primitiveType, name2, size, minRange, maxRange) => {
+    };
+    var embind_init_charCodes = () => {
+      var codes = new Array(256);
+      for (var i = 0; i < 256; ++i) {
+        codes[i] = String.fromCharCode(i);
+      }
+      embind_charCodes = codes;
+    };
+    var embind_charCodes;
+    var readLatin1String = (ptr) => {
+      var ret = "";
+      var c = ptr;
+      while (HEAPU8[c]) {
+        ret += embind_charCodes[HEAPU8[c++]];
+      }
+      return ret;
+    };
+    var awaitingDependencies = {};
+    var registeredTypes = {};
+    var typeDependencies = {};
+    var BindingError;
+    var throwBindingError = (message) => {
+      throw new BindingError(message);
+    };
+    var InternalError;
+    var throwInternalError = (message) => {
+      throw new InternalError(message);
+    };
+    var whenDependentTypesAreResolved = (myTypes, dependentTypes, getTypeConverters) => {
+      myTypes.forEach(function(type) {
+        typeDependencies[type] = dependentTypes;
+      });
+      function onComplete(typeConverters2) {
+        var myTypeConverters = getTypeConverters(typeConverters2);
+        if (myTypeConverters.length !== myTypes.length) {
+          throwInternalError("Mismatched type converter count");
+        }
+        for (var i = 0; i < myTypes.length; ++i) {
+          registerType(myTypes[i], myTypeConverters[i]);
+        }
+      }
+      var typeConverters = new Array(dependentTypes.length);
+      var unregisteredTypes = [];
+      var registered = 0;
+      dependentTypes.forEach((dt, i) => {
+        if (registeredTypes.hasOwnProperty(dt)) {
+          typeConverters[i] = registeredTypes[dt];
+        } else {
+          unregisteredTypes.push(dt);
+          if (!awaitingDependencies.hasOwnProperty(dt)) {
+            awaitingDependencies[dt] = [];
+          }
+          awaitingDependencies[dt].push(() => {
+            typeConverters[i] = registeredTypes[dt];
+            ++registered;
+            if (registered === unregisteredTypes.length) {
+              onComplete(typeConverters);
+            }
+          });
+        }
+      });
+      if (0 === unregisteredTypes.length) {
+        onComplete(typeConverters);
+      }
+    };
+    function sharedRegisterType(rawType, registeredInstance, options2 = {}) {
+      var name2 = registeredInstance.name;
+      if (!rawType) {
+        throwBindingError(`type "${name2}" must have a positive integer typeid pointer`);
+      }
+      if (registeredTypes.hasOwnProperty(rawType)) {
+        if (options2.ignoreDuplicateRegistrations) {
+          return;
+        } else {
+          throwBindingError(`Cannot register type '${name2}' twice`);
+        }
+      }
+      registeredTypes[rawType] = registeredInstance;
+      delete typeDependencies[rawType];
+      if (awaitingDependencies.hasOwnProperty(rawType)) {
+        var callbacks = awaitingDependencies[rawType];
+        delete awaitingDependencies[rawType];
+        callbacks.forEach((cb) => cb());
+      }
+    }
+    function registerType(rawType, registeredInstance, options2 = {}) {
+      if (!("argPackAdvance" in registeredInstance)) {
+        throw new TypeError("registerType registeredInstance requires argPackAdvance");
+      }
+      return sharedRegisterType(rawType, registeredInstance, options2);
+    }
+    var GenericWireTypeSize = 8;
+    var __embind_register_bool = (rawType, name2, trueValue, falseValue) => {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": function(wt) {
+        return !!wt;
+      }, "toWireType": function(destructors, o) {
+        return o ? trueValue : falseValue;
+      }, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": function(pointer) {
+        return this["fromWireType"](HEAPU8[pointer]);
+      }, destructorFunction: null });
+    };
+    var emval_freelist = [];
+    var emval_handles = [];
+    var __emval_decref = (handle) => {
+      if (handle > 9 && 0 === --emval_handles[handle + 1]) {
+        emval_handles[handle] = void 0;
+        emval_freelist.push(handle);
+      }
+    };
+    var count_emval_handles = () => emval_handles.length / 2 - 5 - emval_freelist.length;
+    var init_emval = () => {
+      emval_handles.push(0, 1, void 0, 1, null, 1, true, 1, false, 1);
+      Module6["count_emval_handles"] = count_emval_handles;
+    };
+    var Emval = { toValue: (handle) => {
+      if (!handle) {
+        throwBindingError("Cannot use deleted val. handle = " + handle);
+      }
+      return emval_handles[handle];
+    }, toHandle: (value) => {
+      switch (value) {
+        case void 0:
+          return 2;
+        case null:
+          return 4;
+        case true:
+          return 6;
+        case false:
+          return 8;
+        default: {
+          const handle = emval_freelist.pop() || emval_handles.length;
+          emval_handles[handle] = value;
+          emval_handles[handle + 1] = 1;
+          return handle;
+        }
+      }
+    } };
+    function readPointer(pointer) {
+      return this["fromWireType"](HEAPU32[pointer >> 2]);
+    }
+    var EmValType = { name: "emscripten::val", "fromWireType": (handle) => {
+      var rv = Emval.toValue(handle);
+      __emval_decref(handle);
+      return rv;
+    }, "toWireType": (destructors, value) => Emval.toHandle(value), "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": readPointer, destructorFunction: null };
+    var __embind_register_emval = (rawType) => registerType(rawType, EmValType);
+    var floatReadValueFromPointer = (name2, width) => {
+      switch (width) {
+        case 4:
+          return function(pointer) {
+            return this["fromWireType"](HEAPF32[pointer >> 2]);
+          };
+        case 8:
+          return function(pointer) {
+            return this["fromWireType"](HEAPF64[pointer >> 3]);
+          };
+        default:
+          throw new TypeError(`invalid float width (${width}): ${name2}`);
+      }
+    };
+    var __embind_register_float = (rawType, name2, size) => {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": (value) => value, "toWireType": (destructors, value) => value, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": floatReadValueFromPointer(name2, size), destructorFunction: null });
+    };
+    var createNamedFunction = (name2, body) => Object.defineProperty(body, "name", { value: name2 });
+    var runDestructors = (destructors) => {
+      while (destructors.length) {
+        var ptr = destructors.pop();
+        var del = destructors.pop();
+        del(ptr);
+      }
+    };
+    function usesDestructorStack(argTypes) {
+      for (var i = 1; i < argTypes.length; ++i) {
+        if (argTypes[i] !== null && argTypes[i].destructorFunction === void 0) {
+          return true;
+        }
+      }
+      return false;
+    }
+    function craftInvokerFunction(humanName, argTypes, classType, cppInvokerFunc, cppTargetFunc, isAsync) {
+      var argCount = argTypes.length;
+      if (argCount < 2) {
+        throwBindingError("argTypes array size mismatch! Must at least get return value and 'this' types!");
+      }
+      var isClassMethodFunc = argTypes[1] !== null && classType !== null;
+      var needsDestructorStack = usesDestructorStack(argTypes);
+      var returns = argTypes[0].name !== "void";
+      var expectedArgCount = argCount - 2;
+      var argsWired = new Array(expectedArgCount);
+      var invokerFuncArgs = [];
+      var destructors = [];
+      var invokerFn = function(...args) {
+        if (args.length !== expectedArgCount) {
+          throwBindingError(`function ${humanName} called with ${args.length} arguments, expected ${expectedArgCount}`);
+        }
+        destructors.length = 0;
+        var thisWired;
+        invokerFuncArgs.length = isClassMethodFunc ? 2 : 1;
+        invokerFuncArgs[0] = cppTargetFunc;
+        if (isClassMethodFunc) {
+          thisWired = argTypes[1]["toWireType"](destructors, this);
+          invokerFuncArgs[1] = thisWired;
+        }
+        for (var i = 0; i < expectedArgCount; ++i) {
+          argsWired[i] = argTypes[i + 2]["toWireType"](destructors, args[i]);
+          invokerFuncArgs.push(argsWired[i]);
+        }
+        var rv = cppInvokerFunc(...invokerFuncArgs);
+        function onDone(rv2) {
+          if (needsDestructorStack) {
+            runDestructors(destructors);
+          } else {
+            for (var i2 = isClassMethodFunc ? 1 : 2; i2 < argTypes.length; i2++) {
+              var param2 = i2 === 1 ? thisWired : argsWired[i2 - 2];
+              if (argTypes[i2].destructorFunction !== null) {
+                argTypes[i2].destructorFunction(param2);
+              }
+            }
+          }
+          if (returns) {
+            return argTypes[0]["fromWireType"](rv2);
+          }
+        }
+        return onDone(rv);
+      };
+      return createNamedFunction(humanName, invokerFn);
+    }
+    var ensureOverloadTable = (proto, methodName, humanName) => {
+      if (void 0 === proto[methodName].overloadTable) {
+        var prevFunc = proto[methodName];
+        proto[methodName] = function(...args) {
+          if (!proto[methodName].overloadTable.hasOwnProperty(args.length)) {
+            throwBindingError(`Function '${humanName}' called with an invalid number of arguments (${args.length}) - expects one of (${proto[methodName].overloadTable})!`);
+          }
+          return proto[methodName].overloadTable[args.length].apply(this, args);
+        };
+        proto[methodName].overloadTable = [];
+        proto[methodName].overloadTable[prevFunc.argCount] = prevFunc;
+      }
+    };
+    var exposePublicSymbol = (name2, value, numArguments) => {
+      if (Module6.hasOwnProperty(name2)) {
+        if (void 0 === numArguments || void 0 !== Module6[name2].overloadTable && void 0 !== Module6[name2].overloadTable[numArguments]) {
+          throwBindingError(`Cannot register public name '${name2}' twice`);
+        }
+        ensureOverloadTable(Module6, name2, name2);
+        if (Module6.hasOwnProperty(numArguments)) {
+          throwBindingError(`Cannot register multiple overloads of a function with the same number of arguments (${numArguments})!`);
+        }
+        Module6[name2].overloadTable[numArguments] = value;
+      } else {
+        Module6[name2] = value;
+        if (void 0 !== numArguments) {
+          Module6[name2].numArguments = numArguments;
+        }
+      }
+    };
+    var heap32VectorToArray = (count2, firstElement) => {
+      var array2 = [];
+      for (var i = 0; i < count2; i++) {
+        array2.push(HEAPU32[firstElement + i * 4 >> 2]);
+      }
+      return array2;
+    };
+    var replacePublicSymbol = (name2, value, numArguments) => {
+      if (!Module6.hasOwnProperty(name2)) {
+        throwInternalError("Replacing nonexistent public symbol");
+      }
+      if (void 0 !== Module6[name2].overloadTable && void 0 !== numArguments) {
+        Module6[name2].overloadTable[numArguments] = value;
+      } else {
+        Module6[name2] = value;
+        Module6[name2].argCount = numArguments;
+      }
+    };
+    var dynCallLegacy = (sig, ptr, args) => {
+      sig = sig.replace(/p/g, "i");
+      var f = Module6["dynCall_" + sig];
+      return f(ptr, ...args);
+    };
+    var wasmTableMirror = [];
+    var wasmTable;
+    var getWasmTableEntry = (funcPtr) => {
+      var func = wasmTableMirror[funcPtr];
+      if (!func) {
+        if (funcPtr >= wasmTableMirror.length) wasmTableMirror.length = funcPtr + 1;
+        wasmTableMirror[funcPtr] = func = wasmTable.get(funcPtr);
+      }
+      return func;
+    };
+    var dynCall = (sig, ptr, args = []) => {
+      if (sig.includes("j")) {
+        return dynCallLegacy(sig, ptr, args);
+      }
+      var rtn = getWasmTableEntry(ptr)(...args);
+      return rtn;
+    };
+    var getDynCaller = (sig, ptr) => (...args) => dynCall(sig, ptr, args);
+    var embind__requireFunction = (signature, rawFunction) => {
+      signature = readLatin1String(signature);
+      function makeDynCaller() {
+        if (signature.includes("j")) {
+          return getDynCaller(signature, rawFunction);
+        }
+        return getWasmTableEntry(rawFunction);
+      }
+      var fp = makeDynCaller();
+      if (typeof fp != "function") {
+        throwBindingError(`unknown function pointer with signature ${signature}: ${rawFunction}`);
+      }
+      return fp;
+    };
+    var extendError = (baseErrorType, errorName) => {
+      var errorClass = createNamedFunction(errorName, function(message) {
+        this.name = errorName;
+        this.message = message;
+        var stack = new Error(message).stack;
+        if (stack !== void 0) {
+          this.stack = this.toString() + "\n" + stack.replace(/^Error(:[^\n]*)?\n/, "");
+        }
+      });
+      errorClass.prototype = Object.create(baseErrorType.prototype);
+      errorClass.prototype.constructor = errorClass;
+      errorClass.prototype.toString = function() {
+        if (this.message === void 0) {
+          return this.name;
+        } else {
+          return `${this.name}: ${this.message}`;
+        }
+      };
+      return errorClass;
+    };
+    var UnboundTypeError;
+    var getTypeName = (type) => {
+      var ptr = ___getTypeName(type);
+      var rv = readLatin1String(ptr);
+      _free(ptr);
+      return rv;
+    };
+    var throwUnboundTypeError = (message, types) => {
+      var unboundTypes = [];
+      var seen = {};
+      function visit2(type) {
+        if (seen[type]) {
+          return;
+        }
+        if (registeredTypes[type]) {
+          return;
+        }
+        if (typeDependencies[type]) {
+          typeDependencies[type].forEach(visit2);
+          return;
+        }
+        unboundTypes.push(type);
+        seen[type] = true;
+      }
+      types.forEach(visit2);
+      throw new UnboundTypeError(`${message}: ` + unboundTypes.map(getTypeName).join([", "]));
+    };
+    var getFunctionName = (signature) => {
+      signature = signature.trim();
+      const argsIndex = signature.indexOf("(");
+      if (argsIndex !== -1) {
+        return signature.substr(0, argsIndex);
+      } else {
+        return signature;
+      }
+    };
+    var __embind_register_function = (name2, argCount, rawArgTypesAddr, signature, rawInvoker, fn, isAsync) => {
+      var argTypes = heap32VectorToArray(argCount, rawArgTypesAddr);
+      name2 = readLatin1String(name2);
+      name2 = getFunctionName(name2);
+      rawInvoker = embind__requireFunction(signature, rawInvoker);
+      exposePublicSymbol(name2, function() {
+        throwUnboundTypeError(`Cannot call ${name2} due to unbound types`, argTypes);
+      }, argCount - 1);
+      whenDependentTypesAreResolved([], argTypes, (argTypes2) => {
+        var invokerArgsArray = [argTypes2[0], null].concat(argTypes2.slice(1));
+        replacePublicSymbol(name2, craftInvokerFunction(name2, invokerArgsArray, null, rawInvoker, fn, isAsync), argCount - 1);
+        return [];
+      });
+    };
+    var integerReadValueFromPointer = (name2, width, signed) => {
+      switch (width) {
+        case 1:
+          return signed ? (pointer) => HEAP8[pointer] : (pointer) => HEAPU8[pointer];
+        case 2:
+          return signed ? (pointer) => HEAP16[pointer >> 1] : (pointer) => HEAPU16[pointer >> 1];
+        case 4:
+          return signed ? (pointer) => HEAP32[pointer >> 2] : (pointer) => HEAPU32[pointer >> 2];
+        default:
+          throw new TypeError(`invalid integer width (${width}): ${name2}`);
+      }
+    };
+    var __embind_register_integer = (primitiveType, name2, size, minRange, maxRange) => {
+      name2 = readLatin1String(name2);
+      if (maxRange === -1) {
+        maxRange = 4294967295;
+      }
+      var fromWireType = (value) => value;
+      if (minRange === 0) {
+        var bitshift = 32 - 8 * size;
+        fromWireType = (value) => value << bitshift >>> bitshift;
+      }
+      var isUnsignedType = name2.includes("unsigned");
+      var checkAssertions = (value, toTypeName) => {
+      };
+      var toWireType;
+      if (isUnsignedType) {
+        toWireType = function(destructors, value) {
+          checkAssertions(value, this.name);
+          return value >>> 0;
+        };
+      } else {
+        toWireType = function(destructors, value) {
+          checkAssertions(value, this.name);
+          return value;
+        };
+      }
+      registerType(primitiveType, { name: name2, "fromWireType": fromWireType, "toWireType": toWireType, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": integerReadValueFromPointer(name2, size, minRange !== 0), destructorFunction: null });
+    };
+    var __embind_register_memory_view = (rawType, dataTypeIndex, name2) => {
+      var typeMapping = [Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
+      var TA = typeMapping[dataTypeIndex];
+      function decodeMemoryView(handle) {
+        var size = HEAPU32[handle >> 2];
+        var data = HEAPU32[handle + 4 >> 2];
+        return new TA(HEAP8.buffer, data, size);
+      }
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": decodeMemoryView, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": decodeMemoryView }, { ignoreDuplicateRegistrations: true });
+    };
+    var stringToUTF8Array = (str, heap2, outIdx, maxBytesToWrite) => {
+      if (!(maxBytesToWrite > 0)) return 0;
+      var startIdx = outIdx;
+      var endIdx = outIdx + maxBytesToWrite - 1;
+      for (var i = 0; i < str.length; ++i) {
+        var u = str.charCodeAt(i);
+        if (u >= 55296 && u <= 57343) {
+          var u1 = str.charCodeAt(++i);
+          u = 65536 + ((u & 1023) << 10) | u1 & 1023;
+        }
+        if (u <= 127) {
+          if (outIdx >= endIdx) break;
+          heap2[outIdx++] = u;
+        } else if (u <= 2047) {
+          if (outIdx + 1 >= endIdx) break;
+          heap2[outIdx++] = 192 | u >> 6;
+          heap2[outIdx++] = 128 | u & 63;
+        } else if (u <= 65535) {
+          if (outIdx + 2 >= endIdx) break;
+          heap2[outIdx++] = 224 | u >> 12;
+          heap2[outIdx++] = 128 | u >> 6 & 63;
+          heap2[outIdx++] = 128 | u & 63;
+        } else {
+          if (outIdx + 3 >= endIdx) break;
+          heap2[outIdx++] = 240 | u >> 18;
+          heap2[outIdx++] = 128 | u >> 12 & 63;
+          heap2[outIdx++] = 128 | u >> 6 & 63;
+          heap2[outIdx++] = 128 | u & 63;
+        }
+      }
+      heap2[outIdx] = 0;
+      return outIdx - startIdx;
+    };
+    var stringToUTF8 = (str, outPtr, maxBytesToWrite) => stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite);
+    var lengthBytesUTF8 = (str) => {
+      var len = 0;
+      for (var i = 0; i < str.length; ++i) {
+        var c = str.charCodeAt(i);
+        if (c <= 127) {
+          len++;
+        } else if (c <= 2047) {
+          len += 2;
+        } else if (c >= 55296 && c <= 57343) {
+          len += 4;
+          ++i;
+        } else {
+          len += 3;
+        }
+      }
+      return len;
+    };
+    var UTF8ArrayToString = (heapOrArray, idx, maxBytesToRead) => {
+      var endIdx = idx + maxBytesToRead;
+      var str = "";
+      while (!(idx >= endIdx)) {
+        var u0 = heapOrArray[idx++];
+        if (!u0) return str;
+        if (!(u0 & 128)) {
+          str += String.fromCharCode(u0);
+          continue;
+        }
+        var u1 = heapOrArray[idx++] & 63;
+        if ((u0 & 224) == 192) {
+          str += String.fromCharCode((u0 & 31) << 6 | u1);
+          continue;
+        }
+        var u2 = heapOrArray[idx++] & 63;
+        if ((u0 & 240) == 224) {
+          u0 = (u0 & 15) << 12 | u1 << 6 | u2;
+        } else {
+          u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
+        }
+        if (u0 < 65536) {
+          str += String.fromCharCode(u0);
+        } else {
+          var ch = u0 - 65536;
+          str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+        }
+      }
+      return str;
+    };
+    var UTF8ToString = (ptr, maxBytesToRead) => ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : "";
+    var __embind_register_std_string = (rawType, name2) => {
+      name2 = readLatin1String(name2);
+      var stdStringIsUTF8 = name2 === "std::string";
+      registerType(rawType, { name: name2, "fromWireType"(value) {
+        var length = HEAPU32[value >> 2];
+        var payload = value + 4;
+        var str;
+        if (stdStringIsUTF8) {
+          var decodeStartPtr = payload;
+          for (var i = 0; i <= length; ++i) {
+            var currentBytePtr = payload + i;
+            if (i == length || HEAPU8[currentBytePtr] == 0) {
+              var maxRead = currentBytePtr - decodeStartPtr;
+              var stringSegment = UTF8ToString(decodeStartPtr, maxRead);
+              if (str === void 0) {
+                str = stringSegment;
+              } else {
+                str += String.fromCharCode(0);
+                str += stringSegment;
+              }
+              decodeStartPtr = currentBytePtr + 1;
+            }
+          }
+        } else {
+          var a = new Array(length);
+          for (var i = 0; i < length; ++i) {
+            a[i] = String.fromCharCode(HEAPU8[payload + i]);
+          }
+          str = a.join("");
+        }
+        _free(value);
+        return str;
+      }, "toWireType"(destructors, value) {
+        if (value instanceof ArrayBuffer) {
+          value = new Uint8Array(value);
+        }
+        var length;
+        var valueIsOfTypeString = typeof value == "string";
+        if (!(valueIsOfTypeString || value instanceof Uint8Array || value instanceof Uint8ClampedArray || value instanceof Int8Array)) {
+          throwBindingError("Cannot pass non-string to std::string");
+        }
+        if (stdStringIsUTF8 && valueIsOfTypeString) {
+          length = lengthBytesUTF8(value);
+        } else {
+          length = value.length;
+        }
+        var base = _malloc(4 + length + 1);
+        var ptr = base + 4;
+        HEAPU32[base >> 2] = length;
+        if (stdStringIsUTF8 && valueIsOfTypeString) {
+          stringToUTF8(value, ptr, length + 1);
+        } else {
+          if (valueIsOfTypeString) {
+            for (var i = 0; i < length; ++i) {
+              var charCode = value.charCodeAt(i);
+              if (charCode > 255) {
+                _free(ptr);
+                throwBindingError("String has UTF-16 code units that do not fit in 8 bits");
+              }
+              HEAPU8[ptr + i] = charCode;
+            }
+          } else {
+            for (var i = 0; i < length; ++i) {
+              HEAPU8[ptr + i] = value[i];
+            }
+          }
+        }
+        if (destructors !== null) {
+          destructors.push(_free, base);
+        }
+        return base;
+      }, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": readPointer, destructorFunction(ptr) {
+        _free(ptr);
+      } });
+    };
+    var UTF16ToString = (ptr, maxBytesToRead) => {
+      var str = "";
+      for (var i = 0; !(i >= maxBytesToRead / 2); ++i) {
+        var codeUnit = HEAP16[ptr + i * 2 >> 1];
+        if (codeUnit == 0) break;
+        str += String.fromCharCode(codeUnit);
+      }
+      return str;
+    };
+    var stringToUTF16 = (str, outPtr, maxBytesToWrite) => {
+      maxBytesToWrite ??= 2147483647;
+      if (maxBytesToWrite < 2) return 0;
+      maxBytesToWrite -= 2;
+      var startPtr = outPtr;
+      var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+      for (var i = 0; i < numCharsToWrite; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        HEAP16[outPtr >> 1] = codeUnit;
+        outPtr += 2;
+      }
+      HEAP16[outPtr >> 1] = 0;
+      return outPtr - startPtr;
+    };
+    var lengthBytesUTF16 = (str) => str.length * 2;
+    var UTF32ToString = (ptr, maxBytesToRead) => {
+      var i = 0;
+      var str = "";
+      while (!(i >= maxBytesToRead / 4)) {
+        var utf32 = HEAP32[ptr + i * 4 >> 2];
+        if (utf32 == 0) break;
+        ++i;
+        if (utf32 >= 65536) {
+          var ch = utf32 - 65536;
+          str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+        } else {
+          str += String.fromCharCode(utf32);
+        }
+      }
+      return str;
+    };
+    var stringToUTF32 = (str, outPtr, maxBytesToWrite) => {
+      maxBytesToWrite ??= 2147483647;
+      if (maxBytesToWrite < 4) return 0;
+      var startPtr = outPtr;
+      var endPtr = startPtr + maxBytesToWrite - 4;
+      for (var i = 0; i < str.length; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        if (codeUnit >= 55296 && codeUnit <= 57343) {
+          var trailSurrogate = str.charCodeAt(++i);
+          codeUnit = 65536 + ((codeUnit & 1023) << 10) | trailSurrogate & 1023;
+        }
+        HEAP32[outPtr >> 2] = codeUnit;
+        outPtr += 4;
+        if (outPtr + 4 > endPtr) break;
+      }
+      HEAP32[outPtr >> 2] = 0;
+      return outPtr - startPtr;
+    };
+    var lengthBytesUTF32 = (str) => {
+      var len = 0;
+      for (var i = 0; i < str.length; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        if (codeUnit >= 55296 && codeUnit <= 57343) ++i;
+        len += 4;
+      }
+      return len;
+    };
+    var __embind_register_std_wstring = (rawType, charSize, name2) => {
+      name2 = readLatin1String(name2);
+      var decodeString, encodeString, readCharAt, lengthBytesUTF;
+      if (charSize === 2) {
+        decodeString = UTF16ToString;
+        encodeString = stringToUTF16;
+        lengthBytesUTF = lengthBytesUTF16;
+        readCharAt = (pointer) => HEAPU16[pointer >> 1];
+      } else if (charSize === 4) {
+        decodeString = UTF32ToString;
+        encodeString = stringToUTF32;
+        lengthBytesUTF = lengthBytesUTF32;
+        readCharAt = (pointer) => HEAPU32[pointer >> 2];
+      }
+      registerType(rawType, { name: name2, "fromWireType": (value) => {
+        var length = HEAPU32[value >> 2];
+        var str;
+        var decodeStartPtr = value + 4;
+        for (var i = 0; i <= length; ++i) {
+          var currentBytePtr = value + 4 + i * charSize;
+          if (i == length || readCharAt(currentBytePtr) == 0) {
+            var maxReadBytes = currentBytePtr - decodeStartPtr;
+            var stringSegment = decodeString(decodeStartPtr, maxReadBytes);
+            if (str === void 0) {
+              str = stringSegment;
+            } else {
+              str += String.fromCharCode(0);
+              str += stringSegment;
+            }
+            decodeStartPtr = currentBytePtr + charSize;
+          }
+        }
+        _free(value);
+        return str;
+      }, "toWireType": (destructors, value) => {
+        if (!(typeof value == "string")) {
+          throwBindingError(`Cannot pass non-string to C++ string type ${name2}`);
+        }
+        var length = lengthBytesUTF(value);
+        var ptr = _malloc(4 + length + charSize);
+        HEAPU32[ptr >> 2] = length / charSize;
+        encodeString(value, ptr + 4, length + charSize);
+        if (destructors !== null) {
+          destructors.push(_free, ptr);
+        }
+        return ptr;
+      }, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": readPointer, destructorFunction(ptr) {
+        _free(ptr);
+      } });
+    };
+    var __embind_register_void = (rawType, name2) => {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { isVoid: true, name: name2, "argPackAdvance": 0, "fromWireType": () => void 0, "toWireType": (destructors, o) => void 0 });
+    };
+    var __emscripten_memcpy_js = (dest, src, num) => HEAPU8.copyWithin(dest, src, src + num);
+    var emval_methodCallers = [];
+    var __emval_call = (caller, handle, destructorsRef, args) => {
+      caller = emval_methodCallers[caller];
+      handle = Emval.toValue(handle);
+      return caller(null, handle, destructorsRef, args);
+    };
+    var emval_symbols = {};
+    var getStringOrSymbol = (address) => {
+      var symbol2 = emval_symbols[address];
+      if (symbol2 === void 0) {
+        return readLatin1String(address);
+      }
+      return symbol2;
+    };
+    var emval_get_global = () => {
+      if (typeof globalThis == "object") {
+        return globalThis;
+      }
+      function testGlobal(obj) {
+        obj["$$$embind_global$$$"] = obj;
+        var success2 = typeof $$$embind_global$$$ == "object" && obj["$$$embind_global$$$"] == obj;
+        if (!success2) {
+          delete obj["$$$embind_global$$$"];
+        }
+        return success2;
+      }
+      if (typeof $$$embind_global$$$ == "object") {
+        return $$$embind_global$$$;
+      }
+      if (typeof global == "object" && testGlobal(global)) {
+        $$$embind_global$$$ = global;
+      } else if (typeof self == "object" && testGlobal(self)) {
+        $$$embind_global$$$ = self;
+      }
+      if (typeof $$$embind_global$$$ == "object") {
+        return $$$embind_global$$$;
+      }
+      throw Error("unable to get global object.");
+    };
+    var __emval_get_global = (name2) => {
+      if (name2 === 0) {
+        return Emval.toHandle(emval_get_global());
+      } else {
+        name2 = getStringOrSymbol(name2);
+        return Emval.toHandle(emval_get_global()[name2]);
+      }
+    };
+    var emval_addMethodCaller = (caller) => {
+      var id = emval_methodCallers.length;
+      emval_methodCallers.push(caller);
+      return id;
+    };
+    var requireRegisteredType = (rawType, humanName) => {
+      var impl = registeredTypes[rawType];
+      if (void 0 === impl) {
+        throwBindingError(`${humanName} has unknown type ${getTypeName(rawType)}`);
+      }
+      return impl;
+    };
+    var emval_lookupTypes = (argCount, argTypes) => {
+      var a = new Array(argCount);
+      for (var i = 0; i < argCount; ++i) {
+        a[i] = requireRegisteredType(HEAPU32[argTypes + i * 4 >> 2], "parameter " + i);
+      }
+      return a;
+    };
+    var reflectConstruct = Reflect.construct;
+    var emval_returnValue = (returnType, destructorsRef, handle) => {
+      var destructors = [];
+      var result = returnType["toWireType"](destructors, handle);
+      if (destructors.length) {
+        HEAPU32[destructorsRef >> 2] = Emval.toHandle(destructors);
+      }
+      return result;
+    };
+    var __emval_get_method_caller = (argCount, argTypes, kind) => {
+      var types = emval_lookupTypes(argCount, argTypes);
+      var retType = types.shift();
+      argCount--;
+      var argN = new Array(argCount);
+      var invokerFunction = (obj, func, destructorsRef, args) => {
+        var offset = 0;
+        for (var i = 0; i < argCount; ++i) {
+          argN[i] = types[i]["readValueFromPointer"](args + offset);
+          offset += types[i]["argPackAdvance"];
+        }
+        var rv = kind === 1 ? reflectConstruct(func, argN) : func.apply(obj, argN);
+        return emval_returnValue(retType, destructorsRef, rv);
+      };
+      var functionName = `methodCaller<(${types.map((t) => t.name).join(", ")}) => ${retType.name}>`;
+      return emval_addMethodCaller(createNamedFunction(functionName, invokerFunction));
+    };
+    var __emval_incref = (handle) => {
+      if (handle > 9) {
+        emval_handles[handle + 1] += 1;
+      }
+    };
+    var __emval_run_destructors = (handle) => {
+      var destructors = Emval.toValue(handle);
+      runDestructors(destructors);
+      __emval_decref(handle);
+    };
+    var _abort = () => {
+      abort("");
+    };
+    var getHeapMax = () => 2147483648;
+    var growMemory = (size) => {
+      var b = wasmMemory.buffer;
+      var pages = (size - b.byteLength + 65535) / 65536;
+      try {
+        wasmMemory.grow(pages);
+        updateMemoryViews();
+        return 1;
+      } catch (e) {
+      }
+    };
+    var _emscripten_resize_heap = (requestedSize) => {
+      var oldSize = HEAPU8.length;
+      requestedSize >>>= 0;
+      var maxHeapSize = getHeapMax();
+      if (requestedSize > maxHeapSize) {
+        return false;
+      }
+      var alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
+      for (var cutDown = 1; cutDown <= 4; cutDown *= 2) {
+        var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown);
+        overGrownHeapSize = Math.min(overGrownHeapSize, requestedSize + 100663296);
+        var newSize = Math.min(maxHeapSize, alignUp(Math.max(requestedSize, overGrownHeapSize), 65536));
+        var replacement = growMemory(newSize);
+        if (replacement) {
+          return true;
+        }
+      }
+      return false;
+    };
+    var ENV = {};
+    var getExecutableName = () => thisProgram || "./this.program";
+    var getEnvStrings = () => {
+      if (!getEnvStrings.strings) {
+        var lang = (typeof navigator == "object" && navigator.languages && navigator.languages[0] || "C").replace("-", "_") + ".UTF-8";
+        var env = { "USER": "web_user", "LOGNAME": "web_user", "PATH": "/", "PWD": "/", "HOME": "/home/web_user", "LANG": lang, "_": getExecutableName() };
+        for (var x in ENV) {
+          if (ENV[x] === void 0) delete env[x];
+          else env[x] = ENV[x];
+        }
+        var strings = [];
+        for (var x in env) {
+          strings.push(`${x}=${env[x]}`);
+        }
+        getEnvStrings.strings = strings;
+      }
+      return getEnvStrings.strings;
+    };
+    var stringToAscii = (str, buffer) => {
+      for (var i = 0; i < str.length; ++i) {
+        HEAP8[buffer++] = str.charCodeAt(i);
+      }
+      HEAP8[buffer] = 0;
+    };
+    var _environ_get = (__environ, environ_buf) => {
+      var bufSize = 0;
+      getEnvStrings().forEach((string4, i) => {
+        var ptr = environ_buf + bufSize;
+        HEAPU32[__environ + i * 4 >> 2] = ptr;
+        stringToAscii(string4, ptr);
+        bufSize += string4.length + 1;
+      });
+      return 0;
+    };
+    var _environ_sizes_get = (penviron_count, penviron_buf_size) => {
+      var strings = getEnvStrings();
+      HEAPU32[penviron_count >> 2] = strings.length;
+      var bufSize = 0;
+      strings.forEach((string4) => bufSize += string4.length + 1);
+      HEAPU32[penviron_buf_size >> 2] = bufSize;
+      return 0;
+    };
+    var runtimeKeepaliveCounter = 0;
+    var keepRuntimeAlive = () => noExitRuntime || runtimeKeepaliveCounter > 0;
+    var _proc_exit = (code) => {
+      EXITSTATUS = code;
+      if (!keepRuntimeAlive()) {
+        Module6["onExit"]?.(code);
+        ABORT = true;
+      }
+      quit_(code, new ExitStatus(code));
+    };
+    var exitJS = (status, implicit) => {
+      EXITSTATUS = status;
+      _proc_exit(status);
+    };
+    var _exit = exitJS;
+    var _fd_close = (fd) => 52;
+    var convertI32PairToI53Checked = (lo, hi) => hi + 2097152 >>> 0 < 4194305 - !!lo ? (lo >>> 0) + hi * 4294967296 : NaN;
+    function _fd_seek(fd, offset_low, offset_high, whence, newOffset) {
+      var offset = convertI32PairToI53Checked(offset_low, offset_high);
+      return 70;
+    }
+    var printCharBuffers = [null, [], []];
+    var printChar = (stream, curr) => {
+      var buffer = printCharBuffers[stream];
+      if (curr === 0 || curr === 10) {
+        (stream === 1 ? out : err)(UTF8ArrayToString(buffer, 0));
+        buffer.length = 0;
+      } else {
+        buffer.push(curr);
+      }
+    };
+    var _fd_write = (fd, iov, iovcnt, pnum) => {
+      var num = 0;
+      for (var i = 0; i < iovcnt; i++) {
+        var ptr = HEAPU32[iov >> 2];
+        var len = HEAPU32[iov + 4 >> 2];
+        iov += 8;
+        for (var j = 0; j < len; j++) {
+          printChar(fd, HEAPU8[ptr + j]);
+        }
+        num += len;
+      }
+      HEAPU32[pnum >> 2] = num;
+      return 0;
+    };
+    embind_init_charCodes();
+    BindingError = Module6["BindingError"] = class BindingError extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "BindingError";
+      }
+    };
+    InternalError = Module6["InternalError"] = class InternalError extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "InternalError";
+      }
+    };
+    init_emval();
+    UnboundTypeError = Module6["UnboundTypeError"] = extendError(Error, "UnboundTypeError");
+    var wasmImports = { o: ___cxa_throw, q: __embind_register_bigint, m: __embind_register_bool, l: __embind_register_emval, j: __embind_register_float, f: __embind_register_function, b: __embind_register_integer, a: __embind_register_memory_view, e: __embind_register_std_string, c: __embind_register_std_wstring, n: __embind_register_void, v: __emscripten_memcpy_js, i: __emval_call, d: __emval_decref, k: __emval_get_global, h: __emval_get_method_caller, y: __emval_incref, g: __emval_run_destructors, r: _abort, s: _emscripten_resize_heap, t: _environ_get, u: _environ_sizes_get, z: _exit, w: _fd_close, p: _fd_seek, x: _fd_write };
+    var wasmExports = createWasm();
+    var ___wasm_call_ctors = () => (___wasm_call_ctors = wasmExports["B"])();
+    var ___getTypeName = (a0) => (___getTypeName = wasmExports["C"])(a0);
+    var _malloc = (a0) => (_malloc = wasmExports["D"])(a0);
+    var _free = (a0) => (_free = wasmExports["E"])(a0);
+    var __emscripten_stack_restore = (a0) => (__emscripten_stack_restore = wasmExports["_emscripten_stack_restore"])(a0);
+    var __emscripten_stack_alloc = (a0) => (__emscripten_stack_alloc = wasmExports["_emscripten_stack_alloc"])(a0);
+    var _emscripten_stack_get_current = () => (_emscripten_stack_get_current = wasmExports["emscripten_stack_get_current"])();
+    var ___cxa_increment_exception_refcount = (a0) => (___cxa_increment_exception_refcount = wasmExports["__cxa_increment_exception_refcount"])(a0);
+    var ___cxa_is_pointer_type = (a0) => (___cxa_is_pointer_type = wasmExports["G"])(a0);
+    var dynCall_jiji = Module6["dynCall_jiji"] = (a0, a1, a2, a3, a4) => (dynCall_jiji = Module6["dynCall_jiji"] = wasmExports["H"])(a0, a1, a2, a3, a4);
+    var calledRun;
+    dependenciesFulfilled = function runCaller() {
+      if (!calledRun) run();
+      if (!calledRun) dependenciesFulfilled = runCaller;
+    };
+    function run() {
+      if (runDependencies > 0) {
+        return;
+      }
+      preRun();
+      if (runDependencies > 0) {
+        return;
+      }
+      function doRun() {
+        if (calledRun) return;
+        calledRun = true;
+        Module6["calledRun"] = true;
+        if (ABORT) return;
+        initRuntime();
+        readyPromiseResolve(Module6);
+        if (Module6["onRuntimeInitialized"]) Module6["onRuntimeInitialized"]();
+        postRun();
+      }
+      if (Module6["setStatus"]) {
+        Module6["setStatus"]("Running...");
+        setTimeout(function() {
+          setTimeout(function() {
+            Module6["setStatus"]("");
+          }, 1);
+          doRun();
+        }, 1);
+      } else {
+        doRun();
+      }
+    }
+    if (Module6["preInit"]) {
+      if (typeof Module6["preInit"] == "function") Module6["preInit"] = [Module6["preInit"]];
+      while (Module6["preInit"].length > 0) {
+        Module6["preInit"].pop()();
+      }
+    }
+    run();
+    return readyPromise;
+  });
+})();
+var mozjpeg_dec_default = Module;
+
+// node_modules/@jsquash/jpeg/meta.js
+var defaultOptions = {
+  quality: 75,
+  baseline: false,
+  arithmetic: false,
+  progressive: true,
+  optimize_coding: true,
+  smoothing: 0,
+  color_space: 3,
+  quant_table: 3,
+  trellis_multipass: false,
+  trellis_opt_zero: false,
+  trellis_opt_table: false,
+  trellis_loops: 1,
+  auto_subsample: true,
+  chroma_subsample: 2,
+  separate_chroma_quality: false,
+  chroma_quality: 75
+};
+var defaultDecodeOptions = {
+  preserveOrientation: false
+};
+
+// node_modules/@jsquash/jpeg/decode.js
+var emscriptenModule;
+async function init3(module, moduleOptionOverrides) {
+  let actualModule = module;
+  let actualOptions = moduleOptionOverrides;
+  if (arguments.length === 1 && !(module instanceof WebAssembly.Module)) {
+    actualModule = void 0;
+    actualOptions = module;
+  }
+  emscriptenModule = initEmscriptenModule(mozjpeg_dec_default, actualModule, actualOptions);
+}
+async function decode5(buffer, options2 = {}) {
+  if (!emscriptenModule)
+    init3();
+  const _options = { ...defaultDecodeOptions, ...options2 };
+  const module = await emscriptenModule;
+  const result = module.decode(buffer, _options.preserveOrientation);
+  if (!result)
+    throw new Error("Decoding error");
+  return result;
+}
+
+// node_modules/@jsquash/jpeg/codec/enc/mozjpeg_enc.js
+var Module2 = (() => {
+  var _scriptDir = import.meta.url;
+  return (function(moduleArg = {}) {
+    var Module6 = moduleArg;
+    var readyPromiseResolve, readyPromiseReject;
+    var readyPromise = new Promise((resolve, reject) => {
+      readyPromiseResolve = resolve;
+      readyPromiseReject = reject;
+    });
+    const isServiceWorker5 = globalThis.ServiceWorkerGlobalScope !== void 0;
+    const isRunningInCloudFlareWorkers5 = isServiceWorker5 && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+    const isRunningInNode5 = typeof process === "object" && process.release && process.release.name === "node";
+    if (isRunningInCloudFlareWorkers5 || isRunningInNode5) {
+      if (!globalThis.ImageData) {
+        globalThis.ImageData = class ImageData {
+          constructor(data, width, height) {
+            this.data = data;
+            this.width = width;
+            this.height = height;
+          }
+        };
+      }
+      if (import.meta.url === void 0) {
+        import.meta.url = "https://localhost";
+      }
+      if (typeof self !== "undefined" && self.location === void 0) {
+        self.location = { href: "" };
+      }
+    }
+    var moduleOverrides = Object.assign({}, Module6);
+    var arguments_ = [];
+    var thisProgram = "./this.program";
+    var quit_ = (status, toThrow) => {
+      throw toThrow;
+    };
+    var ENVIRONMENT_IS_WEB = typeof window == "object";
+    var ENVIRONMENT_IS_WORKER = typeof importScripts == "function";
+    var ENVIRONMENT_IS_NODE = typeof process == "object" && typeof process.versions == "object" && typeof process.versions.node == "string";
+    var scriptDirectory = "";
+    function locateFile(path15) {
+      if (Module6["locateFile"]) {
+        return Module6["locateFile"](path15, scriptDirectory);
+      }
+      return scriptDirectory + path15;
+    }
+    var read_, readAsync, readBinary;
+    if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
+      if (ENVIRONMENT_IS_WORKER) {
+        scriptDirectory = self.location.href;
+      } else if (typeof document != "undefined" && document.currentScript) {
+        scriptDirectory = document.currentScript.src;
+      }
+      if (_scriptDir) {
+        scriptDirectory = _scriptDir;
+      }
+      if (scriptDirectory.startsWith("blob:")) {
+        scriptDirectory = "";
+      } else {
+        scriptDirectory = scriptDirectory.substr(0, scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1);
+      }
+      {
+        read_ = (url2) => {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", url2, false);
+          xhr.send(null);
+          return xhr.responseText;
+        };
+        if (ENVIRONMENT_IS_WORKER) {
+          readBinary = (url2) => {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url2, false);
+            xhr.responseType = "arraybuffer";
+            xhr.send(null);
+            return new Uint8Array(xhr.response);
+          };
+        }
+        readAsync = (url2, onload, onerror) => {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", url2, true);
+          xhr.responseType = "arraybuffer";
+          xhr.onload = () => {
+            if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
+              onload(xhr.response);
+              return;
+            }
+            onerror();
+          };
+          xhr.onerror = onerror;
+          xhr.send(null);
+        };
+      }
+    } else {
+    }
+    var out = Module6["print"] || console.log.bind(console);
+    var err = Module6["printErr"] || console.error.bind(console);
+    Object.assign(Module6, moduleOverrides);
+    moduleOverrides = null;
+    if (Module6["arguments"]) arguments_ = Module6["arguments"];
+    if (Module6["thisProgram"]) thisProgram = Module6["thisProgram"];
+    if (Module6["quit"]) quit_ = Module6["quit"];
+    var wasmBinary;
+    if (Module6["wasmBinary"]) wasmBinary = Module6["wasmBinary"];
+    var wasmMemory;
+    var ABORT = false;
+    var EXITSTATUS;
+    var HEAP8, HEAPU8, HEAP16, HEAPU16, HEAP32, HEAPU32, HEAPF32, HEAPF64;
+    function updateMemoryViews() {
+      var b = wasmMemory.buffer;
+      Module6["HEAP8"] = HEAP8 = new Int8Array(b);
+      Module6["HEAP16"] = HEAP16 = new Int16Array(b);
+      Module6["HEAPU8"] = HEAPU8 = new Uint8Array(b);
+      Module6["HEAPU16"] = HEAPU16 = new Uint16Array(b);
+      Module6["HEAP32"] = HEAP32 = new Int32Array(b);
+      Module6["HEAPU32"] = HEAPU32 = new Uint32Array(b);
+      Module6["HEAPF32"] = HEAPF32 = new Float32Array(b);
+      Module6["HEAPF64"] = HEAPF64 = new Float64Array(b);
+    }
+    var __ATPRERUN__ = [];
+    var __ATINIT__ = [];
+    var __ATPOSTRUN__ = [];
+    var runtimeInitialized = false;
+    function preRun() {
+      if (Module6["preRun"]) {
+        if (typeof Module6["preRun"] == "function") Module6["preRun"] = [Module6["preRun"]];
+        while (Module6["preRun"].length) {
+          addOnPreRun(Module6["preRun"].shift());
+        }
+      }
+      callRuntimeCallbacks(__ATPRERUN__);
+    }
+    function initRuntime() {
+      runtimeInitialized = true;
+      callRuntimeCallbacks(__ATINIT__);
+    }
+    function postRun() {
+      if (Module6["postRun"]) {
+        if (typeof Module6["postRun"] == "function") Module6["postRun"] = [Module6["postRun"]];
+        while (Module6["postRun"].length) {
+          addOnPostRun(Module6["postRun"].shift());
+        }
+      }
+      callRuntimeCallbacks(__ATPOSTRUN__);
+    }
+    function addOnPreRun(cb) {
+      __ATPRERUN__.unshift(cb);
+    }
+    function addOnInit(cb) {
+      __ATINIT__.unshift(cb);
+    }
+    function addOnPostRun(cb) {
+      __ATPOSTRUN__.unshift(cb);
+    }
+    var runDependencies = 0;
+    var runDependencyWatcher = null;
+    var dependenciesFulfilled = null;
+    function addRunDependency(id) {
+      runDependencies++;
+      Module6["monitorRunDependencies"]?.(runDependencies);
+    }
+    function removeRunDependency(id) {
+      runDependencies--;
+      Module6["monitorRunDependencies"]?.(runDependencies);
+      if (runDependencies == 0) {
+        if (runDependencyWatcher !== null) {
+          clearInterval(runDependencyWatcher);
+          runDependencyWatcher = null;
+        }
+        if (dependenciesFulfilled) {
+          var callback = dependenciesFulfilled;
+          dependenciesFulfilled = null;
+          callback();
+        }
+      }
+    }
+    function abort(what) {
+      Module6["onAbort"]?.(what);
+      what = "Aborted(" + what + ")";
+      err(what);
+      ABORT = true;
+      EXITSTATUS = 1;
+      what += ". Build with -sASSERTIONS for more info.";
+      var e = new WebAssembly.RuntimeError(what);
+      readyPromiseReject(e);
+      throw e;
+    }
+    var dataURIPrefix = "data:application/octet-stream;base64,";
+    var isDataURI = (filename) => filename.startsWith(dataURIPrefix);
+    var wasmBinaryFile;
+    if (Module6["locateFile"]) {
+      wasmBinaryFile = "mozjpeg_enc.wasm";
+      if (!isDataURI(wasmBinaryFile)) {
+        wasmBinaryFile = locateFile(wasmBinaryFile);
+      }
+    } else {
+      wasmBinaryFile = new URL("mozjpeg_enc.wasm", import.meta.url).href;
+    }
+    function getBinarySync(file2) {
+      if (file2 == wasmBinaryFile && wasmBinary) {
+        return new Uint8Array(wasmBinary);
+      }
+      if (readBinary) {
+        return readBinary(file2);
+      }
+      throw "both async and sync fetching of the wasm failed";
+    }
+    function getBinaryPromise(binaryFile) {
+      if (!wasmBinary && (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER)) {
+        if (typeof fetch == "function") {
+          return fetch(binaryFile, { credentials: "same-origin" }).then((response) => {
+            if (!response["ok"]) {
+              throw `failed to load wasm binary file at '${binaryFile}'`;
+            }
+            return response["arrayBuffer"]();
+          }).catch(() => getBinarySync(binaryFile));
+        }
+      }
+      return Promise.resolve().then(() => getBinarySync(binaryFile));
+    }
+    function instantiateArrayBuffer(binaryFile, imports, receiver) {
+      return getBinaryPromise(binaryFile).then((binary) => WebAssembly.instantiate(binary, imports)).then(receiver, (reason) => {
+        err(`failed to asynchronously prepare wasm: ${reason}`);
+        abort(reason);
+      });
+    }
+    function instantiateAsync(binary, binaryFile, imports, callback) {
+      if (!binary && typeof WebAssembly.instantiateStreaming == "function" && !isDataURI(binaryFile) && typeof fetch == "function") {
+        return fetch(binaryFile, { credentials: "same-origin" }).then((response) => {
+          var result = WebAssembly.instantiateStreaming(response, imports);
+          return result.then(callback, function(reason) {
+            err(`wasm streaming compile failed: ${reason}`);
+            err("falling back to ArrayBuffer instantiation");
+            return instantiateArrayBuffer(binaryFile, imports, callback);
+          });
+        });
+      }
+      return instantiateArrayBuffer(binaryFile, imports, callback);
+    }
+    function createWasm() {
+      var info = { "a": wasmImports };
+      function receiveInstance(instance, module) {
+        wasmExports = instance.exports;
+        wasmMemory = wasmExports["C"];
+        updateMemoryViews();
+        wasmTable = wasmExports["H"];
+        addOnInit(wasmExports["D"]);
+        removeRunDependency("wasm-instantiate");
+        return wasmExports;
+      }
+      addRunDependency("wasm-instantiate");
+      function receiveInstantiationResult(result) {
+        receiveInstance(result["instance"]);
+      }
+      if (Module6["instantiateWasm"]) {
+        try {
+          return Module6["instantiateWasm"](info, receiveInstance);
+        } catch (e) {
+          err(`Module.instantiateWasm callback failed with error: ${e}`);
+          readyPromiseReject(e);
+        }
+      }
+      instantiateAsync(wasmBinary, wasmBinaryFile, info, receiveInstantiationResult).catch(readyPromiseReject);
+      return {};
+    }
+    function ExitStatus(status) {
+      this.name = "ExitStatus";
+      this.message = `Program terminated with exit(${status})`;
+      this.status = status;
+    }
+    var callRuntimeCallbacks = (callbacks) => {
+      while (callbacks.length > 0) {
+        callbacks.shift()(Module6);
+      }
+    };
+    var noExitRuntime = Module6["noExitRuntime"] || true;
+    class ExceptionInfo {
+      constructor(excPtr) {
+        this.excPtr = excPtr;
+        this.ptr = excPtr - 24;
+      }
+      set_type(type) {
+        HEAPU32[this.ptr + 4 >> 2] = type;
+      }
+      get_type() {
+        return HEAPU32[this.ptr + 4 >> 2];
+      }
+      set_destructor(destructor) {
+        HEAPU32[this.ptr + 8 >> 2] = destructor;
+      }
+      get_destructor() {
+        return HEAPU32[this.ptr + 8 >> 2];
+      }
+      set_caught(caught) {
+        caught = caught ? 1 : 0;
+        HEAP8[this.ptr + 12] = caught;
+      }
+      get_caught() {
+        return HEAP8[this.ptr + 12] != 0;
+      }
+      set_rethrown(rethrown) {
+        rethrown = rethrown ? 1 : 0;
+        HEAP8[this.ptr + 13] = rethrown;
+      }
+      get_rethrown() {
+        return HEAP8[this.ptr + 13] != 0;
+      }
+      init(type, destructor) {
+        this.set_adjusted_ptr(0);
+        this.set_type(type);
+        this.set_destructor(destructor);
+      }
+      set_adjusted_ptr(adjustedPtr) {
+        HEAPU32[this.ptr + 16 >> 2] = adjustedPtr;
+      }
+      get_adjusted_ptr() {
+        return HEAPU32[this.ptr + 16 >> 2];
+      }
+      get_exception_ptr() {
+        var isPointer = ___cxa_is_pointer_type(this.get_type());
+        if (isPointer) {
+          return HEAPU32[this.excPtr >> 2];
+        }
+        var adjusted = this.get_adjusted_ptr();
+        if (adjusted !== 0) return adjusted;
+        return this.excPtr;
+      }
+    }
+    var exceptionLast = 0;
+    var uncaughtExceptionCount = 0;
+    var ___cxa_throw = (ptr, type, destructor) => {
+      var info = new ExceptionInfo(ptr);
+      info.init(type, destructor);
+      exceptionLast = ptr;
+      uncaughtExceptionCount++;
+      throw exceptionLast;
+    };
+    var structRegistrations = {};
+    var runDestructors = (destructors) => {
+      while (destructors.length) {
+        var ptr = destructors.pop();
+        var del = destructors.pop();
+        del(ptr);
+      }
+    };
+    function readPointer(pointer) {
+      return this["fromWireType"](HEAPU32[pointer >> 2]);
+    }
+    var awaitingDependencies = {};
+    var registeredTypes = {};
+    var typeDependencies = {};
+    var InternalError;
+    var throwInternalError = (message) => {
+      throw new InternalError(message);
+    };
+    var whenDependentTypesAreResolved = (myTypes, dependentTypes, getTypeConverters) => {
+      myTypes.forEach(function(type) {
+        typeDependencies[type] = dependentTypes;
+      });
+      function onComplete(typeConverters2) {
+        var myTypeConverters = getTypeConverters(typeConverters2);
+        if (myTypeConverters.length !== myTypes.length) {
+          throwInternalError("Mismatched type converter count");
+        }
+        for (var i = 0; i < myTypes.length; ++i) {
+          registerType(myTypes[i], myTypeConverters[i]);
+        }
+      }
+      var typeConverters = new Array(dependentTypes.length);
+      var unregisteredTypes = [];
+      var registered = 0;
+      dependentTypes.forEach((dt, i) => {
+        if (registeredTypes.hasOwnProperty(dt)) {
+          typeConverters[i] = registeredTypes[dt];
+        } else {
+          unregisteredTypes.push(dt);
+          if (!awaitingDependencies.hasOwnProperty(dt)) {
+            awaitingDependencies[dt] = [];
+          }
+          awaitingDependencies[dt].push(() => {
+            typeConverters[i] = registeredTypes[dt];
+            ++registered;
+            if (registered === unregisteredTypes.length) {
+              onComplete(typeConverters);
+            }
+          });
+        }
+      });
+      if (0 === unregisteredTypes.length) {
+        onComplete(typeConverters);
+      }
+    };
+    var __embind_finalize_value_object = (structType) => {
+      var reg = structRegistrations[structType];
+      delete structRegistrations[structType];
+      var rawConstructor = reg.rawConstructor;
+      var rawDestructor = reg.rawDestructor;
+      var fieldRecords = reg.fields;
+      var fieldTypes = fieldRecords.map((field) => field.getterReturnType).concat(fieldRecords.map((field) => field.setterArgumentType));
+      whenDependentTypesAreResolved([structType], fieldTypes, (fieldTypes2) => {
+        var fields = {};
+        fieldRecords.forEach((field, i) => {
+          var fieldName = field.fieldName;
+          var getterReturnType = fieldTypes2[i];
+          var getter = field.getter;
+          var getterContext = field.getterContext;
+          var setterArgumentType = fieldTypes2[i + fieldRecords.length];
+          var setter = field.setter;
+          var setterContext = field.setterContext;
+          fields[fieldName] = { read: (ptr) => getterReturnType["fromWireType"](getter(getterContext, ptr)), write: (ptr, o) => {
+            var destructors = [];
+            setter(setterContext, ptr, setterArgumentType["toWireType"](destructors, o));
+            runDestructors(destructors);
+          } };
+        });
+        return [{ name: reg.name, "fromWireType": (ptr) => {
+          var rv = {};
+          for (var i in fields) {
+            rv[i] = fields[i].read(ptr);
+          }
+          rawDestructor(ptr);
+          return rv;
+        }, "toWireType": (destructors, o) => {
+          for (var fieldName in fields) {
+            if (!(fieldName in o)) {
+              throw new TypeError(`Missing field: "${fieldName}"`);
+            }
+          }
+          var ptr = rawConstructor();
+          for (fieldName in fields) {
+            fields[fieldName].write(ptr, o[fieldName]);
+          }
+          if (destructors !== null) {
+            destructors.push(rawDestructor, ptr);
+          }
+          return ptr;
+        }, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": readPointer, destructorFunction: rawDestructor }];
+      });
+    };
+    var __embind_register_bigint = (primitiveType, name2, size, minRange, maxRange) => {
+    };
+    var embind_init_charCodes = () => {
+      var codes = new Array(256);
+      for (var i = 0; i < 256; ++i) {
+        codes[i] = String.fromCharCode(i);
+      }
+      embind_charCodes = codes;
+    };
+    var embind_charCodes;
+    var readLatin1String = (ptr) => {
+      var ret = "";
+      var c = ptr;
+      while (HEAPU8[c]) {
+        ret += embind_charCodes[HEAPU8[c++]];
+      }
+      return ret;
+    };
+    var BindingError;
+    var throwBindingError = (message) => {
+      throw new BindingError(message);
+    };
+    function sharedRegisterType(rawType, registeredInstance, options2 = {}) {
+      var name2 = registeredInstance.name;
+      if (!rawType) {
+        throwBindingError(`type "${name2}" must have a positive integer typeid pointer`);
+      }
+      if (registeredTypes.hasOwnProperty(rawType)) {
+        if (options2.ignoreDuplicateRegistrations) {
+          return;
+        } else {
+          throwBindingError(`Cannot register type '${name2}' twice`);
+        }
+      }
+      registeredTypes[rawType] = registeredInstance;
+      delete typeDependencies[rawType];
+      if (awaitingDependencies.hasOwnProperty(rawType)) {
+        var callbacks = awaitingDependencies[rawType];
+        delete awaitingDependencies[rawType];
+        callbacks.forEach((cb) => cb());
+      }
+    }
+    function registerType(rawType, registeredInstance, options2 = {}) {
+      if (!("argPackAdvance" in registeredInstance)) {
+        throw new TypeError("registerType registeredInstance requires argPackAdvance");
+      }
+      return sharedRegisterType(rawType, registeredInstance, options2);
+    }
+    var GenericWireTypeSize = 8;
+    var __embind_register_bool = (rawType, name2, trueValue, falseValue) => {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": function(wt) {
+        return !!wt;
+      }, "toWireType": function(destructors, o) {
+        return o ? trueValue : falseValue;
+      }, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": function(pointer) {
+        return this["fromWireType"](HEAPU8[pointer]);
+      }, destructorFunction: null });
+    };
+    var emval_freelist = [];
+    var emval_handles = [];
+    var __emval_decref = (handle) => {
+      if (handle > 9 && 0 === --emval_handles[handle + 1]) {
+        emval_handles[handle] = void 0;
+        emval_freelist.push(handle);
+      }
+    };
+    var count_emval_handles = () => emval_handles.length / 2 - 5 - emval_freelist.length;
+    var init_emval = () => {
+      emval_handles.push(0, 1, void 0, 1, null, 1, true, 1, false, 1);
+      Module6["count_emval_handles"] = count_emval_handles;
+    };
+    var Emval = { toValue: (handle) => {
+      if (!handle) {
+        throwBindingError("Cannot use deleted val. handle = " + handle);
+      }
+      return emval_handles[handle];
+    }, toHandle: (value) => {
+      switch (value) {
+        case void 0:
+          return 2;
+        case null:
+          return 4;
+        case true:
+          return 6;
+        case false:
+          return 8;
+        default: {
+          const handle = emval_freelist.pop() || emval_handles.length;
+          emval_handles[handle] = value;
+          emval_handles[handle + 1] = 1;
+          return handle;
+        }
+      }
+    } };
+    var EmValType = { name: "emscripten::val", "fromWireType": (handle) => {
+      var rv = Emval.toValue(handle);
+      __emval_decref(handle);
+      return rv;
+    }, "toWireType": (destructors, value) => Emval.toHandle(value), "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": readPointer, destructorFunction: null };
+    var __embind_register_emval = (rawType) => registerType(rawType, EmValType);
+    var floatReadValueFromPointer = (name2, width) => {
+      switch (width) {
+        case 4:
+          return function(pointer) {
+            return this["fromWireType"](HEAPF32[pointer >> 2]);
+          };
+        case 8:
+          return function(pointer) {
+            return this["fromWireType"](HEAPF64[pointer >> 3]);
+          };
+        default:
+          throw new TypeError(`invalid float width (${width}): ${name2}`);
+      }
+    };
+    var __embind_register_float = (rawType, name2, size) => {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": (value) => value, "toWireType": (destructors, value) => value, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": floatReadValueFromPointer(name2, size), destructorFunction: null });
+    };
+    var createNamedFunction = (name2, body) => Object.defineProperty(body, "name", { value: name2 });
+    function usesDestructorStack(argTypes) {
+      for (var i = 1; i < argTypes.length; ++i) {
+        if (argTypes[i] !== null && argTypes[i].destructorFunction === void 0) {
+          return true;
+        }
+      }
+      return false;
+    }
+    function craftInvokerFunction(humanName, argTypes, classType, cppInvokerFunc, cppTargetFunc, isAsync) {
+      var argCount = argTypes.length;
+      if (argCount < 2) {
+        throwBindingError("argTypes array size mismatch! Must at least get return value and 'this' types!");
+      }
+      var isClassMethodFunc = argTypes[1] !== null && classType !== null;
+      var needsDestructorStack = usesDestructorStack(argTypes);
+      var returns = argTypes[0].name !== "void";
+      var expectedArgCount = argCount - 2;
+      var argsWired = new Array(expectedArgCount);
+      var invokerFuncArgs = [];
+      var destructors = [];
+      var invokerFn = function(...args) {
+        if (args.length !== expectedArgCount) {
+          throwBindingError(`function ${humanName} called with ${args.length} arguments, expected ${expectedArgCount}`);
+        }
+        destructors.length = 0;
+        var thisWired;
+        invokerFuncArgs.length = isClassMethodFunc ? 2 : 1;
+        invokerFuncArgs[0] = cppTargetFunc;
+        if (isClassMethodFunc) {
+          thisWired = argTypes[1]["toWireType"](destructors, this);
+          invokerFuncArgs[1] = thisWired;
+        }
+        for (var i = 0; i < expectedArgCount; ++i) {
+          argsWired[i] = argTypes[i + 2]["toWireType"](destructors, args[i]);
+          invokerFuncArgs.push(argsWired[i]);
+        }
+        var rv = cppInvokerFunc(...invokerFuncArgs);
+        function onDone(rv2) {
+          if (needsDestructorStack) {
+            runDestructors(destructors);
+          } else {
+            for (var i2 = isClassMethodFunc ? 1 : 2; i2 < argTypes.length; i2++) {
+              var param2 = i2 === 1 ? thisWired : argsWired[i2 - 2];
+              if (argTypes[i2].destructorFunction !== null) {
+                argTypes[i2].destructorFunction(param2);
+              }
+            }
+          }
+          if (returns) {
+            return argTypes[0]["fromWireType"](rv2);
+          }
+        }
+        return onDone(rv);
+      };
+      return createNamedFunction(humanName, invokerFn);
+    }
+    var ensureOverloadTable = (proto, methodName, humanName) => {
+      if (void 0 === proto[methodName].overloadTable) {
+        var prevFunc = proto[methodName];
+        proto[methodName] = function(...args) {
+          if (!proto[methodName].overloadTable.hasOwnProperty(args.length)) {
+            throwBindingError(`Function '${humanName}' called with an invalid number of arguments (${args.length}) - expects one of (${proto[methodName].overloadTable})!`);
+          }
+          return proto[methodName].overloadTable[args.length].apply(this, args);
+        };
+        proto[methodName].overloadTable = [];
+        proto[methodName].overloadTable[prevFunc.argCount] = prevFunc;
+      }
+    };
+    var exposePublicSymbol = (name2, value, numArguments) => {
+      if (Module6.hasOwnProperty(name2)) {
+        if (void 0 === numArguments || void 0 !== Module6[name2].overloadTable && void 0 !== Module6[name2].overloadTable[numArguments]) {
+          throwBindingError(`Cannot register public name '${name2}' twice`);
+        }
+        ensureOverloadTable(Module6, name2, name2);
+        if (Module6.hasOwnProperty(numArguments)) {
+          throwBindingError(`Cannot register multiple overloads of a function with the same number of arguments (${numArguments})!`);
+        }
+        Module6[name2].overloadTable[numArguments] = value;
+      } else {
+        Module6[name2] = value;
+        if (void 0 !== numArguments) {
+          Module6[name2].numArguments = numArguments;
+        }
+      }
+    };
+    var heap32VectorToArray = (count2, firstElement) => {
+      var array2 = [];
+      for (var i = 0; i < count2; i++) {
+        array2.push(HEAPU32[firstElement + i * 4 >> 2]);
+      }
+      return array2;
+    };
+    var replacePublicSymbol = (name2, value, numArguments) => {
+      if (!Module6.hasOwnProperty(name2)) {
+        throwInternalError("Replacing nonexistent public symbol");
+      }
+      if (void 0 !== Module6[name2].overloadTable && void 0 !== numArguments) {
+        Module6[name2].overloadTable[numArguments] = value;
+      } else {
+        Module6[name2] = value;
+        Module6[name2].argCount = numArguments;
+      }
+    };
+    var dynCallLegacy = (sig, ptr, args) => {
+      sig = sig.replace(/p/g, "i");
+      var f = Module6["dynCall_" + sig];
+      return f(ptr, ...args);
+    };
+    var wasmTableMirror = [];
+    var wasmTable;
+    var getWasmTableEntry = (funcPtr) => {
+      var func = wasmTableMirror[funcPtr];
+      if (!func) {
+        if (funcPtr >= wasmTableMirror.length) wasmTableMirror.length = funcPtr + 1;
+        wasmTableMirror[funcPtr] = func = wasmTable.get(funcPtr);
+      }
+      return func;
+    };
+    var dynCall = (sig, ptr, args = []) => {
+      if (sig.includes("j")) {
+        return dynCallLegacy(sig, ptr, args);
+      }
+      var rtn = getWasmTableEntry(ptr)(...args);
+      return rtn;
+    };
+    var getDynCaller = (sig, ptr) => (...args) => dynCall(sig, ptr, args);
+    var embind__requireFunction = (signature, rawFunction) => {
+      signature = readLatin1String(signature);
+      function makeDynCaller() {
+        if (signature.includes("j")) {
+          return getDynCaller(signature, rawFunction);
+        }
+        return getWasmTableEntry(rawFunction);
+      }
+      var fp = makeDynCaller();
+      if (typeof fp != "function") {
+        throwBindingError(`unknown function pointer with signature ${signature}: ${rawFunction}`);
+      }
+      return fp;
+    };
+    var extendError = (baseErrorType, errorName) => {
+      var errorClass = createNamedFunction(errorName, function(message) {
+        this.name = errorName;
+        this.message = message;
+        var stack = new Error(message).stack;
+        if (stack !== void 0) {
+          this.stack = this.toString() + "\n" + stack.replace(/^Error(:[^\n]*)?\n/, "");
+        }
+      });
+      errorClass.prototype = Object.create(baseErrorType.prototype);
+      errorClass.prototype.constructor = errorClass;
+      errorClass.prototype.toString = function() {
+        if (this.message === void 0) {
+          return this.name;
+        } else {
+          return `${this.name}: ${this.message}`;
+        }
+      };
+      return errorClass;
+    };
+    var UnboundTypeError;
+    var getTypeName = (type) => {
+      var ptr = ___getTypeName(type);
+      var rv = readLatin1String(ptr);
+      _free(ptr);
+      return rv;
+    };
+    var throwUnboundTypeError = (message, types) => {
+      var unboundTypes = [];
+      var seen = {};
+      function visit2(type) {
+        if (seen[type]) {
+          return;
+        }
+        if (registeredTypes[type]) {
+          return;
+        }
+        if (typeDependencies[type]) {
+          typeDependencies[type].forEach(visit2);
+          return;
+        }
+        unboundTypes.push(type);
+        seen[type] = true;
+      }
+      types.forEach(visit2);
+      throw new UnboundTypeError(`${message}: ` + unboundTypes.map(getTypeName).join([", "]));
+    };
+    var getFunctionName = (signature) => {
+      signature = signature.trim();
+      const argsIndex = signature.indexOf("(");
+      if (argsIndex !== -1) {
+        return signature.substr(0, argsIndex);
+      } else {
+        return signature;
+      }
+    };
+    var __embind_register_function = (name2, argCount, rawArgTypesAddr, signature, rawInvoker, fn, isAsync) => {
+      var argTypes = heap32VectorToArray(argCount, rawArgTypesAddr);
+      name2 = readLatin1String(name2);
+      name2 = getFunctionName(name2);
+      rawInvoker = embind__requireFunction(signature, rawInvoker);
+      exposePublicSymbol(name2, function() {
+        throwUnboundTypeError(`Cannot call ${name2} due to unbound types`, argTypes);
+      }, argCount - 1);
+      whenDependentTypesAreResolved([], argTypes, (argTypes2) => {
+        var invokerArgsArray = [argTypes2[0], null].concat(argTypes2.slice(1));
+        replacePublicSymbol(name2, craftInvokerFunction(name2, invokerArgsArray, null, rawInvoker, fn, isAsync), argCount - 1);
+        return [];
+      });
+    };
+    var integerReadValueFromPointer = (name2, width, signed) => {
+      switch (width) {
+        case 1:
+          return signed ? (pointer) => HEAP8[pointer] : (pointer) => HEAPU8[pointer];
+        case 2:
+          return signed ? (pointer) => HEAP16[pointer >> 1] : (pointer) => HEAPU16[pointer >> 1];
+        case 4:
+          return signed ? (pointer) => HEAP32[pointer >> 2] : (pointer) => HEAPU32[pointer >> 2];
+        default:
+          throw new TypeError(`invalid integer width (${width}): ${name2}`);
+      }
+    };
+    var __embind_register_integer = (primitiveType, name2, size, minRange, maxRange) => {
+      name2 = readLatin1String(name2);
+      if (maxRange === -1) {
+        maxRange = 4294967295;
+      }
+      var fromWireType = (value) => value;
+      if (minRange === 0) {
+        var bitshift = 32 - 8 * size;
+        fromWireType = (value) => value << bitshift >>> bitshift;
+      }
+      var isUnsignedType = name2.includes("unsigned");
+      var checkAssertions = (value, toTypeName) => {
+      };
+      var toWireType;
+      if (isUnsignedType) {
+        toWireType = function(destructors, value) {
+          checkAssertions(value, this.name);
+          return value >>> 0;
+        };
+      } else {
+        toWireType = function(destructors, value) {
+          checkAssertions(value, this.name);
+          return value;
+        };
+      }
+      registerType(primitiveType, { name: name2, "fromWireType": fromWireType, "toWireType": toWireType, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": integerReadValueFromPointer(name2, size, minRange !== 0), destructorFunction: null });
+    };
+    var __embind_register_memory_view = (rawType, dataTypeIndex, name2) => {
+      var typeMapping = [Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
+      var TA = typeMapping[dataTypeIndex];
+      function decodeMemoryView(handle) {
+        var size = HEAPU32[handle >> 2];
+        var data = HEAPU32[handle + 4 >> 2];
+        return new TA(HEAP8.buffer, data, size);
+      }
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": decodeMemoryView, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": decodeMemoryView }, { ignoreDuplicateRegistrations: true });
+    };
+    var stringToUTF8Array = (str, heap2, outIdx, maxBytesToWrite) => {
+      if (!(maxBytesToWrite > 0)) return 0;
+      var startIdx = outIdx;
+      var endIdx = outIdx + maxBytesToWrite - 1;
+      for (var i = 0; i < str.length; ++i) {
+        var u = str.charCodeAt(i);
+        if (u >= 55296 && u <= 57343) {
+          var u1 = str.charCodeAt(++i);
+          u = 65536 + ((u & 1023) << 10) | u1 & 1023;
+        }
+        if (u <= 127) {
+          if (outIdx >= endIdx) break;
+          heap2[outIdx++] = u;
+        } else if (u <= 2047) {
+          if (outIdx + 1 >= endIdx) break;
+          heap2[outIdx++] = 192 | u >> 6;
+          heap2[outIdx++] = 128 | u & 63;
+        } else if (u <= 65535) {
+          if (outIdx + 2 >= endIdx) break;
+          heap2[outIdx++] = 224 | u >> 12;
+          heap2[outIdx++] = 128 | u >> 6 & 63;
+          heap2[outIdx++] = 128 | u & 63;
+        } else {
+          if (outIdx + 3 >= endIdx) break;
+          heap2[outIdx++] = 240 | u >> 18;
+          heap2[outIdx++] = 128 | u >> 12 & 63;
+          heap2[outIdx++] = 128 | u >> 6 & 63;
+          heap2[outIdx++] = 128 | u & 63;
+        }
+      }
+      heap2[outIdx] = 0;
+      return outIdx - startIdx;
+    };
+    var stringToUTF8 = (str, outPtr, maxBytesToWrite) => stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite);
+    var lengthBytesUTF8 = (str) => {
+      var len = 0;
+      for (var i = 0; i < str.length; ++i) {
+        var c = str.charCodeAt(i);
+        if (c <= 127) {
+          len++;
+        } else if (c <= 2047) {
+          len += 2;
+        } else if (c >= 55296 && c <= 57343) {
+          len += 4;
+          ++i;
+        } else {
+          len += 3;
+        }
+      }
+      return len;
+    };
+    var UTF8ArrayToString = (heapOrArray, idx, maxBytesToRead) => {
+      var endIdx = idx + maxBytesToRead;
+      var str = "";
+      while (!(idx >= endIdx)) {
+        var u0 = heapOrArray[idx++];
+        if (!u0) return str;
+        if (!(u0 & 128)) {
+          str += String.fromCharCode(u0);
+          continue;
+        }
+        var u1 = heapOrArray[idx++] & 63;
+        if ((u0 & 224) == 192) {
+          str += String.fromCharCode((u0 & 31) << 6 | u1);
+          continue;
+        }
+        var u2 = heapOrArray[idx++] & 63;
+        if ((u0 & 240) == 224) {
+          u0 = (u0 & 15) << 12 | u1 << 6 | u2;
+        } else {
+          u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
+        }
+        if (u0 < 65536) {
+          str += String.fromCharCode(u0);
+        } else {
+          var ch = u0 - 65536;
+          str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+        }
+      }
+      return str;
+    };
+    var UTF8ToString = (ptr, maxBytesToRead) => ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : "";
+    var __embind_register_std_string = (rawType, name2) => {
+      name2 = readLatin1String(name2);
+      var stdStringIsUTF8 = name2 === "std::string";
+      registerType(rawType, { name: name2, "fromWireType"(value) {
+        var length = HEAPU32[value >> 2];
+        var payload = value + 4;
+        var str;
+        if (stdStringIsUTF8) {
+          var decodeStartPtr = payload;
+          for (var i = 0; i <= length; ++i) {
+            var currentBytePtr = payload + i;
+            if (i == length || HEAPU8[currentBytePtr] == 0) {
+              var maxRead = currentBytePtr - decodeStartPtr;
+              var stringSegment = UTF8ToString(decodeStartPtr, maxRead);
+              if (str === void 0) {
+                str = stringSegment;
+              } else {
+                str += String.fromCharCode(0);
+                str += stringSegment;
+              }
+              decodeStartPtr = currentBytePtr + 1;
+            }
+          }
+        } else {
+          var a = new Array(length);
+          for (var i = 0; i < length; ++i) {
+            a[i] = String.fromCharCode(HEAPU8[payload + i]);
+          }
+          str = a.join("");
+        }
+        _free(value);
+        return str;
+      }, "toWireType"(destructors, value) {
+        if (value instanceof ArrayBuffer) {
+          value = new Uint8Array(value);
+        }
+        var length;
+        var valueIsOfTypeString = typeof value == "string";
+        if (!(valueIsOfTypeString || value instanceof Uint8Array || value instanceof Uint8ClampedArray || value instanceof Int8Array)) {
+          throwBindingError("Cannot pass non-string to std::string");
+        }
+        if (stdStringIsUTF8 && valueIsOfTypeString) {
+          length = lengthBytesUTF8(value);
+        } else {
+          length = value.length;
+        }
+        var base = _malloc(4 + length + 1);
+        var ptr = base + 4;
+        HEAPU32[base >> 2] = length;
+        if (stdStringIsUTF8 && valueIsOfTypeString) {
+          stringToUTF8(value, ptr, length + 1);
+        } else {
+          if (valueIsOfTypeString) {
+            for (var i = 0; i < length; ++i) {
+              var charCode = value.charCodeAt(i);
+              if (charCode > 255) {
+                _free(ptr);
+                throwBindingError("String has UTF-16 code units that do not fit in 8 bits");
+              }
+              HEAPU8[ptr + i] = charCode;
+            }
+          } else {
+            for (var i = 0; i < length; ++i) {
+              HEAPU8[ptr + i] = value[i];
+            }
+          }
+        }
+        if (destructors !== null) {
+          destructors.push(_free, base);
+        }
+        return base;
+      }, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": readPointer, destructorFunction(ptr) {
+        _free(ptr);
+      } });
+    };
+    var UTF16ToString = (ptr, maxBytesToRead) => {
+      var str = "";
+      for (var i = 0; !(i >= maxBytesToRead / 2); ++i) {
+        var codeUnit = HEAP16[ptr + i * 2 >> 1];
+        if (codeUnit == 0) break;
+        str += String.fromCharCode(codeUnit);
+      }
+      return str;
+    };
+    var stringToUTF16 = (str, outPtr, maxBytesToWrite) => {
+      maxBytesToWrite ??= 2147483647;
+      if (maxBytesToWrite < 2) return 0;
+      maxBytesToWrite -= 2;
+      var startPtr = outPtr;
+      var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+      for (var i = 0; i < numCharsToWrite; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        HEAP16[outPtr >> 1] = codeUnit;
+        outPtr += 2;
+      }
+      HEAP16[outPtr >> 1] = 0;
+      return outPtr - startPtr;
+    };
+    var lengthBytesUTF16 = (str) => str.length * 2;
+    var UTF32ToString = (ptr, maxBytesToRead) => {
+      var i = 0;
+      var str = "";
+      while (!(i >= maxBytesToRead / 4)) {
+        var utf32 = HEAP32[ptr + i * 4 >> 2];
+        if (utf32 == 0) break;
+        ++i;
+        if (utf32 >= 65536) {
+          var ch = utf32 - 65536;
+          str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+        } else {
+          str += String.fromCharCode(utf32);
+        }
+      }
+      return str;
+    };
+    var stringToUTF32 = (str, outPtr, maxBytesToWrite) => {
+      maxBytesToWrite ??= 2147483647;
+      if (maxBytesToWrite < 4) return 0;
+      var startPtr = outPtr;
+      var endPtr = startPtr + maxBytesToWrite - 4;
+      for (var i = 0; i < str.length; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        if (codeUnit >= 55296 && codeUnit <= 57343) {
+          var trailSurrogate = str.charCodeAt(++i);
+          codeUnit = 65536 + ((codeUnit & 1023) << 10) | trailSurrogate & 1023;
+        }
+        HEAP32[outPtr >> 2] = codeUnit;
+        outPtr += 4;
+        if (outPtr + 4 > endPtr) break;
+      }
+      HEAP32[outPtr >> 2] = 0;
+      return outPtr - startPtr;
+    };
+    var lengthBytesUTF32 = (str) => {
+      var len = 0;
+      for (var i = 0; i < str.length; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        if (codeUnit >= 55296 && codeUnit <= 57343) ++i;
+        len += 4;
+      }
+      return len;
+    };
+    var __embind_register_std_wstring = (rawType, charSize, name2) => {
+      name2 = readLatin1String(name2);
+      var decodeString, encodeString, readCharAt, lengthBytesUTF;
+      if (charSize === 2) {
+        decodeString = UTF16ToString;
+        encodeString = stringToUTF16;
+        lengthBytesUTF = lengthBytesUTF16;
+        readCharAt = (pointer) => HEAPU16[pointer >> 1];
+      } else if (charSize === 4) {
+        decodeString = UTF32ToString;
+        encodeString = stringToUTF32;
+        lengthBytesUTF = lengthBytesUTF32;
+        readCharAt = (pointer) => HEAPU32[pointer >> 2];
+      }
+      registerType(rawType, { name: name2, "fromWireType": (value) => {
+        var length = HEAPU32[value >> 2];
+        var str;
+        var decodeStartPtr = value + 4;
+        for (var i = 0; i <= length; ++i) {
+          var currentBytePtr = value + 4 + i * charSize;
+          if (i == length || readCharAt(currentBytePtr) == 0) {
+            var maxReadBytes = currentBytePtr - decodeStartPtr;
+            var stringSegment = decodeString(decodeStartPtr, maxReadBytes);
+            if (str === void 0) {
+              str = stringSegment;
+            } else {
+              str += String.fromCharCode(0);
+              str += stringSegment;
+            }
+            decodeStartPtr = currentBytePtr + charSize;
+          }
+        }
+        _free(value);
+        return str;
+      }, "toWireType": (destructors, value) => {
+        if (!(typeof value == "string")) {
+          throwBindingError(`Cannot pass non-string to C++ string type ${name2}`);
+        }
+        var length = lengthBytesUTF(value);
+        var ptr = _malloc(4 + length + charSize);
+        HEAPU32[ptr >> 2] = length / charSize;
+        encodeString(value, ptr + 4, length + charSize);
+        if (destructors !== null) {
+          destructors.push(_free, ptr);
+        }
+        return ptr;
+      }, "argPackAdvance": GenericWireTypeSize, "readValueFromPointer": readPointer, destructorFunction(ptr) {
+        _free(ptr);
+      } });
+    };
+    var __embind_register_value_object = (rawType, name2, constructorSignature, rawConstructor, destructorSignature, rawDestructor) => {
+      structRegistrations[rawType] = { name: readLatin1String(name2), rawConstructor: embind__requireFunction(constructorSignature, rawConstructor), rawDestructor: embind__requireFunction(destructorSignature, rawDestructor), fields: [] };
+    };
+    var __embind_register_value_object_field = (structType, fieldName, getterReturnType, getterSignature, getter, getterContext, setterArgumentType, setterSignature, setter, setterContext) => {
+      structRegistrations[structType].fields.push({ fieldName: readLatin1String(fieldName), getterReturnType, getter: embind__requireFunction(getterSignature, getter), getterContext, setterArgumentType, setter: embind__requireFunction(setterSignature, setter), setterContext });
+    };
+    var __embind_register_void = (rawType, name2) => {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { isVoid: true, name: name2, "argPackAdvance": 0, "fromWireType": () => void 0, "toWireType": (destructors, o) => void 0 });
+    };
+    var __emscripten_memcpy_js = (dest, src, num) => HEAPU8.copyWithin(dest, src, src + num);
+    var emval_methodCallers = [];
+    var __emval_call = (caller, handle, destructorsRef, args) => {
+      caller = emval_methodCallers[caller];
+      handle = Emval.toValue(handle);
+      return caller(null, handle, destructorsRef, args);
+    };
+    var emval_symbols = {};
+    var getStringOrSymbol = (address) => {
+      var symbol2 = emval_symbols[address];
+      if (symbol2 === void 0) {
+        return readLatin1String(address);
+      }
+      return symbol2;
+    };
+    var emval_get_global = () => {
+      if (typeof globalThis == "object") {
+        return globalThis;
+      }
+      function testGlobal(obj) {
+        obj["$$$embind_global$$$"] = obj;
+        var success2 = typeof $$$embind_global$$$ == "object" && obj["$$$embind_global$$$"] == obj;
+        if (!success2) {
+          delete obj["$$$embind_global$$$"];
+        }
+        return success2;
+      }
+      if (typeof $$$embind_global$$$ == "object") {
+        return $$$embind_global$$$;
+      }
+      if (typeof global == "object" && testGlobal(global)) {
+        $$$embind_global$$$ = global;
+      } else if (typeof self == "object" && testGlobal(self)) {
+        $$$embind_global$$$ = self;
+      }
+      if (typeof $$$embind_global$$$ == "object") {
+        return $$$embind_global$$$;
+      }
+      throw Error("unable to get global object.");
+    };
+    var __emval_get_global = (name2) => {
+      if (name2 === 0) {
+        return Emval.toHandle(emval_get_global());
+      } else {
+        name2 = getStringOrSymbol(name2);
+        return Emval.toHandle(emval_get_global()[name2]);
+      }
+    };
+    var emval_addMethodCaller = (caller) => {
+      var id = emval_methodCallers.length;
+      emval_methodCallers.push(caller);
+      return id;
+    };
+    var requireRegisteredType = (rawType, humanName) => {
+      var impl = registeredTypes[rawType];
+      if (void 0 === impl) {
+        throwBindingError(`${humanName} has unknown type ${getTypeName(rawType)}`);
+      }
+      return impl;
+    };
+    var emval_lookupTypes = (argCount, argTypes) => {
+      var a = new Array(argCount);
+      for (var i = 0; i < argCount; ++i) {
+        a[i] = requireRegisteredType(HEAPU32[argTypes + i * 4 >> 2], "parameter " + i);
+      }
+      return a;
+    };
+    var reflectConstruct = Reflect.construct;
+    var emval_returnValue = (returnType, destructorsRef, handle) => {
+      var destructors = [];
+      var result = returnType["toWireType"](destructors, handle);
+      if (destructors.length) {
+        HEAPU32[destructorsRef >> 2] = Emval.toHandle(destructors);
+      }
+      return result;
+    };
+    var __emval_get_method_caller = (argCount, argTypes, kind) => {
+      var types = emval_lookupTypes(argCount, argTypes);
+      var retType = types.shift();
+      argCount--;
+      var argN = new Array(argCount);
+      var invokerFunction = (obj, func, destructorsRef, args) => {
+        var offset = 0;
+        for (var i = 0; i < argCount; ++i) {
+          argN[i] = types[i]["readValueFromPointer"](args + offset);
+          offset += types[i]["argPackAdvance"];
+        }
+        var rv = kind === 1 ? reflectConstruct(func, argN) : func.apply(obj, argN);
+        return emval_returnValue(retType, destructorsRef, rv);
+      };
+      var functionName = `methodCaller<(${types.map((t) => t.name).join(", ")}) => ${retType.name}>`;
+      return emval_addMethodCaller(createNamedFunction(functionName, invokerFunction));
+    };
+    var __emval_run_destructors = (handle) => {
+      var destructors = Emval.toValue(handle);
+      runDestructors(destructors);
+      __emval_decref(handle);
+    };
+    var _abort = () => {
+      abort("");
+    };
+    var getHeapMax = () => 2147483648;
+    var growMemory = (size) => {
+      var b = wasmMemory.buffer;
+      var pages = (size - b.byteLength + 65535) / 65536;
+      try {
+        wasmMemory.grow(pages);
+        updateMemoryViews();
+        return 1;
+      } catch (e) {
+      }
+    };
+    var _emscripten_resize_heap = (requestedSize) => {
+      var oldSize = HEAPU8.length;
+      requestedSize >>>= 0;
+      var maxHeapSize = getHeapMax();
+      if (requestedSize > maxHeapSize) {
+        return false;
+      }
+      var alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
+      for (var cutDown = 1; cutDown <= 4; cutDown *= 2) {
+        var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown);
+        overGrownHeapSize = Math.min(overGrownHeapSize, requestedSize + 100663296);
+        var newSize = Math.min(maxHeapSize, alignUp(Math.max(requestedSize, overGrownHeapSize), 65536));
+        var replacement = growMemory(newSize);
+        if (replacement) {
+          return true;
+        }
+      }
+      return false;
+    };
+    var ENV = {};
+    var getExecutableName = () => thisProgram || "./this.program";
+    var getEnvStrings = () => {
+      if (!getEnvStrings.strings) {
+        var lang = (typeof navigator == "object" && navigator.languages && navigator.languages[0] || "C").replace("-", "_") + ".UTF-8";
+        var env = { "USER": "web_user", "LOGNAME": "web_user", "PATH": "/", "PWD": "/", "HOME": "/home/web_user", "LANG": lang, "_": getExecutableName() };
+        for (var x in ENV) {
+          if (ENV[x] === void 0) delete env[x];
+          else env[x] = ENV[x];
+        }
+        var strings = [];
+        for (var x in env) {
+          strings.push(`${x}=${env[x]}`);
+        }
+        getEnvStrings.strings = strings;
+      }
+      return getEnvStrings.strings;
+    };
+    var stringToAscii = (str, buffer) => {
+      for (var i = 0; i < str.length; ++i) {
+        HEAP8[buffer++] = str.charCodeAt(i);
+      }
+      HEAP8[buffer] = 0;
+    };
+    var _environ_get = (__environ, environ_buf) => {
+      var bufSize = 0;
+      getEnvStrings().forEach((string4, i) => {
+        var ptr = environ_buf + bufSize;
+        HEAPU32[__environ + i * 4 >> 2] = ptr;
+        stringToAscii(string4, ptr);
+        bufSize += string4.length + 1;
+      });
+      return 0;
+    };
+    var _environ_sizes_get = (penviron_count, penviron_buf_size) => {
+      var strings = getEnvStrings();
+      HEAPU32[penviron_count >> 2] = strings.length;
+      var bufSize = 0;
+      strings.forEach((string4) => bufSize += string4.length + 1);
+      HEAPU32[penviron_buf_size >> 2] = bufSize;
+      return 0;
+    };
+    var runtimeKeepaliveCounter = 0;
+    var keepRuntimeAlive = () => noExitRuntime || runtimeKeepaliveCounter > 0;
+    var _proc_exit = (code) => {
+      EXITSTATUS = code;
+      if (!keepRuntimeAlive()) {
+        Module6["onExit"]?.(code);
+        ABORT = true;
+      }
+      quit_(code, new ExitStatus(code));
+    };
+    var exitJS = (status, implicit) => {
+      EXITSTATUS = status;
+      _proc_exit(status);
+    };
+    var _exit = exitJS;
+    var _fd_close = (fd) => 52;
+    var convertI32PairToI53Checked = (lo, hi) => hi + 2097152 >>> 0 < 4194305 - !!lo ? (lo >>> 0) + hi * 4294967296 : NaN;
+    function _fd_seek(fd, offset_low, offset_high, whence, newOffset) {
+      var offset = convertI32PairToI53Checked(offset_low, offset_high);
+      return 70;
+    }
+    var printCharBuffers = [null, [], []];
+    var printChar = (stream, curr) => {
+      var buffer = printCharBuffers[stream];
+      if (curr === 0 || curr === 10) {
+        (stream === 1 ? out : err)(UTF8ArrayToString(buffer, 0));
+        buffer.length = 0;
+      } else {
+        buffer.push(curr);
+      }
+    };
+    var _fd_write = (fd, iov, iovcnt, pnum) => {
+      var num = 0;
+      for (var i = 0; i < iovcnt; i++) {
+        var ptr = HEAPU32[iov >> 2];
+        var len = HEAPU32[iov + 4 >> 2];
+        iov += 8;
+        for (var j = 0; j < len; j++) {
+          printChar(fd, HEAPU8[ptr + j]);
+        }
+        num += len;
+      }
+      HEAPU32[pnum >> 2] = num;
+      return 0;
+    };
+    InternalError = Module6["InternalError"] = class InternalError extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "InternalError";
+      }
+    };
+    embind_init_charCodes();
+    BindingError = Module6["BindingError"] = class BindingError extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "BindingError";
+      }
+    };
+    init_emval();
+    UnboundTypeError = Module6["UnboundTypeError"] = extendError(Error, "UnboundTypeError");
+    var wasmImports = { j: ___cxa_throw, k: __embind_finalize_value_object, n: __embind_register_bigint, h: __embind_register_bool, z: __embind_register_emval, f: __embind_register_float, e: __embind_register_function, c: __embind_register_integer, a: __embind_register_memory_view, g: __embind_register_std_string, d: __embind_register_std_wstring, l: __embind_register_value_object, b: __embind_register_value_object_field, i: __embind_register_void, s: __emscripten_memcpy_js, y: __emval_call, u: __emval_decref, A: __emval_get_global, x: __emval_get_method_caller, w: __emval_run_destructors, o: _abort, p: _emscripten_resize_heap, q: _environ_get, r: _environ_sizes_get, B: _exit, t: _fd_close, m: _fd_seek, v: _fd_write };
+    var wasmExports = createWasm();
+    var ___wasm_call_ctors = () => (___wasm_call_ctors = wasmExports["D"])();
+    var ___getTypeName = (a0) => (___getTypeName = wasmExports["E"])(a0);
+    var _malloc = (a0) => (_malloc = wasmExports["F"])(a0);
+    var _free = (a0) => (_free = wasmExports["G"])(a0);
+    var __emscripten_stack_restore = (a0) => (__emscripten_stack_restore = wasmExports["_emscripten_stack_restore"])(a0);
+    var __emscripten_stack_alloc = (a0) => (__emscripten_stack_alloc = wasmExports["_emscripten_stack_alloc"])(a0);
+    var _emscripten_stack_get_current = () => (_emscripten_stack_get_current = wasmExports["emscripten_stack_get_current"])();
+    var ___cxa_increment_exception_refcount = (a0) => (___cxa_increment_exception_refcount = wasmExports["__cxa_increment_exception_refcount"])(a0);
+    var ___cxa_is_pointer_type = (a0) => (___cxa_is_pointer_type = wasmExports["I"])(a0);
+    var dynCall_jiji = Module6["dynCall_jiji"] = (a0, a1, a2, a3, a4) => (dynCall_jiji = Module6["dynCall_jiji"] = wasmExports["J"])(a0, a1, a2, a3, a4);
+    var calledRun;
+    dependenciesFulfilled = function runCaller() {
+      if (!calledRun) run();
+      if (!calledRun) dependenciesFulfilled = runCaller;
+    };
+    function run() {
+      if (runDependencies > 0) {
+        return;
+      }
+      preRun();
+      if (runDependencies > 0) {
+        return;
+      }
+      function doRun() {
+        if (calledRun) return;
+        calledRun = true;
+        Module6["calledRun"] = true;
+        if (ABORT) return;
+        initRuntime();
+        readyPromiseResolve(Module6);
+        if (Module6["onRuntimeInitialized"]) Module6["onRuntimeInitialized"]();
+        postRun();
+      }
+      if (Module6["setStatus"]) {
+        Module6["setStatus"]("Running...");
+        setTimeout(function() {
+          setTimeout(function() {
+            Module6["setStatus"]("");
+          }, 1);
+          doRun();
+        }, 1);
+      } else {
+        doRun();
+      }
+    }
+    if (Module6["preInit"]) {
+      if (typeof Module6["preInit"] == "function") Module6["preInit"] = [Module6["preInit"]];
+      while (Module6["preInit"].length > 0) {
+        Module6["preInit"].pop()();
+      }
+    }
+    run();
+    return readyPromise;
+  });
+})();
+var mozjpeg_enc_default = Module2;
+
+// node_modules/@jsquash/jpeg/encode.js
+var emscriptenModule2;
+async function init4(module, moduleOptionOverrides) {
+  let actualModule = module;
+  let actualOptions = moduleOptionOverrides;
+  if (arguments.length === 1 && !(module instanceof WebAssembly.Module)) {
+    actualModule = void 0;
+    actualOptions = module;
+  }
+  emscriptenModule2 = initEmscriptenModule(mozjpeg_enc_default, actualModule, actualOptions);
+}
+async function encode5(data, options2 = {}) {
+  if (!emscriptenModule2)
+    init4();
+  const module = await emscriptenModule2;
+  const _options = { ...defaultOptions, ...options2 };
+  const resultView = module.encode(data.data, data.width, data.height, _options);
+  return resultView.buffer;
+}
+
+// node_modules/@jsquash/webp/codec/dec/webp_dec.js
+var Module3 = (() => {
+  var _scriptDir = import.meta.url;
+  return (function(Module6 = {}) {
+    var Module6 = typeof Module6 != "undefined" ? Module6 : {};
+    var readyPromiseResolve, readyPromiseReject;
+    Module6["ready"] = new Promise(function(resolve, reject) {
+      readyPromiseResolve = resolve;
+      readyPromiseReject = reject;
+    });
+    const isServiceWorker5 = globalThis.ServiceWorkerGlobalScope !== void 0;
+    const isRunningInCloudFlareWorkers5 = isServiceWorker5 && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+    const isRunningInNode5 = typeof process === "object" && process.release && process.release.name === "node";
+    if (isRunningInCloudFlareWorkers5 || isRunningInNode5) {
+      if (!globalThis.ImageData) {
+        globalThis.ImageData = class ImageData {
+          constructor(data, width, height) {
+            this.data = data;
+            this.width = width;
+            this.height = height;
+          }
+        };
+      }
+      if (import.meta.url === void 0) {
+        import.meta.url = "https://localhost";
+      }
+      if (typeof self !== "undefined" && self.location === void 0) {
+        self.location = { href: "" };
+      }
+    }
+    var moduleOverrides = Object.assign({}, Module6);
+    var arguments_ = [];
+    var thisProgram = "./this.program";
+    var quit_ = (status, toThrow) => {
+      throw toThrow;
+    };
+    var ENVIRONMENT_IS_WEB = typeof window == "object";
+    var ENVIRONMENT_IS_WORKER = typeof importScripts == "function";
+    var ENVIRONMENT_IS_NODE = typeof process == "object" && typeof process.versions == "object" && typeof process.versions.node == "string";
+    var scriptDirectory = "";
+    function locateFile(path15) {
+      if (Module6["locateFile"]) {
+        return Module6["locateFile"](path15, scriptDirectory);
+      }
+      return scriptDirectory + path15;
+    }
+    var read_, readAsync, readBinary, setWindowTitle;
+    if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
+      if (ENVIRONMENT_IS_WORKER) {
+        scriptDirectory = self.location.href;
+      } else if (typeof document != "undefined" && document.currentScript) {
+        scriptDirectory = document.currentScript.src;
+      }
+      if (_scriptDir) {
+        scriptDirectory = _scriptDir;
+      }
+      if (scriptDirectory.indexOf("blob:") !== 0) {
+        scriptDirectory = scriptDirectory.substr(0, scriptDirectory.replace(/[?#].*/, "").lastIndexOf("/") + 1);
+      } else {
+        scriptDirectory = "";
+      }
+      {
+        read_ = (url2) => {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", url2, false);
+          xhr.send(null);
+          return xhr.responseText;
+        };
+        if (ENVIRONMENT_IS_WORKER) {
+          readBinary = (url2) => {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url2, false);
+            xhr.responseType = "arraybuffer";
+            xhr.send(null);
+            return new Uint8Array(xhr.response);
+          };
+        }
+        readAsync = (url2, onload, onerror) => {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", url2, true);
+          xhr.responseType = "arraybuffer";
+          xhr.onload = () => {
+            if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
+              onload(xhr.response);
+              return;
+            }
+            onerror();
+          };
+          xhr.onerror = onerror;
+          xhr.send(null);
+        };
+      }
+      setWindowTitle = (title) => document.title = title;
+    } else {
+    }
+    var out = Module6["print"] || console.log.bind(console);
+    var err = Module6["printErr"] || console.warn.bind(console);
+    Object.assign(Module6, moduleOverrides);
+    moduleOverrides = null;
+    if (Module6["arguments"]) arguments_ = Module6["arguments"];
+    if (Module6["thisProgram"]) thisProgram = Module6["thisProgram"];
+    if (Module6["quit"]) quit_ = Module6["quit"];
+    var wasmBinary;
+    if (Module6["wasmBinary"]) wasmBinary = Module6["wasmBinary"];
+    var noExitRuntime = Module6["noExitRuntime"] || true;
+    if (typeof WebAssembly != "object") {
+      abort("no native wasm support detected");
+    }
+    var wasmMemory;
+    var ABORT = false;
+    var EXITSTATUS;
+    function UTF8ArrayToString(heapOrArray, idx, maxBytesToRead) {
+      var endIdx = idx + maxBytesToRead;
+      var str = "";
+      while (!(idx >= endIdx)) {
+        var u0 = heapOrArray[idx++];
+        if (!u0) return str;
+        if (!(u0 & 128)) {
+          str += String.fromCharCode(u0);
+          continue;
+        }
+        var u1 = heapOrArray[idx++] & 63;
+        if ((u0 & 224) == 192) {
+          str += String.fromCharCode((u0 & 31) << 6 | u1);
+          continue;
+        }
+        var u2 = heapOrArray[idx++] & 63;
+        if ((u0 & 240) == 224) {
+          u0 = (u0 & 15) << 12 | u1 << 6 | u2;
+        } else {
+          u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
+        }
+        if (u0 < 65536) {
+          str += String.fromCharCode(u0);
+        } else {
+          var ch = u0 - 65536;
+          str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+        }
+      }
+      return str;
+    }
+    function UTF8ToString(ptr, maxBytesToRead) {
+      return ptr ? UTF8ArrayToString(HEAPU8, ptr, maxBytesToRead) : "";
+    }
+    function stringToUTF8Array(str, heap2, outIdx, maxBytesToWrite) {
+      if (!(maxBytesToWrite > 0)) return 0;
+      var startIdx = outIdx;
+      var endIdx = outIdx + maxBytesToWrite - 1;
+      for (var i = 0; i < str.length; ++i) {
+        var u = str.charCodeAt(i);
+        if (u >= 55296 && u <= 57343) {
+          var u1 = str.charCodeAt(++i);
+          u = 65536 + ((u & 1023) << 10) | u1 & 1023;
+        }
+        if (u <= 127) {
+          if (outIdx >= endIdx) break;
+          heap2[outIdx++] = u;
+        } else if (u <= 2047) {
+          if (outIdx + 1 >= endIdx) break;
+          heap2[outIdx++] = 192 | u >> 6;
+          heap2[outIdx++] = 128 | u & 63;
+        } else if (u <= 65535) {
+          if (outIdx + 2 >= endIdx) break;
+          heap2[outIdx++] = 224 | u >> 12;
+          heap2[outIdx++] = 128 | u >> 6 & 63;
+          heap2[outIdx++] = 128 | u & 63;
+        } else {
+          if (outIdx + 3 >= endIdx) break;
+          heap2[outIdx++] = 240 | u >> 18;
+          heap2[outIdx++] = 128 | u >> 12 & 63;
+          heap2[outIdx++] = 128 | u >> 6 & 63;
+          heap2[outIdx++] = 128 | u & 63;
+        }
+      }
+      heap2[outIdx] = 0;
+      return outIdx - startIdx;
+    }
+    function stringToUTF8(str, outPtr, maxBytesToWrite) {
+      return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite);
+    }
+    function lengthBytesUTF8(str) {
+      var len = 0;
+      for (var i = 0; i < str.length; ++i) {
+        var c = str.charCodeAt(i);
+        if (c <= 127) {
+          len++;
+        } else if (c <= 2047) {
+          len += 2;
+        } else if (c >= 55296 && c <= 57343) {
+          len += 4;
+          ++i;
+        } else {
+          len += 3;
+        }
+      }
+      return len;
+    }
+    var HEAP8, HEAPU8, HEAP16, HEAPU16, HEAP32, HEAPU32, HEAPF32, HEAPF64;
+    function updateMemoryViews() {
+      var b = wasmMemory.buffer;
+      Module6["HEAP8"] = HEAP8 = new Int8Array(b);
+      Module6["HEAP16"] = HEAP16 = new Int16Array(b);
+      Module6["HEAP32"] = HEAP32 = new Int32Array(b);
+      Module6["HEAPU8"] = HEAPU8 = new Uint8Array(b);
+      Module6["HEAPU16"] = HEAPU16 = new Uint16Array(b);
+      Module6["HEAPU32"] = HEAPU32 = new Uint32Array(b);
+      Module6["HEAPF32"] = HEAPF32 = new Float32Array(b);
+      Module6["HEAPF64"] = HEAPF64 = new Float64Array(b);
+    }
+    var wasmTable;
+    var __ATPRERUN__ = [];
+    var __ATINIT__ = [];
+    var __ATPOSTRUN__ = [];
+    var runtimeInitialized = false;
+    function preRun() {
+      if (Module6["preRun"]) {
+        if (typeof Module6["preRun"] == "function") Module6["preRun"] = [Module6["preRun"]];
+        while (Module6["preRun"].length) {
+          addOnPreRun(Module6["preRun"].shift());
+        }
+      }
+      callRuntimeCallbacks(__ATPRERUN__);
+    }
+    function initRuntime() {
+      runtimeInitialized = true;
+      callRuntimeCallbacks(__ATINIT__);
+    }
+    function postRun() {
+      if (Module6["postRun"]) {
+        if (typeof Module6["postRun"] == "function") Module6["postRun"] = [Module6["postRun"]];
+        while (Module6["postRun"].length) {
+          addOnPostRun(Module6["postRun"].shift());
+        }
+      }
+      callRuntimeCallbacks(__ATPOSTRUN__);
+    }
+    function addOnPreRun(cb) {
+      __ATPRERUN__.unshift(cb);
+    }
+    function addOnInit(cb) {
+      __ATINIT__.unshift(cb);
+    }
+    function addOnPostRun(cb) {
+      __ATPOSTRUN__.unshift(cb);
+    }
+    var runDependencies = 0;
+    var runDependencyWatcher = null;
+    var dependenciesFulfilled = null;
+    function addRunDependency(id) {
+      runDependencies++;
+      if (Module6["monitorRunDependencies"]) {
+        Module6["monitorRunDependencies"](runDependencies);
+      }
+    }
+    function removeRunDependency(id) {
+      runDependencies--;
+      if (Module6["monitorRunDependencies"]) {
+        Module6["monitorRunDependencies"](runDependencies);
+      }
+      if (runDependencies == 0) {
+        if (runDependencyWatcher !== null) {
+          clearInterval(runDependencyWatcher);
+          runDependencyWatcher = null;
+        }
+        if (dependenciesFulfilled) {
+          var callback = dependenciesFulfilled;
+          dependenciesFulfilled = null;
+          callback();
+        }
+      }
+    }
+    function abort(what) {
+      if (Module6["onAbort"]) {
+        Module6["onAbort"](what);
+      }
+      what = "Aborted(" + what + ")";
+      err(what);
+      ABORT = true;
+      EXITSTATUS = 1;
+      what += ". Build with -sASSERTIONS for more info.";
+      var e = new WebAssembly.RuntimeError(what);
+      readyPromiseReject(e);
+      throw e;
+    }
+    var dataURIPrefix = "data:application/octet-stream;base64,";
+    function isDataURI(filename) {
+      return filename.startsWith(dataURIPrefix);
+    }
+    var wasmBinaryFile;
+    if (Module6["locateFile"]) {
+      wasmBinaryFile = "webp_dec.wasm";
+      if (!isDataURI(wasmBinaryFile)) {
+        wasmBinaryFile = locateFile(wasmBinaryFile);
+      }
+    } else {
+      wasmBinaryFile = new URL("webp_dec.wasm", import.meta.url).href;
+    }
+    function getBinary(file2) {
+      try {
+        if (file2 == wasmBinaryFile && wasmBinary) {
+          return new Uint8Array(wasmBinary);
+        }
+        if (readBinary) {
+          return readBinary(file2);
+        }
+        throw "both async and sync fetching of the wasm failed";
+      } catch (err2) {
+        abort(err2);
+      }
+    }
+    function getBinaryPromise(binaryFile) {
+      if (!wasmBinary && (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER)) {
+        if (typeof fetch == "function") {
+          return fetch(binaryFile, { credentials: "same-origin" }).then(function(response) {
+            if (!response["ok"]) {
+              throw "failed to load wasm binary file at '" + binaryFile + "'";
+            }
+            return response["arrayBuffer"]();
+          }).catch(function() {
+            return getBinary(binaryFile);
+          });
+        }
+      }
+      return Promise.resolve().then(function() {
+        return getBinary(binaryFile);
+      });
+    }
+    function instantiateArrayBuffer(binaryFile, imports, receiver) {
+      return getBinaryPromise(binaryFile).then(function(binary) {
+        return WebAssembly.instantiate(binary, imports);
+      }).then(function(instance) {
+        return instance;
+      }).then(receiver, function(reason) {
+        err("failed to asynchronously prepare wasm: " + reason);
+        abort(reason);
+      });
+    }
+    function instantiateAsync(binary, binaryFile, imports, callback) {
+      if (!binary && typeof WebAssembly.instantiateStreaming == "function" && !isDataURI(binaryFile) && typeof fetch == "function") {
+        return fetch(binaryFile, { credentials: "same-origin" }).then(function(response) {
+          var result = WebAssembly.instantiateStreaming(response, imports);
+          return result.then(callback, function(reason) {
+            err("wasm streaming compile failed: " + reason);
+            err("falling back to ArrayBuffer instantiation");
+            return instantiateArrayBuffer(binaryFile, imports, callback);
+          });
+        });
+      } else {
+        return instantiateArrayBuffer(binaryFile, imports, callback);
+      }
+    }
+    function createWasm() {
+      var info = { "a": wasmImports };
+      function receiveInstance(instance, module) {
+        var exports = instance.exports;
+        Module6["asm"] = exports;
+        wasmMemory = Module6["asm"]["s"];
+        updateMemoryViews();
+        wasmTable = Module6["asm"]["y"];
+        addOnInit(Module6["asm"]["t"]);
+        removeRunDependency("wasm-instantiate");
+        return exports;
+      }
+      addRunDependency("wasm-instantiate");
+      function receiveInstantiationResult(result) {
+        receiveInstance(result["instance"]);
+      }
+      if (Module6["instantiateWasm"]) {
+        try {
+          return Module6["instantiateWasm"](info, receiveInstance);
+        } catch (e) {
+          err("Module.instantiateWasm callback failed with error: " + e);
+          readyPromiseReject(e);
+        }
+      }
+      instantiateAsync(wasmBinary, wasmBinaryFile, info, receiveInstantiationResult).catch(readyPromiseReject);
+      return {};
+    }
+    function callRuntimeCallbacks(callbacks) {
+      while (callbacks.length > 0) {
+        callbacks.shift()(Module6);
+      }
+    }
+    function ExceptionInfo(excPtr) {
+      this.excPtr = excPtr;
+      this.ptr = excPtr - 24;
+      this.set_type = function(type) {
+        HEAPU32[this.ptr + 4 >> 2] = type;
+      };
+      this.get_type = function() {
+        return HEAPU32[this.ptr + 4 >> 2];
+      };
+      this.set_destructor = function(destructor) {
+        HEAPU32[this.ptr + 8 >> 2] = destructor;
+      };
+      this.get_destructor = function() {
+        return HEAPU32[this.ptr + 8 >> 2];
+      };
+      this.set_refcount = function(refcount) {
+        HEAP32[this.ptr >> 2] = refcount;
+      };
+      this.set_caught = function(caught) {
+        caught = caught ? 1 : 0;
+        HEAP8[this.ptr + 12 >> 0] = caught;
+      };
+      this.get_caught = function() {
+        return HEAP8[this.ptr + 12 >> 0] != 0;
+      };
+      this.set_rethrown = function(rethrown) {
+        rethrown = rethrown ? 1 : 0;
+        HEAP8[this.ptr + 13 >> 0] = rethrown;
+      };
+      this.get_rethrown = function() {
+        return HEAP8[this.ptr + 13 >> 0] != 0;
+      };
+      this.init = function(type, destructor) {
+        this.set_adjusted_ptr(0);
+        this.set_type(type);
+        this.set_destructor(destructor);
+        this.set_refcount(0);
+        this.set_caught(false);
+        this.set_rethrown(false);
+      };
+      this.add_ref = function() {
+        var value = HEAP32[this.ptr >> 2];
+        HEAP32[this.ptr >> 2] = value + 1;
+      };
+      this.release_ref = function() {
+        var prev = HEAP32[this.ptr >> 2];
+        HEAP32[this.ptr >> 2] = prev - 1;
+        return prev === 1;
+      };
+      this.set_adjusted_ptr = function(adjustedPtr) {
+        HEAPU32[this.ptr + 16 >> 2] = adjustedPtr;
+      };
+      this.get_adjusted_ptr = function() {
+        return HEAPU32[this.ptr + 16 >> 2];
+      };
+      this.get_exception_ptr = function() {
+        var isPointer = ___cxa_is_pointer_type(this.get_type());
+        if (isPointer) {
+          return HEAPU32[this.excPtr >> 2];
+        }
+        var adjusted = this.get_adjusted_ptr();
+        if (adjusted !== 0) return adjusted;
+        return this.excPtr;
+      };
+    }
+    var exceptionLast = 0;
+    var uncaughtExceptionCount = 0;
+    function ___cxa_throw(ptr, type, destructor) {
+      var info = new ExceptionInfo(ptr);
+      info.init(type, destructor);
+      exceptionLast = ptr;
+      uncaughtExceptionCount++;
+      throw ptr;
+    }
+    function __embind_register_bigint(primitiveType, name2, size, minRange, maxRange) {
+    }
+    function getShiftFromSize(size) {
+      switch (size) {
+        case 1:
+          return 0;
+        case 2:
+          return 1;
+        case 4:
+          return 2;
+        case 8:
+          return 3;
+        default:
+          throw new TypeError("Unknown type size: " + size);
+      }
+    }
+    function embind_init_charCodes() {
+      var codes = new Array(256);
+      for (var i = 0; i < 256; ++i) {
+        codes[i] = String.fromCharCode(i);
+      }
+      embind_charCodes = codes;
+    }
+    var embind_charCodes = void 0;
+    function readLatin1String(ptr) {
+      var ret = "";
+      var c = ptr;
+      while (HEAPU8[c]) {
+        ret += embind_charCodes[HEAPU8[c++]];
+      }
+      return ret;
+    }
+    var awaitingDependencies = {};
+    var registeredTypes = {};
+    var typeDependencies = {};
+    var char_0 = 48;
+    var char_9 = 57;
+    function makeLegalFunctionName(name2) {
+      if (void 0 === name2) {
+        return "_unknown";
+      }
+      name2 = name2.replace(/[^a-zA-Z0-9_]/g, "$");
+      var f = name2.charCodeAt(0);
+      if (f >= char_0 && f <= char_9) {
+        return "_" + name2;
+      }
+      return name2;
+    }
+    function createNamedFunction(name2, body) {
+      name2 = makeLegalFunctionName(name2);
+      return { [name2]: function() {
+        return body.apply(this, arguments);
+      } }[name2];
+    }
+    function extendError(baseErrorType, errorName) {
+      var errorClass = createNamedFunction(errorName, function(message) {
+        this.name = errorName;
+        this.message = message;
+        var stack = new Error(message).stack;
+        if (stack !== void 0) {
+          this.stack = this.toString() + "\n" + stack.replace(/^Error(:[^\n]*)?\n/, "");
+        }
+      });
+      errorClass.prototype = Object.create(baseErrorType.prototype);
+      errorClass.prototype.constructor = errorClass;
+      errorClass.prototype.toString = function() {
+        if (this.message === void 0) {
+          return this.name;
+        } else {
+          return this.name + ": " + this.message;
+        }
+      };
+      return errorClass;
+    }
+    var BindingError = void 0;
+    function throwBindingError(message) {
+      throw new BindingError(message);
+    }
+    var InternalError = void 0;
+    function throwInternalError(message) {
+      throw new InternalError(message);
+    }
+    function whenDependentTypesAreResolved(myTypes, dependentTypes, getTypeConverters) {
+      myTypes.forEach(function(type) {
+        typeDependencies[type] = dependentTypes;
+      });
+      function onComplete(typeConverters2) {
+        var myTypeConverters = getTypeConverters(typeConverters2);
+        if (myTypeConverters.length !== myTypes.length) {
+          throwInternalError("Mismatched type converter count");
+        }
+        for (var i = 0; i < myTypes.length; ++i) {
+          registerType(myTypes[i], myTypeConverters[i]);
+        }
+      }
+      var typeConverters = new Array(dependentTypes.length);
+      var unregisteredTypes = [];
+      var registered = 0;
+      dependentTypes.forEach((dt, i) => {
+        if (registeredTypes.hasOwnProperty(dt)) {
+          typeConverters[i] = registeredTypes[dt];
+        } else {
+          unregisteredTypes.push(dt);
+          if (!awaitingDependencies.hasOwnProperty(dt)) {
+            awaitingDependencies[dt] = [];
+          }
+          awaitingDependencies[dt].push(() => {
+            typeConverters[i] = registeredTypes[dt];
+            ++registered;
+            if (registered === unregisteredTypes.length) {
+              onComplete(typeConverters);
+            }
+          });
+        }
+      });
+      if (0 === unregisteredTypes.length) {
+        onComplete(typeConverters);
+      }
+    }
+    function registerType(rawType, registeredInstance, options2 = {}) {
+      if (!("argPackAdvance" in registeredInstance)) {
+        throw new TypeError("registerType registeredInstance requires argPackAdvance");
+      }
+      var name2 = registeredInstance.name;
+      if (!rawType) {
+        throwBindingError('type "' + name2 + '" must have a positive integer typeid pointer');
+      }
+      if (registeredTypes.hasOwnProperty(rawType)) {
+        if (options2.ignoreDuplicateRegistrations) {
+          return;
+        } else {
+          throwBindingError("Cannot register type '" + name2 + "' twice");
+        }
+      }
+      registeredTypes[rawType] = registeredInstance;
+      delete typeDependencies[rawType];
+      if (awaitingDependencies.hasOwnProperty(rawType)) {
+        var callbacks = awaitingDependencies[rawType];
+        delete awaitingDependencies[rawType];
+        callbacks.forEach((cb) => cb());
+      }
+    }
+    function __embind_register_bool(rawType, name2, size, trueValue, falseValue) {
+      var shift = getShiftFromSize(size);
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": function(wt) {
+        return !!wt;
+      }, "toWireType": function(destructors, o) {
+        return o ? trueValue : falseValue;
+      }, "argPackAdvance": 8, "readValueFromPointer": function(pointer) {
+        var heap2;
+        if (size === 1) {
+          heap2 = HEAP8;
+        } else if (size === 2) {
+          heap2 = HEAP16;
+        } else if (size === 4) {
+          heap2 = HEAP32;
+        } else {
+          throw new TypeError("Unknown boolean type size: " + name2);
+        }
+        return this["fromWireType"](heap2[pointer >> shift]);
+      }, destructorFunction: null });
+    }
+    var emval_free_list = [];
+    var emval_handle_array = [{}, { value: void 0 }, { value: null }, { value: true }, { value: false }];
+    function __emval_decref(handle) {
+      if (handle > 4 && 0 === --emval_handle_array[handle].refcount) {
+        emval_handle_array[handle] = void 0;
+        emval_free_list.push(handle);
+      }
+    }
+    function count_emval_handles() {
+      var count2 = 0;
+      for (var i = 5; i < emval_handle_array.length; ++i) {
+        if (emval_handle_array[i] !== void 0) {
+          ++count2;
+        }
+      }
+      return count2;
+    }
+    function get_first_emval() {
+      for (var i = 5; i < emval_handle_array.length; ++i) {
+        if (emval_handle_array[i] !== void 0) {
+          return emval_handle_array[i];
+        }
+      }
+      return null;
+    }
+    function init_emval() {
+      Module6["count_emval_handles"] = count_emval_handles;
+      Module6["get_first_emval"] = get_first_emval;
+    }
+    var Emval = { toValue: (handle) => {
+      if (!handle) {
+        throwBindingError("Cannot use deleted val. handle = " + handle);
+      }
+      return emval_handle_array[handle].value;
+    }, toHandle: (value) => {
+      switch (value) {
+        case void 0:
+          return 1;
+        case null:
+          return 2;
+        case true:
+          return 3;
+        case false:
+          return 4;
+        default: {
+          var handle = emval_free_list.length ? emval_free_list.pop() : emval_handle_array.length;
+          emval_handle_array[handle] = { refcount: 1, value };
+          return handle;
+        }
+      }
+    } };
+    function simpleReadValueFromPointer(pointer) {
+      return this["fromWireType"](HEAP32[pointer >> 2]);
+    }
+    function __embind_register_emval(rawType, name2) {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": function(handle) {
+        var rv = Emval.toValue(handle);
+        __emval_decref(handle);
+        return rv;
+      }, "toWireType": function(destructors, value) {
+        return Emval.toHandle(value);
+      }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: null });
+    }
+    function floatReadValueFromPointer(name2, shift) {
+      switch (shift) {
+        case 2:
+          return function(pointer) {
+            return this["fromWireType"](HEAPF32[pointer >> 2]);
+          };
+        case 3:
+          return function(pointer) {
+            return this["fromWireType"](HEAPF64[pointer >> 3]);
+          };
+        default:
+          throw new TypeError("Unknown float type: " + name2);
+      }
+    }
+    function __embind_register_float(rawType, name2, size) {
+      var shift = getShiftFromSize(size);
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": function(value) {
+        return value;
+      }, "toWireType": function(destructors, value) {
+        return value;
+      }, "argPackAdvance": 8, "readValueFromPointer": floatReadValueFromPointer(name2, shift), destructorFunction: null });
+    }
+    function runDestructors(destructors) {
+      while (destructors.length) {
+        var ptr = destructors.pop();
+        var del = destructors.pop();
+        del(ptr);
+      }
+    }
+    function craftInvokerFunction(humanName, argTypes, classType, cppInvokerFunc, cppTargetFunc, isAsync) {
+      var argCount = argTypes.length;
+      if (argCount < 2) {
+        throwBindingError("argTypes array size mismatch! Must at least get return value and 'this' types!");
+      }
+      var isClassMethodFunc = argTypes[1] !== null && classType !== null;
+      var needsDestructorStack = false;
+      for (var i = 1; i < argTypes.length; ++i) {
+        if (argTypes[i] !== null && argTypes[i].destructorFunction === void 0) {
+          needsDestructorStack = true;
+          break;
+        }
+      }
+      var returns = argTypes[0].name !== "void";
+      var expectedArgCount = argCount - 2;
+      var argsWired = new Array(expectedArgCount);
+      var invokerFuncArgs = [];
+      var destructors = [];
+      return function() {
+        if (arguments.length !== expectedArgCount) {
+          throwBindingError("function " + humanName + " called with " + arguments.length + " arguments, expected " + expectedArgCount + " args!");
+        }
+        destructors.length = 0;
+        var thisWired;
+        invokerFuncArgs.length = isClassMethodFunc ? 2 : 1;
+        invokerFuncArgs[0] = cppTargetFunc;
+        if (isClassMethodFunc) {
+          thisWired = argTypes[1]["toWireType"](destructors, this);
+          invokerFuncArgs[1] = thisWired;
+        }
+        for (var i2 = 0; i2 < expectedArgCount; ++i2) {
+          argsWired[i2] = argTypes[i2 + 2]["toWireType"](destructors, arguments[i2]);
+          invokerFuncArgs.push(argsWired[i2]);
+        }
+        var rv = cppInvokerFunc.apply(null, invokerFuncArgs);
+        function onDone(rv2) {
+          if (needsDestructorStack) {
+            runDestructors(destructors);
+          } else {
+            for (var i3 = isClassMethodFunc ? 1 : 2; i3 < argTypes.length; i3++) {
+              var param2 = i3 === 1 ? thisWired : argsWired[i3 - 2];
+              if (argTypes[i3].destructorFunction !== null) {
+                argTypes[i3].destructorFunction(param2);
+              }
+            }
+          }
+          if (returns) {
+            return argTypes[0]["fromWireType"](rv2);
+          }
+        }
+        return onDone(rv);
+      };
+    }
+    function ensureOverloadTable(proto, methodName, humanName) {
+      if (void 0 === proto[methodName].overloadTable) {
+        var prevFunc = proto[methodName];
+        proto[methodName] = function() {
+          if (!proto[methodName].overloadTable.hasOwnProperty(arguments.length)) {
+            throwBindingError("Function '" + humanName + "' called with an invalid number of arguments (" + arguments.length + ") - expects one of (" + proto[methodName].overloadTable + ")!");
+          }
+          return proto[methodName].overloadTable[arguments.length].apply(this, arguments);
+        };
+        proto[methodName].overloadTable = [];
+        proto[methodName].overloadTable[prevFunc.argCount] = prevFunc;
+      }
+    }
+    function exposePublicSymbol(name2, value, numArguments) {
+      if (Module6.hasOwnProperty(name2)) {
+        if (void 0 === numArguments || void 0 !== Module6[name2].overloadTable && void 0 !== Module6[name2].overloadTable[numArguments]) {
+          throwBindingError("Cannot register public name '" + name2 + "' twice");
+        }
+        ensureOverloadTable(Module6, name2, name2);
+        if (Module6.hasOwnProperty(numArguments)) {
+          throwBindingError("Cannot register multiple overloads of a function with the same number of arguments (" + numArguments + ")!");
+        }
+        Module6[name2].overloadTable[numArguments] = value;
+      } else {
+        Module6[name2] = value;
+        if (void 0 !== numArguments) {
+          Module6[name2].numArguments = numArguments;
+        }
+      }
+    }
+    function heap32VectorToArray(count2, firstElement) {
+      var array2 = [];
+      for (var i = 0; i < count2; i++) {
+        array2.push(HEAPU32[firstElement + i * 4 >> 2]);
+      }
+      return array2;
+    }
+    function replacePublicSymbol(name2, value, numArguments) {
+      if (!Module6.hasOwnProperty(name2)) {
+        throwInternalError("Replacing nonexistant public symbol");
+      }
+      if (void 0 !== Module6[name2].overloadTable && void 0 !== numArguments) {
+        Module6[name2].overloadTable[numArguments] = value;
+      } else {
+        Module6[name2] = value;
+        Module6[name2].argCount = numArguments;
+      }
+    }
+    function dynCallLegacy(sig, ptr, args) {
+      var f = Module6["dynCall_" + sig];
+      return args && args.length ? f.apply(null, [ptr].concat(args)) : f.call(null, ptr);
+    }
+    var wasmTableMirror = [];
+    function getWasmTableEntry(funcPtr) {
+      var func = wasmTableMirror[funcPtr];
+      if (!func) {
+        if (funcPtr >= wasmTableMirror.length) wasmTableMirror.length = funcPtr + 1;
+        wasmTableMirror[funcPtr] = func = wasmTable.get(funcPtr);
+      }
+      return func;
+    }
+    function dynCall(sig, ptr, args) {
+      if (sig.includes("j")) {
+        return dynCallLegacy(sig, ptr, args);
+      }
+      var rtn = getWasmTableEntry(ptr).apply(null, args);
+      return rtn;
+    }
+    function getDynCaller(sig, ptr) {
+      var argCache = [];
+      return function() {
+        argCache.length = 0;
+        Object.assign(argCache, arguments);
+        return dynCall(sig, ptr, argCache);
+      };
+    }
+    function embind__requireFunction(signature, rawFunction) {
+      signature = readLatin1String(signature);
+      function makeDynCaller() {
+        if (signature.includes("j")) {
+          return getDynCaller(signature, rawFunction);
+        }
+        return getWasmTableEntry(rawFunction);
+      }
+      var fp = makeDynCaller();
+      if (typeof fp != "function") {
+        throwBindingError("unknown function pointer with signature " + signature + ": " + rawFunction);
+      }
+      return fp;
+    }
+    var UnboundTypeError = void 0;
+    function getTypeName(type) {
+      var ptr = ___getTypeName(type);
+      var rv = readLatin1String(ptr);
+      _free(ptr);
+      return rv;
+    }
+    function throwUnboundTypeError(message, types) {
+      var unboundTypes = [];
+      var seen = {};
+      function visit2(type) {
+        if (seen[type]) {
+          return;
+        }
+        if (registeredTypes[type]) {
+          return;
+        }
+        if (typeDependencies[type]) {
+          typeDependencies[type].forEach(visit2);
+          return;
+        }
+        unboundTypes.push(type);
+        seen[type] = true;
+      }
+      types.forEach(visit2);
+      throw new UnboundTypeError(message + ": " + unboundTypes.map(getTypeName).join([", "]));
+    }
+    function __embind_register_function(name2, argCount, rawArgTypesAddr, signature, rawInvoker, fn, isAsync) {
+      var argTypes = heap32VectorToArray(argCount, rawArgTypesAddr);
+      name2 = readLatin1String(name2);
+      rawInvoker = embind__requireFunction(signature, rawInvoker);
+      exposePublicSymbol(name2, function() {
+        throwUnboundTypeError("Cannot call " + name2 + " due to unbound types", argTypes);
+      }, argCount - 1);
+      whenDependentTypesAreResolved([], argTypes, function(argTypes2) {
+        var invokerArgsArray = [argTypes2[0], null].concat(argTypes2.slice(1));
+        replacePublicSymbol(name2, craftInvokerFunction(name2, invokerArgsArray, null, rawInvoker, fn, isAsync), argCount - 1);
+        return [];
+      });
+    }
+    function integerReadValueFromPointer(name2, shift, signed) {
+      switch (shift) {
+        case 0:
+          return signed ? function readS8FromPointer(pointer) {
+            return HEAP8[pointer];
+          } : function readU8FromPointer(pointer) {
+            return HEAPU8[pointer];
+          };
+        case 1:
+          return signed ? function readS16FromPointer(pointer) {
+            return HEAP16[pointer >> 1];
+          } : function readU16FromPointer(pointer) {
+            return HEAPU16[pointer >> 1];
+          };
+        case 2:
+          return signed ? function readS32FromPointer(pointer) {
+            return HEAP32[pointer >> 2];
+          } : function readU32FromPointer(pointer) {
+            return HEAPU32[pointer >> 2];
+          };
+        default:
+          throw new TypeError("Unknown integer type: " + name2);
+      }
+    }
+    function __embind_register_integer(primitiveType, name2, size, minRange, maxRange) {
+      name2 = readLatin1String(name2);
+      if (maxRange === -1) {
+        maxRange = 4294967295;
+      }
+      var shift = getShiftFromSize(size);
+      var fromWireType = (value) => value;
+      if (minRange === 0) {
+        var bitshift = 32 - 8 * size;
+        fromWireType = (value) => value << bitshift >>> bitshift;
+      }
+      var isUnsignedType = name2.includes("unsigned");
+      var checkAssertions = (value, toTypeName) => {
+      };
+      var toWireType;
+      if (isUnsignedType) {
+        toWireType = function(destructors, value) {
+          checkAssertions(value, this.name);
+          return value >>> 0;
+        };
+      } else {
+        toWireType = function(destructors, value) {
+          checkAssertions(value, this.name);
+          return value;
+        };
+      }
+      registerType(primitiveType, { name: name2, "fromWireType": fromWireType, "toWireType": toWireType, "argPackAdvance": 8, "readValueFromPointer": integerReadValueFromPointer(name2, shift, minRange !== 0), destructorFunction: null });
+    }
+    function __embind_register_memory_view(rawType, dataTypeIndex, name2) {
+      var typeMapping = [Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array];
+      var TA = typeMapping[dataTypeIndex];
+      function decodeMemoryView(handle) {
+        handle = handle >> 2;
+        var heap2 = HEAPU32;
+        var size = heap2[handle];
+        var data = heap2[handle + 1];
+        return new TA(heap2.buffer, data, size);
+      }
+      name2 = readLatin1String(name2);
+      registerType(rawType, { name: name2, "fromWireType": decodeMemoryView, "argPackAdvance": 8, "readValueFromPointer": decodeMemoryView }, { ignoreDuplicateRegistrations: true });
+    }
+    function __embind_register_std_string(rawType, name2) {
+      name2 = readLatin1String(name2);
+      var stdStringIsUTF8 = name2 === "std::string";
+      registerType(rawType, { name: name2, "fromWireType": function(value) {
+        var length = HEAPU32[value >> 2];
+        var payload = value + 4;
+        var str;
+        if (stdStringIsUTF8) {
+          var decodeStartPtr = payload;
+          for (var i = 0; i <= length; ++i) {
+            var currentBytePtr = payload + i;
+            if (i == length || HEAPU8[currentBytePtr] == 0) {
+              var maxRead = currentBytePtr - decodeStartPtr;
+              var stringSegment = UTF8ToString(decodeStartPtr, maxRead);
+              if (str === void 0) {
+                str = stringSegment;
+              } else {
+                str += String.fromCharCode(0);
+                str += stringSegment;
+              }
+              decodeStartPtr = currentBytePtr + 1;
+            }
+          }
+        } else {
+          var a = new Array(length);
+          for (var i = 0; i < length; ++i) {
+            a[i] = String.fromCharCode(HEAPU8[payload + i]);
+          }
+          str = a.join("");
+        }
+        _free(value);
+        return str;
+      }, "toWireType": function(destructors, value) {
+        if (value instanceof ArrayBuffer) {
+          value = new Uint8Array(value);
+        }
+        var length;
+        var valueIsOfTypeString = typeof value == "string";
+        if (!(valueIsOfTypeString || value instanceof Uint8Array || value instanceof Uint8ClampedArray || value instanceof Int8Array)) {
+          throwBindingError("Cannot pass non-string to std::string");
+        }
+        if (stdStringIsUTF8 && valueIsOfTypeString) {
+          length = lengthBytesUTF8(value);
+        } else {
+          length = value.length;
+        }
+        var base = _malloc(4 + length + 1);
+        var ptr = base + 4;
+        HEAPU32[base >> 2] = length;
+        if (stdStringIsUTF8 && valueIsOfTypeString) {
+          stringToUTF8(value, ptr, length + 1);
+        } else {
+          if (valueIsOfTypeString) {
+            for (var i = 0; i < length; ++i) {
+              var charCode = value.charCodeAt(i);
+              if (charCode > 255) {
+                _free(ptr);
+                throwBindingError("String has UTF-16 code units that do not fit in 8 bits");
+              }
+              HEAPU8[ptr + i] = charCode;
+            }
+          } else {
+            for (var i = 0; i < length; ++i) {
+              HEAPU8[ptr + i] = value[i];
+            }
+          }
+        }
+        if (destructors !== null) {
+          destructors.push(_free, base);
+        }
+        return base;
+      }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: function(ptr) {
+        _free(ptr);
+      } });
+    }
+    function UTF16ToString(ptr, maxBytesToRead) {
+      var str = "";
+      for (var i = 0; !(i >= maxBytesToRead / 2); ++i) {
+        var codeUnit = HEAP16[ptr + i * 2 >> 1];
+        if (codeUnit == 0) break;
+        str += String.fromCharCode(codeUnit);
+      }
+      return str;
+    }
+    function stringToUTF16(str, outPtr, maxBytesToWrite) {
+      if (maxBytesToWrite === void 0) {
+        maxBytesToWrite = 2147483647;
+      }
+      if (maxBytesToWrite < 2) return 0;
+      maxBytesToWrite -= 2;
+      var startPtr = outPtr;
+      var numCharsToWrite = maxBytesToWrite < str.length * 2 ? maxBytesToWrite / 2 : str.length;
+      for (var i = 0; i < numCharsToWrite; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        HEAP16[outPtr >> 1] = codeUnit;
+        outPtr += 2;
+      }
+      HEAP16[outPtr >> 1] = 0;
+      return outPtr - startPtr;
+    }
+    function lengthBytesUTF16(str) {
+      return str.length * 2;
+    }
+    function UTF32ToString(ptr, maxBytesToRead) {
+      var i = 0;
+      var str = "";
+      while (!(i >= maxBytesToRead / 4)) {
+        var utf32 = HEAP32[ptr + i * 4 >> 2];
+        if (utf32 == 0) break;
+        ++i;
+        if (utf32 >= 65536) {
+          var ch = utf32 - 65536;
+          str += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+        } else {
+          str += String.fromCharCode(utf32);
+        }
+      }
+      return str;
+    }
+    function stringToUTF32(str, outPtr, maxBytesToWrite) {
+      if (maxBytesToWrite === void 0) {
+        maxBytesToWrite = 2147483647;
+      }
+      if (maxBytesToWrite < 4) return 0;
+      var startPtr = outPtr;
+      var endPtr = startPtr + maxBytesToWrite - 4;
+      for (var i = 0; i < str.length; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        if (codeUnit >= 55296 && codeUnit <= 57343) {
+          var trailSurrogate = str.charCodeAt(++i);
+          codeUnit = 65536 + ((codeUnit & 1023) << 10) | trailSurrogate & 1023;
+        }
+        HEAP32[outPtr >> 2] = codeUnit;
+        outPtr += 4;
+        if (outPtr + 4 > endPtr) break;
+      }
+      HEAP32[outPtr >> 2] = 0;
+      return outPtr - startPtr;
+    }
+    function lengthBytesUTF32(str) {
+      var len = 0;
+      for (var i = 0; i < str.length; ++i) {
+        var codeUnit = str.charCodeAt(i);
+        if (codeUnit >= 55296 && codeUnit <= 57343) ++i;
+        len += 4;
+      }
+      return len;
+    }
+    function __embind_register_std_wstring(rawType, charSize, name2) {
+      name2 = readLatin1String(name2);
+      var decodeString, encodeString, getHeap, lengthBytesUTF, shift;
+      if (charSize === 2) {
+        decodeString = UTF16ToString;
+        encodeString = stringToUTF16;
+        lengthBytesUTF = lengthBytesUTF16;
+        getHeap = () => HEAPU16;
+        shift = 1;
+      } else if (charSize === 4) {
+        decodeString = UTF32ToString;
+        encodeString = stringToUTF32;
+        lengthBytesUTF = lengthBytesUTF32;
+        getHeap = () => HEAPU32;
+        shift = 2;
+      }
+      registerType(rawType, { name: name2, "fromWireType": function(value) {
+        var length = HEAPU32[value >> 2];
+        var HEAP = getHeap();
+        var str;
+        var decodeStartPtr = value + 4;
+        for (var i = 0; i <= length; ++i) {
+          var currentBytePtr = value + 4 + i * charSize;
+          if (i == length || HEAP[currentBytePtr >> shift] == 0) {
+            var maxReadBytes = currentBytePtr - decodeStartPtr;
+            var stringSegment = decodeString(decodeStartPtr, maxReadBytes);
+            if (str === void 0) {
+              str = stringSegment;
+            } else {
+              str += String.fromCharCode(0);
+              str += stringSegment;
+            }
+            decodeStartPtr = currentBytePtr + charSize;
+          }
+        }
+        _free(value);
+        return str;
+      }, "toWireType": function(destructors, value) {
+        if (!(typeof value == "string")) {
+          throwBindingError("Cannot pass non-string to C++ string type " + name2);
+        }
+        var length = lengthBytesUTF(value);
+        var ptr = _malloc(4 + length + charSize);
+        HEAPU32[ptr >> 2] = length >> shift;
+        encodeString(value, ptr + 4, length + charSize);
+        if (destructors !== null) {
+          destructors.push(_free, ptr);
+        }
+        return ptr;
+      }, "argPackAdvance": 8, "readValueFromPointer": simpleReadValueFromPointer, destructorFunction: function(ptr) {
+        _free(ptr);
+      } });
+    }
+    function __embind_register_void(rawType, name2) {
+      name2 = readLatin1String(name2);
+      registerType(rawType, { isVoid: true, name: name2, "argPackAdvance": 0, "fromWireType": function() {
+        return void 0;
+      }, "toWireType": function(destructors, o) {
+        return void 0;
+      } });
+    }
+    var emval_symbols = {};
+    function getStringOrSymbol(address) {
+      var symbol2 = emval_symbols[address];
+      if (symbol2 === void 0) {
+        return readLatin1String(address);
+      }
+      return symbol2;
+    }
+    function emval_get_global() {
+      if (typeof globalThis == "object") {
+        return globalThis;
+      }
+      function testGlobal(obj) {
+        obj["$$$embind_global$$$"] = obj;
+        var success2 = typeof $$$embind_global$$$ == "object" && obj["$$$embind_global$$$"] == obj;
+        if (!success2) {
+          delete obj["$$$embind_global$$$"];
+        }
+        return success2;
+      }
+      if (typeof $$$embind_global$$$ == "object") {
+        return $$$embind_global$$$;
+      }
+      if (typeof global == "object" && testGlobal(global)) {
+        $$$embind_global$$$ = global;
+      } else if (typeof self == "object" && testGlobal(self)) {
+        $$$embind_global$$$ = self;
+      }
+      if (typeof $$$embind_global$$$ == "object") {
+        return $$$embind_global$$$;
+      }
+      throw Error("unable to get global object.");
+    }
+    function __emval_get_global(name2) {
+      if (name2 === 0) {
+        return Emval.toHandle(emval_get_global());
+      } else {
+        name2 = getStringOrSymbol(name2);
+        return Emval.toHandle(emval_get_global()[name2]);
+      }
+    }
+    function __emval_incref(handle) {
+      if (handle > 4) {
+        emval_handle_array[handle].refcount += 1;
+      }
+    }
+    function requireRegisteredType(rawType, humanName) {
+      var impl = registeredTypes[rawType];
+      if (void 0 === impl) {
+        throwBindingError(humanName + " has unknown type " + getTypeName(rawType));
+      }
+      return impl;
+    }
+    function craftEmvalAllocator(argCount) {
+      var argsList = new Array(argCount + 1);
+      return function(constructor, argTypes, args) {
+        argsList[0] = constructor;
+        for (var i = 0; i < argCount; ++i) {
+          var argType = requireRegisteredType(HEAPU32[argTypes + i * 4 >> 2], "parameter " + i);
+          argsList[i + 1] = argType["readValueFromPointer"](args);
+          args += argType["argPackAdvance"];
+        }
+        var obj = new (constructor.bind.apply(constructor, argsList))();
+        return Emval.toHandle(obj);
+      };
+    }
+    var emval_newers = {};
+    function __emval_new(handle, argCount, argTypes, args) {
+      handle = Emval.toValue(handle);
+      var newer = emval_newers[argCount];
+      if (!newer) {
+        newer = craftEmvalAllocator(argCount);
+        emval_newers[argCount] = newer;
+      }
+      return newer(handle, argTypes, args);
+    }
+    function _abort() {
+      abort("");
+    }
+    function _emscripten_memcpy_big(dest, src, num) {
+      HEAPU8.copyWithin(dest, src, src + num);
+    }
+    function getHeapMax() {
+      return 2147483648;
+    }
+    function emscripten_realloc_buffer(size) {
+      var b = wasmMemory.buffer;
+      try {
+        wasmMemory.grow(size - b.byteLength + 65535 >>> 16);
+        updateMemoryViews();
+        return 1;
+      } catch (e) {
+      }
+    }
+    function _emscripten_resize_heap(requestedSize) {
+      var oldSize = HEAPU8.length;
+      requestedSize = requestedSize >>> 0;
+      var maxHeapSize = getHeapMax();
+      if (requestedSize > maxHeapSize) {
+        return false;
+      }
+      let alignUp = (x, multiple) => x + (multiple - x % multiple) % multiple;
+      for (var cutDown = 1; cutDown <= 4; cutDown *= 2) {
+        var overGrownHeapSize = oldSize * (1 + 0.2 / cutDown);
+        overGrownHeapSize = Math.min(overGrownHeapSize, requestedSize + 100663296);
+        var newSize = Math.min(maxHeapSize, alignUp(Math.max(requestedSize, overGrownHeapSize), 65536));
+        var replacement = emscripten_realloc_buffer(newSize);
+        if (replacement) {
+          return true;
+        }
+      }
+      return false;
+    }
+    embind_init_charCodes();
+    BindingError = Module6["BindingError"] = extendError(Error, "BindingError");
+    InternalError = Module6["InternalError"] = extendError(Error, "InternalError");
+    init_emval();
+    UnboundTypeError = Module6["UnboundTypeError"] = extendError(Error, "UnboundTypeError");
+    var wasmImports = { "n": ___cxa_throw, "o": __embind_register_bigint, "l": __embind_register_bool, "r": __embind_register_emval, "k": __embind_register_float, "c": __embind_register_function, "b": __embind_register_integer, "a": __embind_register_memory_view, "g": __embind_register_std_string, "f": __embind_register_std_wstring, "m": __embind_register_void, "d": __emval_decref, "e": __emval_get_global, "i": __emval_incref, "h": __emval_new, "j": _abort, "q": _emscripten_memcpy_big, "p": _emscripten_resize_heap };
+    var asm = createWasm();
+    var ___wasm_call_ctors = function() {
+      return (___wasm_call_ctors = Module6["asm"]["t"]).apply(null, arguments);
+    };
+    var _malloc = function() {
+      return (_malloc = Module6["asm"]["u"]).apply(null, arguments);
+    };
+    var _free = function() {
+      return (_free = Module6["asm"]["v"]).apply(null, arguments);
+    };
+    var ___getTypeName = Module6["___getTypeName"] = function() {
+      return (___getTypeName = Module6["___getTypeName"] = Module6["asm"]["w"]).apply(null, arguments);
+    };
+    var __embind_initialize_bindings = Module6["__embind_initialize_bindings"] = function() {
+      return (__embind_initialize_bindings = Module6["__embind_initialize_bindings"] = Module6["asm"]["x"]).apply(null, arguments);
+    };
+    var ___errno_location = function() {
+      return (___errno_location = Module6["asm"]["__errno_location"]).apply(null, arguments);
+    };
+    var ___cxa_is_pointer_type = function() {
+      return (___cxa_is_pointer_type = Module6["asm"]["z"]).apply(null, arguments);
+    };
+    var calledRun;
+    dependenciesFulfilled = function runCaller() {
+      if (!calledRun) run();
+      if (!calledRun) dependenciesFulfilled = runCaller;
+    };
+    function run() {
+      if (runDependencies > 0) {
+        return;
+      }
+      preRun();
+      if (runDependencies > 0) {
+        return;
+      }
+      function doRun() {
+        if (calledRun) return;
+        calledRun = true;
+        Module6["calledRun"] = true;
+        if (ABORT) return;
+        initRuntime();
+        readyPromiseResolve(Module6);
+        if (Module6["onRuntimeInitialized"]) Module6["onRuntimeInitialized"]();
+        postRun();
+      }
+      if (Module6["setStatus"]) {
+        Module6["setStatus"]("Running...");
+        setTimeout(function() {
+          setTimeout(function() {
+            Module6["setStatus"]("");
+          }, 1);
+          doRun();
+        }, 1);
+      } else {
+        doRun();
+      }
+    }
+    if (Module6["preInit"]) {
+      if (typeof Module6["preInit"] == "function") Module6["preInit"] = [Module6["preInit"]];
+      while (Module6["preInit"].length > 0) {
+        Module6["preInit"].pop()();
+      }
+    }
+    run();
+    return Module6.ready;
+  });
+})();
+var webp_dec_default = Module3;
+
+// node_modules/@jsquash/webp/utils.js
+function initEmscriptenModule2(moduleFactory, wasmModule, moduleOptionOverrides = {}) {
+  let instantiateWasm;
+  if (wasmModule) {
+    instantiateWasm = (imports, callback) => {
+      const instance = new WebAssembly.Instance(wasmModule, imports);
+      callback(instance);
+      return instance.exports;
+    };
+  }
+  return moduleFactory({
+    // Just to be safe, don't automatically invoke any wasm functions
+    noInitialRun: true,
+    instantiateWasm,
+    ...moduleOptionOverrides
+  });
+}
+
+// node_modules/@jsquash/webp/decode.js
+var emscriptenModule3;
+async function init5(module, moduleOptionOverrides) {
+  let actualModule = module;
+  let actualOptions = moduleOptionOverrides;
+  if (arguments.length === 1 && !(module instanceof WebAssembly.Module)) {
+    actualModule = void 0;
+    actualOptions = module;
+  }
+  emscriptenModule3 = initEmscriptenModule2(webp_dec_default, actualModule, actualOptions);
+}
+async function decode6(buffer) {
+  if (!emscriptenModule3)
+    init5();
+  const module = await emscriptenModule3;
+  const result = module.decode(buffer);
+  if (!result)
+    throw new Error("Decoding error");
+  return result;
+}
+
+// node_modules/@jsquash/webp/meta.js
+var defaultOptions2 = {
+  quality: 75,
+  target_size: 0,
+  target_PSNR: 0,
+  method: 4,
+  sns_strength: 50,
+  filter_strength: 60,
+  filter_sharpness: 0,
+  filter_type: 1,
+  partitions: 0,
+  segments: 4,
+  pass: 1,
+  show_compressed: 0,
+  preprocessing: 0,
+  autofilter: 0,
+  partition_limit: 0,
+  alpha_compression: 1,
+  alpha_filtering: 1,
+  alpha_quality: 100,
+  lossless: 0,
+  exact: 0,
+  image_hint: 0,
+  emulate_jpeg_size: 0,
+  thread_level: 0,
+  low_memory: 0,
+  near_lossless: 100,
+  use_delta_palette: 0,
+  use_sharp_yuv: 0
+};
+
+// node_modules/wasm-feature-detect/dist/esm/index.js
+var simd = async () => WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]));
+
+// node_modules/@jsquash/webp/encode.js
+var emscriptenModule4;
+async function init6(module, moduleOptionOverrides) {
+  let actualModule = module;
+  let actualOptions = moduleOptionOverrides;
+  if (arguments.length === 1 && !(module instanceof WebAssembly.Module)) {
+    actualModule = void 0;
+    actualOptions = module;
+  }
+  if (await simd()) {
+    const webpEncoder2 = await Promise.resolve().then(() => (init_webp_enc_simd(), webp_enc_simd_exports));
+    emscriptenModule4 = initEmscriptenModule2(webpEncoder2.default, actualModule, actualOptions);
+    return emscriptenModule4;
+  }
+  const webpEncoder = await Promise.resolve().then(() => (init_webp_enc(), webp_enc_exports));
+  emscriptenModule4 = initEmscriptenModule2(webpEncoder.default, actualModule, actualOptions);
+  return emscriptenModule4;
+}
+async function encode6(data, options2 = {}) {
+  if (!emscriptenModule4)
+    emscriptenModule4 = init6();
+  const _options = { ...defaultOptions2, ...options2 };
+  const module = await emscriptenModule4;
+  const result = module.encode(data.data, data.width, data.height, _options);
+  if (!result)
+    throw new Error("Encoding error.");
+  return result.buffer;
+}
+
+// node_modules/@jsquash/resize/util.js
+function getContainOffsets(sw, sh, dw, dh) {
+  const currentAspect = sw / sh;
+  const endAspect = dw / dh;
+  if (endAspect > currentAspect) {
+    const newSh = sw / endAspect;
+    const newSy = (sh - newSh) / 2;
+    return { sw, sh: newSh, sx: 0, sy: newSy };
+  }
+  const newSw = sh * endAspect;
+  const newSx = (sw - newSw) / 2;
+  return { sh, sw: newSw, sx: newSx, sy: 0 };
+}
+
+// node_modules/@jsquash/resize/lib/resize/pkg/squoosh_resize.js
+var wasm2;
+var cachedUint8Memory02 = null;
+function getUint8Memory02() {
+  if (cachedUint8Memory02 === null || cachedUint8Memory02.byteLength === 0) {
+    cachedUint8Memory02 = new Uint8Array(wasm2.memory.buffer);
+  }
+  return cachedUint8Memory02;
+}
+var WASM_VECTOR_LEN2 = 0;
+function passArray8ToWasm02(arg, malloc) {
+  const ptr = malloc(arg.length * 1, 1) >>> 0;
+  getUint8Memory02().set(arg, ptr / 1);
+  WASM_VECTOR_LEN2 = arg.length;
+  return ptr;
+}
+var cachedInt32Memory02 = null;
+function getInt32Memory02() {
+  if (cachedInt32Memory02 === null || cachedInt32Memory02.byteLength === 0) {
+    cachedInt32Memory02 = new Int32Array(wasm2.memory.buffer);
+  }
+  return cachedInt32Memory02;
+}
+var cachedUint8ClampedMemory02 = null;
+function getUint8ClampedMemory02() {
+  if (cachedUint8ClampedMemory02 === null || cachedUint8ClampedMemory02.byteLength === 0) {
+    cachedUint8ClampedMemory02 = new Uint8ClampedArray(wasm2.memory.buffer);
+  }
+  return cachedUint8ClampedMemory02;
+}
+function getClampedArrayU8FromWasm02(ptr, len) {
+  ptr = ptr >>> 0;
+  return getUint8ClampedMemory02().subarray(ptr / 1, ptr / 1 + len);
+}
+function resize(input_image, input_width, input_height, output_width, output_height, typ_idx, premultiply, color_space_conversion) {
+  try {
+    const retptr = wasm2.__wbindgen_add_to_stack_pointer(-16);
+    const ptr0 = passArray8ToWasm02(input_image, wasm2.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN2;
+    wasm2.resize(retptr, ptr0, len0, input_width, input_height, output_width, output_height, typ_idx, premultiply, color_space_conversion);
+    var r0 = getInt32Memory02()[retptr / 4 + 0];
+    var r1 = getInt32Memory02()[retptr / 4 + 1];
+    var v2 = getClampedArrayU8FromWasm02(r0, r1).slice();
+    wasm2.__wbindgen_free(r0, r1 * 1, 1);
+    return v2;
+  } finally {
+    wasm2.__wbindgen_add_to_stack_pointer(16);
+  }
+}
+async function __wbg_load2(module, imports) {
+  if (typeof Response === "function" && module instanceof Response) {
+    if (typeof WebAssembly.instantiateStreaming === "function") {
+      try {
+        return await WebAssembly.instantiateStreaming(module, imports);
+      } catch (e) {
+        if (module.headers.get("Content-Type") != "application/wasm") {
+          console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+        } else {
+          throw e;
+        }
+      }
+    }
+    const bytes = await module.arrayBuffer();
+    return await WebAssembly.instantiate(bytes, imports);
+  } else {
+    const instance = await WebAssembly.instantiate(module, imports);
+    if (instance instanceof WebAssembly.Instance) {
+      return { instance, module };
+    } else {
+      return instance;
+    }
+  }
+}
+function __wbg_get_imports2() {
+  const imports = {};
+  imports.wbg = {};
+  return imports;
+}
+function __wbg_init_memory2(imports, maybe_memory) {
+}
+function __wbg_finalize_init2(instance, module) {
+  wasm2 = instance.exports;
+  __wbg_init2.__wbindgen_wasm_module = module;
+  cachedInt32Memory02 = null;
+  cachedUint8Memory02 = null;
+  cachedUint8ClampedMemory02 = null;
+  return wasm2;
+}
+async function __wbg_init2(input2) {
+  if (wasm2 !== void 0) return wasm2;
+  if (typeof input2 === "undefined") {
+    input2 = new URL("squoosh_resize_bg.wasm", import.meta.url);
+  }
+  const imports = __wbg_get_imports2();
+  if (typeof input2 === "string" || typeof Request === "function" && input2 instanceof Request || typeof URL === "function" && input2 instanceof URL) {
+    input2 = fetch(input2);
+  }
+  __wbg_init_memory2(imports);
+  const { instance, module } = await __wbg_load2(await input2, imports);
+  return __wbg_finalize_init2(instance, module);
+}
+var squoosh_resize_default = __wbg_init2;
+var isServiceWorker2 = globalThis.ServiceWorkerGlobalScope !== void 0;
+var isRunningInCloudFlareWorkers2 = isServiceWorker2 && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+var isRunningInNode2 = typeof process === "object" && process.release && process.release.name === "node";
+if (isRunningInCloudFlareWorkers2 || isRunningInNode2) {
+  if (!globalThis.ImageData) {
+    globalThis.ImageData = class ImageData {
+      constructor(data, width, height) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+      }
+    };
+  }
+  if (import.meta.url === void 0) {
+    import.meta.url = "https://localhost";
+  }
+  if (typeof self !== "undefined" && self.location === void 0) {
+    self.location = { href: "" };
+  }
+}
+
+// node_modules/@jsquash/resize/lib/hqx/pkg/squooshhqx.js
+var wasm3;
+var cachedUint32Memory0 = null;
+function getUint32Memory0() {
+  if (cachedUint32Memory0 === null || cachedUint32Memory0.byteLength === 0) {
+    cachedUint32Memory0 = new Uint32Array(wasm3.memory.buffer);
+  }
+  return cachedUint32Memory0;
+}
+var WASM_VECTOR_LEN3 = 0;
+function passArray32ToWasm0(arg, malloc) {
+  const ptr = malloc(arg.length * 4, 4) >>> 0;
+  getUint32Memory0().set(arg, ptr / 4);
+  WASM_VECTOR_LEN3 = arg.length;
+  return ptr;
+}
+var cachedInt32Memory03 = null;
+function getInt32Memory03() {
+  if (cachedInt32Memory03 === null || cachedInt32Memory03.byteLength === 0) {
+    cachedInt32Memory03 = new Int32Array(wasm3.memory.buffer);
+  }
+  return cachedInt32Memory03;
+}
+function getArrayU32FromWasm0(ptr, len) {
+  ptr = ptr >>> 0;
+  return getUint32Memory0().subarray(ptr / 4, ptr / 4 + len);
+}
+function resize2(input_image, input_width, input_height, factor) {
+  try {
+    const retptr = wasm3.__wbindgen_add_to_stack_pointer(-16);
+    const ptr0 = passArray32ToWasm0(input_image, wasm3.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN3;
+    wasm3.resize(retptr, ptr0, len0, input_width, input_height, factor);
+    var r0 = getInt32Memory03()[retptr / 4 + 0];
+    var r1 = getInt32Memory03()[retptr / 4 + 1];
+    var v2 = getArrayU32FromWasm0(r0, r1).slice();
+    wasm3.__wbindgen_free(r0, r1 * 4, 4);
+    return v2;
+  } finally {
+    wasm3.__wbindgen_add_to_stack_pointer(16);
+  }
+}
+async function __wbg_load3(module, imports) {
+  if (typeof Response === "function" && module instanceof Response) {
+    if (typeof WebAssembly.instantiateStreaming === "function") {
+      try {
+        return await WebAssembly.instantiateStreaming(module, imports);
+      } catch (e) {
+        if (module.headers.get("Content-Type") != "application/wasm") {
+          console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+        } else {
+          throw e;
+        }
+      }
+    }
+    const bytes = await module.arrayBuffer();
+    return await WebAssembly.instantiate(bytes, imports);
+  } else {
+    const instance = await WebAssembly.instantiate(module, imports);
+    if (instance instanceof WebAssembly.Instance) {
+      return { instance, module };
+    } else {
+      return instance;
+    }
+  }
+}
+function __wbg_get_imports3() {
+  const imports = {};
+  imports.wbg = {};
+  return imports;
+}
+function __wbg_init_memory3(imports, maybe_memory) {
+}
+function __wbg_finalize_init3(instance, module) {
+  wasm3 = instance.exports;
+  __wbg_init3.__wbindgen_wasm_module = module;
+  cachedInt32Memory03 = null;
+  cachedUint32Memory0 = null;
+  return wasm3;
+}
+async function __wbg_init3(input2) {
+  if (wasm3 !== void 0) return wasm3;
+  if (typeof input2 === "undefined") {
+    input2 = new URL("squooshhqx_bg.wasm", import.meta.url);
+  }
+  const imports = __wbg_get_imports3();
+  if (typeof input2 === "string" || typeof Request === "function" && input2 instanceof Request || typeof URL === "function" && input2 instanceof URL) {
+    input2 = fetch(input2);
+  }
+  __wbg_init_memory3(imports);
+  const { instance, module } = await __wbg_load3(await input2, imports);
+  return __wbg_finalize_init3(instance, module);
+}
+var squooshhqx_default = __wbg_init3;
+var isServiceWorker3 = globalThis.ServiceWorkerGlobalScope !== void 0;
+var isRunningInCloudFlareWorkers3 = isServiceWorker3 && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+var isRunningInNode3 = typeof process === "object" && process.release && process.release.name === "node";
+if (isRunningInCloudFlareWorkers3 || isRunningInNode3) {
+  if (!globalThis.ImageData) {
+    globalThis.ImageData = class ImageData {
+      constructor(data, width, height) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+      }
+    };
+  }
+  if (import.meta.url === void 0) {
+    import.meta.url = "https://localhost";
+  }
+  if (typeof self !== "undefined" && self.location === void 0) {
+    self.location = { href: "" };
+  }
+}
+
+// node_modules/@jsquash/resize/lib/magic-kernel/pkg/jsquash_magic_kernel.js
+var wasm4;
+function getClampedArrayU8FromWasm03(ptr, len) {
+  ptr = ptr >>> 0;
+  return getUint8ClampedArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+var cachedUint8ArrayMemory0 = null;
+function getUint8ArrayMemory0() {
+  if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
+    cachedUint8ArrayMemory0 = new Uint8Array(wasm4.memory.buffer);
+  }
+  return cachedUint8ArrayMemory0;
+}
+var cachedUint8ClampedArrayMemory0 = null;
+function getUint8ClampedArrayMemory0() {
+  if (cachedUint8ClampedArrayMemory0 === null || cachedUint8ClampedArrayMemory0.byteLength === 0) {
+    cachedUint8ClampedArrayMemory0 = new Uint8ClampedArray(wasm4.memory.buffer);
+  }
+  return cachedUint8ClampedArrayMemory0;
+}
+function passArray8ToWasm03(arg, malloc) {
+  const ptr = malloc(arg.length * 1, 1) >>> 0;
+  getUint8ArrayMemory0().set(arg, ptr / 1);
+  WASM_VECTOR_LEN4 = arg.length;
+  return ptr;
+}
+function passStringToWasm0(arg, malloc, realloc) {
+  if (realloc === void 0) {
+    const buf = cachedTextEncoder.encode(arg);
+    const ptr2 = malloc(buf.length, 1) >>> 0;
+    getUint8ArrayMemory0().subarray(ptr2, ptr2 + buf.length).set(buf);
+    WASM_VECTOR_LEN4 = buf.length;
+    return ptr2;
+  }
+  let len = arg.length;
+  let ptr = malloc(len, 1) >>> 0;
+  const mem = getUint8ArrayMemory0();
+  let offset = 0;
+  for (; offset < len; offset++) {
+    const code = arg.charCodeAt(offset);
+    if (code > 127) break;
+    mem[ptr + offset] = code;
+  }
+  if (offset !== len) {
+    if (offset !== 0) {
+      arg = arg.slice(offset);
+    }
+    ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+    const view2 = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
+    const ret = cachedTextEncoder.encodeInto(arg, view2);
+    offset += ret.written;
+    ptr = realloc(ptr, len, offset, 1) >>> 0;
+  }
+  WASM_VECTOR_LEN4 = offset;
+  return ptr;
+}
+var cachedTextEncoder = new TextEncoder();
+if (!("encodeInto" in cachedTextEncoder)) {
+  cachedTextEncoder.encodeInto = function(arg, view2) {
+    const buf = cachedTextEncoder.encode(arg);
+    view2.set(buf);
+    return {
+      read: arg.length,
+      written: buf.length
+    };
+  };
+}
+var WASM_VECTOR_LEN4 = 0;
+function resize3(data, input_width, input_height, output_width, output_height, version2) {
+  const ptr0 = passArray8ToWasm03(data, wasm4.__wbindgen_malloc);
+  const len0 = WASM_VECTOR_LEN4;
+  const ptr1 = passStringToWasm0(version2, wasm4.__wbindgen_malloc, wasm4.__wbindgen_realloc);
+  const len1 = WASM_VECTOR_LEN4;
+  const ret = wasm4.resize(ptr0, len0, input_width, input_height, output_width, output_height, ptr1, len1);
+  return ret;
+}
+var EXPECTED_RESPONSE_TYPES = /* @__PURE__ */ new Set(["basic", "cors", "default"]);
+async function __wbg_load4(module, imports) {
+  if (typeof Response === "function" && module instanceof Response) {
+    if (typeof WebAssembly.instantiateStreaming === "function") {
+      try {
+        return await WebAssembly.instantiateStreaming(module, imports);
+      } catch (e) {
+        const validResponse = module.ok && EXPECTED_RESPONSE_TYPES.has(module.type);
+        if (validResponse && module.headers.get("Content-Type") !== "application/wasm") {
+          console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+        } else {
+          throw e;
+        }
+      }
+    }
+    const bytes = await module.arrayBuffer();
+    return await WebAssembly.instantiate(bytes, imports);
+  } else {
+    const instance = await WebAssembly.instantiate(module, imports);
+    if (instance instanceof WebAssembly.Instance) {
+      return { instance, module };
+    } else {
+      return instance;
+    }
+  }
+}
+function __wbg_get_imports4() {
+  const imports = {};
+  imports.wbg = {};
+  imports.wbg.__wbg_new_with_owned_u8_clamped_array_and_sh_e8143e95833a3ec3 = function(arg0, arg1, arg2, arg3) {
+    var v0 = getClampedArrayU8FromWasm03(arg0, arg1).slice();
+    wasm4.__wbindgen_free(arg0, arg1 * 1, 1);
+    const ret = new ImageData(v0, arg2 >>> 0, arg3 >>> 0);
+    return ret;
+  };
+  imports.wbg.__wbindgen_init_externref_table = function() {
+    const table = wasm4.__wbindgen_externrefs;
+    const offset = table.grow(4);
+    table.set(0, void 0);
+    table.set(offset + 0, void 0);
+    table.set(offset + 1, null);
+    table.set(offset + 2, true);
+    table.set(offset + 3, false);
+  };
+  return imports;
+}
+function __wbg_finalize_init4(instance, module) {
+  wasm4 = instance.exports;
+  __wbg_init4.__wbindgen_wasm_module = module;
+  cachedUint8ArrayMemory0 = null;
+  cachedUint8ClampedArrayMemory0 = null;
+  wasm4.__wbindgen_start();
+  return wasm4;
+}
+async function __wbg_init4(module_or_path) {
+  if (wasm4 !== void 0) return wasm4;
+  if (typeof module_or_path !== "undefined") {
+    if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
+      ({ module_or_path } = module_or_path);
+    } else {
+      console.warn("using deprecated parameters for the initialization function; pass a single object instead");
+    }
+  }
+  if (typeof module_or_path === "undefined") {
+    module_or_path = new URL("jsquash_magic_kernel_bg.wasm", import.meta.url);
+  }
+  const imports = __wbg_get_imports4();
+  if (typeof module_or_path === "string" || typeof Request === "function" && module_or_path instanceof Request || typeof URL === "function" && module_or_path instanceof URL) {
+    module_or_path = fetch(module_or_path);
+  }
+  const { instance, module } = await __wbg_load4(await module_or_path, imports);
+  return __wbg_finalize_init4(instance, module);
+}
+var jsquash_magic_kernel_default = __wbg_init4;
+var isServiceWorker4 = globalThis.ServiceWorkerGlobalScope !== void 0;
+var isRunningInCloudFlareWorkers4 = isServiceWorker4 && typeof self !== "undefined" && globalThis.caches && globalThis.caches.default !== void 0;
+var isRunningInNode4 = typeof process === "object" && process.release && process.release.name === "node";
+if (isRunningInCloudFlareWorkers4 || isRunningInNode4) {
+  if (!globalThis.ImageData) {
+    globalThis.ImageData = class ImageData {
+      constructor(data, width, height) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+      }
+    };
+  }
+  if (import.meta.url === void 0) {
+    import.meta.url = "https://localhost";
+  }
+  if (typeof self !== "undefined" && self.location === void 0) {
+    self.location = { href: "" };
+  }
+}
+
+// node_modules/@jsquash/resize/meta.js
+var defaultOptions3 = {
+  // Width and height will always default to the image size.
+  // This is set elsewhere.
+  width: 1,
+  height: 1,
+  // This will be set to 'vector' if the input is SVG.
+  method: "lanczos3",
+  fitMethod: "stretch",
+  premultiply: true,
+  linearRGB: true
+};
+
+// node_modules/@jsquash/resize/index.js
+var MAGIC_KERNEL_METHODS = [
+  "magicKernel",
+  "magicKernelSharp2013",
+  "magicKernelSharp2021"
+];
+var resizeWasmReady;
+var hqxWasmReady;
+var magicKernelWasmReady;
+function initResize(moduleOrPath) {
+  if (!resizeWasmReady) {
+    resizeWasmReady = squoosh_resize_default(moduleOrPath);
+  }
+  return resizeWasmReady;
+}
+function initHqx(moduleOrPath) {
+  if (!hqxWasmReady) {
+    hqxWasmReady = squooshhqx_default(moduleOrPath);
+  }
+  return hqxWasmReady;
+}
+function initMagicKernel(moduleOrPath) {
+  if (!magicKernelWasmReady) {
+    magicKernelWasmReady = jsquash_magic_kernel_default(moduleOrPath);
+  }
+  return magicKernelWasmReady;
+}
+function optsIsHqxOpts(opts) {
+  return opts.method === "hqx";
+}
+function optsIsMagicKernelOpts(opts) {
+  return MAGIC_KERNEL_METHODS.includes(opts.method);
+}
+function crop(data, sx, sy, sw, sh) {
+  const inputPixels = new Uint32Array(data.data.buffer);
+  for (let y = 0; y < sh; y += 1) {
+    const start = (y + sy) * data.width + sx;
+    inputPixels.copyWithin(y * sw, start, start + sw);
+  }
+  return new ImageData(new Uint8ClampedArray(inputPixels.buffer.slice(0, sw * sh * 4)), sw, sh);
+}
+function clamp(num, { min: min2 = Number.MIN_VALUE, max: max2 = Number.MAX_VALUE }) {
+  return Math.min(Math.max(num, min2), max2);
+}
+var resizeMethods = [
+  "triangle",
+  "catrom",
+  "mitchell",
+  "lanczos3"
+];
+async function hqx(input2, opts) {
+  await initHqx();
+  const widthRatio = opts.width / input2.width;
+  const heightRatio = opts.height / input2.height;
+  const ratio = Math.max(widthRatio, heightRatio);
+  const factor = clamp(Math.ceil(ratio), { min: 1, max: 4 });
+  if (factor === 1)
+    return input2;
+  const result = resize2(new Uint32Array(input2.data.buffer), input2.width, input2.height, factor);
+  return new ImageData(new Uint8ClampedArray(result.buffer), input2.width * factor, input2.height * factor);
+}
+async function magicKernel(input2, opts) {
+  await initMagicKernel();
+  const result = resize3(new Uint8Array(input2.data.buffer), input2.width, input2.height, opts.width, opts.height, opts.method);
+  return result;
+}
+async function resize4(data, overrideOptions) {
+  let options2 = {
+    ...defaultOptions3,
+    ...overrideOptions
+  };
+  let input2 = data;
+  initResize();
+  if (optsIsHqxOpts(options2)) {
+    input2 = await hqx(input2, options2);
+    options2 = { ...options2, method: "catrom" };
+  }
+  await resizeWasmReady;
+  if (options2.fitMethod === "contain") {
+    const { sx, sy, sw, sh } = getContainOffsets(data.width, data.height, options2.width, options2.height);
+    input2 = crop(input2, Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh));
+  }
+  if (optsIsMagicKernelOpts(options2)) {
+    return magicKernel(input2, options2);
+  }
+  const result = resize(new Uint8Array(input2.data.buffer), input2.width, input2.height, options2.width, options2.height, resizeMethods.indexOf(options2.method), options2.premultiply, options2.linearRGB);
+  return new ImageData(new Uint8ClampedArray(result.buffer), options2.width, options2.height);
+}
+
+// src/infrastructure/images/codec-assets.ts
+var codecAssetNames = [
+  "squoosh_png_bg.wasm",
+  "mozjpeg_dec.wasm",
+  "mozjpeg_enc.wasm",
+  "webp_dec.wasm",
+  "webp_enc_simd.wasm",
+  "squoosh_resize_bg.wasm"
+];
+
+// src/infrastructure/images/codecs.ts
+var ImageCodecError = class extends ImageAssetError {
+};
+var activeJpegDecoderWarnings;
+var jpegDecodeQueue = Promise.resolve();
+async function decodeCompleteJpeg(bytes) {
+  const previous = jpegDecodeQueue;
+  let release;
+  jpegDecodeQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const warnings = [];
+    activeJpegDecoderWarnings = warnings;
+    const decoded = await decode5(bytes);
+    if (warnings.length > 0) throw new Error("JPEG decoder reported an incomplete or corrupt stream");
+    return decoded;
+  } finally {
+    activeJpegDecoderWarnings = void 0;
+    release();
+  }
+}
+var MAX_ENCODED_BYTES = 16 * 1024 * 1024;
+var MAX_PIXELS = 16e6;
+var WASM = {
+  png: codecAssetNames[0],
+  jpegDecode: codecAssetNames[1],
+  jpegEncode: codecAssetNames[2],
+  webpDecode: codecAssetNames[3],
+  webpEncode: codecAssetNames[4],
+  resize: codecAssetNames[5]
+};
+var compileWasm = (bytes) => globalThis.WebAssembly.compile(bytes);
+var initJpegDecoder = init3;
+function readPngHeader(bytes) {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.length < 33 || signature.some((value, index2) => bytes[index2] !== value)) throw new Error("invalid PNG");
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let ended = false;
+  while (offset + 12 <= bytes.length) {
+    const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0);
+    const end = offset + 12 + length;
+    if (end > bytes.length) throw new Error("truncated PNG");
+    const type = new TextDecoder().decode(bytes.subarray(offset + 4, offset + 8));
+    if (type === "IHDR") {
+      width = new DataView(bytes.buffer, bytes.byteOffset + offset + 8, 8).getUint32(0);
+      height = new DataView(bytes.buffer, bytes.byteOffset + offset + 12, 4).getUint32(0);
+    }
+    if (type === "acTL") throw new ImageCodecError("image_animation_unsupported", "Animated images are not supported.");
+    if (type === "IEND") {
+      ended = length === 0 && end === bytes.length;
+      break;
+    }
+    offset = end;
+  }
+  if (!ended || width < 1 || height < 1) throw new Error("invalid PNG container");
+  return { width, height };
+}
+function readJpegHeader(bytes) {
+  if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216) throw new Error("invalid JPEG");
+  let width = 0;
+  let height = 0;
+  let orientation = 1;
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 255) throw new Error("invalid JPEG segment");
+    const marker = bytes[offset + 1];
+    offset += 2;
+    if (marker === 217 || marker === 218) break;
+    const length = bytes[offset] << 8 | bytes[offset + 1];
+    if (length < 2 || offset + length > bytes.length) throw new Error("truncated JPEG");
+    const start = offset + 2;
+    const end = offset + length;
+    if (marker === 225 && end - start >= 14 && String.fromCharCode(...bytes.subarray(start, start + 6)) === "Exif\0\0") {
+      const tiff = start + 6;
+      const little = bytes[tiff] === 73;
+      const u16 = (at) => new DataView(bytes.buffer, bytes.byteOffset + at, 2).getUint16(0, little);
+      const u32 = (at) => new DataView(bytes.buffer, bytes.byteOffset + at, 4).getUint32(0, little);
+      const ifd = tiff + u32(tiff + 4);
+      if (ifd + 2 <= end) for (let i = 0; i < u16(ifd); i += 1) {
+        const entry = ifd + 2 + i * 12;
+        if (entry + 12 > end) break;
+        if (u16(entry) === 274 && u16(entry + 2) === 3 && u32(entry + 4) === 1) orientation = u16(entry + 8);
+      }
+    }
+    if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker) && length >= 7) {
+      height = bytes[offset + 3] << 8 | bytes[offset + 4];
+      width = bytes[offset + 5] << 8 | bytes[offset + 6];
+    }
+    offset = end;
+  }
+  if (width < 1 || height < 1 || orientation < 1 || orientation > 8) throw new Error("invalid JPEG dimensions");
+  return { width, height, orientation };
+}
+function readWebpHeader(bytes) {
+  if (bytes.length < 30 || String.fromCharCode(...bytes.subarray(0, 4)) !== "RIFF" || String.fromCharCode(...bytes.subarray(8, 12)) !== "WEBP" || new DataView(bytes.buffer, bytes.byteOffset + 4, 4).getUint32(0, true) + 8 !== bytes.length) throw new Error("invalid WebP");
+  let width = 0;
+  let height = 0;
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const type = String.fromCharCode(...bytes.subarray(offset, offset + 4));
+    const length = new DataView(bytes.buffer, bytes.byteOffset + offset + 4, 4).getUint32(0, true);
+    const end = offset + 8 + length + length % 2;
+    if (end > bytes.length) throw new Error("truncated WebP");
+    if (type === "ANIM" || type === "ANMF") throw new ImageCodecError("image_animation_unsupported", "Animated images are not supported.");
+    const data = offset + 8;
+    if (type === "VP8X" && length >= 10) {
+      if ((bytes[data] & 2) !== 0) throw new ImageCodecError("image_animation_unsupported", "Animated images are not supported.");
+      width = 1 + bytes[data + 4] + (bytes[data + 5] << 8) + (bytes[data + 6] << 16);
+      height = 1 + bytes[data + 7] + (bytes[data + 8] << 8) + (bytes[data + 9] << 16);
+    } else if (type === "VP8 " && length >= 10) {
+      width = (bytes[data + 6] | bytes[data + 7] << 8) & 16383;
+      height = (bytes[data + 8] | bytes[data + 9] << 8) & 16383;
+    } else if (type === "VP8L" && length >= 5) {
+      width = 1 + bytes[data + 1] + ((bytes[data + 2] & 63) << 8);
+      height = 1 + (bytes[data + 2] >> 6) + (bytes[data + 3] << 2) + ((bytes[data + 4] & 15) << 10);
+    }
+    offset = end;
+  }
+  if (offset !== bytes.length || width < 1 || height < 1) throw new Error("invalid WebP dimensions");
+  return { width, height };
+}
+function sniff(bytes) {
+  if (bytes[0] === 137 && bytes[1] === 80) return { format: "png", ...readPngHeader(bytes), orientation: 1 };
+  if (bytes[0] === 255 && bytes[1] === 216) return { format: "jpeg", ...readJpegHeader(bytes) };
+  if (bytes[0] === 82 && bytes[1] === 73) return { format: "webp", ...readWebpHeader(bytes), orientation: 1 };
+  throw new ImageCodecError("image_format_unsupported", "Only static PNG, JPEG, and WebP images are supported.");
+}
+function view(image) {
+  return { data: new Uint8ClampedArray(image.data), width: image.width, height: image.height };
+}
+function orient(image, orientation) {
+  if (orientation === 1) return image;
+  const swapsAxes = orientation >= 5;
+  const width = swapsAxes ? image.height : image.width;
+  const height = swapsAxes ? image.width : image.height;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < image.height; y += 1) for (let x = 0; x < image.width; x += 1) {
+    const target = orientation === 2 ? [image.width - 1 - x, y] : orientation === 3 ? [image.width - 1 - x, image.height - 1 - y] : orientation === 4 ? [x, image.height - 1 - y] : orientation === 5 ? [y, x] : orientation === 6 ? [image.height - 1 - y, x] : orientation === 7 ? [image.height - 1 - y, image.width - 1 - x] : [y, image.width - 1 - x];
+    const sourceOffset = (y * image.width + x) * 4;
+    const targetOffset = (target[1] * width + target[0]) * 4;
+    data.set(image.data.subarray(sourceOffset, sourceOffset + 4), targetOffset);
+  }
+  return { data, width, height };
+}
+function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec-assets/", import.meta.url))) {
+  const asset = (name2) => readFile4(path12.join(assetDirectory, name2));
+  let initialized;
+  async function initialize2() {
+    if (!initialized) initialized = (async () => {
+      const [png, jpegDec, jpegEnc, webpDec, webpEnc, resizeWasm] = await Promise.all(Object.values(WASM).map(asset));
+      await init(await compileWasm(png));
+      await init2(await compileWasm(png));
+      await initJpegDecoder(await compileWasm(jpegDec), { printErr: (message) => activeJpegDecoderWarnings?.push(message) });
+      await init4(await compileWasm(jpegEnc));
+      await init5(await compileWasm(webpDec));
+      await init6(await compileWasm(webpEnc));
+      await initResize(await compileWasm(resizeWasm));
+    })();
+    try {
+      await initialized;
+    } catch {
+      throw new ImageCodecError("image_codec_unavailable", "The local image codec assets could not be loaded. Reinstall or rebuild Sheg.");
+    }
+  }
+  return {
+    async decode(input2) {
+      try {
+        if (input2.byteLength > MAX_ENCODED_BYTES) throw new ImageCodecError("image_source_limit", "The image exceeds the 16 MiB encoded image limit.");
+        const bytes = new Uint8Array(input2);
+        const header = sniff(bytes);
+        if (header.width * header.height > MAX_PIXELS) throw new ImageCodecError("image_source_limit", "The image exceeds the 16 megapixel image limit.");
+        await initialize2();
+        const imageBuffer = Uint8Array.from(bytes).buffer;
+        let decoded;
+        if (header.format === "jpeg") {
+          decoded = await decodeCompleteJpeg(imageBuffer);
+        } else {
+          decoded = header.format === "png" ? await decode_default(bytes) : await decode6(imageBuffer);
+        }
+        const display = orient(decoded, header.orientation);
+        const image = view(display);
+        if (image.width !== (header.orientation >= 5 && header.orientation <= 8 ? header.height : header.width) || image.height !== (header.orientation >= 5 && header.orientation <= 8 ? header.width : header.height) || image.data.length !== image.width * image.height * 4) throw new Error("decoded dimensions mismatch");
+        return { ...image, format: header.format, orientation: header.orientation };
+      } catch (error62) {
+        if (error62 instanceof ImageCodecError) throw error62;
+        throw new ImageCodecError("image_decode_failed", "The file is not a complete, supported static PNG, JPEG, or WebP image.");
+      }
+    },
+    async scale(image, width, height) {
+      if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions.");
+      const factor = Math.min(width / image.width, height / image.height);
+      const expectedWidth = Math.max(1, Math.floor(image.width * factor));
+      const expectedHeight = Math.max(1, Math.floor(image.height * factor));
+      if (factor > 1 || width !== expectedWidth || height !== expectedHeight) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions or enlarging the source.");
+      await initialize2();
+      const scaled = await resize4({ data: image.data, width: image.width, height: image.height }, { width, height, method: "lanczos3", fitMethod: "stretch" });
+      const result = view(scaled);
+      return { ...result, format: image.format, orientation: 1 };
+    },
+    async encode(image) {
+      await initialize2();
+      const data = { data: image.data, width: image.width, height: image.height };
+      try {
+        const bytes = image.format === "png" ? await encode4(data) : image.format === "jpeg" ? await encode5(data, { quality: 90 }) : await encode6(data, { quality: 90, lossless: 0 });
+        return new Uint8Array(bytes);
+      } catch {
+        throw new ImageCodecError("image_decode_failed", "The image could not be encoded by the local codec.");
+      }
+    }
+  };
+}
+
+// src/infrastructure/sqlite/image-assets.ts
+import { createHash as createHash11 } from "node:crypto";
+import { mkdirSync as mkdirSync4 } from "node:fs";
+import path13 from "node:path";
+function imageDigest(bytes) {
+  return createHash11("sha256").update(bytes).digest("hex");
+}
+function verifyAsset(bytes, supplied) {
+  const metadata3 = ImageMetadataSchema.parse(supplied);
+  const sha256 = imageDigest(bytes);
+  if (metadata3.sha256 !== sha256 || metadata3.assetId !== `sha256:${sha256}` || metadata3.bytes !== bytes.byteLength) {
+    throw new ImageAssetError("image_digest_mismatch", "Image bytes do not match the supplied digest and metadata.");
+  }
+  return metadata3;
+}
+function rowMetadata(row) {
+  const sha256 = asText(row.sha256, "image SHA-256 digest");
+  return ImageMetadataSchema.parse({
+    assetId: asText(row.asset_id, "image asset ID"),
+    sha256,
+    format: asText(row.format, "image format"),
+    width: asNumber(row.width, "image width"),
+    height: asNumber(row.height, "image height"),
+    bytes: asNumber(row.byte_length, "image byte length")
+  });
+}
+function findRow(database, assetId2) {
+  return database.prepare("SELECT asset_id, sha256, format, width, height, byte_length, content FROM image_assets WHERE asset_id = ?").get(assetId2);
+}
+function readMetadata(database, assetId2) {
+  const row = findRow(database, assetId2);
+  if (!row) throw new ImageAssetError("image_asset_not_found", "The requested image asset is not in Sheg storage.");
+  return rowMetadata(row);
+}
+function saveSourceInside(database, bytes, supplied) {
+  const metadata3 = verifyAsset(bytes, supplied);
+  const existing = findRow(database, metadata3.assetId);
+  if (existing) {
+    const saved = rowMetadata(existing);
+    const savedBytes = Buffer.from(existing.content);
+    if (JSON.stringify(saved) !== JSON.stringify(metadata3) || !savedBytes.equals(Buffer.from(bytes))) {
+      throw new ImageAssetError("image_digest_mismatch", "Image bytes or metadata conflict with an asset already stored for this digest.");
+    }
+    return saved;
+  }
+  database.prepare(`INSERT INTO image_assets (asset_id, sha256, format, width, height, byte_length, content)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(metadata3.assetId, metadata3.sha256, metadata3.format, metadata3.width, metadata3.height, metadata3.bytes, Buffer.from(bytes));
+  return metadata3;
+}
+function createImageAssetRepository(context) {
+  const database = context.database;
+  return {
+    metadata(assetId2) {
+      context.ensureOpen();
+      return context.readSnapshot(() => readMetadata(database, assetId2));
+    },
+    bytes(assetId2) {
+      context.ensureOpen();
+      return context.readSnapshot(() => {
+        const row = findRow(database, assetId2);
+        if (!row) throw new ImageAssetError("image_asset_not_found", "The requested image asset is not in Sheg storage.");
+        return Uint8Array.from(Buffer.from(row.content));
+      });
+    },
+    saveSource(bytes, supplied) {
+      context.ensureOpen();
+      return context.transaction(() => saveSourceInside(database, bytes, supplied));
+    },
+    savePrepared(sourceBytes, sourceInput, candidateBytes, candidateInput, scaling) {
+      context.ensureOpen();
+      const source = verifyAsset(sourceBytes, sourceInput);
+      const candidate = verifyAsset(candidateBytes, candidateInput);
+      if (source.assetId === candidate.assetId) throw new ImageAssetError("image_scale_target_unreachable", "An unchanged image does not create a separate derivation.");
+      if (!Number.isSafeInteger(scaling.width) || scaling.width < 1 || !Number.isSafeInteger(scaling.height) || scaling.height < 1 || scaling.algorithm !== "lanczos3" || scaling.policyVersion !== 1) {
+        throw new ImageAssetError("image_scale_target_unreachable", "The image scaling provenance is invalid.");
+      }
+      return context.transaction(() => {
+        saveSourceInside(database, sourceBytes, source);
+        saveSourceInside(database, candidateBytes, candidate);
+        const existing = database.prepare(`SELECT source_asset_id, width, height, algorithm, policy_version
+          FROM image_derivations WHERE candidate_asset_id = ?`).get(candidate.assetId);
+        if (existing) {
+          const matches = existing.source_asset_id === source.assetId && asNumber(existing.width, "image scale width") === scaling.width && asNumber(existing.height, "image scale height") === scaling.height && existing.algorithm === scaling.algorithm && asNumber(existing.policy_version, "image policy version") === scaling.policyVersion;
+          if (!matches) throw new ImageAssetError("image_digest_mismatch", "This candidate digest already has a different retained source or scaling history.");
+          return { source, candidate, scaling };
+        }
+        const now = new Date(context.now()).toISOString();
+        database.prepare(`INSERT INTO image_derivations (source_asset_id, candidate_asset_id, width, height, algorithm, policy_version, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(source.assetId, candidate.assetId, scaling.width, scaling.height, scaling.algorithm, scaling.policyVersion, now);
+        return { source, candidate, scaling };
+      });
+    },
+    close() {
+      context.close();
+    }
+  };
+}
+function openImageAssetRepository(dataRoot) {
+  if (!path13.isAbsolute(dataRoot)) throw new RunStoreError("datastore_path_invalid", "The Sheg data directory must be an absolute path.");
+  mkdirSync4(dataRoot, { recursive: true });
+  const databasePath = path13.join(dataRoot, "runs.sqlite");
+  const connection = openSqliteConnection(databasePath, dataRoot);
+  const context = createSqliteRepositoryContext(connection, databasePath, Date.now);
+  return createImageAssetRepository(context);
+}
+
 // src/infrastructure/run-runtime.ts
-function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platform, os.homedir()), service) {
+function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platform, os.homedir()), service, options2 = {}) {
   let runtimeService;
   let ownedStore;
   let storeReady = service !== void 0;
   let startupFailure;
+  let ownedImageRepository;
+  let imagePreparation;
   if (service) runtimeService = service;
   else {
     try {
@@ -45638,7 +54274,18 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
     get service() {
       return runtimeService;
     },
+    get image() {
+      if (!storeReady || inspectRunStoreCompatibility(dataRoot).status !== "current") throw recoveryRequiredError();
+      if (!imagePreparation) {
+        ownedImageRepository = openImageAssetRepository(dataRoot);
+        imagePreparation = createImagePreparationService(ownedImageRepository, options2.imageCodec ?? createStaticImageCodec(), dataRoot);
+      }
+      return imagePreparation;
+    },
     close() {
+      ownedImageRepository?.close();
+      ownedImageRepository = void 0;
+      imagePreparation = void 0;
       ownedStore?.close();
       ownedStore = void 0;
     },
@@ -45725,7 +54372,7 @@ function assertNever2(value) {
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.3.1-dev.1",
+  version: "0.4.0-dev.1",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
@@ -45747,6 +54394,10 @@ var package_default = {
     node: ">=24 <25"
   },
   dependencies: {
+    "@jsquash/jpeg": "1.6.0",
+    "@jsquash/png": "3.1.1",
+    "@jsquash/resize": "2.1.1",
+    "@jsquash/webp": "1.5.0",
     "@modelcontextprotocol/server": "2.1.0",
     "drizzle-orm": "1.0.0-rc.4",
     zod: "4.6.5"
@@ -45769,8 +54420,8 @@ var productVersion = package_default.version;
 
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
-function createPollingServer(service) {
-  const runtime = createRunRuntime(void 0, service);
+function createPollingServer(service, dataRoot, imageCodec) {
+  const runtime = createRunRuntime(dataRoot, service, imageCodec === void 0 ? {} : { imageCodec });
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
   server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Journey fit is measured for initial respondent inputs; each later reached turn is checked immediately before inference and may stop only that respondent if it does not fit. Independent questions in one group share one frozen state; fit entries identify measured inputs and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
   server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
@@ -45783,6 +54434,15 @@ function createPollingServer(service) {
   server.registerTool("run_resume", { description: "Explicitly resume eligible interrupted work, retryable partial question failures, or respondent-local failures in eligible partial journeys under the same run ID, saved request, and original call allowance. Completed answers and reached journey paths are preserved; only eligible failed work is retried. Reads never resume work.", inputSchema: external_exports.object({ runId: external_exports.string().uuid() }).strict() }, async ({ runId }) => safeResult(() => runtime.service.resume(runId)));
   server.registerTool("run_delete", { description: "Preview or delete an explicit selection of terminal runs. Preview first when unsure. Active runs must be cancelled and polled to a terminal state before deletion.", inputSchema: runDeleteSchema }, async ({ runIds, dryRun }) => safeResult(() => dryRun ? runtime.service.previewDelete(runIds) : runtime.service.deleteRuns(runIds)));
   server.registerTool("run_storage", { description: `Inspect datastore compatibility and recovery state or optimize a healthy datastore. When recovery is required, explicitly reset only after reviewing status and setting confirmation to ${resetConfirmation}; Sheg preserves the original database files before replacing the active store. No credentials or SQL are exposed.`, inputSchema: runStorageSchema }, async (input2) => safeResult(() => runtime.storage(input2)));
+  server.registerTool("image_import", { description: "Import and validate exact image bytes into Sheg asset custody. Provide either an absolute local path with its expected SHA-256 or a saved asset reference. No model is called.", inputSchema: ImageImportRequestSchema }, async ({ source }) => safeResult(() => {
+    requireAbsoluteMcpSource(source);
+    return runtime.image.import(source);
+  }));
+  server.registerTool("image_scale", { description: "Create a proportional static image candidate from a verified local image or saved asset. maxBytes applies only to image bytes, not model context fit. No crop, format change, quality control or model call is performed.", inputSchema: ScaleRequestSchema }, async (request) => safeResult(() => {
+    requireAbsoluteMcpSource(request.source);
+    return runtime.image.scale(request);
+  }));
+  server.registerTool("image_get", { description: "Read saved image metadata without processing or exporting it. Set export true to write or reuse a digest-named local preview under Sheg storage.", inputSchema: ImageGetRequestSchema }, async ({ assetId: assetId2, export: includePreview }) => safeResult(() => includePreview ? runtime.image.export(assetId2) : { asset: runtime.image.get(assetId2) }));
   const close = server.close.bind(server);
   server.close = async () => {
     runtime.close();
@@ -45794,16 +54454,19 @@ async function safeResult(operation) {
   try {
     return jsonResult(await operation());
   } catch (error62) {
-    const code = error62 instanceof RunServiceError || error62 instanceof RunStoreError ? error62.code : "internal_error";
-    const message = error62 instanceof RunServiceError || error62 instanceof RunStoreError ? error62.message : "The Sheg operation failed.";
+    const code = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError ? error62.code : "internal_error";
+    const message = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError ? error62.message : "The Sheg operation failed.";
     const result = { error: { code, message } };
     return { ...jsonResult(result), isError: true };
   }
 }
+function requireAbsoluteMcpSource(source) {
+  if ("path" in source && !path14.isAbsolute(source.path)) throw new ImageAssetError("image_source_path_invalid", "MCP image file sources must use an absolute path.");
+}
 function jsonResult(value) {
   return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(path11.resolve(process.argv[1])).href) serveStdio(() => createPollingServer(), { onerror: (error62) => process.stderr.write(`${error62.message}
+if (process.argv[1] && import.meta.url === pathToFileURL(path14.resolve(process.argv[1])).href) serveStdio(() => createPollingServer(), { onerror: (error62) => process.stderr.write(`${error62.message}
 `) });
 export {
   createPollingServer
