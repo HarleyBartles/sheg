@@ -240,7 +240,11 @@ function applyUpgrade(database: DatabaseSync, dataRoot: string, migrations: read
       database.exec('BEGIN IMMEDIATE');
       transactionOpen = true;
       const lockedVersion = pragmaNumber(database, 'user_version');
-      if (lockedVersion === migration.toVersion) { database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); return; }
+      if (lockedVersion >= migration.toVersion) {
+        const migrationAdvanced = lockedVersion === migration.toVersion ||
+          lockedVersion === migrations.at(-1)?.toVersion || migrations.some(({ fromVersion }) => fromVersion === lockedVersion);
+        if (migrationAdvanced) { database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); return; }
+      }
       if (lockedVersion !== migration.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
       if (pragmaNumber(database, 'data_version') !== beforeBackupDataVersion) {
         database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); continue;
