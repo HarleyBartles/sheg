@@ -18,6 +18,9 @@ import { createControlledRecoveryProvider } from '../scripts/skill-testing/contr
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import { createStaticImageCodec } from '../src/infrastructure/images/codecs.js';
 import { runCli } from '../src/entrypoints/cli.js';
+import { ClefProvider } from '../src/providers/clef.js';
+import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
+import type { ProviderConfigInput } from '../src/providers/config.js';
 
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
@@ -55,14 +58,14 @@ function journeyRequest() {
   };
 }
 
-async function connectedFixture(assertProviderReady: () => Promise<void> = async () => undefined, imageCodec?: Parameters<typeof createPollingServer>[2]) {
+async function connectedFixture(assertProviderReady: () => Promise<void> = async () => undefined, imageCodec?: Parameters<typeof createPollingServer>[2], credentialStore?: Parameters<typeof createPollingServer>[3]) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-'));
   const store = openRunStore(root);
   const fit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
   const calls = { providerFactory: 0, measure: 0, infer: 0, launch: 0, credentials: 0 };
   const provider: DecisionProvider = { measure() { calls.measure += 1; return fit; }, measureBatch() { calls.measure += 1; return fit; }, async decide() { calls.infer += 1; throw new Error('MCP admission must not infer.'); }, async decideBatch() { calls.infer += 1; throw new Error('MCP admission must not infer.'); } };
   const service = createRunService(store, root, () => { calls.providerFactory += 1; return provider; }, { async launch() { calls.launch += 1; } }, { assertProviderReady: async () => { calls.credentials += 1; await assertProviderReady(); } });
-  const server = createPollingServer(service, root, imageCodec);
+  const server = createPollingServer(service, root, imageCodec, credentialStore);
   const client = new Client({ name: 'sheg-mcp-test', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -76,6 +79,32 @@ test('MCP advertises the package product version', async () => {
   } finally {
     await f.close();
   }
+});
+
+test('MCP provider credential status, setup and removal use the fixed Clef route and never return key material', async () => {
+  const calls: string[] = [];
+  let availability: 'available' | 'missing' = 'missing';
+  const credentialStore = {
+    async availability(route: string) { calls.push(`status:${route}`); return availability; },
+    async setup(route: string) { calls.push(`setup:${route}`); availability = 'available'; },
+    async remove(route: string) { calls.push(`remove:${route}`); availability = 'missing'; },
+  };
+  const f = await connectedFixture(async () => undefined, undefined, credentialStore);
+  try {
+    const tools = await f.client.listTools();
+    assert.ok(tools.tools.some(({ name }) => name === 'provider_credential'));
+    const status = await f.client.callTool({ name: 'provider_credential', arguments: { route: 'clef', operation: 'status' } });
+    assert.deepEqual(status.structuredContent, { route: 'clef', operation: 'status', availability: 'missing' });
+    const setup = await f.client.callTool({ name: 'provider_credential', arguments: { route: 'clef', operation: 'setup' } });
+    assert.deepEqual(setup.structuredContent, { route: 'clef', operation: 'setup', availability: 'available' });
+    const remove = await f.client.callTool({ name: 'provider_credential', arguments: { route: 'clef', operation: 'remove' } });
+    assert.deepEqual(remove.structuredContent, { route: 'clef', operation: 'remove', availability: 'missing' });
+    const arbitrary = await f.client.callTool({ name: 'provider_credential', arguments: { route: 'clef', operation: 'status', endpoint: 'https://attacker.invalid' } });
+    assert.equal(arbitrary.isError, true);
+    assert.equal(calls.some((call) => call.includes('attacker.invalid')), false);
+    assert.equal(JSON.stringify([status, setup, remove]).includes('token'), false);
+    assert.deepEqual(calls, ['status:clef', 'setup:clef', 'status:clef', 'remove:clef', 'status:clef']);
+  } finally { await f.close(); }
 });
 
 test('MCP imports an image, scales its saved reference on a later connection, and CLI explicitly exports it', async () => {
@@ -149,6 +178,71 @@ test('MCP imports an image, scales its saved reference on a later connection, an
   }
 });
 
+test('MCP imports a source, inspects and accepts a Clef visual poll, then executes from retained bytes after source deletion', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-mcp-clef-'));
+  const store = openRunStore(root);
+  const imageRepository = openImageAssetRepository(root);
+  const codec = await localImageCodec(root);
+  let releaseDispatch!: () => void;
+  let dispatchStarted!: () => void;
+  const dispatchGate = new Promise<void>((resolve) => { releaseDispatch = resolve; });
+  const dispatched = new Promise<void>((resolve) => { dispatchStarted = resolve; });
+  let workerPromise: Promise<void> | undefined;
+  let requestUrl = '';
+  let requestImages: string[] = [];
+  const credentials = { async readForAuthentication(route: string) { assert.equal(route, 'clef'); return 'fixture-clef-secret'; } };
+  const fetchRequest = (async (url: string | URL | Request, init?: RequestInit) => {
+    requestUrl = String(url);
+    const body = JSON.parse(String(init?.body)) as { images: string[] };
+    requestImages = body.images;
+    dispatchStarted();
+    await dispatchGate;
+    return Response.json({ success: true, result: { model: 'clef', answers: { 'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } } }, usage: { input_tokens: 20, output_tokens: 0 } }, errors: [], messages: [] });
+  }) as typeof fetch;
+  const resolver = { resolve: (assetId: string) => ({ metadata: imageRepository.metadata(assetId), bytes: imageRepository.bytes(assetId) }) };
+  const providerFactory = (config: ProviderConfigInput) => {
+    if (config.kind !== 'clef') throw new Error('This fixture accepts only Clef.');
+    return new ClefProvider(config, fetchRequest, { credentialStore: credentials, imageResolver: resolver });
+  };
+  const service = createRunService(store, root, providerFactory, { async launch(_dataRoot, runId) { workerPromise = executeQuestionRun(splitRunStore(store), runId, providerFactory); } });
+  const server = createPollingServer(service, root, codec, { async availability() { return 'available'; }, async setup() {}, async remove() {} });
+  const client = new Client({ name: 'sheg-mcp-clef-visual-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const source = path.join(root, 'source.png');
+  const original = await readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
+  await copyFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url), source);
+  t.after(async () => { releaseDispatch(); await client.close(); await server.close(); imageRepository.close(); store.close(); await rm(root, { recursive: true, force: true }); });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const imported = await client.callTool({ name: 'image_import', arguments: { source: { path: source, sha256: createHash('sha256').update(original).digest('hex') } } });
+  assert.equal(imported.isError ?? false, false, JSON.stringify(imported.structuredContent));
+  const image = imported.structuredContent as { assetId: string; sha256: string; width: number; height: number; bytes: number; format: 'png' };
+  const request: InlineRunRequest = {
+    kind: 'poll', respondents: [{ id: 'reader', intent: 'Read the recommendation', context: 'Curious', desired_outcome: 'Understand the proposal', engagement_cues: 'Examples', friction_cues: 'Distraction' }],
+    material: [{ id: 'section-four', text: 'The recommendation follows.' }, { id: 'portrait', type: 'image', text: '', altText: 'A determined specialist in a teal coat checks a ledger.', caption: 'Writ prepares the records.', asset: image }],
+    questions: [{ type: 'choice', id: 'image-fit', instructions: 'Does the image support the recommendation?', options: { yes: 'It supports the section', no: 'It distracts from the section' }, visual: { mode: 'pixels', materialIds: ['portrait'] } }],
+    provider: { kind: 'clef', accountId: '3327878972ea82e6b454069bba62f3d9', model: 'clef', timeoutMs: 1000 }, maxCalls: 1,
+  };
+  const inspection = await client.callTool({ name: 'run_inspect', arguments: { request } });
+  assert.equal((inspection.structuredContent as { valid: boolean }).valid, true, JSON.stringify(inspection.structuredContent));
+  const accepted = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request } });
+  assert.equal(accepted.isError ?? false, false, JSON.stringify(accepted.structuredContent));
+  const runId = (accepted.structuredContent as { runId: string }).runId;
+  const frozen = await client.callTool({ name: 'run_get', arguments: { runId, view: 'request' } });
+  const frozenRequest = frozen.structuredContent as { evaluations: Array<{ packet: { visualMaterials?: Array<{ asset: { assetId: string }; altText: string }> } }> };
+  assert.equal(frozenRequest.evaluations[0]?.packet.visualMaterials?.[0]?.asset.assetId, image.assetId);
+  assert.equal(frozenRequest.evaluations[0]?.packet.visualMaterials?.[0]?.altText, 'A determined specialist in a teal coat checks a ledger.');
+  await dispatched;
+  await unlink(source);
+  releaseDispatch();
+  await workerPromise;
+  assert.equal(requestUrl, 'https://api.cloudflare.com/client/v4/accounts/3327878972ea82e6b454069bba62f3d9/ai/run/@cf/cloudflare/clef');
+  assert.deepEqual(requestImages, [`data:image/png;base64,${original.toString('base64')}`]);
+  const recalled = await client.callTool({ name: 'run_get', arguments: { runId, view: 'answers' } });
+  assert.equal((recalled.structuredContent as { items: Array<{ status: string; execution: { provider: string; model: string } }> }).items[0]?.execution.provider, 'clef');
+  assert.equal((recalled.structuredContent as { items: Array<{ status: string }> }).items[0]?.status, 'answered');
+  assert.equal(store.attempts(runId).items.length, 1);
+});
+
 test('missing image codec is bounded and leaves storage maintenance usable', async () => {
   const f = await connectedFixture();
   const source = fileURLToPath(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
@@ -177,7 +271,7 @@ test('MCP accepts, discovers, reads, and cancels durable direct requests with st
   const f = await connectedFixture();
   try {
     const tools = await f.client.listTools();
-    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['image_get', 'image_import', 'image_scale', 'run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_query', 'run_resume', 'run_start', 'run_storage']);
+    assert.deepEqual(tools.tools.map(({ name }) => name).sort(), ['image_get', 'image_import', 'image_scale', 'provider_credential', 'run_cancel', 'run_delete', 'run_get', 'run_inspect', 'run_list', 'run_query', 'run_resume', 'run_start', 'run_storage']);
     assert.match(tools.tools.find(({ name }) => name === 'run_resume')?.description ?? '', /partial journey/i);
     const inspected = await f.client.callTool({ name: 'run_inspect', arguments: { request: request() } });
     assert.equal(inspected.isError ?? false, false);

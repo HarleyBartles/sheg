@@ -4,7 +4,7 @@ param(
   [string] $Operation,
 
   [Parameter(Mandatory = $true)]
-  [ValidatePattern('^Sheg/(Jev/(TypeSafe|OpenRouter)|Test/[0-9a-f-]{36})$')]
+  [ValidatePattern('^Sheg/(Jev/(TypeSafe|OpenRouter)|Clef/Cloudflare|Test/[0-9a-f-]{36})$')]
   [string] $TargetName
 )
 

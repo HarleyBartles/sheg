@@ -1,5 +1,5 @@
 import { ProviderCallError, type ProviderFailureOptions } from '../domain/decision/provider-failure.js';
-import { decisionBatchRequestSchema, decisionRequestSchema, decisionValueFromResult, type DecisionBatchRequest, type DecisionBatchResult, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
+import { decisionBatchRequestSchema, decisionRequestSchema, decisionValueFromResult, type DecisionBatchRequest, type DecisionBatchResult, type DecisionQuestion, type DecisionRequest, type DecisionResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
 import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision, validateDecisionBatch } from '../domain/decision/validate.js';
 import { jevConfigSchema, type JevConfigInput, type JevConfig } from './jev/config.js';
@@ -7,6 +7,7 @@ import { jevMetadata } from './jev/model-metadata.js';
 import { WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import { executeJevTransport, JevTransportError } from './jev/transport.js';
 import { systemOneAnswerSchema, systemOneQuestion } from './system-one-contract.js';
+import { textStateWithVisualDescriptions } from '../domain/decision/prompt.js';
 
 export { jevConfigInputSchema, jevConfigSchema, type JevConfigInput, type JevConfig, type JevRoute } from './jev/config.js';
 
@@ -24,11 +25,17 @@ const TYPESAFE_CONTEXT_UNVERIFIED = 'typesafe-model-context-unverified';
 const JEV_MEASUREMENT_METHOD = 'utf8-bytes-div-3+20%-reserve/v1';
 
 function requestBody(request: DecisionRequest, model: string): Record<string, unknown> {
-  return { model, state: request.state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
+  const state = textStateWithVisualDescriptions(request.state, [request.question], request.visualMaterials ?? []);
+  return { model, state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
 }
 
 function batchRequestBody(request: DecisionBatchRequest, model: string): Record<string, unknown> {
-  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
+  const state = textStateWithVisualDescriptions(request.state, request.questions, request.visualMaterials ?? []);
+  return { model, state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
+}
+
+function hasPixelQuestions(questions: readonly DecisionQuestion[]): boolean {
+  return questions.some((question) => question.visual?.mode === 'pixels');
 }
 
 function measureRequestBody(serialized: string, model: string, route: JevConfig['route']): ProviderContextFit {
@@ -48,10 +55,12 @@ function measureRequestBody(serialized: string, model: string, route: JevConfig[
 }
 
 export function measureJevContext(request: DecisionRequest, model: string, route: JevConfig['route'] = 'openrouter'): ProviderContextFit {
+  if (hasPixelQuestions([request.question])) return missingMeasureFit({ kind: 'jev', route, model }, 'visual-pixels-require-clef');
   return measureRequestBody(JSON.stringify(requestBody(request, model)), model, route);
 }
 
 export function measureJevBatchContext(request: DecisionBatchRequest, model: string, route: JevConfig['route'] = 'openrouter'): ProviderContextFit {
+  if (hasPixelQuestions(request.questions)) return missingMeasureFit({ kind: 'jev', route, model }, 'visual-pixels-require-clef');
   return measureRequestBody(JSON.stringify(batchRequestBody(request, model)), model, route);
 }
 
@@ -101,6 +110,7 @@ export class JevProvider implements DecisionProvider {
   measureBatch(request: DecisionBatchRequest): ProviderContextFit {
     const parsed = decisionBatchRequestSchema.safeParse(request);
     if (!parsed.success) return { ...missingMeasureFit(this.config, 'invalid-batch-request'), reason: 'invalid-batch-request' };
+    if (hasPixelQuestions(parsed.data.questions)) return missingMeasureFit(this.config, 'visual-pixels-require-clef');
     return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
   }
 
@@ -135,10 +145,11 @@ export class JevProvider implements DecisionProvider {
     }
   }
   measure(request: DecisionRequest): ProviderContextFit {
+    if (hasPixelQuestions([request.question])) return missingMeasureFit(this.config, 'visual-pixels-require-clef');
     return this.measureContext(request, this.config);
   }
 }
 
-function missingMeasureFit(config: JevConfig, reason: string): ProviderContextFit {
+function missingMeasureFit(config: Pick<JevConfig, 'kind' | 'route' | 'model'>, reason: string): ProviderContextFit {
   return { provider: 'jev', status: 'unavailable', method: 'unavailable', modelIdentity: config.model, tokenCount: 'estimated', tokens: 0, contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason };
 }

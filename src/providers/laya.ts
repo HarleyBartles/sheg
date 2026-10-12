@@ -5,6 +5,7 @@ import type { DecisionProvider, ProviderContextFit } from '../domain/decision/pr
 import { DecisionError, decisionValidationFailure, decisionValidationFailureForReason, validateDecision } from '../domain/decision/validate.js';
 import { measureLayaContext } from './laya/context-fit.js';
 import { systemOneAnswerSchema, systemOneQuestion } from './system-one-contract.js';
+import { textStateWithVisualDescriptions } from '../domain/decision/prompt.js';
 export { measureLayaContext } from './laya/context-fit.js';
 
 export type LayaConfig = {
@@ -50,12 +51,18 @@ export async function checkLayaFit(
   config: LayaConfig,
   measureFit?: FitMeasurer,
 ): Promise<FitResult> {
+  if (request.question.visual?.mode === 'pixels') {
+    return { provider: 'laya', status: 'unavailable', method: 'laya-text-only/v1', modelIdentity: config.checkpoint,
+      tokenCount: 'measured', tokens: 0, contextLimit: config.contextLimit, headroomTokens: 0, effectiveLimit: config.contextLimit,
+      details: {}, reason: 'visual-pixels-require-clef' };
+  }
   if (request.question.type === 'score' && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
     return { provider: 'laya', status: 'overflow', method: 'laya-score-rubric-limit/v1', modelIdentity: config.checkpoint, tokenCount: 'measured', tokens: request.question.rubric.length, contextLimit: config.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
   }
   let measurement: ProviderContextFit;
   try {
-    measurement = await (measureFit ?? measureLayaContext)(request, config);
+    const projected = { ...request, state: textStateWithVisualDescriptions(request.state, [request.question], request.visualMaterials ?? []) };
+    measurement = await (measureFit ?? measureLayaContext)(projected, config);
   } catch {
     return { provider: 'laya', status: 'unavailable', method: 'laya-context-fit/v1', modelIdentity: config.checkpoint, tokenCount: 'measured', tokens: 0, contextLimit: config.contextLimit, headroomTokens: 0, effectiveLimit: config.contextLimit, details: {}, reason: 'context-unmeasurable' };
   }
@@ -96,6 +103,7 @@ export class LayaProvider implements DecisionProvider {
     }
 
     const { question } = parsedRequest.data;
+    const projectedState = textStateWithVisualDescriptions(parsedRequest.data.state, [question], parsedRequest.data.visualMaterials ?? []);
     const endpoint = new URL('/v1/systemone', ensureTrailingSlash(this.config.baseUrl)).toString();
     const startedAt = performance.now();
     let response: Response;
@@ -105,7 +113,7 @@ export class LayaProvider implements DecisionProvider {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: this.config.checkpoint,
-          state: parsedRequest.data.state,
+          state: projectedState,
           questions: {
             [question.id]: systemOneQuestion(question),
           },

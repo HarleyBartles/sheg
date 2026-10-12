@@ -4,7 +4,7 @@ import type { AnswerRow, JourneyRunRecord, Page, RunAttempt, RunContextDetail, R
 import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
 import type { PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
-import type { ProviderConfigInput } from '../providers/config.js';
+import type { ProviderConfigInput, ProviderFactoryOptions } from '../providers/config.js';
 import type { DeletePreview, DeleteResult, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
 import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
 
@@ -16,7 +16,7 @@ export class RunServiceError extends Error {
 }
 
 export interface WorkerLauncher { launch(dataRoot: string, runId: string): Promise<void> }
-export type ProviderFactory = (config: ProviderConfigInput) => DecisionProvider;
+export type ProviderFactory = (config: ProviderConfigInput, options?: ProviderFactoryOptions) => DecisionProvider;
 export type RunServiceOptions = { assertProviderReady?: (config: ProviderConfigInput) => Promise<void> };
 
 export interface RunService {

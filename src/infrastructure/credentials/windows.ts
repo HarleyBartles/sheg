@@ -4,16 +4,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JevRoute } from '../../providers/jev/config.js';
 
+export type CredentialRoute = JevRoute | 'clef';
+
 export type CredentialAvailability = 'available' | 'missing' | 'malformed' | 'unavailable';
 export type CredentialStoreErrorCode = 'credential_malformed' | 'credential_missing' | 'credential_unavailable';
 
 export class CredentialStoreError extends Error {
-  constructor(readonly code: CredentialStoreErrorCode, readonly route: JevRoute) {
+  constructor(readonly code: CredentialStoreErrorCode, readonly route: CredentialRoute) {
+    const routeLabel = route === 'clef' ? 'Cloudflare Clef' : route;
     const message = code === 'credential_malformed'
-      ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.`
+      ? `The ${routeLabel} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.`
       : code === 'credential_missing'
-        ? `The ${route} secure credential is missing.`
-        : `The ${route} secure credential is unavailable.`;
+        ? `The ${routeLabel} secure credential is missing.`
+        : `The ${routeLabel} secure credential is unavailable.`;
     super(message);
     this.name = 'CredentialStoreError';
   }
@@ -21,27 +24,31 @@ export class CredentialStoreError extends Error {
 
 export type WindowsCredentialStoreOptions = {
   helperPath?: string;
-  credentialTargets?: Partial<Record<JevRoute, string>>;
+  credentialTargets?: Partial<Record<CredentialRoute, string>>;
   run?: (args: string[], interactive?: boolean) => Promise<{ code: number; stdout: string; stderr: string }>;
 };
 
-const defaultTargets: Record<JevRoute, string> = {
+const defaultTargets: Record<CredentialRoute, string> = {
   typesafe: 'Sheg/Jev/TypeSafe',
   openrouter: 'Sheg/Jev/OpenRouter',
+  clef: 'Sheg/Clef/Cloudflare',
 };
 
 export class WindowsCredentialStore {
-  private readonly targets: Record<JevRoute, string>;
+  private readonly targets: Record<CredentialRoute, string>;
   private readonly helperPath: string;
   private readonly run: NonNullable<WindowsCredentialStoreOptions['run']>;
 
   constructor(options: WindowsCredentialStoreOptions = {}) {
     this.targets = { ...defaultTargets, ...options.credentialTargets };
+    for (const [route, target] of Object.entries(options.credentialTargets ?? {})) {
+      if (!/^Sheg\/Test\/[0-9a-f-]{36}$/i.test(target)) throw new Error(`The ${route} credential target is fixed and cannot be redirected.`);
+    }
     this.helperPath = options.helperPath ?? locateHelper();
     this.run = options.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
   }
 
-  async availability(route: JevRoute): Promise<CredentialAvailability> {
+  async availability(route: CredentialRoute): Promise<CredentialAvailability> {
     try {
       const result = await this.run(this.arguments('Status', route));
       if (result.code === 0 && result.stdout.trim() === 'AVAILABLE') return 'available';
@@ -53,7 +60,7 @@ export class WindowsCredentialStore {
     }
   }
 
-  async readForAuthentication(route: JevRoute): Promise<string> {
+  async readForAuthentication(route: CredentialRoute): Promise<string> {
     let result: { code: number; stdout: string; stderr: string };
     try {
       result = await this.run(this.arguments('Read', route));
@@ -66,17 +73,17 @@ export class WindowsCredentialStore {
     return key;
   }
 
-  async setup(route: JevRoute): Promise<void> {
+  async setup(route: CredentialRoute): Promise<void> {
     const result = await this.run(this.arguments('Setup', route), true);
     if (result.code !== 0) throw new Error(`The ${route} secure credential could not be saved.`);
   }
 
-  async remove(route: JevRoute): Promise<void> {
+  async remove(route: CredentialRoute): Promise<void> {
     const result = await this.run(this.arguments('Remove', route));
     if (result.code !== 0 && result.code !== 3) throw new Error(`The ${route} secure credential could not be removed.`);
   }
 
-  private arguments(operation: string, route: JevRoute): string[] {
+  private arguments(operation: string, route: CredentialRoute): string[] {
     return ['-Operation', operation, '-TargetName', this.targets[route]];
   }
 }

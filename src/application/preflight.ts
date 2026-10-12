@@ -3,17 +3,19 @@ import { z } from 'zod';
 import { respondentProfileSchema } from '../domain/respondents/profile.js';
 import { walkStudyPackets, type PreflightPacket } from '../domain/journey/packet-walker.js';
 import type { ProviderContextFit } from '../domain/decision/provider.js';
-import { JevProvider, type JevRoute } from '../providers/jev.js';
+import { JevProvider } from '../providers/jev.js';
+import type { CredentialRoute } from '../infrastructure/credentials/windows.js';
 import { LayaProvider } from '../providers/laya.js';
+import { ClefProvider } from '../providers/clef.js';
 import { providerConfigSchema, type ProviderConfigInput } from '../providers/config.js';
 import { promptContractHash } from '../domain/decision/prompt.js';
-import { executionFingerprint, stimulusFingerprint } from '../infrastructure/identity.js';
+import { executionFingerprint, stimulusFingerprint, type ExecutionProvider } from '../infrastructure/identity.js';
 
 export type PreflightProviderConfig = ProviderConfigInput;
 type CredentialAvailability = 'available' | 'missing' | 'malformed' | 'unavailable';
 type PreflightCredentialStore = {
-  availability(route: JevRoute): Promise<CredentialAvailability>;
-  readForAuthentication(route: JevRoute): Promise<string>;
+  availability(route: CredentialRoute): Promise<CredentialAvailability>;
+  readForAuthentication(route: CredentialRoute): Promise<string>;
 };
 const unavailableCredentialStore: PreflightCredentialStore = {
   async availability() { return 'unavailable'; },
@@ -36,7 +38,7 @@ export const preflightInputSchema = z.object({
 
 export type ProviderStudyFit = {
   provider: string;
-  route: JevRoute | null;
+  route: CredentialRoute | null;
   endpoint: string | null;
   credentialAvailability: CredentialAvailability | null;
   executionFingerprint: string;
@@ -70,7 +72,8 @@ export async function preflightStudy(input: StudyPreflightInput, dependencies: {
   const credentialStore = dependencies.credentialStore ?? unavailableCredentialStore;
   for (const providerInput of config.providers) {
     const providerConfig = providerInput;
-    const provider = providerConfig.kind === 'jev' ? new JevProvider(providerConfig, fetch, { credentialStore }) : new LayaProvider(providerConfig);
+    const provider = providerConfig.kind === 'jev' ? new JevProvider(providerConfig, fetch, { credentialStore }) :
+      providerConfig.kind === 'laya' ? new LayaProvider(providerConfig) : new ClefProvider(providerConfig, fetch, { credentialStore });
     const overflows: ProviderStudyFit['overflows'] = [];
     const unavailable: ProviderStudyFit['unavailable'] = [];
     let maximumTokens: number | null = null;
@@ -99,21 +102,23 @@ export async function preflightStudy(input: StudyPreflightInput, dependencies: {
     }
     const complete = traversal.status === 'complete';
     const fitUnverified = traversal.unverifiedReason !== undefined;
-    const credentialAvailability: CredentialAvailability | null = providerConfig.kind === 'jev'
-      ? await credentialStore.availability(providerConfig.route)
-      : null;
+    const credentialRoute: CredentialRoute | null = providerConfig.kind === 'jev' ? providerConfig.route : providerConfig.kind === 'clef' ? 'clef' : null;
+    const credentialAvailability: CredentialAvailability | null = credentialRoute === null ? null : await credentialStore.availability(credentialRoute);
+    const identity: ExecutionProvider = providerConfig.kind === 'jev'
+      ? { kind: 'jev', route: providerConfig.route, model: providerConfig.model, endpoint: providerConfig.endpoint }
+      : providerConfig.kind === 'laya'
+        ? { kind: 'laya', checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...(providerConfig.precision === undefined ? {} : { precision: providerConfig.precision }) }
+        : { kind: 'clef', accountId: providerConfig.accountId, model: providerConfig.model };
     results.push({
-      route: providerConfig.kind === 'jev' ? providerConfig.route : null,
+      route: credentialRoute,
       endpoint: providerConfig.kind === 'jev' ? providerConfig.endpoint : null,
       credentialAvailability,
-      provider: providerConfig.kind === 'jev' ? providerConfig.model : providerConfig.checkpoint,
-      executionFingerprint: executionFingerprint(inputFingerprint, providerConfig.kind === 'jev'
-        ? { kind: 'jev', route: providerConfig.route, model: providerConfig.model, endpoint: providerConfig.endpoint }
-        : { kind: 'laya', checkpoint: providerConfig.checkpoint, contextLimit: providerConfig.contextLimit, headLimit: providerConfig.headLimit, tokenizerSha256: providerConfig.tokenizerSha256, ...(providerConfig.precision === undefined ? {} : { precision: providerConfig.precision }) }),
+      provider: providerConfig.kind === 'jev' || providerConfig.kind === 'clef' ? providerConfig.model : providerConfig.checkpoint,
+      executionFingerprint: executionFingerprint(inputFingerprint, identity),
       tokenizerSha256: providerConfig.kind === 'laya' ? providerConfig.tokenizerSha256 : null,
       status: overflows.length ? 'does-not-fit' : !complete || fitUnverified || unavailable.length ? 'unverified' : 'fit',
       basis: config.mode === 'maximum-profile' ? 'synthetic-profile' : 'frozen-cohort',
-      configuration: providerConfig.kind === 'jev'
+      configuration: providerConfig.kind === 'jev' || providerConfig.kind === 'clef'
         ? credentialAvailability === 'available' ? 'configured' : 'incomplete'
         : unavailable.length ? 'incomplete' : 'configured',
       availability: 'unverified',

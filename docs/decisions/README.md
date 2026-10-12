@@ -44,6 +44,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0036](0036-share-the-default-datastore-across-harnesses.md) | Share the default datastore across harnesses | Accepted |
 | [0037](0037-adopt-gitflow-and-semver-cadence.md) | Adopt Gitflow and SemVer with integration checkpoints | Accepted |
 | [0038](0038-store-and-scale-image-assets-locally.md) | Store and scale image assets locally | Accepted |
+| [0039](0039-run-visual-polls-through-native-clef.md) | Run visual polls through native Cloudflare Clef | Accepted |
 
 ## Writing and changing decisions
 

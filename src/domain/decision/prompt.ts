@@ -1,13 +1,26 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { decisionRequestSchema, decisionValueSchema, type DecisionRequest, type DecisionValue } from './decision.js';
+import { decisionRequestSchema, decisionValueSchema, type DecisionRequest, type DecisionValue, type DecisionVisualMaterial } from './decision.js';
 import { respondentPerspectiveSchema, type RespondentPerspective, type RespondentProfile } from '../respondents/profile.js';
 import type { JourneyDefinition } from '../study/arm.js';
+import { isImageMaterial } from '../study/stimulus.js';
+import { providerKindSchema } from './provider.js';
+
+const visualEvidenceSchema = z.object({
+  mode: z.enum(['pixels', 'described']), provider: providerKindSchema, model: z.string().min(1),
+  materials: z.array(z.object({ materialId: z.string().min(1), assetId: z.string().min(1), sha256: z.string().regex(/^[a-f\d]{64}$/i),
+    altText: z.string().min(1), caption: z.string().min(1).optional() }).strict()).min(1).max(4),
+}).strict().superRefine((evidence, context) => {
+  for (const [index, material] of evidence.materials.entries()) if (material.assetId !== `sha256:${material.sha256}`) {
+    context.addIssue({ code: 'custom', path: ['materials', index, 'assetId'], message: 'Visual evidence asset ID must match its SHA-256 digest.' });
+  }
+});
 
 export const promptHistoryEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('exposure'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), itemId: z.string().min(1) }).strict(),
   z.object({ type: z.literal('choice'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), taskId: z.string().min(1), choice: z.string().min(1) }).strict(),
   z.object({ type: z.literal('response'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), taskId: z.string().min(1), result: decisionValueSchema }).strict(),
+  z.object({ type: z.literal('visual-response'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), taskId: z.string().min(1), result: decisionValueSchema, visualEvidence: visualEvidenceSchema }).strict(),
 ]);
 export type PromptHistoryEvent = z.infer<typeof promptHistoryEventSchema>;
 
@@ -26,9 +39,9 @@ const trajectoryChoiceSchema = z.object({
   taskId: z.string().min(1), choiceId: z.string().min(1), choiceMeaning: z.string().min(1), exposedItemIds: z.array(z.string().min(1)),
 }).strict();
 const trajectoryResponseSchema = z.discriminatedUnion('type', [
-  z.object({ ...trajectoryChoiceSchema.shape, type: z.literal('choice'), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)).optional(), confidence: z.number().finite().min(0).max(1).optional() }).strict(),
-  z.object({ type: z.literal('score'), taskId: z.string().min(1), score: z.number().finite(), meaning: z.string(), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), legend: z.record(z.string(), z.string()), confidence: z.number().finite().min(0).max(1).optional(), exposedItemIds: z.array(z.string().min(1)) }).strict(),
-  z.object({ type: z.literal('noul'), taskId: z.string().min(1), noul: z.number().finite().min(0).max(1), proposition: z.string(), exposedItemIds: z.array(z.string().min(1)) }).strict(),
+  z.object({ ...trajectoryChoiceSchema.shape, type: z.literal('choice'), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)).optional(), confidence: z.number().finite().min(0).max(1).optional(), visualEvidence: visualEvidenceSchema.optional() }).strict(),
+  z.object({ type: z.literal('score'), taskId: z.string().min(1), score: z.number().finite(), meaning: z.string(), probabilities: z.record(z.string(), z.number().finite().min(0).max(1)), legend: z.record(z.string(), z.string()), confidence: z.number().finite().min(0).max(1).optional(), exposedItemIds: z.array(z.string().min(1)), visualEvidence: visualEvidenceSchema.optional() }).strict(),
+  z.object({ type: z.literal('noul'), taskId: z.string().min(1), noul: z.number().finite().min(0).max(1), proposition: z.string(), exposedItemIds: z.array(z.string().min(1)), visualEvidence: visualEvidenceSchema.optional() }).strict(),
 ]);
 const trajectorySummarySchema = z.object({
   version: z.literal(1), eventCount: z.number().int().nonnegative(), exposureCount: z.number().int().nonnegative(), decisionCount: z.number().int().nonnegative(),
@@ -38,6 +51,7 @@ const trajectorySummarySchema = z.object({
 export const promptStateSchema = z.object({
   respondent: z.object({ profile: respondentPerspectiveSchema }).strict(),
   encounteredItems: z.array(z.object({ id: z.string().min(1), text: z.string().min(1) }).strict()),
+  materialOrder: z.array(z.string().min(1)).optional(),
   trajectory: trajectorySummarySchema,
 }).strict();
 export type PromptState = z.infer<typeof promptStateSchema>;
@@ -47,19 +61,23 @@ export type DecisionPacket = z.infer<typeof decisionPacketSchema>;
 export type DecisionPacketParts = {
   respondentProfile: RespondentPerspective;
   encounteredItems: Array<{ id: string; text: string }>;
+  materialOrder?: string[];
+  visualMaterials?: DecisionVisualMaterial[];
   trajectory: TrajectorySummary;
   question: DecisionRequest['question'];
 };
 
 export function questionForTask(task: JourneyDefinition['tasks'][number]): DecisionRequest['question'] {
-  if (task.type === 'choice') return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}) };
-  if (task.type === 'score') return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
-  return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }) };
+  if (task.type === 'choice') return { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options }, ...(task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}), ...(task.visual ? { visual: task.visual } : {}) };
+  if (task.type === 'score') return { type: 'score', id: task.id, instructions: task.instructions, rubric: [...task.rubric], ...(task.visual ? { visual: task.visual } : {}) };
+  return { type: 'noul', id: task.id, instructions: task.instructions, ...(task.criteria === undefined ? {} : { criteria: { ...task.criteria } }), ...(task.visual ? { visual: task.visual } : {}) };
 }
 
 const promptContract = {
-  version: 7,
-  stateFields: ['respondent.profile', 'encounteredItems', 'trajectory'],
+  version: 10,
+  stateFields: ['respondent.profile', 'encounteredItems', 'materialOrder', 'trajectory'],
+  visualBindings: 'question-scoped image material IDs; image descriptors are carried as semantic context and pixel payloads are provider-specific',
+  visualHistory: 'visual responses carry the exact supplied image description, caption, typed answer, provider and model as structured semantic evidence without carrying image bytes',
   encounteredMaterial: 'all items exposed through the current turn, unique by item ID in first-exposure order',
   trajectory: ['prior task IDs and typed responses with meanings', 'prior exposure IDs', 'event counts and range'],
   responseHistory: 'per-task include or omit; omitted legacy setting includes prior responses',
@@ -73,6 +91,7 @@ const promptContract = {
 } as const;
 
 export const v6PromptContractHash = 'a39d72d1ba77b0560dac5b7ccedf07b72e80b9d7bc1330679acd9c209e831526';
+const previousVisualPromptContractHash = '671217c23a449181a29c50c826f16e079a753e5c134f9bbcc63d55932fdbc016';
 
 function finishTrajectory(body: Omit<TrajectorySummary, 'payloadUtf8Bytes'>): TrajectorySummary {
   let payloadUtf8Bytes = 0;
@@ -181,20 +200,21 @@ function compactTrajectory(arm: JourneyDefinition, history: readonly PromptHisto
       continue;
     }
     const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
-    const result = event.type === 'response' ? event.result : { type: 'choice' as const, choice: event.choice, probabilities: {} };
+    const result = event.type === 'response' || event.type === 'visual-response' ? event.result : { type: 'choice' as const, choice: event.choice, probabilities: {} };
+    const visualEvidence = event.type === 'visual-response' ? event.visualEvidence : undefined;
     if (!task) throw new Error(`Unknown task ${event.taskId} in journey history.`);
     if (result.type === 'choice') {
       const choiceMeaning = task.type !== 'score' && task.type !== 'noul' ? task.options[result.choice] : undefined;
       if (choiceMeaning === undefined) throw new Error(`Unknown choice ${result.choice} for task ${event.taskId} in journey history.`);
-      const response = { type: 'choice' as const, taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...(result.probabilities === undefined ? {} : { probabilities: result.probabilities }), ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+      const response = { type: 'choice' as const, taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...(result.probabilities === undefined ? {} : { probabilities: result.probabilities }), ...(result.confidence === undefined ? {} : { confidence: result.confidence }), ...(visualEvidence ? { visualEvidence } : {}) };
       responses.push(response);
       choices.push({ taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds] });
     } else if (result.type === 'score') {
       if (task.type !== 'score' || result.legend[String(Math.round(result.score))] === undefined) throw new Error(`Score response does not match task ${event.taskId}.`);
-      responses.push({ type: 'score', taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(' | ')}`, probabilities: result.probabilities, legend: result.legend, ...(result.confidence === undefined ? {} : { confidence: result.confidence }), exposedItemIds: [...exposureIds] });
+      responses.push({ type: 'score', taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(' | ')}`, probabilities: result.probabilities, legend: result.legend, ...(result.confidence === undefined ? {} : { confidence: result.confidence }), exposedItemIds: [...exposureIds], ...(visualEvidence ? { visualEvidence } : {}) });
     } else {
       if (task.type !== 'noul') throw new Error(`Noul response does not match task ${event.taskId}.`);
-      responses.push({ type: 'noul', taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds] });
+      responses.push({ type: 'noul', taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds], ...(visualEvidence ? { visualEvidence } : {}) });
     }
   }
 
@@ -231,7 +251,7 @@ export function compileDecisionPacketForCompiler(
   if (compilerFingerprint === v6PromptContractHash) {
     return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 'v6');
   }
-  if (compilerFingerprint === promptContractHash()) {
+  if (compilerFingerprint === previousVisualPromptContractHash || compilerFingerprint === promptContractHash()) {
     return compileDecisionPacket(arm, profile, taskId, history);
   }
   throw new Error(`Unsupported journey compiler identity ${compilerFingerprint}.`);
@@ -253,7 +273,7 @@ function compileDecisionPacketWithMaterialPolicy(
     if (arm.presentation.kind === 'sequence') {
       itemIds = arm.items.map((item) => item.id);
     } else {
-      const lastDecisionIndex = history.findLastIndex((event) => event.type === 'choice' || event.type === 'response');
+      const lastDecisionIndex = history.findLastIndex((event) => event.type === 'choice' || event.type === 'response' || event.type === 'visual-response');
       itemIds = history.slice(lastDecisionIndex + 1)
         .filter((event): event is Extract<PromptHistoryEvent, { type: 'exposure' }> => event.type === 'exposure')
         .map((event) => event.itemId);
@@ -264,10 +284,10 @@ function compileDecisionPacketWithMaterialPolicy(
       .map((event) => event.itemId))];
   }
 
-  const encounteredItems = itemIds.map((id) => {
+  const encounteredItems = itemIds.flatMap((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
-    return { id: item.id, text: item.text };
+    return isImageMaterial(item) ? [] : [{ id: item.id, text: item.text }];
   });
   return compileDecisionRequest({
     respondentProfile: {
@@ -278,6 +298,7 @@ function compileDecisionPacketWithMaterialPolicy(
       friction_cues: profile.friction_cues,
     },
     encounteredItems,
+    materialOrder: itemIds,
     trajectory: compactTrajectory(
       arm,
       task.responseHistory === 'omit'
@@ -285,24 +306,52 @@ function compileDecisionPacketWithMaterialPolicy(
         : history,
     ),
     question: questionForTask(task),
+    ...(task.visual ? { visualMaterials: task.visual.materialIds.flatMap((id) => {
+      const item = itemsById.get(id);
+      return item && isImageMaterial(item) ? [{ id: item.id, asset: item.asset, altText: item.altText, ...(item.caption === undefined ? {} : { caption: item.caption }) }] : [];
+    }) } : {}),
   });
 }
 
 export function compileDecisionRequest(parts: DecisionPacketParts): DecisionRequest & { state: PromptState } {
+  const visualMaterials = parts.visualMaterials ?? [];
   const state: PromptState = {
     respondent: { profile: { ...parts.respondentProfile } },
     encounteredItems: parts.encounteredItems.map(({ id, text }) => ({ id, text })),
+    ...(parts.materialOrder === undefined ? {} : { materialOrder: [...parts.materialOrder] }),
     trajectory: parts.trajectory,
   };
   const request = decisionRequestSchema.parse({
     state,
     question: parts.question,
     ...(parts.question.type === 'choice' ? { optionIds: Object.keys(parts.question.options) } : {}),
+    ...(visualMaterials.length ? { visualMaterials } : {}),
   });
   return {
     ...request,
     state,
   };
+}
+
+export function textStateWithVisualDescriptions(
+  state: Record<string, unknown>,
+  questions: readonly DecisionRequest['question'][],
+  materials: readonly DecisionVisualMaterial[],
+): Record<string, unknown> {
+  const referenced = new Map<string, 'pixels' | 'described'>();
+  for (const question of questions) for (const id of question.visual?.materialIds ?? []) {
+    const previous = referenced.get(id);
+    if (previous === 'described' || question.visual?.mode === 'described') referenced.set(id, 'described');
+    else referenced.set(id, 'pixels');
+  }
+  const items = Array.isArray(state.encounteredItems) ? state.encounteredItems as Array<{ id: string; text: string }> : [];
+  const visualItems = materials.filter(({ id }) => referenced.has(id)).map((material) => {
+    const mode = referenced.get(material.id);
+    const lines = [mode === 'described' ? `Image description: ${material.altText}` : undefined,
+      material.caption === undefined ? undefined : `Caption: ${material.caption}`].filter((line): line is string => line !== undefined);
+    return lines.length ? { id: material.id, text: lines.join('\n') } : undefined;
+  }).filter((item): item is { id: string; text: string } => item !== undefined);
+  return visualItems.length ? { ...state, encounteredItems: [...items, ...visualItems] } : state;
 }
 
 export function promptContractHash(): string {

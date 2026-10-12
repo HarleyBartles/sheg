@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { providerKinds } from '../domain/decision/provider.js';
 import { jevConfigInputSchema, jevConfigSchema } from './jev/config.js';
+import { clefConfigSchema, type ClefImageResolver } from './clef/config.js';
 
 const layaConfigSchema = z.object({
   kind: z.literal(providerKinds[1]),
@@ -17,7 +18,9 @@ const layaConfigSchema = z.object({
 export const providerConfigSchema = z.union([
   jevConfigInputSchema.transform((input) => jevConfigSchema.parse(input)),
   layaConfigSchema,
+  clefConfigSchema,
 ]);
 
 export type ProviderConfigInput = z.input<typeof providerConfigSchema>;
 export type ProviderConfig = z.output<typeof providerConfigSchema>;
+export type ProviderFactoryOptions = { imageResolver?: ClefImageResolver };

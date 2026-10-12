@@ -14,16 +14,23 @@ import { RunStoreError } from '../infrastructure/run-store.js';
 import type { RunService } from '../application/run-service.js';
 import { ImageAssetError, ImageGetRequestSchema, ImageImportRequestSchema, ScaleRequestSchema } from '../domain/assets/image.js';
 import type { StaticImageCodec } from '../infrastructure/images/codecs.js';
+import { manageProviderCredential, providerCredentialRequestSchema, ProviderCredentialOperationError, type ProviderCredentialStore } from '../application/provider-credentials.js';
 
 type CliIo = { out(value: string): unknown; error(value: string): unknown };
 const outputIo: CliIo = { out: (value) => process.stdout.write(`${value}\n`), error: (value) => process.stderr.write(`${value}\n`) };
 
-export async function runCli(args: readonly string[], io: CliIo = outputIo, service?: RunService, imageCodec?: StaticImageCodec): Promise<number> {
+export async function runCli(args: readonly string[], io: CliIo = outputIo, service?: RunService, imageCodec?: StaticImageCodec, credentialStore: ProviderCredentialStore = new WindowsCredentialStore()): Promise<number> {
   const [command, ...rest] = args;
   if (command === '--help' || command === 'help' || command === undefined) { io.out(helpText); return 0; }
   try {
     const options = parseArgs(rest);
     validateOptions(command, options);
+    if (command === 'provider-credential') {
+      const parsed = providerCredentialRequestSchema.safeParse(options);
+      if (!parsed.success) throw new CliInputError('Provider credential route or operation is invalid.');
+      io.out(JSON.stringify(await manageProviderCredential(parsed.data, credentialStore)));
+      return 0;
+    }
     if (command === 'preflight') {
       const mode = options.mode ?? 'frozen-cohort';
       if (mode !== 'frozen-cohort' && mode !== 'maximum-profile') throw new CliInputError('Preflight mode must be frozen-cohort or maximum-profile.');
@@ -46,7 +53,7 @@ export async function runCli(args: readonly string[], io: CliIo = outputIo, serv
   } catch (error) {
     const result = error instanceof ImageAssetError
       ? { error: { code: error.code, message: error.message } }
-      : error instanceof CliInputError || error instanceof RunServiceError || error instanceof RunStoreError
+      : error instanceof CliInputError || error instanceof RunServiceError || error instanceof RunStoreError || error instanceof ProviderCredentialOperationError
       ? { error: error.message }
       : { error: 'The Sheg command failed. Check the command arguments and local datastore.' };
     io.error(JSON.stringify(result));
@@ -160,6 +167,7 @@ function validateOptions(command: string | undefined, options: Record<string, st
     list: ['query', 'data-root'], query: ['query', 'data-root'], get: ['request', 'data-root'],
     cancel: ['run-id', 'data-root'], resume: ['run-id', 'data-root'], delete: ['request', 'data-root'], storage: ['request', 'data-root'],
     'image-import': ['request', 'data-root'], 'image-scale': ['request', 'data-root'], 'image-get': ['request', 'data-root'],
+    'provider-credential': ['route', 'operation'],
   };
   const allowed = commands[command ?? ''];
   if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ''}`);
@@ -197,6 +205,7 @@ Commands:
   image-import --request <json-file>             Validate and save one digest-verified image
   image-scale --request <json-file>               Create a proportional image candidate
   image-get --request <json-file>                 Read metadata or explicitly export a preview
+  provider-credential --route clef --operation status|setup|remove  Manage a provider key in Windows Credential Manager
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
   CLI and MCP share the platform's Sheg data directory by default.

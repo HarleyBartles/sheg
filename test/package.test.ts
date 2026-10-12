@@ -60,6 +60,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
   assert.equal(await exists(path.join(plugin, 'dist/migrations/0000_baseline_v9/migration.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/migrations/0001_image_assets/migration.sql')), true);
+  assert.equal(await exists(path.join(plugin, 'dist/migrations/0002_run_visual_assets/migration.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/queries/load-journey-worker-turn.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/drizzle-orm-Apache-2.0.txt')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/THIRD-PARTY-NOTICES.md')), true);
@@ -127,7 +128,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), false);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
   const initialized = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { readOnly: true });
-  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10); }
+  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 11); }
   finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
@@ -531,6 +532,150 @@ test('a copied MCP runs a journey across connections and resumes its saved turn 
     releaseSecond?.();
     if (workerPid) killPid(workerPid);
     throw error;
+  }
+});
+
+test('a copied plugin runs a Clef visual journey from saved pixels and compact history without checkout assets', { skip: process.platform !== 'win32' }, async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-installed-clef-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const plugin = path.join(sandbox, 'installed', 'sheg');
+  await mkdir(path.dirname(plugin), { recursive: true });
+  await cp(pluginPackageSource(), plugin, { recursive: true });
+  assert.equal(await exists(path.join(plugin, 'node_modules')), false);
+  const dataRoot = path.join(sandbox, 'data');
+  const imagePath = path.join(sandbox, 'portrait.png');
+  await copyFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url), imagePath);
+  const imageBytes = await readFile(imagePath);
+  const imageDigest = createHash('sha256').update(imageBytes).digest('hex');
+  const calls: Array<{ url: string; authorization: string | undefined; originalUrl: string | undefined; body: { questions: Record<string, unknown>; images?: string[]; state: { trajectory: { responses: unknown[] } } } }> = [];
+  let releaseVisual: (() => void) | undefined;
+  let visualArrived: (() => void) | undefined;
+  let visualCallCount = 0;
+  const visualRequest = new Promise<void>((resolve) => { visualArrived = resolve; });
+  const inference = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { questions: Record<string, unknown>; images?: string[]; state: { trajectory: { responses: unknown[] } } };
+    calls.push({ url: request.url ?? '', authorization: request.headers.authorization, originalUrl: request.headers['x-clef-original-url'] as string | undefined, body });
+    const questionId = Object.keys(body.questions)[0] ?? '';
+    if (questionId === 'visual-question' && ++visualCallCount === 1) {
+      visualArrived?.();
+      await new Promise<void>((resolve) => { releaseVisual = resolve; });
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+      success: true,
+      result: { model: 'clef', answers: { [questionId]: { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 } } }, usage: { input_tokens: 20 } },
+      errors: [], messages: [],
+    }));
+  });
+  await new Promise<void>((resolve, reject) => { inference.once('error', reject); inference.listen(0, '127.0.0.1', resolve); });
+  t.after(() => closeTestServer(inference));
+  const address = inference.address();
+  assert.ok(address && typeof address === 'object');
+  const helper = path.join(plugin, 'dist/credentials/windows-credential.ps1');
+  await writeFile(helper, 'param([string]$Operation, [string]$TargetName)\nif ($TargetName -ne "Sheg/Clef/Cloudflare") { exit 9 }\nif ($Operation -eq "Read") { Write-Output "temporary-clef-test-token"; exit 0 }\nif ($Operation -eq "Status") { Write-Output "AVAILABLE"; exit 0 }\nexit 0\n');
+  const preloader = path.join(sandbox, 'mock-clef-fetch.mjs');
+  await writeFile(preloader, [
+    'const nativeFetch = globalThis.fetch;',
+    'globalThis.fetch = (input, init) => {',
+    '  const url = new URL(typeof input === "string" ? input : input.url);',
+    '  if (url.hostname !== "api.cloudflare.com") throw new Error("Unexpected external request.");',
+    '  const headers = new Headers(init?.headers);',
+    '  headers.set("x-clef-original-url", url.href);',
+    '  return nativeFetch(process.env.SHEG_MOCK_CLEF_URL, { ...init, headers });',
+    '};',
+    '',
+  ].join('\n'));
+  const client = new Client({ name: 'sheg-installed-clef-test', version: '1.0.0' });
+  const env = { ...(process.env as Record<string, string>), SHEG_DATA_DIR: dataRoot, SHEG_MOCK_CLEF_URL: `http://127.0.0.1:${address.port}/clef`, NODE_OPTIONS: `--import=${pathToFileURL(preloader).href}` };
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
+  try {
+    await client.connect(transport);
+    const imported = await client.callTool({ name: 'image_import', arguments: { source: { path: imagePath, sha256: imageDigest } } });
+    assert.equal(imported.isError ?? false, false, JSON.stringify(imported.structuredContent));
+    const image = imported.structuredContent as { assetId: string; sha256: string; format: string; width: number; height: number };
+    const journey = {
+      kind: 'journey', respondents: [{ id: 'reader-a', intent: 'Understand the article', context: 'New reader', desired_outcome: 'Choose whether to continue', engagement_cues: 'Clear argument', friction_cues: 'Distraction' }],
+      journey: {
+        id: 'article', label: 'Image contribution',
+        items: [
+          { id: 'section-three', text: 'Section three makes the case for careful records.' },
+          { id: 'article-image', type: 'image', text: '', altText: 'A small teal robot studies a checklist.', caption: 'The guide checks the records.', asset: image },
+        ],
+        tasks: [
+          { id: 'text-question', type: 'choice', instructions: 'Would you read the next section?', options: { continue: 'Continue', leave: 'Leave' } },
+          { id: 'visual-question', type: 'choice', instructions: 'Does the image support the next section?', options: { continue: 'It supports the section', leave: 'It distracts from the section' }, visual: { mode: 'pixels', materialIds: ['article-image'] } },
+        ],
+        presentation: { kind: 'graph', entryNodeId: 'show-section', maxDecisions: 2, nodes: [
+          { id: 'show-section', kind: 'expose', itemId: 'section-three' }, { id: 'ask-text', kind: 'ask', taskId: 'text-question' },
+          { id: 'show-image', kind: 'expose', itemId: 'article-image' }, { id: 'ask-visual', kind: 'ask', taskId: 'visual-question' },
+          { id: 'done', kind: 'terminal', outcome: 'complete' },
+        ], transitions: [
+          { fromNodeId: 'show-section', toNodeId: 'ask-text' },
+          { fromNodeId: 'ask-text', optionId: 'continue', toNodeId: 'show-image' }, { fromNodeId: 'ask-text', optionId: 'leave', toNodeId: 'show-image' },
+          { fromNodeId: 'show-image', toNodeId: 'ask-visual' },
+          { fromNodeId: 'ask-visual', optionId: 'continue', toNodeId: 'done' }, { fromNodeId: 'ask-visual', optionId: 'leave', toNodeId: 'done' },
+        ] },
+      },
+      maxCalls: 3, provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef', timeoutMs: 10_000 },
+    };
+    const inspected = await client.callTool({ name: 'run_inspect', arguments: { request: journey } });
+    assert.equal(inspected.isError ?? false, false, JSON.stringify(inspected));
+    assert.equal((inspected.structuredContent as { valid: boolean }).valid, true, JSON.stringify(inspected.structuredContent));
+    const started = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: journey } });
+    assert.equal(started.isError ?? false, false, JSON.stringify(started));
+    const runId = (started.structuredContent as { runId: string }).runId;
+    await visualRequest;
+    await rm(imagePath);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.originalUrl, 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/clef');
+    assert.equal(calls[0]?.body.images, undefined);
+    assert.deepEqual(calls[1]?.body.images, [`data:image/png;base64,${imageBytes.toString('base64')}`]);
+    assert.equal(calls[1]?.authorization, 'Bearer temporary-clef-test-token');
+    assert.equal(calls[1]?.body.state.trajectory.responses.length, 1);
+    assert.equal(JSON.stringify(calls[1]?.body.state.trajectory.responses[0]).includes(imageBytes.toString('base64')), false);
+    const database = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
+    let workerPid = 0;
+    try {
+      const owner = database.prepare('SELECT owner_pid FROM runs WHERE run_id = ?').get(runId) as { owner_pid?: number } | undefined;
+      workerPid = Number(owner?.owner_pid);
+      assert.ok(Number.isInteger(workerPid) && workerPid > 0 && isPidAlive(workerPid));
+    } finally { database.close(); }
+    killPid(workerPid);
+    await waitForPidExit(workerPid);
+    const expire = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'));
+    try { expire.prepare('UPDATE runs SET lease_expires_ms = 0 WHERE run_id = ?').run(runId); }
+    finally { expire.close(); }
+    releaseVisual?.();
+    const resumedClient = new Client({ name: 'sheg-installed-clef-resume', version: '1.0.0' });
+    const resumedTransport = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
+    try {
+      await resumedClient.connect(resumedTransport);
+      const status = await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+      assert.equal((status.structuredContent as { status: string }).status, 'interrupted');
+      const beforeResume = await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+      const interrupted = beforeResume.structuredContent as JourneyDetailTestShape;
+      assert.deepEqual(interrupted.evaluations.map(({ status }) => status), ['answered', 'pending']);
+      const resumed = await resumedClient.callTool({ name: 'run_resume', arguments: { runId } });
+      assert.equal(resumed.isError ?? false, false, JSON.stringify(resumed));
+      await waitForCompleted(dataRoot, runId);
+      assert.equal(calls.length, 3, 'Resume should retry only the interrupted visual turn.');
+      assert.equal(calls[2]?.body.state.trajectory.responses.length, 1);
+      assert.equal(calls[2]?.body.images?.length, 1);
+      const evidence = await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+      const detail = evidence.structuredContent as JourneyDetailTestShape;
+      assert.deepEqual(detail.evaluations.map(({ status }) => status), ['answered', 'answered']);
+      const visualResponse = JSON.stringify((await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'answers' } })).structuredContent);
+      assert.match(visualResponse, /clef/);
+      assert.equal(visualResponse.includes(imageBytes.toString('base64')), false);
+      await rm(helper);
+      const unavailable = await resumedClient.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: journey } });
+      assert.equal(unavailable.isError, true, 'A copied package without its secure credential helper must refuse Clef before dispatch.');
+      assert.equal(calls.length, 3);
+    } finally { await killMcpConnection(resumedClient, resumedTransport); }
+  } finally {
+    releaseVisual?.();
+    await killMcpConnection(client, transport);
   }
 });
 

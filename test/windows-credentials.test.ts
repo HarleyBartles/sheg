@@ -12,17 +12,47 @@ import { WindowsCredentialStore } from '../src/infrastructure/credentials/window
 
 test('credential requests keep secrets off helper arguments and report only availability', async () => {
   const calls: string[][] = [];
+  const target = `Sheg/Test/${randomUUID()}`;
   const store = new WindowsCredentialStore({
     helperPath: 'fixture-helper.ps1',
-    credentialTargets: { typesafe: 'Sheg/Test/fixture' },
+    credentialTargets: { typesafe: target },
     run: async (args) => { calls.push([...args]); return { code: 0, stdout: 'AVAILABLE\n', stderr: '' }; },
   });
 
   assert.equal(await store.availability('typesafe'), 'available');
-  assert.deepEqual(calls, [['-Operation', 'Status', '-TargetName', 'Sheg/Test/fixture']]);
+  assert.deepEqual(calls, [['-Operation', 'Status', '-TargetName', target]]);
   await store.setup('typesafe');
-  assert.deepEqual(calls[1], ['-Operation', 'Setup', '-TargetName', 'Sheg/Test/fixture']);
+  assert.deepEqual(calls[1], ['-Operation', 'Setup', '-TargetName', target]);
   assert.equal(JSON.stringify(calls).includes('fixture-secret'), false);
+});
+
+test('Clef uses its fixed independent Cloudflare target for status, read, setup, and removal', async () => {
+  const calls: Array<{ args: string[]; interactive?: boolean }> = [];
+  const store = new WindowsCredentialStore({
+    helperPath: 'fixture-helper.ps1',
+    run: async (args, interactive) => { calls.push({ args: [...args], ...(interactive === undefined ? {} : { interactive }) }); return { code: 0, stdout: 'AVAILABLE\n', stderr: '' }; },
+  });
+  assert.equal(await store.availability('clef'), 'available');
+  await store.readForAuthentication('clef');
+  await store.setup('clef');
+  await store.remove('clef');
+  assert.deepEqual(calls.map(({ args }) => args), ['Status', 'Read', 'Setup', 'Remove'].map((operation) => ['-Operation', operation, '-TargetName', 'Sheg/Clef/Cloudflare']));
+  assert.equal(calls[2]?.interactive, true);
+  assert.equal(JSON.stringify(calls).includes('secret'), false);
+});
+
+test('Clef route cannot be redirected into either Jev credential target', () => {
+  assert.throws(() => new WindowsCredentialStore({ credentialTargets: { clef: 'Sheg/Jev/OpenRouter' } }), /fixed|route/i);
+});
+
+test('the Windows helper rejects an arbitrary Clef target before credential operations', { skip: process.platform !== 'win32' }, () => {
+  const result = spawnSync('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+    fileURLToPath(new URL('../src/infrastructure/credentials/windows-credential.ps1', import.meta.url)),
+    '-Operation', 'Status', '-TargetName', 'Sheg/Clef/Attacker',
+  ], { encoding: 'utf8', windowsHide: true, shell: false });
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stdout, /AVAILABLE|MISSING|MALFORMED/);
 });
 
 test('credential status distinguishes a missing entry from an unavailable secure store', async () => {
@@ -53,7 +83,7 @@ test('credential status identifies a present but unreadable stored encoding with
 test('Windows vault reads, replaces, and removes a unique isolated fixture credential', { skip: process.platform !== 'win32' }, async () => {
   const targetName = `Sheg/Test/${randomUUID()}`;
   const helperPath = fileURLToPath(new URL('./fixtures/windows-credential-fixture.ps1', import.meta.url));
-  const store = new WindowsCredentialStore({ credentialTargets: { typesafe: targetName, openrouter: targetName } });
+  const store = new WindowsCredentialStore({ credentialTargets: { typesafe: targetName, openrouter: targetName, clef: targetName } });
   const fixture = (value: string, rawEncoding: 'utf8' | 'invalid' | undefined = undefined) => spawnSync('powershell.exe', [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath,
     ...(rawEncoding === 'utf8' ? ['-RawUtf8Bytes'] : []),

@@ -103,7 +103,7 @@ test('preparation compiles one frozen, metadata-free packet per respondent witho
     { profile: { intent: 'Compare options', context: 'Returning buyer', desired_outcome: 'Save time', engagement_cues: 'Evidence', friction_cues: 'Repetition' } },
   ]);
   assert.deepEqual(fixture.measured[0]!.state.encounteredItems, [{ id: 'section-three', text: 'Exact text' }]);
-  assert.deepEqual(Object.keys(fixture.measured[0]!.state), ['respondent', 'encounteredItems', 'trajectory']);
+  assert.deepEqual(Object.keys(fixture.measured[0]!.state), ['respondent', 'encounteredItems', 'materialOrder', 'trajectory']);
   assert.equal(JSON.stringify(fixture.measured[0]).includes('temporary research label'), false);
   assert.equal(fixture.measured[0]!.question.type, 'choice');
   assert.ok('optionIds' in fixture.measured[0]!);

@@ -81,6 +81,34 @@ test('provider accepts the routed checkpoint while preserving Laya confidence se
   assert.equal(result.cost, undefined);
 });
 
+test('Laya carries an authored image description as text and refuses pixel-dependent requests', async () => {
+  const described: DecisionRequest = {
+    ...request,
+    question: { ...request.question, visual: { mode: 'described', materialIds: ['portrait'] } },
+    visualMaterials: [{ id: 'portrait', altText: 'A compact lawful standards agent in brown tweed with a ledger.', asset: { assetId: `sha256:${'a'.repeat(64)}`, sha256: 'a'.repeat(64), format: 'png', width: 20, height: 20, bytes: 40 } }],
+  };
+  let body: Record<string, unknown> | undefined;
+  const provider = new LayaProvider(config, {
+    measureFit: async (projected) => {
+      assert.equal((projected.state.encounteredItems as Array<{ id: string }>).at(-1)?.id, 'portrait');
+      return fit(20);
+    },
+    fetchRequest: async (_url, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({ model: 'laya-rl-agent', answers: { continue: { type: 'choice', choice: 'continue', probabilities: { continue: 0.8, stop: 0.2 } } }, usage: {}, routing: { model: config.checkpoint } });
+    },
+  });
+  await provider.decide(described, 1);
+  assert.deepEqual((body?.state as { encounteredItems: unknown[] }).encounteredItems.at(-1), {
+    id: 'portrait', text: 'Image description: A compact lawful standards agent in brown tweed with a ledger.',
+  });
+  const pixels = { ...described, question: { ...described.question, visual: { mode: 'pixels' as const, materialIds: ['portrait'] } } } as DecisionRequest;
+  let calls = 0;
+  const noCall = new LayaProvider(config, { measureFit: async () => fit(20), fetchRequest: async () => { calls += 1; throw new Error('must not call'); } });
+  await assert.rejects(noCall.decide(pixels, 1), /visual-pixels-require-clef/);
+  assert.equal(calls, 0);
+});
+
 test('Laya validation errors carry safe typed failure evidence without echoing the answer', async () => {
   const provider = new LayaProvider(config, {
     measureFit: async () => fit(20),

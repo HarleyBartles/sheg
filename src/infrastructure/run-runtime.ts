@@ -19,9 +19,12 @@ export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process
   let startupFailure: unknown;
   let ownedImageRepository: ReturnType<typeof openImageAssetRepository> | undefined;
   let imagePreparation: ImagePreparationService | undefined;
+  const imageRepository = () => ownedImageRepository ??= openImageAssetRepository(dataRoot);
+  const providerFactory = (config: Parameters<typeof createProvider>[0], providerOptions: Parameters<typeof createProvider>[1] = {}) =>
+    createProvider(config, config.kind === 'clef' ? { ...providerOptions, imageResolver: { resolve: (assetId) => ({ metadata: imageRepository().metadata(assetId), bytes: imageRepository().bytes(assetId) }) } } : providerOptions);
   if (service) runtimeService = service;
   else {
-    try { const runtime = createDefaultRunService(dataRoot); runtimeService = runtime.service; ownedStore = runtime.store; storeReady = true; }
+    try { const runtime = createDefaultRunService(dataRoot, providerFactory); runtimeService = runtime.service; ownedStore = runtime.store; storeReady = true; }
     catch (error) { runtimeService = unavailableRunService(); startupFailure = error; }
   }
 
@@ -30,7 +33,7 @@ export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process
       if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: 'current', schemaVersion: SCHEMA_VERSION } };
       const observed = inspectRunStoreCompatibility(dataRoot);
       if (observed.status === 'current') {
-        const runtime = createDefaultRunService(dataRoot);
+        const runtime = createDefaultRunService(dataRoot, providerFactory);
         runtimeService = runtime.service;
         ownedStore = runtime.store;
         storeReady = true;
@@ -56,7 +59,7 @@ export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process
         throw new RunServiceError('recovery_not_required', 'The datastore no longer requires recovery; inspect its current status before taking further action.');
       }
       const reset = resetRunStore(dataRoot);
-      const runtime = createDefaultRunService(dataRoot);
+      const runtime = createDefaultRunService(dataRoot, providerFactory);
       runtimeService = runtime.service;
       ownedStore = runtime.store;
       storeReady = true;
@@ -75,8 +78,7 @@ export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process
     get image(): ImagePreparationService {
       if (!storeReady || inspectRunStoreCompatibility(dataRoot).status !== 'current') throw recoveryRequiredError();
       if (!imagePreparation) {
-        ownedImageRepository = openImageAssetRepository(dataRoot);
-        imagePreparation = createImagePreparationService(ownedImageRepository, options.imageCodec ?? createStaticImageCodec(), dataRoot);
+        imagePreparation = createImagePreparationService(imageRepository(), options.imageCodec ?? createStaticImageCodec(), dataRoot);
       }
       return imagePreparation;
     },
@@ -94,9 +96,9 @@ function compatibilityStatus(observed: ReturnType<typeof inspectRunStoreCompatib
   return { status: observed.status, schemaVersion: observed.status === 'unreadable' ? null : observed.schemaVersion };
 }
 
-function createDefaultRunService(dataRoot: string): { service: RunService; store: RunPersistence } {
+function createDefaultRunService(dataRoot: string, providerFactory: typeof createProvider): { service: RunService; store: RunPersistence } {
   const store = openRunPersistence(dataRoot);
-  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
+  return { service: createRunService(store, dataRoot, providerFactory, new DetachedWorkerLauncher(), { assertProviderReady }), store };
 }
 
 function unavailableRunService(): RunService {

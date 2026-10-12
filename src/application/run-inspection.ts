@@ -12,6 +12,7 @@ import { hashCanonical } from '../infrastructure/identity.js';
 import type { PreflightPacket } from '../domain/journey/packet-walker.js';
 import { estimateRunDecisionCalls } from '../domain/journey/route-bounds.js';
 import { journeyTopology } from '../domain/journey/topology.js';
+import { isImageMaterial } from '../domain/study/stimulus.js';
 
 export type { Inspection } from '../domain/run/lifecycle.js';
 export type { FrozenEvaluation, InlineRunRequest, PreparedRun } from '../domain/run/request.js';
@@ -102,7 +103,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
     }
-    const modelIdentity = request.provider.kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+    const modelIdentity = request.provider.kind === 'jev' || request.provider.kind === 'clef' ? request.provider.model : request.provider.checkpoint;
     const contextId = randomUUID(); const groupId = randomUUID();
     const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
     minimumCalls += planned.batches.length;
@@ -264,7 +265,7 @@ export async function prepareRun(
   const problems: RunProblem[] = [];
   let minimumCalls = 0;
   const kind = request.provider.kind;
-  const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === 'jev' || kind === 'clef' ? request.provider.model : request.provider.checkpoint;
 
   for (const respondent of request.respondents) {
     const respondentProfile = {
@@ -274,9 +275,15 @@ export async function prepareRun(
       engagement_cues: respondent.engagement_cues,
       friction_cues: respondent.friction_cues,
     };
-    const packets = request.questions.map((question) => compileDecisionRequest({
-      respondentProfile, encounteredItems: request.material, trajectory: emptyTrajectory(), question,
-    }));
+    const materialOrder = request.material.map(({ id }) => id);
+    const packets = request.questions.map((question) => {
+      const bound = new Set(question.visual?.materialIds ?? []);
+      const visualMaterials = request.material.flatMap((item) => isImageMaterial(item) && bound.has(item.id)
+        ? [{ id: item.id, asset: item.asset, altText: item.altText, ...(item.caption === undefined ? {} : { caption: item.caption }) }]
+        : []);
+      return compileDecisionRequest({ respondentProfile, encounteredItems: request.material.filter((item) => !isImageMaterial(item)).map(({ id, text }) => ({ id, text })),
+        materialOrder, visualMaterials, trajectory: emptyTrajectory(), question });
+    });
     const contextId = randomUUID();
     const groupId = randomUUID();
     preparedGroups.push({ groupId, contextId, respondentId: respondent.id, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
@@ -325,6 +332,12 @@ async function planQuestionBatches(
   const batches: DecisionBatchRequest[] = [];
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
+  const materialsByQuestion = new Map(packets.map((packet) => [packet.question.id, packet.visualMaterials ?? []]));
+  const batchVisualMaterials = (batchQuestions: readonly DecisionQuestion[]) => {
+    const byId = new Map<string, NonNullable<DecisionRequest['visualMaterials']>[number]>();
+    for (const question of batchQuestions) for (const material of materialsByQuestion.get(question.id) ?? []) byId.set(material.id, material);
+    return [...byId.values()];
+  };
   const measureOne = async (index: number): Promise<ProviderContextFit> => {
     if (!provider.measure) return missingMeasureFit(provider, kind, modelIdentity);
     try { return await provider.measure(packets[index]!); }
@@ -332,7 +345,10 @@ async function planQuestionBatches(
   };
   const measureBatch = async (batchQuestions: readonly DecisionQuestion[]): Promise<ProviderContextFit> => {
     if (!provider.measureBatch) return missingMeasureFit(provider, kind, modelIdentity);
-    try { return await provider.measureBatch({ state, questions: [...batchQuestions] }); }
+    try {
+      const visualMaterials = batchVisualMaterials(batchQuestions);
+      return await provider.measureBatch({ state, questions: [...batchQuestions], ...(visualMaterials.length ? { visualMaterials } : {}) });
+    }
     catch { return { ...missingMeasureFit(provider, kind, modelIdentity), reason: 'provider-measurement-failed' }; }
   };
   const recordFit = (questionIds: string[], fit: ProviderContextFit) => {
@@ -346,7 +362,8 @@ async function planQuestionBatches(
       const question = questions[index]!;
       const fit = await measureOne(index);
       recordFit([question.id], fit);
-      batches.push({ state, questions: [question] });
+      const visualMaterials = batchVisualMaterials([question]);
+      batches.push({ state, questions: [question], ...(visualMaterials.length ? { visualMaterials } : {}) });
     }
     return { batches, fits, problems };
   }
@@ -371,7 +388,8 @@ async function planQuestionBatches(
     }
     if (lastFit) {
       const selected = questions.slice(start, lastFit.end);
-      batches.push({ state, questions: [...selected] });
+      const visualMaterials = batchVisualMaterials(selected);
+      batches.push({ state, questions: [...selected], ...(visualMaterials.length ? { visualMaterials } : {}) });
       recordFit(selected.map(({ id }) => id), lastFit.fit);
       start = lastFit.end;
       continue;
@@ -421,7 +439,7 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
   }
 
   const kind = request.provider.kind;
-  const modelIdentity = kind === 'jev' ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === 'jev' || kind === 'clef' ? request.provider.model : request.provider.checkpoint;
   const measuredByInput = new Map<string, ProviderContextFit>();
   for (const packet of packets) {
     const inputFingerprint = hashCanonical(packet.request);

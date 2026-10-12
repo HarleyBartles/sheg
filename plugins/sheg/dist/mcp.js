@@ -27639,7 +27639,7 @@ var Protocol = class {
       ...options2,
       relatedRequestId: request.id
     });
-    const sendRequest = (r, resultSchema, options2) => this._requestWithSchemaViaCodec(this._resolveOutboundCodec(r.method), r, resultSchema, {
+    const sendRequest = (r, resultSchema2, options2) => this._requestWithSchemaViaCodec(this._resolveOutboundCodec(r.method), r, resultSchema2, {
       ...options2,
       relatedRequestId: request.id
     });
@@ -27817,17 +27817,17 @@ var Protocol = class {
   * explicit compatibility schemas. Spec methods are still era-gated here:
   * an explicit schema never smuggles a deleted method onto the wire.
   */
-  _requestWithSchema(request, resultSchema, options2) {
+  _requestWithSchema(request, resultSchema2, options2) {
     const codec2 = this._resolveOutboundCodec(request.method);
     this._assertOutboundRequestInEra(codec2, request.method);
-    return this._requestWithSchemaViaCodec(codec2, request, resultSchema, options2);
+    return this._requestWithSchemaViaCodec(codec2, request, resultSchema2, options2);
   }
   /**
   * The request funnel proper, keyed by the resolved era codec: the codec
   * owns result decoding (raw-first `resultType` discrimination — V-1 —
   * and the era's lift posture) before the schema validation step.
   */
-  _requestWithSchemaViaCodec(codec2, request, resultSchema, options2) {
+  _requestWithSchemaViaCodec(codec2, request, resultSchema2, options2) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, headers } = options2 ?? {};
     const flowStartedAt = Date.now();
     let onAbort;
@@ -27905,18 +27905,18 @@ var Protocol = class {
           const flow = {
             codec: codec2,
             request,
-            resultSchema,
+            resultSchema: resultSchema2,
             options: options2,
             flowStartedAt,
             retry: (params, legOptions) => this._requestWithSchemaViaCodec(codec2, params === void 0 ? { method: request.method } : {
               method: request.method,
               params
-            }, resultSchema, legOptions)
+            }, resultSchema2, legOptions)
           };
           return resolve(this._resolveNonCompleteResult(decoded, flow));
         }
         const result = decoded.result;
-        validateStandardSchema(resultSchema, result).then((parseResult) => {
+        validateStandardSchema(resultSchema2, result).then((parseResult) => {
           if (parseResult.success) resolve(parseResult.data);
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request.method}: ${parseResult.error}`));
         }, reject);
@@ -37343,8 +37343,46 @@ import { pathToFileURL } from "node:url";
 // src/application/run-service.ts
 import path from "node:path";
 
+// src/domain/assets/image.ts
+var IMAGE_FORMATS = ["png", "jpeg", "webp"];
+var ImageFormatSchema = external_exports.enum(IMAGE_FORMATS);
+var digest = external_exports.string().regex(/^[a-f0-9]{64}$/);
+var assetId = external_exports.string().regex(/^sha256:[a-f0-9]{64}$/);
+var ImageSourceSchema = external_exports.union([
+  external_exports.object({ path: external_exports.string().min(1), sha256: digest }).strict(),
+  external_exports.object({ assetId }).strict()
+]);
+var ImageImportRequestSchema = external_exports.object({ source: ImageSourceSchema }).strict();
+var ImageGetRequestSchema = external_exports.object({ assetId, export: external_exports.boolean().optional() }).strict();
+var ImageMetadataSchema = external_exports.object({
+  assetId,
+  sha256: digest,
+  format: ImageFormatSchema,
+  width: external_exports.number().int().positive().max(16e6),
+  height: external_exports.number().int().positive().max(16e6),
+  bytes: external_exports.number().int().positive().max(16 * 1024 * 1024)
+}).strict().refine((metadata3) => metadata3.width * metadata3.height <= 16e6, {
+  message: "Image dimensions exceed the 16 megapixel limit."
+});
+var ScaleRequestSchema = external_exports.object({
+  source: ImageSourceSchema,
+  maxWidth: external_exports.number().int().positive().optional(),
+  maxHeight: external_exports.number().int().positive().optional(),
+  maxBytes: external_exports.number().int().positive().optional()
+}).strict().refine((request) => request.maxWidth !== void 0 || request.maxHeight !== void 0 || request.maxBytes !== void 0, {
+  message: "At least one image target is required."
+});
+var ImageAssetError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "ImageAssetError";
+  }
+  code;
+};
+
 // src/domain/decision/provider.ts
-var providerKinds = ["jev", "laya"];
+var providerKinds = ["jev", "laya", "clef"];
 var providerKindSchema = external_exports.enum(providerKinds);
 var providerContextFitStatuses = ["fits", "overflow", "unavailable"];
 var providerContextFitStatusSchema = external_exports.enum(providerContextFitStatuses);
@@ -37357,6 +37395,17 @@ var prose = external_exports.string().min(1);
 var choiceText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Choice text must not be blank.");
 var probability = external_exports.number().finite().min(0).max(1);
 var probabilities = external_exports.record(external_exports.string(), probability);
+var visualBindingSchema = external_exports.object({ mode: external_exports.enum(["pixels", "described"]), materialIds: external_exports.array(identifier).min(1).max(4) }).strict().superRefine((binding, context) => {
+  if (new Set(binding.materialIds).size !== binding.materialIds.length) context.addIssue({ code: "custom", path: ["materialIds"], message: "Visual material IDs must be unique and ordered." });
+});
+var decisionVisualMaterialSchema = external_exports.object({
+  id: identifier,
+  altText: prose,
+  caption: prose.optional(),
+  asset: ImageMetadataSchema
+}).strict().superRefine((material, context) => {
+  if (material.asset.assetId !== `sha256:${material.asset.sha256}`) context.addIssue({ code: "custom", path: ["asset", "assetId"], message: "Image asset ID must match its SHA-256 digest." });
+});
 var decisionTypes = { choice: "choice", score: "score", noul: "noul" };
 var decisionTypeSchema = external_exports.enum(decisionTypes);
 var routeableDecisionTypes = [decisionTypes.score, decisionTypes.noul];
@@ -37384,7 +37433,8 @@ var choiceQuestionSchema = external_exports.object({
   id: identifier,
   instructions: prose,
   options: external_exports.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
-  materialOptions: external_exports.record(identifier, identifier).optional()
+  materialOptions: external_exports.record(identifier, identifier).optional(),
+  visual: visualBindingSchema.optional()
 }).strict().superRefine((question, context) => {
   if (question.materialOptions) {
     const links = Object.entries(question.materialOptions);
@@ -37404,24 +37454,28 @@ var scoreQuestionSchema = external_exports.object({
   type: external_exports.literal(decisionTypes.score),
   id: identifier,
   instructions: prose,
-  rubric: external_exports.array(prose).min(2)
+  rubric: external_exports.array(prose).min(2),
+  visual: visualBindingSchema.optional()
 }).strict();
 var noulQuestionSchema = external_exports.object({
   type: external_exports.literal(decisionTypes.noul),
   id: identifier,
   instructions: prose,
-  criteria: external_exports.object({ true: prose.optional(), false: prose.optional() }).strict().optional()
+  criteria: external_exports.object({ true: prose.optional(), false: prose.optional() }).strict().optional(),
+  visual: visualBindingSchema.optional()
 }).strict();
 var decisionQuestionSchema = external_exports.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
 var decisionBatchRequestSchema = external_exports.object({
   state: external_exports.record(external_exports.string(), external_exports.unknown()),
-  questions: external_exports.array(decisionQuestionSchema).min(1)
+  questions: external_exports.array(decisionQuestionSchema).min(1),
+  visualMaterials: external_exports.array(decisionVisualMaterialSchema).max(4).optional()
 }).strict().superRefine((request, context) => {
   if (new Set(request.questions.map(({ id }) => id)).size !== request.questions.length) {
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a batch." });
   }
+  validateVisualReferences(request.questions, request.visualMaterials ?? [], context);
 });
-var requestStateSchema = external_exports.object({ state: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict();
+var requestStateSchema = external_exports.object({ state: external_exports.record(external_exports.string(), external_exports.unknown()), visualMaterials: external_exports.array(decisionVisualMaterialSchema).max(4).optional() }).strict();
 var choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
   optionIds: external_exports.array(identifier).min(1)
@@ -37433,7 +37487,21 @@ var choiceRequestSchema = requestStateSchema.extend({
 });
 var scoreRequestSchema = requestStateSchema.extend({ question: scoreQuestionSchema }).strict();
 var noulRequestSchema = requestStateSchema.extend({ question: noulQuestionSchema }).strict();
-var decisionRequestSchema = external_exports.union([choiceRequestSchema, scoreRequestSchema, noulRequestSchema]);
+var decisionRequestSchema = external_exports.union([choiceRequestSchema, scoreRequestSchema, noulRequestSchema]).superRefine((request, context) => {
+  validateVisualReferences([request.question], request.visualMaterials ?? [], context);
+});
+function validateVisualReferences(questions, materials, context) {
+  const byId = new Set(materials.map(({ id }) => id));
+  if (byId.size !== materials.length) context.addIssue({ code: "custom", path: ["visualMaterials"], message: "Visual material IDs must be unique." });
+  const referenced = /* @__PURE__ */ new Set();
+  for (const [questionIndex, question] of questions.entries()) {
+    for (const id of question.visual?.materialIds ?? []) {
+      referenced.add(id);
+      if (!byId.has(id)) context.addIssue({ code: "custom", path: ["questions", questionIndex, "visual", "materialIds"], message: `Visual binding has no immutable material reference for ${id}.` });
+    }
+  }
+  for (const material of materials) if (!referenced.has(material.id)) context.addIssue({ code: "custom", path: ["visualMaterials"], message: `Visual material ${material.id} is not bound to a question.` });
+}
 var choiceResultSchema = external_exports.object({
   type: external_exports.literal(decisionTypes.choice).default(decisionTypes.choice),
   choice: identifier,
@@ -37525,11 +37593,67 @@ var respondentProfileSchema = external_exports.object({
   ...perspectiveFields
 }).strict().superRefine(enforceAggregateProfileProse);
 
+// src/domain/study/stimulus.ts
+var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var exactText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Material text must not be blank.");
+var materialOriginSchema = external_exports.object({
+  sourceId: identifier2,
+  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var sourceReferenceSchema = external_exports.object({
+  path: external_exports.string().min(1),
+  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
+}).strict();
+var stimulusItemSchema = external_exports.object({
+  id: identifier2,
+  text: exactText,
+  sourceId: materialOriginSchema.shape.sourceId.optional(),
+  sourceSha256: materialOriginSchema.shape.sourceSha256.optional()
+}).strict().superRefine((item, context) => {
+  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) {
+    context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
+  }
+});
+var imageMaterialSchema = external_exports.object({
+  id: identifier2,
+  type: external_exports.literal("image"),
+  text: external_exports.literal("").default(""),
+  sourceId: materialOriginSchema.shape.sourceId.optional(),
+  sourceSha256: materialOriginSchema.shape.sourceSha256.optional(),
+  altText: exactText,
+  caption: exactText.optional(),
+  asset: ImageMetadataSchema
+}).strict().superRefine((item, context) => {
+  if (item.asset.assetId !== `sha256:${item.asset.sha256}`) context.addIssue({ code: "custom", path: ["asset", "assetId"], message: "Image asset ID must match its SHA-256 digest." });
+  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
+});
+var materialItemSchema = external_exports.union([stimulusItemSchema, imageMaterialSchema]);
+function isImageMaterial(item) {
+  return "type" in item && item.type === "image";
+}
+
 // src/domain/decision/prompt.ts
+var visualEvidenceSchema = external_exports.object({
+  mode: external_exports.enum(["pixels", "described"]),
+  provider: providerKindSchema,
+  model: external_exports.string().min(1),
+  materials: external_exports.array(external_exports.object({
+    materialId: external_exports.string().min(1),
+    assetId: external_exports.string().min(1),
+    sha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+    altText: external_exports.string().min(1),
+    caption: external_exports.string().min(1).optional()
+  }).strict()).min(1).max(4)
+}).strict().superRefine((evidence, context) => {
+  for (const [index2, material] of evidence.materials.entries()) if (material.assetId !== `sha256:${material.sha256}`) {
+    context.addIssue({ code: "custom", path: ["materials", index2, "assetId"], message: "Visual evidence asset ID must match its SHA-256 digest." });
+  }
+});
 var promptHistoryEventSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), itemId: external_exports.string().min(1) }).strict(),
   external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), choice: external_exports.string().min(1) }).strict(),
-  external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), result: decisionValueSchema }).strict()
+  external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), result: decisionValueSchema }).strict(),
+  external_exports.object({ type: external_exports.literal("visual-response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), result: decisionValueSchema, visualEvidence: visualEvidenceSchema }).strict()
 ]);
 var trajectoryChoiceSchema = external_exports.object({
   taskId: external_exports.string().min(1),
@@ -37538,9 +37662,9 @@ var trajectoryChoiceSchema = external_exports.object({
   exposedItemIds: external_exports.array(external_exports.string().min(1))
 }).strict();
 var trajectoryResponseSchema = external_exports.discriminatedUnion("type", [
-  external_exports.object({ ...trajectoryChoiceSchema.shape, type: external_exports.literal("choice"), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)).optional(), confidence: external_exports.number().finite().min(0).max(1).optional() }).strict(),
-  external_exports.object({ type: external_exports.literal("score"), taskId: external_exports.string().min(1), score: external_exports.number().finite(), meaning: external_exports.string(), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), legend: external_exports.record(external_exports.string(), external_exports.string()), confidence: external_exports.number().finite().min(0).max(1).optional(), exposedItemIds: external_exports.array(external_exports.string().min(1)) }).strict(),
-  external_exports.object({ type: external_exports.literal("noul"), taskId: external_exports.string().min(1), noul: external_exports.number().finite().min(0).max(1), proposition: external_exports.string(), exposedItemIds: external_exports.array(external_exports.string().min(1)) }).strict()
+  external_exports.object({ ...trajectoryChoiceSchema.shape, type: external_exports.literal("choice"), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)).optional(), confidence: external_exports.number().finite().min(0).max(1).optional(), visualEvidence: visualEvidenceSchema.optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("score"), taskId: external_exports.string().min(1), score: external_exports.number().finite(), meaning: external_exports.string(), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), legend: external_exports.record(external_exports.string(), external_exports.string()), confidence: external_exports.number().finite().min(0).max(1).optional(), exposedItemIds: external_exports.array(external_exports.string().min(1)), visualEvidence: visualEvidenceSchema.optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("noul"), taskId: external_exports.string().min(1), noul: external_exports.number().finite().min(0).max(1), proposition: external_exports.string(), exposedItemIds: external_exports.array(external_exports.string().min(1)), visualEvidence: visualEvidenceSchema.optional() }).strict()
 ]);
 var trajectorySummarySchema = external_exports.object({
   version: external_exports.literal(1),
@@ -37555,17 +37679,20 @@ var trajectorySummarySchema = external_exports.object({
 var promptStateSchema = external_exports.object({
   respondent: external_exports.object({ profile: respondentPerspectiveSchema }).strict(),
   encounteredItems: external_exports.array(external_exports.object({ id: external_exports.string().min(1), text: external_exports.string().min(1) }).strict()),
+  materialOrder: external_exports.array(external_exports.string().min(1)).optional(),
   trajectory: trajectorySummarySchema
 }).strict();
 var decisionPacketSchema = decisionRequestSchema.and(external_exports.object({ state: promptStateSchema }).strict());
 function questionForTask(task) {
-  if (task.type === "choice") return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options }, ...task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {} };
-  if (task.type === "score") return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric] };
-  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } } };
+  if (task.type === "choice") return { type: "choice", id: task.id, instructions: task.instructions, options: { ...task.options }, ...task.materialOptions ? { materialOptions: { ...task.materialOptions } } : {}, ...task.visual ? { visual: task.visual } : {} };
+  if (task.type === "score") return { type: "score", id: task.id, instructions: task.instructions, rubric: [...task.rubric], ...task.visual ? { visual: task.visual } : {} };
+  return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } }, ...task.visual ? { visual: task.visual } : {} };
 }
 var promptContract = {
-  version: 7,
-  stateFields: ["respondent.profile", "encounteredItems", "trajectory"],
+  version: 10,
+  stateFields: ["respondent.profile", "encounteredItems", "materialOrder", "trajectory"],
+  visualBindings: "question-scoped image material IDs; image descriptors are carried as semantic context and pixel payloads are provider-specific",
+  visualHistory: "visual responses carry the exact supplied image description, caption, typed answer, provider and model as structured semantic evidence without carrying image bytes",
   encounteredMaterial: "all items exposed through the current turn, unique by item ID in first-exposure order",
   trajectory: ["prior task IDs and typed responses with meanings", "prior exposure IDs", "event counts and range"],
   responseHistory: "per-task include or omit; omitted legacy setting includes prior responses",
@@ -37578,6 +37705,7 @@ var promptContract = {
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
 var v6PromptContractHash = "a39d72d1ba77b0560dac5b7ccedf07b72e80b9d7bc1330679acd9c209e831526";
+var previousVisualPromptContractHash = "671217c23a449181a29c50c826f16e079a753e5c134f9bbcc63d55932fdbc016";
 function finishTrajectory(body) {
   let payloadUtf8Bytes = 0;
   for (; ; ) {
@@ -37679,20 +37807,21 @@ function compactTrajectory(arm, history) {
       continue;
     }
     const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
-    const result = event.type === "response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
+    const result = event.type === "response" || event.type === "visual-response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
+    const visualEvidence = event.type === "visual-response" ? event.visualEvidence : void 0;
     if (!task) throw new Error(`Unknown task ${event.taskId} in journey history.`);
     if (result.type === "choice") {
       const choiceMeaning = task.type !== "score" && task.type !== "noul" ? task.options[result.choice] : void 0;
       if (choiceMeaning === void 0) throw new Error(`Unknown choice ${result.choice} for task ${event.taskId} in journey history.`);
-      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, ...visualEvidence ? { visualEvidence } : {} };
       responses.push(response);
       choices.push({ taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds] });
     } else if (result.type === "score") {
       if (task.type !== "score" || result.legend[String(Math.round(result.score))] === void 0) throw new Error(`Score response does not match task ${event.taskId}.`);
-      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds] });
+      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds], ...visualEvidence ? { visualEvidence } : {} });
     } else {
       if (task.type !== "noul") throw new Error(`Noul response does not match task ${event.taskId}.`);
-      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds] });
+      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds], ...visualEvidence ? { visualEvidence } : {} });
     }
   }
   const body = {
@@ -37713,7 +37842,7 @@ function compileDecisionPacketForCompiler(arm, profile, taskId, history, compile
   if (compilerFingerprint === v6PromptContractHash) {
     return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, "v6");
   }
-  if (compilerFingerprint === promptContractHash()) {
+  if (compilerFingerprint === previousVisualPromptContractHash || compilerFingerprint === promptContractHash()) {
     return compileDecisionPacket(arm, profile, taskId, history);
   }
   throw new Error(`Unsupported journey compiler identity ${compilerFingerprint}.`);
@@ -37727,16 +37856,16 @@ function compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 
     if (arm.presentation.kind === "sequence") {
       itemIds = arm.items.map((item) => item.id);
     } else {
-      const lastDecisionIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
+      const lastDecisionIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response" || event.type === "visual-response");
       itemIds = history.slice(lastDecisionIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
     }
   } else {
     itemIds = [...new Set(history.filter((event) => event.type === "exposure").map((event) => event.itemId))];
   }
-  const encounteredItems = itemIds.map((id) => {
+  const encounteredItems = itemIds.flatMap((id) => {
     const item = itemsById.get(id);
     if (!item) throw new Error(`Unknown encountered item ${id}.`);
-    return { id: item.id, text: item.text };
+    return isImageMaterial(item) ? [] : [{ id: item.id, text: item.text }];
   });
   return compileDecisionRequest({
     respondentProfile: {
@@ -37747,28 +37876,54 @@ function compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 
       friction_cues: profile.friction_cues
     },
     encounteredItems,
+    materialOrder: itemIds,
     trajectory: compactTrajectory(
       arm,
       task.responseHistory === "omit" ? history.filter((event) => event.type === "exposure") : history
     ),
-    question: questionForTask(task)
+    question: questionForTask(task),
+    ...task.visual ? { visualMaterials: task.visual.materialIds.flatMap((id) => {
+      const item = itemsById.get(id);
+      return item && isImageMaterial(item) ? [{ id: item.id, asset: item.asset, altText: item.altText, ...item.caption === void 0 ? {} : { caption: item.caption } }] : [];
+    }) } : {}
   });
 }
 function compileDecisionRequest(parts) {
+  const visualMaterials = parts.visualMaterials ?? [];
   const state = {
     respondent: { profile: { ...parts.respondentProfile } },
     encounteredItems: parts.encounteredItems.map(({ id, text: text2 }) => ({ id, text: text2 })),
+    ...parts.materialOrder === void 0 ? {} : { materialOrder: [...parts.materialOrder] },
     trajectory: parts.trajectory
   };
   const request = decisionRequestSchema.parse({
     state,
     question: parts.question,
-    ...parts.question.type === "choice" ? { optionIds: Object.keys(parts.question.options) } : {}
+    ...parts.question.type === "choice" ? { optionIds: Object.keys(parts.question.options) } : {},
+    ...visualMaterials.length ? { visualMaterials } : {}
   });
   return {
     ...request,
     state
   };
+}
+function textStateWithVisualDescriptions(state, questions, materials) {
+  const referenced = /* @__PURE__ */ new Map();
+  for (const question of questions) for (const id of question.visual?.materialIds ?? []) {
+    const previous = referenced.get(id);
+    if (previous === "described" || question.visual?.mode === "described") referenced.set(id, "described");
+    else referenced.set(id, "pixels");
+  }
+  const items = Array.isArray(state.encounteredItems) ? state.encounteredItems : [];
+  const visualItems = materials.filter(({ id }) => referenced.has(id)).map((material) => {
+    const mode = referenced.get(material.id);
+    const lines = [
+      mode === "described" ? `Image description: ${material.altText}` : void 0,
+      material.caption === void 0 ? void 0 : `Caption: ${material.caption}`
+    ].filter((line) => line !== void 0);
+    return lines.length ? { id: material.id, text: lines.join("\n") } : void 0;
+  }).filter((item) => item !== void 0);
+  return visualItems.length ? { ...state, encounteredItems: [...items, ...visualItems] } : state;
 }
 function promptContractHash() {
   return createHash("sha256").update(JSON.stringify(promptContract)).digest("hex");
@@ -37921,6 +38076,17 @@ var jevConfigSchema = jevConfigInputSchema.transform((input2) => {
   };
 });
 
+// src/providers/clef/config.ts
+var clefConfigSchema = external_exports.object({
+  kind: external_exports.literal("clef"),
+  accountId: external_exports.string().regex(/^[a-f0-9]{32}$/),
+  model: external_exports.enum(["clef", "clef-flash"]).default("clef"),
+  timeoutMs: external_exports.number().int().positive().default(3e4)
+}).strict();
+function clefEndpoint(config2) {
+  return `https://api.cloudflare.com/client/v4/accounts/${config2.accountId}/ai/run/@cf/cloudflare/${config2.model}`;
+}
+
 // src/providers/config.ts
 var layaConfigSchema = external_exports.object({
   kind: external_exports.literal(providerKinds[1]),
@@ -37935,15 +38101,16 @@ var layaConfigSchema = external_exports.object({
 }).strict();
 var providerConfigSchema = external_exports.union([
   jevConfigInputSchema.transform((input2) => jevConfigSchema.parse(input2)),
-  layaConfigSchema
+  layaConfigSchema,
+  clefConfigSchema
 ]);
 
 // src/domain/study/presentation.ts
-var identifier2 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 var nodeSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ id: identifier2, kind: external_exports.literal("expose"), itemId: identifier2 }).strict(),
-  external_exports.object({ id: identifier2, kind: external_exports.literal("ask"), taskId: identifier2 }).strict(),
-  external_exports.object({ id: identifier2, kind: external_exports.literal("terminal"), outcome: identifier2 }).strict()
+  external_exports.object({ id: identifier3, kind: external_exports.literal("expose"), itemId: identifier3 }).strict(),
+  external_exports.object({ id: identifier3, kind: external_exports.literal("ask"), taskId: identifier3 }).strict(),
+  external_exports.object({ id: identifier3, kind: external_exports.literal("terminal"), outcome: identifier3 }).strict()
 ]);
 var responseIntervalSchema = external_exports.object({
   type: routeableDecisionTypeSchema,
@@ -37953,10 +38120,10 @@ var responseIntervalSchema = external_exports.object({
   maximumInclusive: external_exports.boolean()
 }).strict();
 var transitionSchema = external_exports.object({
-  fromNodeId: identifier2,
-  optionId: identifier2.optional(),
+  fromNodeId: identifier3,
+  optionId: identifier3.optional(),
   when: responseIntervalSchema.optional(),
-  toNodeId: identifier2
+  toNodeId: identifier3
 }).strict();
 var presentationSchema = external_exports.discriminatedUnion("kind", [
   external_exports.object({ kind: external_exports.literal("sequence") }).strict(),
@@ -37964,32 +38131,10 @@ var presentationSchema = external_exports.discriminatedUnion("kind", [
     kind: external_exports.literal("graph"),
     nodes: external_exports.array(nodeSchema).min(1),
     transitions: external_exports.array(transitionSchema),
-    entryNodeId: identifier2,
+    entryNodeId: identifier3,
     maxDecisions: external_exports.number().int().positive()
   }).strict()
 ]);
-
-// src/domain/study/stimulus.ts
-var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
-var exactText = external_exports.string().min(1).refine((value) => value.trim().length > 0, "Material text must not be blank.");
-var materialOriginSchema = external_exports.object({
-  sourceId: identifier3,
-  sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-}).strict();
-var sourceReferenceSchema = external_exports.object({
-  path: external_exports.string().min(1),
-  sha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
-}).strict();
-var stimulusItemSchema = external_exports.object({
-  id: identifier3,
-  text: exactText,
-  sourceId: materialOriginSchema.shape.sourceId.optional(),
-  sourceSha256: materialOriginSchema.shape.sourceSha256.optional()
-}).strict().superRefine((item, context) => {
-  if (item.sourceId === void 0 !== (item.sourceSha256 === void 0)) {
-    context.addIssue({ code: "custom", path: ["sourceSha256"], message: "Source identity and digest must be provided together." });
-  }
-});
 
 // src/domain/study/task.ts
 var identifier4 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -37999,7 +38144,8 @@ var taskFields = {
   id: identifier4,
   instructions: prose2,
   comparisonKey: identifier4.optional(),
-  responseHistory: external_exports.enum(["include", "omit"]).optional()
+  responseHistory: external_exports.enum(["include", "omit"]).optional(),
+  visual: visualBindingSchema.optional()
 };
 var options = external_exports.record(identifier4, choiceText2).refine((value) => Object.keys(value).length > 0, "A choice task requires at least one option.");
 var materialOptions = external_exports.record(identifier4, identifier4).optional();
@@ -38058,7 +38204,7 @@ var prose3 = external_exports.string().trim().min(1);
 var journeyDefinitionFields = {
   id: identifier5,
   label: prose3,
-  items: external_exports.array(stimulusItemSchema).min(1),
+  items: external_exports.array(materialItemSchema).min(1),
   tasks: external_exports.array(taskSchema).min(1),
   presentation: presentationSchema
 };
@@ -38091,12 +38237,23 @@ function validateJourneyDefinition(arm, context) {
         context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} references unknown material ${materialId}.` });
         continue;
       }
+      if (isImageMaterial(item)) {
+        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
       if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
         context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Material ${materialId} requires source identity and digest before it can be linked.` });
       }
       if (task.options[optionId] !== item.text) {
         context.addIssue({ code: "custom", path: ["tasks", taskIndex, "options", optionId], message: `Choice option ${optionId} must equal the exact text of material ${materialId}.` });
       }
+    }
+  }
+  const imageIds = new Set(arm.items.filter(isImageMaterial).map((item) => item.id));
+  for (const [taskIndex, task] of arm.tasks.entries()) {
+    if (!task.visual) continue;
+    for (const materialId of task.visual.materialIds) {
+      if (!imageIds.has(materialId)) context.addIssue({ code: "custom", path: ["tasks", taskIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
     }
   }
   if (presentation.kind === "sequence") return;
@@ -38253,7 +38410,6 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
 }
 
 // src/domain/run/request.ts
-var materialItemSchema = stimulusItemSchema;
 function validateMaterialChoices(questions, material, context) {
   const materials = new Map(material.map((item) => [item.id, item]));
   questions.forEach((question, questionIndex) => {
@@ -38265,6 +38421,10 @@ function validateMaterialChoices(questions, material, context) {
         context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} references unknown material ${materialId}.` });
         continue;
       }
+      if (isImageMaterial(candidate)) {
+        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        continue;
+      }
       if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
         context.addIssue({ code: "custom", path: issuePath, message: `Material ${materialId} requires source identity and digest before it can be linked.` });
       }
@@ -38273,6 +38433,23 @@ function validateMaterialChoices(questions, material, context) {
       }
     }
   });
+}
+function validateVisualBindings(questions, material, context, path15) {
+  const byId = new Map(material.map((item) => [item.id, item]));
+  const bound = /* @__PURE__ */ new Set();
+  questions.forEach((question, questionIndex) => {
+    for (const materialId of question.visual?.materialIds ?? []) {
+      const candidate = byId.get(materialId);
+      if (!candidate || !isImageMaterial(candidate)) {
+        context.addIssue({ code: "custom", path: [path15, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
+        continue;
+      }
+      bound.add(materialId);
+    }
+  });
+  for (const item of material) {
+    if (isImageMaterial(item) && !bound.has(item.id)) context.addIssue({ code: "custom", path: [path15], message: `Image material ${item.id} must be bound to a visual question.` });
+  }
 }
 var inlineRunRequestSchema = external_exports.object({
   kind: external_exports.literal("poll"),
@@ -38296,6 +38473,10 @@ var inlineRunRequestSchema = external_exports.object({
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
   }
   validateMaterialChoices(request.questions, request.material, context);
+  validateVisualBindings(request.questions, request.material, context, "questions");
+  if (request.questions.some((question) => question.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
+    context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
+  }
 });
 var inlineJourneyRequestSchema = external_exports.object({
   kind: external_exports.literal("journey"),
@@ -38309,6 +38490,10 @@ var inlineJourneyRequestSchema = external_exports.object({
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
   }
+  const visualTasks = request.journey.tasks.filter((task) => task.visual !== void 0);
+  if (visualTasks.some((task) => task.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
+    context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
+  }
 });
 var evidenceAnswerCriterionSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("choice"), choiceId: external_exports.string().min(1) }).strict(),
@@ -38319,7 +38504,7 @@ var evidenceCriteriaSchema = external_exports.object({
   respondentId: external_exports.string().min(1).optional(),
   status: external_exports.enum(["pending", "answered", "failed", "unreached"]).optional(),
   questionId: external_exports.string().min(1).optional(),
-  materialId: materialItemSchema.shape.id.optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
   answer: evidenceAnswerCriterionSchema.optional(),
   outcome: external_exports.string().min(1).optional()
 }).strict();
@@ -38334,7 +38519,7 @@ var followOnSelectionSchema = external_exports.union([
 ]);
 var followOnContextSchema = external_exports.object({
   mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
-  materialIds: external_exports.array(materialItemSchema.shape.id).min(1).optional(),
+  materialIds: external_exports.array(stimulusItemSchema.shape.id).min(1).optional(),
   includeSelectedMaterial: external_exports.boolean().optional()
 }).strict().superRefine((contextInput, context) => {
   if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
@@ -38377,6 +38562,10 @@ var followOnRunRequestSchema = external_exports.object({
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
   }
+  if (request.material) {
+    if (request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs is not supported in this slice." });
+    validateVisualBindings(request.questions, request.material, context, "questions");
+  }
   if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
     context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
   }
@@ -38410,8 +38599,8 @@ var selectionCoverageSchema = external_exports.object({
   }
 });
 var selectedMaterialEvidenceSchema = external_exports.object({
-  materialId: materialItemSchema.shape.id,
-  text: materialItemSchema.shape.text,
+  materialId: stimulusItemSchema.shape.id,
+  text: stimulusItemSchema.shape.text,
   sourceId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
   sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
   textSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
@@ -38440,7 +38629,7 @@ var runListQuerySchema = external_exports.object({
   label: external_exports.string().min(1).optional(),
   createdAfter: external_exports.string().datetime().optional(),
   createdBefore: external_exports.string().datetime().optional(),
-  materialId: materialItemSchema.shape.id.optional(),
+  materialId: stimulusItemSchema.shape.id.optional(),
   cursor: external_exports.string().optional(),
   limit: external_exports.number().int().min(1).max(200).optional()
 }).strict().superRefine((query, context) => {
@@ -38706,7 +38895,7 @@ async function prepareFollowOnRun(request, source, provider) {
     } catch (error62) {
       throw new RunProblemError("follow_on_context_invalid", error62 instanceof Error ? error62.message : "Follow-on context could not be prepared.");
     }
-    const modelIdentity = request.provider.kind === "jev" ? request.provider.model : request.provider.checkpoint;
+    const modelIdentity = request.provider.kind === "jev" || request.provider.kind === "clef" ? request.provider.model : request.provider.checkpoint;
     const contextId = randomUUID();
     const groupId = randomUUID();
     const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
@@ -38909,7 +39098,7 @@ async function prepareRun(input2, provider) {
   const problems = [];
   let minimumCalls = 0;
   const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
   for (const respondent of request.respondents) {
     const respondentProfile = {
       intent: respondent.intent,
@@ -38918,12 +39107,19 @@ async function prepareRun(input2, provider) {
       engagement_cues: respondent.engagement_cues,
       friction_cues: respondent.friction_cues
     };
-    const packets = request.questions.map((question) => compileDecisionRequest({
-      respondentProfile,
-      encounteredItems: request.material,
-      trajectory: emptyTrajectory(),
-      question
-    }));
+    const materialOrder = request.material.map(({ id }) => id);
+    const packets = request.questions.map((question) => {
+      const bound = new Set(question.visual?.materialIds ?? []);
+      const visualMaterials = request.material.flatMap((item) => isImageMaterial(item) && bound.has(item.id) ? [{ id: item.id, asset: item.asset, altText: item.altText, ...item.caption === void 0 ? {} : { caption: item.caption } }] : []);
+      return compileDecisionRequest({
+        respondentProfile,
+        encounteredItems: request.material.filter((item) => !isImageMaterial(item)).map(({ id, text: text2 }) => ({ id, text: text2 })),
+        materialOrder,
+        visualMaterials,
+        trajectory: emptyTrajectory(),
+        question
+      });
+    });
     const contextId = randomUUID();
     const groupId = randomUUID();
     preparedGroups.push({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questionIds: request.questions.map(({ id }) => id) });
@@ -38968,6 +39164,12 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
   const batches = [];
   const fits = [];
   const problems = [];
+  const materialsByQuestion = new Map(packets.map((packet) => [packet.question.id, packet.visualMaterials ?? []]));
+  const batchVisualMaterials = (batchQuestions) => {
+    const byId = /* @__PURE__ */ new Map();
+    for (const question of batchQuestions) for (const material of materialsByQuestion.get(question.id) ?? []) byId.set(material.id, material);
+    return [...byId.values()];
+  };
   const measureOne = async (index2) => {
     if (!provider.measure) return missingMeasureFit(provider, kind, modelIdentity);
     try {
@@ -38979,7 +39181,8 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
   const measureBatch = async (batchQuestions) => {
     if (!provider.measureBatch) return missingMeasureFit(provider, kind, modelIdentity);
     try {
-      return await provider.measureBatch({ state, questions: [...batchQuestions] });
+      const visualMaterials = batchVisualMaterials(batchQuestions);
+      return await provider.measureBatch({ state, questions: [...batchQuestions], ...visualMaterials.length ? { visualMaterials } : {} });
     } catch {
       return { ...missingMeasureFit(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
     }
@@ -38994,7 +39197,8 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
       const question = questions[index2];
       const fit = await measureOne(index2);
       recordFit([question.id], fit);
-      batches.push({ state, questions: [question] });
+      const visualMaterials = batchVisualMaterials([question]);
+      batches.push({ state, questions: [question], ...visualMaterials.length ? { visualMaterials } : {} });
     }
     return { batches, fits, problems };
   }
@@ -39018,7 +39222,8 @@ async function planQuestionBatches(group, provider, kind, modelIdentity) {
     }
     if (lastFit) {
       const selected = questions.slice(start, lastFit.end);
-      batches.push({ state, questions: [...selected] });
+      const visualMaterials = batchVisualMaterials(selected);
+      batches.push({ state, questions: [...selected], ...visualMaterials.length ? { visualMaterials } : {} });
       recordFit(selected.map(({ id }) => id), lastFit.fit);
       start = lastFit.end;
       continue;
@@ -39082,7 +39287,7 @@ async function prepareJourneyAdmission(request, provider) {
     });
   }
   const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" ? request.provider.model : request.provider.checkpoint;
+  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
   const measuredByInput = /* @__PURE__ */ new Map();
   for (const packet of packets) {
     const inputFingerprint = hashCanonical(packet.request);
@@ -44505,6 +44710,14 @@ var imageDerivations = sqliteTable("image_derivations", {
   check2("image_derivations_dimensions_ck", sql`${table.width} > 0 AND ${table.height} > 0`),
   check2("image_derivations_policy_ck", sql`${table.algorithm} = 'lanczos3' AND ${table.policyVersion} = 1`)
 ]);
+var runVisualAssets = sqliteTable("run_visual_assets", {
+  runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
+  materialId: text("material_id").notNull(),
+  assetId: text("asset_id").notNull().references(() => imageAssets.assetId, { onDelete: "restrict" })
+}, (table) => [
+  primaryKey({ name: "run_visual_assets_pk", columns: [table.runId, table.materialId] }),
+  index("run_visual_assets_asset_idx").on(table.assetId, table.runId)
+]);
 var sqliteTables = {
   runs,
   questionGroups,
@@ -44515,7 +44728,8 @@ var sqliteTables = {
   evaluationAnswerAttempts,
   schemaMigrations,
   imageAssets,
-  imageDerivations
+  imageDerivations,
+  runVisualAssets
 };
 
 // src/infrastructure/sqlite/work-policy.ts
@@ -44525,9 +44739,10 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 10;
+var SCHEMA_VERSION = 11;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
+var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -44557,8 +44772,17 @@ function imageAssetMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 10 image asset migration is missing from this Sheg installation.");
   return { id: IMAGE_ASSET_MIGRATION_ID, fromVersion: 9, toVersion: 10, sql: readFileSync(match, "utf8") };
 }
+function runVisualAssetsMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0002_run_visual_assets/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0002_run_visual_assets/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 11 run visual asset migration is missing from this Sheg installation.");
+  return { id: RUN_VISUAL_ASSETS_MIGRATION_ID, fromVersion: 10, toVersion: 11, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration()];
 }
 function migrationChecksum(migration) {
   return createHash4("sha256").update(migration.sql).digest("hex");
@@ -44713,11 +44937,14 @@ function applyUpgrade(database, dataRoot, migrations, migration, now) {
       database.exec("BEGIN IMMEDIATE");
       transactionOpen = true;
       const lockedVersion = pragmaNumber(database, "user_version");
-      if (lockedVersion === migration.toVersion) {
-        database.exec("ROLLBACK");
-        transactionOpen = false;
-        unlinkSync(backupPath);
-        return;
+      if (lockedVersion >= migration.toVersion) {
+        const migrationAdvanced = lockedVersion === migration.toVersion || lockedVersion === migrations.at(-1)?.toVersion || migrations.some(({ fromVersion }) => fromVersion === lockedVersion);
+        if (migrationAdvanced) {
+          database.exec("ROLLBACK");
+          transactionOpen = false;
+          unlinkSync(backupPath);
+          return;
+        }
       }
       if (lockedVersion !== migration.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
       if (pragmaNumber(database, "data_version") !== beforeBackupDataVersion) {
@@ -44775,7 +45002,15 @@ function applySchemaMigrations(database, dataRoot, migrations, targetVersion, no
           validateSchemaShape(database);
           return;
         }
-        if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError("unsupported_schema_version", "The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.");
+        if (lockedVersion !== 0 || lockedTables !== 0) {
+          const anotherInitializerAdvanced = lockedVersion > 0 && lockedVersion < targetVersion && lockedTables > 0 && migrations.some(({ fromVersion }) => fromVersion === lockedVersion);
+          if (anotherInitializerAdvanced) {
+            database.exec("COMMIT");
+            currentVersion = lockedVersion;
+            continue;
+          }
+          throw new RunStoreError("unsupported_schema_version", "The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.");
+        }
         runMigrationSql(database, migration.sql);
         database.exec(`PRAGMA user_version = ${migration.toVersion}`);
         database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), schemaFingerprint(database), new Date(now()).toISOString());
@@ -45003,7 +45238,7 @@ function validateDecisionBatch(request, result, options2 = {}) {
     }
     try {
       const enriched = { ...value.data, ...execution };
-      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {} }, enriched, options2);
+      const checked = validateDecision({ state: parsedRequest.data.state, question, ...question.type === "choice" ? { optionIds: Object.keys(question.options) } : {}, ...parsedRequest.data.visualMaterials ? { visualMaterials: parsedRequest.data.visualMaterials } : {} }, enriched, options2);
       return { questionId: question.id, value: decisionValueFromResult(checked) };
     } catch (error62) {
       if (!(error62 instanceof DecisionError)) throw error62;
@@ -45363,9 +45598,17 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
   if (outcome.kind === "answered") {
     const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
     const answerEvent = transition.state.events.slice(priorEvents.length).findLast(
-      (event) => event.type === "response" && event.nodeId === nodeId
+      (event) => (event.type === "response" || event.type === "visual-response") && event.nodeId === nodeId
     );
-    if (!answerEvent || answerEvent.taskId !== packet.question.id || !context.sameDecisionValue(answerEvent.result, result)) {
+    const expectedVisualMaterials = packet.question.visual?.materialIds.map((id) => packet.visualMaterials?.find((material) => material.id === id)).flatMap((material) => material ? [{
+      materialId: material.id,
+      assetId: material.asset.assetId,
+      sha256: material.asset.sha256,
+      altText: material.altText,
+      ...material.caption === void 0 ? {} : { caption: material.caption }
+    }] : []) ?? [];
+    const visualEventMatches = packet.question.visual === void 0 ? answerEvent?.type === "response" : answerEvent?.type === "visual-response" && answerEvent.visualEvidence.mode === packet.question.visual.mode && answerEvent.visualEvidence.provider === result.provider && answerEvent.visualEvidence.model === result.model && JSON.stringify(answerEvent.visualEvidence.materials) === JSON.stringify(expectedVisualMaterials);
+    if (!answerEvent || answerEvent.taskId !== packet.question.id || !visualEventMatches || !context.sameDecisionValue(answerEvent.result, result)) {
       throw new RunStoreError("journey_transition_conflict", "Journey transition must append the exact typed answer for this turn.");
     }
     const routeAddition = transition.state.route.slice(priorRoute.length);
@@ -45540,7 +45783,7 @@ function deleteRunSelection(context, runIds) {
 }
 
 // src/infrastructure/sqlite/commands/acceptance.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID3 } from "node:crypto";
 
 // src/infrastructure/sqlite/run-identity-queries.ts
 function findRunBySubmission(database, submissionId) {
@@ -45780,10 +46023,12 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
         throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
       }
     }
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID3();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedRunData(context.orm, runId, prepared);
+    insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
 }
@@ -45800,12 +46045,65 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
       context.reconcileInside(runId2, context.now());
       return { created: false, run: context.statusInside(runId2) };
     }
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID3();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedJourneyData(context.orm, runId, prepared);
+    insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
+}
+function requestedImageMaterials(request) {
+  if (request.kind === "poll") {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    return request.material.filter((item) => isImageMaterial(item) && bound.has(item.id));
+  }
+  if (request.kind === "journey") {
+    const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
+    return request.journey.items.filter((item) => isImageMaterial(item) && bound.has(item.id));
+  }
+  return [];
+}
+function verifyFrozenVisualAssets(database, request, frozenEvaluations) {
+  const requested = requestedImageMaterials(request);
+  const materialsById = new Map(requested.map((material) => [material.id, material]));
+  for (const evaluation of frozenEvaluations) {
+    const packetMaterials = evaluation.packet.visualMaterials ?? [];
+    const boundIds = evaluation.packet.question.visual?.materialIds ?? [];
+    if (packetMaterials.length !== boundIds.length || packetMaterials.some((material) => !boundIds.includes(material.id))) {
+      throw new RunStoreError("invalid_prepared_run", "A frozen visual packet does not match its ordered image bindings.");
+    }
+    for (const packetMaterial of packetMaterials) {
+      const material = materialsById.get(packetMaterial.id);
+      const expected = material && { id: material.id, altText: material.altText, asset: material.asset, ...material.caption === void 0 ? {} : { caption: material.caption } };
+      if (!expected || hashCanonical(expected) !== hashCanonical(packetMaterial)) {
+        throw new RunStoreError("invalid_prepared_run", "A frozen visual packet differs from the image descriptor accepted in the run request.");
+      }
+    }
+  }
+  for (const material of requested) {
+    const row = database.prepare("SELECT asset_id, sha256, format, width, height, byte_length, content FROM image_assets WHERE asset_id = ?").get(material.asset.assetId);
+    if (!row) throw new RunStoreError("image_asset_not_found", "A visual image asset is no longer available in Sheg storage.");
+    const bytes = Buffer.from(row.content);
+    const actual = {
+      assetId: asText(row.asset_id, "image asset ID"),
+      sha256: asText(row.sha256, "image SHA-256 digest"),
+      format: asText(row.format, "image format"),
+      width: asNumber(row.width, "image width"),
+      height: asNumber(row.height, "image height"),
+      bytes: asNumber(row.byte_length, "image byte length")
+    };
+    const digest3 = createHash6("sha256").update(bytes).digest("hex");
+    if (hashCanonical(actual) !== hashCanonical(material.asset) || actual.sha256 !== digest3 || actual.bytes !== bytes.byteLength) {
+      throw new RunStoreError("image_asset_changed", "A visual image asset changed after inspection; inspect the request again.");
+    }
+  }
+  return requested;
+}
+function insertRunVisualAssets(database, runId, materials) {
+  if (!materials.length) return;
+  database.insert(runVisualAssets).values(materials.map((material) => ({ runId, materialId: material.id, assetId: material.asset.assetId }))).run();
 }
 function chunks(values, size) {
   const result = [];
@@ -46413,7 +46711,7 @@ function loadAttempts(database, runId, cursorText, requestedLimit, ensureRun) {
 }
 
 // src/infrastructure/sqlite/evidence-query.ts
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 
 // src/infrastructure/sqlite/evaluation-criteria.ts
 var numericOperators = { eq: "=", lt: "<", lte: "<=", gt: ">", gte: ">=" };
@@ -46574,8 +46872,8 @@ function queryEvidencePage(context, input2) {
         WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.baseUrl;
-    const model = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
+    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.kind === "laya" ? parsedRequest.data.provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${parsedRequest.data.provider.accountId}/ai/run/@cf/cloudflare/${parsedRequest.data.provider.model}`;
+    const model = parsedRequest.data.provider.kind === "jev" || parsedRequest.data.provider.kind === "clef" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
     const items = pageRows.map((row) => {
       const contextId = asText(row.context_id, "context ID");
       const respondentId = asText(row.respondent_id, "respondent ID");
@@ -46593,7 +46891,7 @@ function queryEvidencePage(context, input2) {
             text: candidate.text,
             sourceId: candidate.sourceId,
             sourceSha256: candidate.sourceSha256,
-            textSha256: createHash6("sha256").update(candidate.text, "utf8").digest("hex")
+            textSha256: createHash7("sha256").update(candidate.text, "utf8").digest("hex")
           };
         }
       }
@@ -46771,7 +47069,7 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
 }
 
 // src/infrastructure/sqlite/follow-on-queries.ts
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 function loadFollowOnSources(database, input2, notFound) {
   const request = followOnRunRequestSchema.parse(input2);
   const run = database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
@@ -46826,7 +47124,7 @@ function loadFollowOnSources(database, input2, notFound) {
       text: selectedMaterial.text,
       sourceId: selectedMaterial.sourceId,
       sourceSha256: selectedMaterial.sourceSha256,
-      textSha256: createHash7("sha256").update(selectedMaterial.text, "utf8").digest("hex")
+      textSha256: createHash8("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
     if (selectedMaterialId && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
@@ -47696,7 +47994,8 @@ import path9 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var CredentialStoreError = class extends Error {
   constructor(code, route) {
-    const message = code === "credential_malformed" ? `The ${route} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${route} secure credential is missing.` : `The ${route} secure credential is unavailable.`;
+    const routeLabel = route === "clef" ? "Cloudflare Clef" : route;
+    const message = code === "credential_malformed" ? `The ${routeLabel} secure credential is present but uses an unsupported encoding. Sheg can read UTF-8 or UTF-16LE credentials; re-enter it with Sheg's credential setup.` : code === "credential_missing" ? `The ${routeLabel} secure credential is missing.` : `The ${routeLabel} secure credential is unavailable.`;
     super(message);
     this.code = code;
     this.route = route;
@@ -47707,7 +48006,8 @@ var CredentialStoreError = class extends Error {
 };
 var defaultTargets = {
   typesafe: "Sheg/Jev/TypeSafe",
-  openrouter: "Sheg/Jev/OpenRouter"
+  openrouter: "Sheg/Jev/OpenRouter",
+  clef: "Sheg/Clef/Cloudflare"
 };
 var WindowsCredentialStore = class {
   targets;
@@ -47715,6 +48015,9 @@ var WindowsCredentialStore = class {
   run;
   constructor(options2 = {}) {
     this.targets = { ...defaultTargets, ...options2.credentialTargets };
+    for (const [route, target] of Object.entries(options2.credentialTargets ?? {})) {
+      if (!/^Sheg\/Test\/[0-9a-f-]{36}$/i.test(target)) throw new Error(`The ${route} credential target is fixed and cannot be redirected.`);
+    }
     this.helperPath = options2.helperPath ?? locateHelper();
     this.run = options2.run ?? ((args, interactive) => runPowerShell(this.helperPath, args, interactive));
   }
@@ -47973,10 +48276,15 @@ var JevCallError = class extends ProviderCallError {
 var TYPESAFE_CONTEXT_UNVERIFIED = "typesafe-model-context-unverified";
 var JEV_MEASUREMENT_METHOD = "utf8-bytes-div-3+20%-reserve/v1";
 function requestBody(request, model) {
-  return { model, state: request.state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
+  const state = textStateWithVisualDescriptions(request.state, [request.question], request.visualMaterials ?? []);
+  return { model, state, questions: { [request.question.id]: systemOneQuestion(request.question) } };
 }
 function batchRequestBody(request, model) {
-  return { model, state: request.state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
+  const state = textStateWithVisualDescriptions(request.state, request.questions, request.visualMaterials ?? []);
+  return { model, state, questions: Object.fromEntries(request.questions.map((question) => [question.id, systemOneQuestion(question)])) };
+}
+function hasPixelQuestions(questions) {
+  return questions.some((question) => question.visual?.mode === "pixels");
 }
 function measureRequestBody(serialized, model, route) {
   const bytes = Buffer.byteLength(serialized, "utf8");
@@ -48000,9 +48308,11 @@ function measureRequestBody(serialized, model, route) {
   };
 }
 function measureJevContext(request, model, route = "openrouter") {
+  if (hasPixelQuestions([request.question])) return missingMeasureFit2({ kind: "jev", route, model }, "visual-pixels-require-clef");
   return measureRequestBody(JSON.stringify(requestBody(request, model)), model, route);
 }
 function measureJevBatchContext(request, model, route = "openrouter") {
+  if (hasPixelQuestions(request.questions)) return missingMeasureFit2({ kind: "jev", route, model }, "visual-pixels-require-clef");
   return measureRequestBody(JSON.stringify(batchRequestBody(request, model)), model, route);
 }
 var JevProvider = class {
@@ -48043,6 +48353,7 @@ var JevProvider = class {
   measureBatch(request) {
     const parsed = decisionBatchRequestSchema.safeParse(request);
     if (!parsed.success) return { ...missingMeasureFit2(this.config, "invalid-batch-request"), reason: "invalid-batch-request" };
+    if (hasPixelQuestions(parsed.data.questions)) return missingMeasureFit2(this.config, "visual-pixels-require-clef");
     return this.measureBatchContext?.(parsed.data, this.config) ?? measureJevBatchContext(parsed.data, this.config.model, this.config.route);
   }
   async decideBatch(request, maxAttempts) {
@@ -48081,6 +48392,7 @@ var JevProvider = class {
     }
   }
   measure(request) {
+    if (hasPixelQuestions([request.question])) return missingMeasureFit2(this.config, "visual-pixels-require-clef");
     return this.measureContext(request, this.config);
   }
 };
@@ -48089,7 +48401,7 @@ function missingMeasureFit2(config2, reason) {
 }
 
 // src/providers/laya/context-fit.ts
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 import { readFile as readFile2, stat } from "node:fs/promises";
 import path10 from "node:path";
 
@@ -48328,8 +48640,8 @@ async function tokenizerPromise(config2) {
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile2(absolutePath);
-    const sha256 = createHash8("sha256").update(bytes).digest("hex");
-    if (sha256 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
+    const sha2562 = createHash9("sha256").update(bytes).digest("hex");
+    if (sha2562 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
     let raw;
     try {
       raw = JSON.parse(bytes.toString("utf8"));
@@ -48338,7 +48650,7 @@ async function tokenizerPromise(config2) {
     }
     const data = parseTokenizerJson(raw);
     if (!data) throw new Error("tokenizer-json-unsupported");
-    return { data, sha256 };
+    return { data, sha256: sha2562 };
   })();
   tokenizerCache.set(key, { signature, loaded });
   return loaded;
@@ -48437,12 +48749,28 @@ var responseSchema = external_exports.object({
   routing: external_exports.object({ model: external_exports.string().min(1) }).passthrough()
 }).passthrough();
 async function checkLayaFit(request, config2, measureFit) {
+  if (request.question.visual?.mode === "pixels") {
+    return {
+      provider: "laya",
+      status: "unavailable",
+      method: "laya-text-only/v1",
+      modelIdentity: config2.checkpoint,
+      tokenCount: "measured",
+      tokens: 0,
+      contextLimit: config2.contextLimit,
+      headroomTokens: 0,
+      effectiveLimit: config2.contextLimit,
+      details: {},
+      reason: "visual-pixels-require-clef"
+    };
+  }
   if (request.question.type === "score" && request.question.rubric.length > MAX_LAYA_SCORE_LEVELS) {
     return { provider: "laya", status: "overflow", method: "laya-score-rubric-limit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: request.question.rubric.length, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: MAX_LAYA_SCORE_LEVELS, details: { scoreRubricLevels: request.question.rubric.length, maximumScoreRubricLevels: MAX_LAYA_SCORE_LEVELS }, reason: `score-rubric-exceeds-${MAX_LAYA_SCORE_LEVELS}-levels` };
   }
   let measurement;
   try {
-    measurement = await (measureFit ?? measureLayaContext)(request, config2);
+    const projected = { ...request, state: textStateWithVisualDescriptions(request.state, [request.question], request.visualMaterials ?? []) };
+    measurement = await (measureFit ?? measureLayaContext)(projected, config2);
   } catch {
     return { provider: "laya", status: "unavailable", method: "laya-context-fit/v1", modelIdentity: config2.checkpoint, tokenCount: "measured", tokens: 0, contextLimit: config2.contextLimit, headroomTokens: 0, effectiveLimit: config2.contextLimit, details: {}, reason: "context-unmeasurable" };
   }
@@ -48477,6 +48805,7 @@ var LayaProvider = class {
       throw new LayaCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, 0, fit, parsedRequest.data.question.id);
     }
     const { question } = parsedRequest.data;
+    const projectedState = textStateWithVisualDescriptions(parsedRequest.data.state, [question], parsedRequest.data.visualMaterials ?? []);
     const endpoint = new URL("/v1/systemone", ensureTrailingSlash(this.config.baseUrl)).toString();
     const startedAt = performance.now();
     let response;
@@ -48486,7 +48815,7 @@ var LayaProvider = class {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: this.config.checkpoint,
-          state: parsedRequest.data.state,
+          state: projectedState,
           questions: {
             [question.id]: systemOneQuestion(question)
           }
@@ -48538,11 +48867,328 @@ function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+// src/providers/clef/compiler.ts
+import { createHash as createHash10 } from "node:crypto";
+var CLEF_MAX_IMAGES = 4;
+var CLEF_MAX_QUESTIONS = 64;
+var CLEF_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+var CLEF_MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024;
+var CLEF_MAX_BODY_BYTES = 13 * 1024 * 1024;
+var CLEF_SAFE_CONTEXT_TOKENS = 51200;
+var CLEF_IMAGE_TOKEN_ALLOWANCE = 1027;
+var ClefCompilationError = class extends Error {
+  constructor(reason, status) {
+    super(reason);
+    this.reason = reason;
+    this.status = status;
+  }
+  reason;
+  status;
+};
+function questionForClef(question, imageIndexes) {
+  const criteria = question.type === "choice" ? question.options : question.type === "score" ? question.rubric : question.criteria;
+  const indexes = question.visual?.mode === "pixels" ? question.visual.materialIds.map((id) => imageIndexes.get(id)) : [];
+  if (indexes.some((index2) => index2 === void 0)) throw new ClefCompilationError("visual-image-reference-missing", "unavailable");
+  const imageNote = indexes.length ? `
+Use only attached image index${indexes.length === 1 ? "" : "es"} ${indexes.join(", ")} for this question.` : "";
+  const candidateMappings = question.type === "choice" && question.materialOptions && question.visual?.mode === "pixels" ? Object.entries(question.materialOptions).map(([optionId, materialId]) => {
+    const index2 = imageIndexes.get(materialId);
+    if (index2 === void 0) throw new ClefCompilationError("visual-choice-image-reference-missing", "unavailable");
+    return `Option ${JSON.stringify(optionId)} (${JSON.stringify(question.options[optionId])}) corresponds to attached image index ${index2}.`;
+  }) : [];
+  const mappingNote = candidateMappings.length ? `
+Visual choice mapping: ${candidateMappings.join(" ")}` : "";
+  return { type: question.type, instructions: `${question.instructions}${imageNote}${mappingNote}`, ...criteria === void 0 ? {} : { criteria } };
+}
+function sha256(bytes) {
+  return createHash10("sha256").update(bytes).digest("hex");
+}
+function compileClefRequest(input2, configInput, imageResolver) {
+  const config2 = clefConfigSchema.parse(configInput);
+  const rawQuestions = "questions" in input2 ? input2.questions : [input2.question];
+  const rawPixelIds = new Set(rawQuestions.flatMap((question) => question.visual?.mode === "pixels" ? question.visual.materialIds : []));
+  if (rawPixelIds.size > CLEF_MAX_IMAGES) throw new ClefCompilationError("image-count-exceeded", "overflow");
+  const request = "questions" in input2 ? decisionBatchRequestSchema.parse(input2) : { ...input2, questions: [input2.question], ...input2.visualMaterials ? { visualMaterials: input2.visualMaterials } : {} };
+  if (request.questions.length > CLEF_MAX_QUESTIONS) throw new ClefCompilationError("question-count-exceeded", "overflow");
+  if (request.questions.some(({ id }) => !/^[A-Za-z0-9_.-]{1,100}$/.test(id))) throw new ClefCompilationError("question-id-unsupported", "overflow");
+  const bindings = request.questions.flatMap((question) => question.visual ? [{ question, mode: question.visual.mode, ids: question.visual.materialIds }] : []);
+  const modeByMaterial = /* @__PURE__ */ new Map();
+  for (const binding of bindings) for (const id of binding.ids) {
+    const previous = modeByMaterial.get(id);
+    if (previous !== void 0 && previous !== binding.mode) throw new ClefCompilationError("visual-mode-conflict-in-batch", "unavailable");
+    modeByMaterial.set(id, binding.mode);
+  }
+  const metadataById = new Map((request.visualMaterials ?? []).map((material) => [material.id, material]));
+  const materialOrder = Array.isArray(request.state.materialOrder) ? request.state.materialOrder : [];
+  const orderedMaterials = [...modeByMaterial.keys()].sort((left, right) => {
+    const leftIndex = materialOrder.indexOf(left);
+    const rightIndex = materialOrder.indexOf(right);
+    if (leftIndex < 0 && rightIndex < 0) return left.localeCompare(right);
+    if (leftIndex < 0) return 1;
+    if (rightIndex < 0) return -1;
+    return leftIndex - rightIndex;
+  });
+  const pixelIds = orderedMaterials.filter((id) => modeByMaterial.get(id) === "pixels");
+  if (pixelIds.length > CLEF_MAX_IMAGES) throw new ClefCompilationError("image-count-exceeded", "overflow");
+  const imageIndexes = new Map(pixelIds.map((id, index2) => [id, index2]));
+  const images = [];
+  const visualMaterials = [];
+  let imageBytes = 0;
+  for (const id of orderedMaterials) {
+    const material = metadataById.get(id);
+    if (!material) throw new ClefCompilationError("visual-image-reference-missing", "unavailable");
+    if (modeByMaterial.get(id) === "pixels") {
+      if (!imageResolver) throw new ClefCompilationError("image-asset-unavailable", "unavailable");
+      let resolved;
+      try {
+        resolved = imageResolver.resolve(material.asset.assetId);
+      } catch {
+        throw new ClefCompilationError("image-asset-unavailable", "unavailable");
+      }
+      let actualMetadata;
+      try {
+        actualMetadata = ImageMetadataSchema.parse(resolved.metadata);
+      } catch {
+        throw new ClefCompilationError("image-metadata-invalid", "unavailable");
+      }
+      const bytes = Buffer.from(resolved.bytes);
+      const actualDigest = sha256(bytes);
+      if (actualMetadata.assetId !== material.asset.assetId || actualMetadata.sha256 !== material.asset.sha256 || actualMetadata.bytes !== bytes.byteLength || actualDigest !== actualMetadata.sha256 || JSON.stringify(actualMetadata) !== JSON.stringify(material.asset)) throw new ClefCompilationError("image-asset-integrity-failed", "unavailable");
+      if (actualMetadata.bytes > CLEF_MAX_IMAGE_BYTES) throw new ClefCompilationError("image-size-exceeded", "overflow");
+      if (actualMetadata.width * actualMetadata.height > 16e6) throw new ClefCompilationError("image-pixel-limit-exceeded", "overflow");
+      imageBytes += bytes.byteLength;
+      if (imageBytes > CLEF_MAX_TOTAL_IMAGE_BYTES) throw new ClefCompilationError("total-image-size-exceeded", "overflow");
+      images.push(`data:image/${actualMetadata.format};base64,${bytes.toString("base64")}`);
+      visualMaterials.push({ materialId: id, imageIndex: imageIndexes.get(id), ...material.caption === void 0 ? {} : { caption: material.caption } });
+    } else {
+      const describingQuestionIds = bindings.filter((binding) => binding.mode === "described" && binding.ids.includes(id)).map(({ question }) => question.id);
+      visualMaterials.push({ materialId: id, describedFor: describingQuestionIds, altText: material.altText, ...material.caption === void 0 ? {} : { caption: material.caption } });
+    }
+  }
+  const state = { ...request.state, ...visualMaterials.length ? { visualMaterials } : {} };
+  const questions = Object.fromEntries(request.questions.map((question) => [question.id, questionForClef(question, imageIndexes)]));
+  const nonImageProjection = JSON.stringify({ model: config2.model, state, questions });
+  const textEstimate = Math.ceil(Buffer.byteLength(nonImageProjection, "utf8") / 3);
+  const imageTokenAllowance = images.length * CLEF_IMAGE_TOKEN_ALLOWANCE;
+  if (textEstimate + imageTokenAllowance > CLEF_SAFE_CONTEXT_TOKENS) throw new ClefCompilationError("estimated-context-over-limit", "overflow");
+  const body = JSON.stringify({ model: config2.model, state, questions, ...images.length ? { images } : {} });
+  const bodyBytes = Buffer.byteLength(body, "utf8");
+  if (bodyBytes > CLEF_MAX_BODY_BYTES) throw new ClefCompilationError("request-body-size-exceeded", "overflow");
+  return { body, nonImageProjection, textEstimate, imageCount: images.length, imageTokenAllowance, imageBytes, bodyBytes };
+}
+
+// src/providers/clef/fit.ts
+var CLEF_MEASUREMENT_METHOD = "utf8-bytes-div-3+1027-per-image+20%-reserve/v1";
+function unavailable2(config2, reason) {
+  return {
+    provider: "clef",
+    status: "unavailable",
+    method: CLEF_MEASUREMENT_METHOD,
+    modelIdentity: config2.model,
+    tokenCount: "estimated",
+    tokens: 0,
+    contextLimit: 65536,
+    headroomTokens: 14336,
+    effectiveLimit: CLEF_SAFE_CONTEXT_TOKENS,
+    details: {},
+    reason
+  };
+}
+function measureClefBatchFit(request, configInput, imageResolver) {
+  const config2 = clefConfigSchema.parse(configInput);
+  try {
+    const compiled = compileClefRequest(request, config2, imageResolver);
+    const tokens = compiled.textEstimate + compiled.imageTokenAllowance;
+    return {
+      provider: "clef",
+      status: "fits",
+      method: CLEF_MEASUREMENT_METHOD,
+      modelIdentity: config2.model,
+      tokenCount: "estimated",
+      tokens,
+      contextLimit: 65536,
+      headroomTokens: 14336,
+      effectiveLimit: CLEF_SAFE_CONTEXT_TOKENS,
+      details: {
+        textProjectionUtf8Bytes: Buffer.byteLength(compiled.nonImageProjection, "utf8"),
+        bytesPerEstimatedToken: 3,
+        reservePercent: 20,
+        imageCount: compiled.imageCount,
+        imageBytes: compiled.imageBytes,
+        imageTokenAllowance: compiled.imageTokenAllowance,
+        estimatedTokens: compiled.textEstimate,
+        totalEstimatedTokens: tokens,
+        effectiveLimitTokens: CLEF_SAFE_CONTEXT_TOKENS,
+        serializedBodyBytes: compiled.bodyBytes,
+        finalJsonBodyBytes: compiled.bodyBytes,
+        altTextInPixelProjection: 0
+      }
+    };
+  } catch (error62) {
+    if (!(error62 instanceof ClefCompilationError)) return unavailable2(config2, "request-projection-unavailable");
+    const status = error62.status;
+    const fit = unavailable2(config2, error62.reason);
+    return {
+      ...fit,
+      status,
+      tokens: status === "overflow" && error62.reason === "estimated-context-over-limit" ? CLEF_SAFE_CONTEXT_TOKENS + 1 : 0,
+      details: { effectiveLimitTokens: CLEF_SAFE_CONTEXT_TOKENS, ...fit.details }
+    };
+  }
+}
+function measureClefContextFit(request, config2, imageResolver) {
+  return measureClefBatchFit({ state: request.state, questions: [request.question], ...request.visualMaterials ? { visualMaterials: request.visualMaterials } : {} }, config2, imageResolver);
+}
+
+// src/providers/clef/transport.ts
+import { setTimeout as wait2 } from "node:timers/promises";
+var usageSchema = external_exports.object({ input_tokens: external_exports.number().int().nonnegative(), output_tokens: external_exports.number().int().nonnegative().optional() }).passthrough();
+var resultSchema = external_exports.object({ model: external_exports.string().min(1), answers: external_exports.record(external_exports.string(), external_exports.unknown()), usage: usageSchema }).passthrough();
+var responseSchema2 = external_exports.object({ success: external_exports.literal(true), result: resultSchema }).passthrough();
+var retryableStatuses2 = /* @__PURE__ */ new Set([429, 500, 502, 503, 524, 529]);
+async function executeClefTransport(input2) {
+  let token;
+  try {
+    token = await input2.credentialStore.readForAuthentication("clef");
+  } catch (error62) {
+    const credential = error62 instanceof CredentialStoreError ? error62 : new CredentialStoreError("credential_unavailable", "clef");
+    throw new ProviderCallError(credential.message, { attempts: 0, scope: "run", code: credential.code, category: "credential" });
+  }
+  const startedAt = performance.now();
+  for (let attempts2 = 1; attempts2 <= input2.maxAttempts; attempts2 += 1) {
+    let response;
+    try {
+      response = await input2.fetchRequest(clefEndpoint(input2.config), {
+        method: "POST",
+        redirect: "error",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: input2.body,
+        signal: AbortSignal.timeout(input2.config.timeoutMs)
+      });
+    } catch {
+      if (attempts2 < input2.maxAttempts) {
+        await wait2(Math.min(50 * 2 ** (attempts2 - 1), 1e3));
+        continue;
+      }
+      throw new ProviderCallError("Clef request failed at the transport boundary.", { attempts: attempts2, scope: "evaluation", category: "transport" });
+    }
+    if (!response.ok) {
+      if (retryableStatuses2.has(response.status) && attempts2 < input2.maxAttempts) {
+        await wait2(Math.min(50 * 2 ** (attempts2 - 1), 1e3));
+        continue;
+      }
+      throw new ProviderCallError(`Clef request failed with HTTP ${response.status}.`, {
+        attempts: attempts2,
+        scope: response.status === 401 || response.status === 403 ? "run" : "evaluation",
+        category: "http",
+        httpStatus: response.status
+      });
+    }
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new ProviderCallError("Clef returned unreadable response JSON.", { attempts: attempts2, scope: "run", category: "envelope" });
+    }
+    const parsed = responseSchema2.safeParse(payload);
+    if (!parsed.success) throw new ProviderCallError("Clef returned an invalid execution envelope.", { attempts: attempts2, scope: "run", category: "envelope" });
+    const usage = parsed.data.result.usage;
+    return { response: parsed.data.result, execution: {
+      attempts: attempts2,
+      provider: "clef",
+      model: parsed.data.result.model,
+      latencyMs: performance.now() - startedAt,
+      usage: { inputTokens: usage.input_tokens, ...usage.output_tokens === void 0 ? {} : { outputTokens: usage.output_tokens } }
+    } };
+  }
+  throw new ProviderCallError("Clef call limit reached without a response.", { attempts: input2.maxAttempts, scope: "evaluation", category: "transport" });
+}
+
+// src/providers/clef.ts
+var ClefProvider = class {
+  constructor(config2, fetchRequest = fetch, options2 = {}) {
+    this.fetchRequest = fetchRequest;
+    this.config = clefConfigSchema.parse(config2);
+    this.credentialStore = options2.credentialStore ?? new WindowsCredentialStore();
+    this.imageResolver = options2.imageResolver;
+  }
+  fetchRequest;
+  config;
+  credentialStore;
+  imageResolver;
+  measure(request) {
+    return measureClefContextFit(request, this.config, this.imageResolver);
+  }
+  measureBatch(request) {
+    return measureClefBatchFit(request, this.config, this.imageResolver);
+  }
+  async decide(request, maxAttempts) {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new ProviderCallError("Clef call limit must be a positive integer.", { attempts: 0 });
+    const parsed = decisionRequestSchema.safeParse(request);
+    if (!parsed.success) throw new ProviderCallError("Clef decision request is invalid.", { attempts: 0, scope: "evaluation", category: "admission" });
+    const fit = this.measure(parsed.data);
+    if (fit.status !== "fits") throw new ProviderCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, { attempts: 0, scope: "evaluation", contextFit: fit, category: "admission" });
+    const result = await this.decideBatch({ state: parsed.data.state, questions: [parsed.data.question], ...parsed.data.visualMaterials ? { visualMaterials: parsed.data.visualMaterials } : {} }, maxAttempts);
+    const answer = result.answers[0];
+    if (!answer || !("value" in answer)) {
+      const failure2 = answer && "failure" in answer ? answer.failure : void 0;
+      const detail = failure2 && "detail" in failure2 ? failure2.detail : void 0;
+      throw new ProviderCallError("Clef answer failed typed validation.", {
+        attempts: result.execution.attempts,
+        scope: "evaluation",
+        code: failure2?.code ?? "invalid_answer",
+        category: "answer",
+        ...detail ? { validationFailure: { code: failure2.code, message: failure2.message, detail } } : {}
+      });
+    }
+    const enriched = { ...answer.value, ...result.execution };
+    try {
+      return validateDecision(parsed.data, enriched, { maxAttempts, provider: "clef", model: this.config.model });
+    } catch (error62) {
+      if (error62 instanceof DecisionError) throw new ProviderCallError("Clef answer failed typed validation.", { attempts: result.execution.attempts, scope: "evaluation", code: "invalid_answer", category: "answer", validationFailure: decisionValidationFailure(error62) });
+      throw error62;
+    }
+  }
+  async decideBatch(request, maxAttempts) {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new ProviderCallError("Clef call limit must be a positive integer.", { attempts: 0 });
+    const parsed = decisionBatchRequestSchema.safeParse(request);
+    if (!parsed.success) throw new ProviderCallError("Clef decision batch request is invalid.", { attempts: 0, scope: "evaluation", category: "admission" });
+    const fit = this.measureBatch(parsed.data);
+    if (fit.status !== "fits") throw new ProviderCallError(`unsupported-input: ${fit.reason ?? fit.status}.`, { attempts: 0, scope: "evaluation", contextFit: fit, category: "admission" });
+    let compiled;
+    try {
+      compiled = compileClefRequest(parsed.data, this.config, this.imageResolver);
+    } catch (error62) {
+      const reason = error62 instanceof ClefCompilationError ? error62.reason : "request-projection-unavailable";
+      throw new ProviderCallError(`unsupported-input: ${reason}.`, { attempts: 0, scope: "evaluation", contextFit: fit, category: "admission" });
+    }
+    const { response, execution } = await executeClefTransport({ config: this.config, credentialStore: this.credentialStore, fetchRequest: this.fetchRequest, body: compiled.body, maxAttempts });
+    if (response.model !== this.config.model) throw new ProviderCallError("Clef served a model other than the configured selector.", { attempts: execution.attempts, scope: "run", category: "execution" });
+    const questionById = new Map(parsed.data.questions.map((question) => [question.id, question]));
+    for (const id of Object.keys(response.answers)) if (!questionById.has(id)) throw new ProviderCallError("Clef response contains an unknown question ID.", { attempts: execution.attempts, scope: "run", category: "execution" });
+    const answers = Object.entries(response.answers).map(([questionId, raw]) => ({ questionId, value: normalizeAnswer(questionById.get(questionId), raw) }));
+    try {
+      return validateDecisionBatch(parsed.data, { answers, execution }, { maxAttempts, provider: "clef", model: this.config.model });
+    } catch (error62) {
+      if (error62 instanceof DecisionError) throw new ProviderCallError("Clef response execution could not be validated.", { attempts: execution.attempts, scope: "run", category: "execution" });
+      throw error62;
+    }
+  }
+};
+function normalizeAnswer(question, raw) {
+  if (question.type !== "score" || typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
+  const answer = raw;
+  if (answer.type !== "score" || !("probabilities" in answer) || typeof answer.probabilities !== "object" || answer.probabilities === null || Array.isArray(answer.probabilities)) return raw;
+  const rubric = question.rubric;
+  return { ...answer, legend: Object.fromEntries(rubric.map((label, index2) => [String(index2), label])) };
+}
+
 // src/providers/factory.ts
-function createProvider(config2) {
+function createProvider(config2, options2 = {}) {
   if (config2.kind === "jev") {
     return new JevProvider(config2);
   }
+  if (config2.kind === "clef") return new ClefProvider(config2, fetch, { ...options2.imageResolver ? { imageResolver: options2.imageResolver } : {} });
   return new LayaProvider({
     kind: "laya",
     baseUrl: config2.baseUrl,
@@ -48556,8 +49202,8 @@ function createProvider(config2) {
   });
 }
 async function assertProviderReady(config2, credentials = new WindowsCredentialStore()) {
-  if (config2.kind !== "jev") return;
-  const route = config2.route ?? "openrouter";
+  if (config2.kind === "laya") return;
+  const route = config2.kind === "jev" ? config2.route ?? "openrouter" : "clef";
   const state = await credentials.availability(route);
   if (state === "malformed") throw new CredentialStoreError("credential_malformed", route);
   if (state === "missing") throw new CredentialStoreError("credential_missing", route);
@@ -48565,54 +49211,16 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 }
 
 // src/application/image-preparation.ts
-import { createHash as createHash10 } from "node:crypto";
+import { createHash as createHash12 } from "node:crypto";
 import { open as open3 } from "node:fs/promises";
 
-// src/domain/assets/image.ts
-var IMAGE_FORMATS = ["png", "jpeg", "webp"];
-var ImageFormatSchema = external_exports.enum(IMAGE_FORMATS);
-var digest = external_exports.string().regex(/^[a-f0-9]{64}$/);
-var assetId = external_exports.string().regex(/^sha256:[a-f0-9]{64}$/);
-var ImageSourceSchema = external_exports.union([
-  external_exports.object({ path: external_exports.string().min(1), sha256: digest }).strict(),
-  external_exports.object({ assetId }).strict()
-]);
-var ImageImportRequestSchema = external_exports.object({ source: ImageSourceSchema }).strict();
-var ImageGetRequestSchema = external_exports.object({ assetId, export: external_exports.boolean().optional() }).strict();
-var ImageMetadataSchema = external_exports.object({
-  assetId,
-  sha256: digest,
-  format: ImageFormatSchema,
-  width: external_exports.number().int().positive().max(16e6),
-  height: external_exports.number().int().positive().max(16e6),
-  bytes: external_exports.number().int().positive().max(16 * 1024 * 1024)
-}).strict().refine((metadata3) => metadata3.width * metadata3.height <= 16e6, {
-  message: "Image dimensions exceed the 16 megapixel limit."
-});
-var ScaleRequestSchema = external_exports.object({
-  source: ImageSourceSchema,
-  maxWidth: external_exports.number().int().positive().optional(),
-  maxHeight: external_exports.number().int().positive().optional(),
-  maxBytes: external_exports.number().int().positive().optional()
-}).strict().refine((request) => request.maxWidth !== void 0 || request.maxHeight !== void 0 || request.maxBytes !== void 0, {
-  message: "At least one image target is required."
-});
-var ImageAssetError = class extends Error {
-  constructor(code, message) {
-    super(message);
-    this.code = code;
-    this.name = "ImageAssetError";
-  }
-  code;
-};
-
 // src/infrastructure/images/asset-export.ts
-import { createHash as createHash9, randomUUID as randomUUID7 } from "node:crypto";
+import { createHash as createHash11, randomUUID as randomUUID7 } from "node:crypto";
 import { lstat, mkdir as mkdir2, readFile as readFile3, realpath, rename as rename2, rm as rm2, writeFile } from "node:fs/promises";
 import path11 from "node:path";
 async function exportImageAsset(root, asset, bytes) {
   if (!path11.isAbsolute(root)) throw new ImageAssetError("image_export_failed", "The image preview directory must be absolute.");
-  const expectedHash = createHash9("sha256").update(bytes).digest("hex");
+  const expectedHash = createHash11("sha256").update(bytes).digest("hex");
   if (expectedHash !== asset.sha256 || bytes.byteLength !== asset.bytes) throw new ImageAssetError("image_digest_mismatch", "Stored image bytes do not match their metadata.");
   const rootPath = path11.resolve(root);
   const directory = path11.join(rootPath, "asset-previews");
@@ -48626,7 +49234,7 @@ async function exportImageAsset(root, asset, bytes) {
       const existing = await lstat(target);
       if (existing.isSymbolicLink() || !existing.isFile()) throw new Error("preview target is not a regular file");
       const current = await readFile3(target);
-      const currentHash = createHash9("sha256").update(current).digest("hex");
+      const currentHash = createHash11("sha256").update(current).digest("hex");
       if (currentHash === asset.sha256 && current.byteLength === asset.bytes) return { asset, path: target };
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
@@ -48642,11 +49250,11 @@ async function exportImageAsset(root, asset, bytes) {
 
 // src/application/image-preparation.ts
 function digest2(bytes) {
-  return createHash10("sha256").update(bytes).digest("hex");
+  return createHash12("sha256").update(bytes).digest("hex");
 }
 function metadata2(bytes, decoded) {
-  const sha256 = digest2(bytes);
-  return ImageMetadataSchema.parse({ assetId: `sha256:${sha256}`, sha256, format: decoded.format, width: decoded.width, height: decoded.height, bytes: bytes.byteLength });
+  const sha2562 = digest2(bytes);
+  return ImageMetadataSchema.parse({ assetId: `sha256:${sha2562}`, sha256: sha2562, format: decoded.format, width: decoded.width, height: decoded.height, bytes: bytes.byteLength });
 }
 function readTarget(source) {
   if ("assetId" in source) return Promise.reject(new Error("saved source must be read from repository"));
@@ -54105,25 +54713,25 @@ function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec
 }
 
 // src/infrastructure/sqlite/image-assets.ts
-import { createHash as createHash11 } from "node:crypto";
+import { createHash as createHash13 } from "node:crypto";
 import { mkdirSync as mkdirSync4 } from "node:fs";
 import path13 from "node:path";
 function imageDigest(bytes) {
-  return createHash11("sha256").update(bytes).digest("hex");
+  return createHash13("sha256").update(bytes).digest("hex");
 }
 function verifyAsset(bytes, supplied) {
   const metadata3 = ImageMetadataSchema.parse(supplied);
-  const sha256 = imageDigest(bytes);
-  if (metadata3.sha256 !== sha256 || metadata3.assetId !== `sha256:${sha256}` || metadata3.bytes !== bytes.byteLength) {
+  const sha2562 = imageDigest(bytes);
+  if (metadata3.sha256 !== sha2562 || metadata3.assetId !== `sha256:${sha2562}` || metadata3.bytes !== bytes.byteLength) {
     throw new ImageAssetError("image_digest_mismatch", "Image bytes do not match the supplied digest and metadata.");
   }
   return metadata3;
 }
 function rowMetadata(row) {
-  const sha256 = asText(row.sha256, "image SHA-256 digest");
+  const sha2562 = asText(row.sha256, "image SHA-256 digest");
   return ImageMetadataSchema.parse({
     assetId: asText(row.asset_id, "image asset ID"),
-    sha256,
+    sha256: sha2562,
     format: asText(row.format, "image format"),
     width: asNumber(row.width, "image width"),
     height: asNumber(row.height, "image height"),
@@ -54218,10 +54826,12 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
   let startupFailure;
   let ownedImageRepository;
   let imagePreparation;
+  const imageRepository = () => ownedImageRepository ??= openImageAssetRepository(dataRoot);
+  const providerFactory = (config2, providerOptions = {}) => createProvider(config2, config2.kind === "clef" ? { ...providerOptions, imageResolver: { resolve: (assetId2) => ({ metadata: imageRepository().metadata(assetId2), bytes: imageRepository().bytes(assetId2) }) } } : providerOptions);
   if (service) runtimeService = service;
   else {
     try {
-      const runtime = createDefaultRunService(dataRoot);
+      const runtime = createDefaultRunService(dataRoot, providerFactory);
       runtimeService = runtime.service;
       ownedStore = runtime.store;
       storeReady = true;
@@ -54235,7 +54845,7 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
       if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
       const observed = inspectRunStoreCompatibility(dataRoot);
       if (observed.status === "current") {
-        const runtime = createDefaultRunService(dataRoot);
+        const runtime = createDefaultRunService(dataRoot, providerFactory);
         runtimeService = runtime.service;
         ownedStore = runtime.store;
         storeReady = true;
@@ -54257,7 +54867,7 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
         throw new RunServiceError("recovery_not_required", "The datastore no longer requires recovery; inspect its current status before taking further action.");
       }
       const reset = resetRunStore2(dataRoot);
-      const runtime = createDefaultRunService(dataRoot);
+      const runtime = createDefaultRunService(dataRoot, providerFactory);
       runtimeService = runtime.service;
       ownedStore = runtime.store;
       storeReady = true;
@@ -54277,8 +54887,7 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
     get image() {
       if (!storeReady || inspectRunStoreCompatibility(dataRoot).status !== "current") throw recoveryRequiredError();
       if (!imagePreparation) {
-        ownedImageRepository = openImageAssetRepository(dataRoot);
-        imagePreparation = createImagePreparationService(ownedImageRepository, options2.imageCodec ?? createStaticImageCodec(), dataRoot);
+        imagePreparation = createImagePreparationService(imageRepository(), options2.imageCodec ?? createStaticImageCodec(), dataRoot);
       }
       return imagePreparation;
     },
@@ -54300,31 +54909,31 @@ function compatibilityStatus(observed, startupFailure) {
   if (observed.status === "uninitialized") return { status: "uninitialized", schemaVersion: 0 };
   return { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
 }
-function createDefaultRunService(dataRoot) {
+function createDefaultRunService(dataRoot, providerFactory) {
   const store = openRunPersistence(dataRoot);
-  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
+  return { service: createRunService(store, dataRoot, providerFactory, new DetachedWorkerLauncher(), { assertProviderReady }), store };
 }
 function unavailableRunService() {
-  const unavailable2 = () => {
+  const unavailable3 = () => {
     throw recoveryRequiredError();
   };
   return {
-    inspect: async () => unavailable2(),
-    start: async () => unavailable2(),
-    resume: async () => unavailable2(),
-    previewDelete: () => unavailable2(),
-    deleteRuns: () => unavailable2(),
-    storageInfo: () => unavailable2(),
-    optimizeStorage: () => unavailable2(),
-    list: () => unavailable2(),
-    queryEvidence: () => unavailable2(),
-    getContext: () => unavailable2(),
-    getStatus: () => unavailable2(),
-    getRequest: () => unavailable2(),
-    getJourneyRun: () => unavailable2(),
-    answers: () => unavailable2(),
-    attempts: () => unavailable2(),
-    cancel: () => unavailable2()
+    inspect: async () => unavailable3(),
+    start: async () => unavailable3(),
+    resume: async () => unavailable3(),
+    previewDelete: () => unavailable3(),
+    deleteRuns: () => unavailable3(),
+    storageInfo: () => unavailable3(),
+    optimizeStorage: () => unavailable3(),
+    list: () => unavailable3(),
+    queryEvidence: () => unavailable3(),
+    getContext: () => unavailable3(),
+    getStatus: () => unavailable3(),
+    getRequest: () => unavailable3(),
+    getJourneyRun: () => unavailable3(),
+    answers: () => unavailable3(),
+    attempts: () => unavailable3(),
+    cancel: () => unavailable3()
   };
 }
 function recoveryRequiredError() {
@@ -54372,7 +54981,7 @@ function assertNever2(value) {
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.4.0-dev.1",
+  version: "0.4.0-dev.2",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
@@ -54418,11 +55027,35 @@ var package_default = {
 // src/infrastructure/product-identity.ts
 var productVersion = package_default.version;
 
+// src/application/provider-credentials.ts
+var providerCredentialRequestSchema = external_exports.object({
+  route: external_exports.enum(["typesafe", "openrouter", "clef"]),
+  operation: external_exports.enum(["status", "setup", "remove"])
+}).strict();
+var ProviderCredentialOperationError = class extends Error {
+  code = "credential_operation_failed";
+  constructor() {
+    super("The provider credential operation could not be completed.");
+    this.name = "ProviderCredentialOperationError";
+  }
+};
+async function manageProviderCredential(input2, store = new WindowsCredentialStore()) {
+  const request = providerCredentialRequestSchema.parse(input2);
+  try {
+    if (request.operation === "setup") await store.setup(request.route);
+    else if (request.operation === "remove") await store.remove(request.route);
+    return { route: request.route, operation: request.operation, availability: await store.availability(request.route) };
+  } catch {
+    throw new ProviderCredentialOperationError();
+  }
+}
+
 // src/entrypoints/mcp.ts
 var runListSchema = runListQuerySchema;
-function createPollingServer(service, dataRoot, imageCodec) {
+function createPollingServer(service, dataRoot, imageCodec, credentialStore = new WindowsCredentialStore()) {
   const runtime = createRunRuntime(dataRoot, service, imageCodec === void 0 ? {} : { imageCodec });
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
+  server.registerTool("provider_credential", { description: "Check, set up, or remove a provider API key in Windows Credential Manager. Setup reads the secret through Sheg secure input; secrets are never accepted as tool input or returned. Clef always uses its fixed Cloudflare credential target.", inputSchema: providerCredentialRequestSchema }, async (input2) => safeResult(() => manageProviderCredential(input2, credentialStore)));
   server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Journey fit is measured for initial respondent inputs; each later reached turn is checked immediately before inference and may stop only that respondent if it does not fit. Independent questions in one group share one frozen state; fit entries identify measured inputs and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
   server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
@@ -54454,8 +55087,8 @@ async function safeResult(operation) {
   try {
     return jsonResult(await operation());
   } catch (error62) {
-    const code = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError ? error62.code : "internal_error";
-    const message = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError ? error62.message : "The Sheg operation failed.";
+    const code = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError || error62 instanceof ProviderCredentialOperationError ? error62.code : "internal_error";
+    const message = error62 instanceof RunServiceError || error62 instanceof RunStoreError || error62 instanceof ImageAssetError || error62 instanceof ProviderCredentialOperationError ? error62.message : "The Sheg operation failed.";
     const result = { error: { code, message } };
     return { ...jsonResult(result), isError: true };
   }

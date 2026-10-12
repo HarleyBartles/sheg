@@ -141,6 +141,18 @@ test('compiler identity selects frozen v6 packet windows and rejects unknown jou
   assert.throws(() => compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history, 'unknown-contract'), /unsupported.*compiler/i);
 });
 
+test('the previously shipped cumulative journey contract remains readable after adding visual response history', async () => {
+  const study = await loadStudy(manifestPath, cohortPath);
+  const arm = study.manifest.arms[0]!;
+  const task = arm.tasks[1]!;
+  const history: PromptHistoryEvent[] = [
+    { type: 'exposure', sequence: 0, nodeId: 'show-symptom', itemId: 'symptom' },
+    { type: 'response', sequence: 1, nodeId: 'choose-entry', taskId: arm.tasks[0]!.id, result: { type: 'choice', choice: 'continue' } },
+  ];
+  assert.deepEqual(compileDecisionPacketForCompiler(arm, study.respondents[0]!, task.id, history,
+    '671217c23a449181a29c50c826f16e079a753e5c134f9bbcc63d55932fdbc016'), compileDecisionPacket(arm, study.respondents[0]!, task.id, history));
+});
+
 test('a task can suppress prior response context without changing the same respondent journey', async () => {
   const study = await loadStudy(manifestPath, cohortPath);
   const arm = structuredClone(study.manifest.arms[0]!);
@@ -195,6 +207,7 @@ test('explicit packet parts compile to the same validated request as the study a
       { id: 'symptom', text: arm.items.find((item) => item.id === 'symptom')!.text },
       { id: 'investigation', text: arm.items.find((item) => item.id === 'investigation')!.text },
     ],
+    ...(fromArm.state.materialOrder === undefined ? {} : { materialOrder: fromArm.state.materialOrder }),
     trajectory: fromArm.state.trajectory,
     question: { type: 'choice', id: task.id, instructions: task.instructions, options: { ...task.options } },
   });

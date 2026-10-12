@@ -22,6 +22,7 @@ export type JourneyProgress = {
   outcome: string | null;
   next?: { nodeId: string; taskId: string; pathId: string; packet: DecisionRequest & { state: PromptState } };
 };
+export type JourneyVisualExecution = { provider: DecisionResult['provider']; model: string; visualMaterials: NonNullable<DecisionRequest['visualMaterials']> };
 
 export function advanceJourney(
   arm: JourneyDefinition,
@@ -29,6 +30,7 @@ export function advanceJourney(
   state: { currentNodeId: string; events: readonly JourneyEvent[]; route: readonly JourneyProgress['route'][number][] },
   rawResult: DecisionValue,
   compilerFingerprint?: string,
+  visualExecution?: JourneyVisualExecution,
 ): JourneyProgress {
   const result = decisionValueSchema.parse(rawResult);
   const events = [...state.events];
@@ -49,7 +51,20 @@ export function advanceJourney(
     routeTarget = edge.toNodeId;
   }
 
-  const answerEvent: Extract<JourneyEvent, { type: 'response' }> = { type: 'response', sequence: events.length, nodeId, taskId, result };
+  const task = arm.tasks.find((candidate) => candidate.id === taskId)!;
+  let answerEvent: Extract<JourneyEvent, { type: 'response' | 'visual-response' }>;
+  if (task.visual) {
+    if (!visualExecution) throw new JourneyExecutionError(`Visual task ${taskId} is missing provider evidence.`);
+    const materialsById = new Map(visualExecution.visualMaterials.map((material) => [material.id, material]));
+    const materials = task.visual.materialIds.map((materialId) => {
+      const material = materialsById.get(materialId);
+      if (!material) throw new JourneyExecutionError(`Visual task ${taskId} is missing frozen material ${materialId}.`);
+      return { materialId, assetId: material.asset.assetId, sha256: material.asset.sha256, altText: material.altText, ...(material.caption === undefined ? {} : { caption: material.caption }) };
+    });
+    answerEvent = { type: 'visual-response', sequence: events.length, nodeId, taskId, result, visualEvidence: {
+      mode: task.visual.mode, provider: visualExecution.provider, model: visualExecution.model, materials,
+    } };
+  } else answerEvent = { type: 'response', sequence: events.length, nodeId, taskId, result };
   events.push(answerEvent);
   route.push({ nodeId, response: result, toNodeId: routeTarget });
   const pathId = route.length === 0 ? 'root' : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`}`).join('>');

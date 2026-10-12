@@ -7,11 +7,12 @@ import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
 import { ProviderCallError } from '../domain/decision/provider-failure.js';
 import type { EvaluationFailure } from '../domain/run/lifecycle.js';
 import type { ProviderFactory } from './run-service.js';
+import type { ProviderFactoryOptions } from '../providers/config.js';
 import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionBatchRequest, DecisionBatchResult } from '../domain/decision/decision.js';
 
 const HEARTBEAT_MS = 2_000;
-export async function executeQuestionRun(persistence: RunPersistence, runId: string, providerFactory: ProviderFactory): Promise<void> {
+export async function executeQuestionRun(persistence: RunPersistence, runId: string, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions = {}): Promise<void> {
   const { reads, commands } = persistence;
   const claim = commands.claim(runId, Date.now(), process.pid);
   if (!claim) return;
@@ -23,9 +24,9 @@ export async function executeQuestionRun(persistence: RunPersistence, runId: str
   heartbeat.unref();
   try {
     if (reads.getRequestKind(runId) === 'journey') {
-      await executeJourney(reads, commands, runId, claim, providerFactory);
+      await executeJourney(reads, commands, runId, claim, providerFactory, providerOptions);
     } else {
-      await executePoll(reads, commands, runId, claim, providerFactory);
+      await executePoll(reads, commands, runId, claim, providerFactory, providerOptions);
     }
     commands.finish(claim);
   } catch {
@@ -35,9 +36,9 @@ export async function executeQuestionRun(persistence: RunPersistence, runId: str
   }
 }
 
-async function executePoll(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
+async function executePoll(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions): Promise<void> {
   const prepared = reads.getRequest(runId);
-  const provider = providerFactory(prepared.request.provider);
+  const provider = providerFactory(prepared.request.provider, providerOptions);
   const answers = new Map(reads.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
@@ -50,7 +51,9 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
         let selected: typeof pending = [];
         for (let size = pending.length; size >= 1; size -= 1) {
           const candidate = pending.slice(0, size);
-          const fit = await provider.measureBatch({ state: group.state, questions: candidate.map(({ packet }) => packet.question) });
+          const batchQuestions = candidate.map(({ packet }) => packet.question);
+          const batchMaterials = batchVisualMaterials(candidate.map(({ packet }) => packet.visualMaterials ?? []));
+          const fit = await provider.measureBatch({ state: group.state, questions: batchQuestions, ...(batchMaterials.length ? { visualMaterials: batchMaterials } : {}) });
           if (fit.status === 'fits') { selected = candidate; break; }
           if (fit.status === 'unavailable') throw new Error('Provider could not confirm fit for the remaining question group.');
         }
@@ -59,7 +62,9 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
       }
       const reservation = commands.reserveBatch(claim, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
       if (!reservation) break;
-      const batch: DecisionBatchRequest = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
+      const batchQuestions = reservation.evaluations.map(({ packet }) => packet.question);
+      const batchMaterials = batchVisualMaterials(reservation.evaluations.map(({ packet }) => packet.visualMaterials ?? []));
+      const batch: DecisionBatchRequest = { state: group.state, questions: batchQuestions, ...(batchMaterials.length ? { visualMaterials: batchMaterials } : {}) };
       let settled: Array<{ evaluationId: string; status: import('../domain/run/lifecycle.js').AnswerRow['status'] }>;
       try {
         let result: DecisionBatchResult;
@@ -83,9 +88,9 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
   }
 }
 
-async function executeJourney(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory): Promise<void> {
+async function executeJourney(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions): Promise<void> {
   const accepted = reads.getJourneyRun(runId);
-  const provider = providerFactory(accepted.request.provider);
+  const provider = providerFactory(accepted.request.provider, providerOptions);
   while (true) {
     if (!commands.heartbeat(claim, Date.now())) return;
     const reservation = commands.reserveNext(claim, Date.now());
@@ -97,7 +102,9 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
       const progress = advanceJourney(accepted.request.journey, profile, {
         currentNodeId: currentEvaluation.nodeId, events: respondentState.events, route: respondentState.route,
-      }, value, accepted.compilerFingerprint);
+      }, value, accepted.compilerFingerprint, currentEvaluation.packet.question.visual ? {
+        provider: result.provider, model: result.model, visualMaterials: currentEvaluation.packet.visualMaterials ?? [],
+      } : undefined);
       const nextEvaluation = progress.next ? {
         evaluationId: randomUUID(), turnId: randomUUID(), contextId: randomUUID(),
         respondentId: respondentState.respondentId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,
@@ -136,6 +143,16 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       if (scope === 'run') break;
     }
   }
+}
+
+function batchVisualMaterials(groups: readonly (readonly NonNullable<DecisionBatchRequest['visualMaterials']>[number][])[]): NonNullable<DecisionBatchRequest['visualMaterials']> {
+  const byId = new Map<string, NonNullable<DecisionBatchRequest['visualMaterials']>[number]>();
+  for (const group of groups) for (const material of group) {
+    const previous = byId.get(material.id);
+    if (previous && hashCanonical(previous) !== hashCanonical(material)) throw new Error('Frozen visual material changed within the accepted batch.');
+    byId.set(material.id, material);
+  }
+  return [...byId.values()];
 }
 
 function failureScope(error: unknown): 'evaluation' | 'run' {

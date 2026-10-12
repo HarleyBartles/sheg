@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ImageMetadataSchema } from '../assets/image.js';
 import { providerKindSchema } from './provider.js';
 
 const identifier = z.string().min(1);
@@ -6,6 +7,15 @@ const prose = z.string().min(1);
 const choiceText = z.string().min(1).refine((value) => value.trim().length > 0, 'Choice text must not be blank.');
 const probability = z.number().finite().min(0).max(1);
 const probabilities = z.record(z.string(), probability);
+export const visualBindingSchema = z.object({ mode: z.enum(['pixels', 'described']), materialIds: z.array(identifier).min(1).max(4) }).strict().superRefine((binding, context) => {
+  if (new Set(binding.materialIds).size !== binding.materialIds.length) context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Visual material IDs must be unique and ordered.' });
+});
+export const decisionVisualMaterialSchema = z.object({
+  id: identifier, altText: prose, caption: prose.optional(), asset: ImageMetadataSchema,
+}).strict().superRefine((material, context) => {
+  if (material.asset.assetId !== `sha256:${material.asset.sha256}`) context.addIssue({ code: 'custom', path: ['asset', 'assetId'], message: 'Image asset ID must match its SHA-256 digest.' });
+});
+export type DecisionVisualMaterial = z.infer<typeof decisionVisualMaterialSchema>;
 export const decisionTypes = { choice: 'choice', score: 'score', noul: 'noul' } as const;
 export const decisionTypeSchema = z.enum(decisionTypes);
 export const routeableDecisionTypes = [decisionTypes.score, decisionTypes.noul] as const;
@@ -36,6 +46,7 @@ const choiceQuestionSchema = z.object({
   instructions: prose,
   options: z.record(identifier, choiceText).refine((value) => Object.keys(value).length > 0),
   materialOptions: z.record(identifier, identifier).optional(),
+  visual: visualBindingSchema.optional(),
 }).strict().superRefine((question, context) => {
   if (question.materialOptions) {
     const links = Object.entries(question.materialOptions);
@@ -56,12 +67,14 @@ const scoreQuestionSchema = z.object({
   id: identifier,
   instructions: prose,
   rubric: z.array(prose).min(2),
+  visual: visualBindingSchema.optional(),
 }).strict();
 const noulQuestionSchema = z.object({
   type: z.literal(decisionTypes.noul),
   id: identifier,
   instructions: prose,
   criteria: z.object({ true: prose.optional(), false: prose.optional() }).strict().optional(),
+  visual: visualBindingSchema.optional(),
 }).strict();
 
 export const decisionQuestionSchema = z.union([choiceQuestionSchema, scoreQuestionSchema, noulQuestionSchema]);
@@ -69,13 +82,15 @@ export const decisionQuestionSchema = z.union([choiceQuestionSchema, scoreQuesti
 export const decisionBatchRequestSchema = z.object({
   state: z.record(z.string(), z.unknown()),
   questions: z.array(decisionQuestionSchema).min(1),
+  visualMaterials: z.array(decisionVisualMaterialSchema).max(4).optional(),
 }).strict().superRefine((request, context) => {
   if (new Set(request.questions.map(({ id }) => id)).size !== request.questions.length) {
     context.addIssue({ code: 'custom', path: ['questions'], message: 'Question IDs must be unique within a batch.' });
   }
+  validateVisualReferences(request.questions, request.visualMaterials ?? [], context);
 });
 
-const requestStateSchema = z.object({ state: z.record(z.string(), z.unknown()) }).strict();
+const requestStateSchema = z.object({ state: z.record(z.string(), z.unknown()), visualMaterials: z.array(decisionVisualMaterialSchema).max(4).optional() }).strict();
 const choiceRequestSchema = requestStateSchema.extend({
   question: choiceQuestionSchema,
   optionIds: z.array(identifier).min(1),
@@ -90,7 +105,22 @@ const choiceRequestSchema = requestStateSchema.extend({
 const scoreRequestSchema = requestStateSchema.extend({ question: scoreQuestionSchema }).strict();
 const noulRequestSchema = requestStateSchema.extend({ question: noulQuestionSchema }).strict();
 
-export const decisionRequestSchema = z.union([choiceRequestSchema, scoreRequestSchema, noulRequestSchema]);
+export const decisionRequestSchema = z.union([choiceRequestSchema, scoreRequestSchema, noulRequestSchema]).superRefine((request, context) => {
+  validateVisualReferences([request.question], request.visualMaterials ?? [], context);
+});
+
+function validateVisualReferences(questions: readonly DecisionQuestion[], materials: readonly DecisionVisualMaterial[], context: z.RefinementCtx): void {
+  const byId = new Set(materials.map(({ id }) => id));
+  if (byId.size !== materials.length) context.addIssue({ code: 'custom', path: ['visualMaterials'], message: 'Visual material IDs must be unique.' });
+  const referenced = new Set<string>();
+  for (const [questionIndex, question] of questions.entries()) {
+    for (const id of question.visual?.materialIds ?? []) {
+      referenced.add(id);
+      if (!byId.has(id)) context.addIssue({ code: 'custom', path: ['questions', questionIndex, 'visual', 'materialIds'], message: `Visual binding has no immutable material reference for ${id}.` });
+    }
+  }
+  for (const material of materials) if (!referenced.has(material.id)) context.addIssue({ code: 'custom', path: ['visualMaterials'], message: `Visual material ${material.id} is not bound to a question.` });
+}
 
 const choiceResultSchema = z.object({
   type: z.literal(decisionTypes.choice).default(decisionTypes.choice),

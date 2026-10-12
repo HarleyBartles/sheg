@@ -10,10 +10,11 @@ import { sqliteTables } from './tables.js';
 import { PREPARED_LAUNCH_WINDOW_MS } from './work-policy.js';
 
 export const BASELINE_SCHEMA_VERSION = 9;
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 export const BASELINE_MIGRATION_ID = 'baseline-v9';
 export const IMAGE_ASSET_MIGRATION_ID = 'image-assets-v10';
-export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets'] as const;
+export const RUN_VISUAL_ASSETS_MIGRATION_ID = 'run-visual-assets-v11';
+export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets', '0002_run_visual_assets'] as const;
 const MIGRATION_BACKUP_RETRIES = 3;
 const SQLITE_TRANSIENT_LOCK_CODES = new Set([5, 6]);
 const SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -54,8 +55,18 @@ function imageAssetMigration(): SqliteMigration {
   return { id: IMAGE_ASSET_MIGRATION_ID, fromVersion: 9, toVersion: 10, sql: readFileSync(match, 'utf8') };
 }
 
+function runVisualAssetsMigration(): SqliteMigration {
+  const candidates = [
+    fileURLToPath(new URL('../../../migrations/0002_run_visual_assets/migration.sql', import.meta.url)),
+    fileURLToPath(new URL('./migrations/0002_run_visual_assets/migration.sql', import.meta.url)),
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError('datastore_schema_invalid', 'The schema 11 run visual asset migration is missing from this Sheg installation.');
+  return { id: RUN_VISUAL_ASSETS_MIGRATION_ID, fromVersion: 10, toVersion: 11, sql: readFileSync(match, 'utf8') };
+}
+
 export function registeredMigrations(): SqliteMigration[] {
-  return [baselineMigration(), imageAssetMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration()];
 }
 
 function migrationChecksum(migration: SqliteMigration): string {
@@ -229,7 +240,11 @@ function applyUpgrade(database: DatabaseSync, dataRoot: string, migrations: read
       database.exec('BEGIN IMMEDIATE');
       transactionOpen = true;
       const lockedVersion = pragmaNumber(database, 'user_version');
-      if (lockedVersion === migration.toVersion) { database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); return; }
+      if (lockedVersion >= migration.toVersion) {
+        const migrationAdvanced = lockedVersion === migration.toVersion ||
+          lockedVersion === migrations.at(-1)?.toVersion || migrations.some(({ fromVersion }) => fromVersion === lockedVersion);
+        if (migrationAdvanced) { database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); return; }
+      }
       if (lockedVersion !== migration.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${lockedVersion} while migrating; preserve it and use run_storage to inspect compatibility.`);
       if (pragmaNumber(database, 'data_version') !== beforeBackupDataVersion) {
         database.exec('ROLLBACK'); transactionOpen = false; unlinkSync(backupPath); continue;
@@ -274,7 +289,16 @@ export function applySchemaMigrations(database: DatabaseSync, dataRoot: string, 
           validateSchemaShape(database);
           return;
         }
-        if (lockedVersion !== 0 || lockedTables !== 0) throw new RunStoreError('unsupported_schema_version', 'The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.');
+        if (lockedVersion !== 0 || lockedTables !== 0) {
+          const anotherInitializerAdvanced = lockedVersion > 0 && lockedVersion < targetVersion && lockedTables > 0 &&
+            migrations.some(({ fromVersion }) => fromVersion === lockedVersion);
+          if (anotherInitializerAdvanced) {
+            database.exec('COMMIT');
+            currentVersion = lockedVersion;
+            continue;
+          }
+          throw new RunStoreError('unsupported_schema_version', 'The datastore changed while being initialized; preserve it and use run_storage to inspect recovery options.');
+        }
         runMigrationSql(database, migration.sql);
         database.exec(`PRAGMA user_version = ${migration.toVersion}`);
         database.prepare('INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)')
