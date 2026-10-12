@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { respondentArchetypeGroups } from '../src/domain/respondents/archetype-catalogue.js';
+import { codecAssetNames } from '../src/infrastructure/images/codec-assets.js';
 import { buildPlugin } from '../scripts/build.js';
 
 test('build replaces the distribution with only current runtime outputs', async (t) => {
@@ -18,11 +19,14 @@ test('build replaces the distribution with only current runtime outputs', async 
 
   await buildPlugin(outputDirectory);
 
-  assert.deepEqual((await readdir(outputDirectory)).sort(), ['cli.js', 'credentials', 'data', 'licenses', 'mcp.js', 'migrations', 'queries', 'worker.js']);
+  assert.deepEqual((await readdir(outputDirectory)).sort(), ['cli.js', 'codec-assets', 'credentials', 'data', 'licenses', 'mcp.js', 'migrations', 'queries', 'worker.js']);
   assert.equal(await readFile(path.join(outputDirectory, 'queries/load-journey-worker-turn.sql'), 'utf8'), await readFile(new URL('../src/infrastructure/sqlite/queries/load-journey-worker-turn.sql', import.meta.url), 'utf8'));
   assert.equal(await readFile(path.join(outputDirectory, 'credentials/windows-credential.ps1'), 'utf8'), await readFile(new URL('../src/infrastructure/credentials/windows-credential.ps1', import.meta.url), 'utf8'));
   assert.equal(await readFile(path.join(outputDirectory, 'migrations/0000_baseline_v9/migration.sql'), 'utf8'), await readFile(new URL('../migrations/0000_baseline_v9/migration.sql', import.meta.url), 'utf8'));
   assert.equal(await readFile(path.join(outputDirectory, 'licenses/drizzle-orm-Apache-2.0.txt'), 'utf8'), await readFile(new URL('../licenses/drizzle-orm-Apache-2.0.txt', import.meta.url), 'utf8'));
+  assert.deepEqual((await readdir(path.join(outputDirectory, 'codec-assets'))).sort(), [...codecAssetNames].sort());
+  for (const name of codecAssetNames) assert.deepEqual(await readFile(path.join(outputDirectory, 'codec-assets', name)), await readFile(new URL(`../node_modules/@jsquash/${codecSourceFor(name)}`, import.meta.url)));
+  assert.equal((await readFile(path.join(outputDirectory, 'licenses/jsquash/jpeg/LICENSE.codec.md'), 'utf8')).includes('libjpeg-turbo'), true);
   if (process.platform === 'win32') {
     const status = spawnSync('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
@@ -41,3 +45,14 @@ test('build replaces the distribution with only current runtime outputs', async 
     assert.deepEqual(JSON.parse(await readFile(path.join(dataDirectory, group.filename), 'utf8')), JSON.parse(await readFile(new URL(`../src/domain/respondents/archetype-groups/${group.filename}`, import.meta.url), 'utf8')));
   }
 });
+
+function codecSourceFor(name: string): string {
+  return ({
+    'squoosh_png_bg.wasm': 'png/codec/pkg/squoosh_png_bg.wasm',
+    'mozjpeg_dec.wasm': 'jpeg/codec/dec/mozjpeg_dec.wasm',
+    'mozjpeg_enc.wasm': 'jpeg/codec/enc/mozjpeg_enc.wasm',
+    'webp_dec.wasm': 'webp/codec/dec/webp_dec.wasm',
+    'webp_enc_simd.wasm': 'webp/codec/enc/webp_enc_simd.wasm',
+    'squoosh_resize_bg.wasm': 'resize/lib/resize/pkg/squoosh_resize_bg.wasm',
+  } as Record<string, string>)[name]!;
+}

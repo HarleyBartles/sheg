@@ -60,6 +60,8 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(plugin, 'dist/queries/load-journey-worker-turn.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/drizzle-orm-Apache-2.0.txt')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/THIRD-PARTY-NOTICES.md')), true);
+  for (const asset of ['squoosh_png_bg.wasm', 'mozjpeg_dec.wasm', 'mozjpeg_enc.wasm', 'webp_dec.wasm', 'webp_enc_simd.wasm', 'squoosh_resize_bg.wasm']) assert.equal(await exists(path.join(plugin, 'dist/codec-assets', asset)), true);
+  assert.equal(await exists(path.join(plugin, 'dist/licenses/jsquash/jpeg/LICENSE.codec.md')), true);
   const credentialHelper = path.join(plugin, 'dist/credentials/windows-credential.ps1');
   assert.equal(await exists(credentialHelper), true);
   if (process.platform === 'win32') {

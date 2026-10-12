@@ -45747,6 +45747,10 @@ var package_default = {
     node: ">=24 <25"
   },
   dependencies: {
+    "@jsquash/jpeg": "1.6.0",
+    "@jsquash/png": "3.1.1",
+    "@jsquash/resize": "2.1.1",
+    "@jsquash/webp": "1.5.0",
     "@modelcontextprotocol/server": "2.1.0",
     "drizzle-orm": "1.0.0-rc.4",
     zod: "4.6.5"
