@@ -44690,6 +44690,14 @@ var imageDerivations = sqliteTable("image_derivations", {
   check2("image_derivations_dimensions_ck", sql`${table.width} > 0 AND ${table.height} > 0`),
   check2("image_derivations_policy_ck", sql`${table.algorithm} = 'lanczos3' AND ${table.policyVersion} = 1`)
 ]);
+var runVisualAssets = sqliteTable("run_visual_assets", {
+  runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
+  materialId: text("material_id").notNull(),
+  assetId: text("asset_id").notNull().references(() => imageAssets.assetId, { onDelete: "restrict" })
+}, (table) => [
+  primaryKey({ name: "run_visual_assets_pk", columns: [table.runId, table.materialId] }),
+  index("run_visual_assets_asset_idx").on(table.assetId, table.runId)
+]);
 var sqliteTables = {
   runs,
   questionGroups,
@@ -44700,7 +44708,8 @@ var sqliteTables = {
   evaluationAnswerAttempts,
   schemaMigrations,
   imageAssets,
-  imageDerivations
+  imageDerivations,
+  runVisualAssets
 };
 
 // src/infrastructure/sqlite/work-policy.ts
@@ -44710,9 +44719,10 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 10;
+var SCHEMA_VERSION = 11;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
+var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -44742,8 +44752,17 @@ function imageAssetMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 10 image asset migration is missing from this Sheg installation.");
   return { id: IMAGE_ASSET_MIGRATION_ID, fromVersion: 9, toVersion: 10, sql: readFileSync(match, "utf8") };
 }
+function runVisualAssetsMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0002_run_visual_assets/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0002_run_visual_assets/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 11 run visual asset migration is missing from this Sheg installation.");
+  return { id: RUN_VISUAL_ASSETS_MIGRATION_ID, fromVersion: 10, toVersion: 11, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration()];
 }
 function migrationChecksum(migration) {
   return createHash4("sha256").update(migration.sql).digest("hex");
@@ -45733,7 +45752,7 @@ function deleteRunSelection(context, runIds) {
 }
 
 // src/infrastructure/sqlite/commands/acceptance.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID3 } from "node:crypto";
 
 // src/infrastructure/sqlite/run-identity-queries.ts
 function findRunBySubmission(database, submissionId) {
@@ -45973,10 +45992,12 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
         throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
       }
     }
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID3();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedRunData(context.orm, runId, prepared);
+    insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
 }
@@ -45993,12 +46014,65 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
       context.reconcileInside(runId2, context.now());
       return { created: false, run: context.statusInside(runId2) };
     }
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID3();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedJourneyData(context.orm, runId, prepared);
+    insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
+}
+function requestedImageMaterials(request) {
+  if (request.kind === "poll") {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    return request.material.filter((item) => isImageMaterial(item) && bound.has(item.id));
+  }
+  if (request.kind === "journey") {
+    const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
+    return request.journey.items.filter((item) => isImageMaterial(item) && bound.has(item.id));
+  }
+  return [];
+}
+function verifyFrozenVisualAssets(database, request, frozenEvaluations) {
+  const requested = requestedImageMaterials(request);
+  const materialsById = new Map(requested.map((material) => [material.id, material]));
+  for (const evaluation of frozenEvaluations) {
+    const packetMaterials = evaluation.packet.visualMaterials ?? [];
+    const boundIds = evaluation.packet.question.visual?.materialIds ?? [];
+    if (packetMaterials.length !== boundIds.length || packetMaterials.some((material) => !boundIds.includes(material.id))) {
+      throw new RunStoreError("invalid_prepared_run", "A frozen visual packet does not match its ordered image bindings.");
+    }
+    for (const packetMaterial of packetMaterials) {
+      const material = materialsById.get(packetMaterial.id);
+      const expected = material && { id: material.id, altText: material.altText, asset: material.asset, ...material.caption === void 0 ? {} : { caption: material.caption } };
+      if (!expected || hashCanonical(expected) !== hashCanonical(packetMaterial)) {
+        throw new RunStoreError("invalid_prepared_run", "A frozen visual packet differs from the image descriptor accepted in the run request.");
+      }
+    }
+  }
+  for (const material of requested) {
+    const row = database.prepare("SELECT asset_id, sha256, format, width, height, byte_length, content FROM image_assets WHERE asset_id = ?").get(material.asset.assetId);
+    if (!row) throw new RunStoreError("image_asset_not_found", "A visual image asset is no longer available in Sheg storage.");
+    const bytes = Buffer.from(row.content);
+    const actual = {
+      assetId: asText(row.asset_id, "image asset ID"),
+      sha256: asText(row.sha256, "image SHA-256 digest"),
+      format: asText(row.format, "image format"),
+      width: asNumber(row.width, "image width"),
+      height: asNumber(row.height, "image height"),
+      bytes: asNumber(row.byte_length, "image byte length")
+    };
+    const digest3 = createHash6("sha256").update(bytes).digest("hex");
+    if (hashCanonical(actual) !== hashCanonical(material.asset) || actual.sha256 !== digest3 || actual.bytes !== bytes.byteLength) {
+      throw new RunStoreError("image_asset_changed", "A visual image asset changed after inspection; inspect the request again.");
+    }
+  }
+  return requested;
+}
+function insertRunVisualAssets(database, runId, materials) {
+  if (!materials.length) return;
+  database.insert(runVisualAssets).values(materials.map((material) => ({ runId, materialId: material.id, assetId: material.asset.assetId }))).run();
 }
 function chunks(values, size) {
   const result = [];
@@ -46606,7 +46680,7 @@ function loadAttempts(database, runId, cursorText, requestedLimit, ensureRun) {
 }
 
 // src/infrastructure/sqlite/evidence-query.ts
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 
 // src/infrastructure/sqlite/evaluation-criteria.ts
 var numericOperators = { eq: "=", lt: "<", lte: "<=", gt: ">", gte: ">=" };
@@ -46786,7 +46860,7 @@ function queryEvidencePage(context, input2) {
             text: candidate.text,
             sourceId: candidate.sourceId,
             sourceSha256: candidate.sourceSha256,
-            textSha256: createHash6("sha256").update(candidate.text, "utf8").digest("hex")
+            textSha256: createHash7("sha256").update(candidate.text, "utf8").digest("hex")
           };
         }
       }
@@ -46964,7 +47038,7 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
 }
 
 // src/infrastructure/sqlite/follow-on-queries.ts
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 function loadFollowOnSources(database, input2, notFound) {
   const request = followOnRunRequestSchema.parse(input2);
   const run = database.prepare("SELECT status, used_calls, reserved_calls, request_json FROM runs WHERE run_id = ?").get(request.sourceRunId);
@@ -47019,7 +47093,7 @@ function loadFollowOnSources(database, input2, notFound) {
       text: selectedMaterial.text,
       sourceId: selectedMaterial.sourceId,
       sourceSha256: selectedMaterial.sourceSha256,
-      textSha256: createHash7("sha256").update(selectedMaterial.text, "utf8").digest("hex")
+      textSha256: createHash8("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
     if (selectedMaterialId && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
@@ -48296,7 +48370,7 @@ function missingMeasureFit2(config2, reason) {
 }
 
 // src/providers/laya/context-fit.ts
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 import { readFile as readFile2, stat } from "node:fs/promises";
 import path10 from "node:path";
 
@@ -48535,7 +48609,7 @@ async function tokenizerPromise(config2) {
   if (existing?.signature === signature) return existing.loaded;
   const loaded = (async () => {
     const bytes = await readFile2(absolutePath);
-    const sha2562 = createHash8("sha256").update(bytes).digest("hex");
+    const sha2562 = createHash9("sha256").update(bytes).digest("hex");
     if (sha2562 !== config2.tokenizerSha256.toLowerCase()) throw new Error("tokenizer-checksum-mismatch");
     let raw;
     try {
@@ -48763,7 +48837,7 @@ function ensureTrailingSlash(value) {
 }
 
 // src/providers/clef/compiler.ts
-import { createHash as createHash9 } from "node:crypto";
+import { createHash as createHash10 } from "node:crypto";
 var CLEF_MAX_IMAGES = 4;
 var CLEF_MAX_QUESTIONS = 64;
 var CLEF_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
@@ -48796,7 +48870,7 @@ Visual choice mapping: ${candidateMappings.join(" ")}` : "";
   return { type: question.type, instructions: `${question.instructions}${imageNote}${mappingNote}`, ...criteria === void 0 ? {} : { criteria } };
 }
 function sha256(bytes) {
-  return createHash9("sha256").update(bytes).digest("hex");
+  return createHash10("sha256").update(bytes).digest("hex");
 }
 function compileClefRequest(input2, configInput, imageResolver) {
   const config2 = clefConfigSchema.parse(configInput);
@@ -49106,16 +49180,16 @@ async function assertProviderReady(config2, credentials = new WindowsCredentialS
 }
 
 // src/application/image-preparation.ts
-import { createHash as createHash11 } from "node:crypto";
+import { createHash as createHash12 } from "node:crypto";
 import { open as open3 } from "node:fs/promises";
 
 // src/infrastructure/images/asset-export.ts
-import { createHash as createHash10, randomUUID as randomUUID7 } from "node:crypto";
+import { createHash as createHash11, randomUUID as randomUUID7 } from "node:crypto";
 import { lstat, mkdir as mkdir2, readFile as readFile3, realpath, rename as rename2, rm as rm2, writeFile } from "node:fs/promises";
 import path11 from "node:path";
 async function exportImageAsset(root, asset, bytes) {
   if (!path11.isAbsolute(root)) throw new ImageAssetError("image_export_failed", "The image preview directory must be absolute.");
-  const expectedHash = createHash10("sha256").update(bytes).digest("hex");
+  const expectedHash = createHash11("sha256").update(bytes).digest("hex");
   if (expectedHash !== asset.sha256 || bytes.byteLength !== asset.bytes) throw new ImageAssetError("image_digest_mismatch", "Stored image bytes do not match their metadata.");
   const rootPath = path11.resolve(root);
   const directory = path11.join(rootPath, "asset-previews");
@@ -49129,7 +49203,7 @@ async function exportImageAsset(root, asset, bytes) {
       const existing = await lstat(target);
       if (existing.isSymbolicLink() || !existing.isFile()) throw new Error("preview target is not a regular file");
       const current = await readFile3(target);
-      const currentHash = createHash10("sha256").update(current).digest("hex");
+      const currentHash = createHash11("sha256").update(current).digest("hex");
       if (currentHash === asset.sha256 && current.byteLength === asset.bytes) return { asset, path: target };
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
@@ -49145,7 +49219,7 @@ async function exportImageAsset(root, asset, bytes) {
 
 // src/application/image-preparation.ts
 function digest2(bytes) {
-  return createHash11("sha256").update(bytes).digest("hex");
+  return createHash12("sha256").update(bytes).digest("hex");
 }
 function metadata2(bytes, decoded) {
   const sha2562 = digest2(bytes);
@@ -54608,11 +54682,11 @@ function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec
 }
 
 // src/infrastructure/sqlite/image-assets.ts
-import { createHash as createHash12 } from "node:crypto";
+import { createHash as createHash13 } from "node:crypto";
 import { mkdirSync as mkdirSync4 } from "node:fs";
 import path13 from "node:path";
 function imageDigest(bytes) {
-  return createHash12("sha256").update(bytes).digest("hex");
+  return createHash13("sha256").update(bytes).digest("hex");
 }
 function verifyAsset(bytes, supplied) {
   const metadata3 = ImageMetadataSchema.parse(supplied);

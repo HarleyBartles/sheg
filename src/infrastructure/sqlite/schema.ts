@@ -10,10 +10,11 @@ import { sqliteTables } from './tables.js';
 import { PREPARED_LAUNCH_WINDOW_MS } from './work-policy.js';
 
 export const BASELINE_SCHEMA_VERSION = 9;
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 export const BASELINE_MIGRATION_ID = 'baseline-v9';
 export const IMAGE_ASSET_MIGRATION_ID = 'image-assets-v10';
-export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets'] as const;
+export const RUN_VISUAL_ASSETS_MIGRATION_ID = 'run-visual-assets-v11';
+export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets', '0002_run_visual_assets'] as const;
 const MIGRATION_BACKUP_RETRIES = 3;
 const SQLITE_TRANSIENT_LOCK_CODES = new Set([5, 6]);
 const SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -54,8 +55,18 @@ function imageAssetMigration(): SqliteMigration {
   return { id: IMAGE_ASSET_MIGRATION_ID, fromVersion: 9, toVersion: 10, sql: readFileSync(match, 'utf8') };
 }
 
+function runVisualAssetsMigration(): SqliteMigration {
+  const candidates = [
+    fileURLToPath(new URL('../../../migrations/0002_run_visual_assets/migration.sql', import.meta.url)),
+    fileURLToPath(new URL('./migrations/0002_run_visual_assets/migration.sql', import.meta.url)),
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError('datastore_schema_invalid', 'The schema 11 run visual asset migration is missing from this Sheg installation.');
+  return { id: RUN_VISUAL_ASSETS_MIGRATION_ID, fromVersion: 10, toVersion: 11, sql: readFileSync(match, 'utf8') };
+}
+
 export function registeredMigrations(): SqliteMigration[] {
-  return [baselineMigration(), imageAssetMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration()];
 }
 
 function migrationChecksum(migration: SqliteMigration): string {

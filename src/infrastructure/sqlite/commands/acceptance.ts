@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
 import type { DatabaseSync } from 'node:sqlite';
 import type { RunStatusView } from '../../../domain/run/lifecycle.js';
@@ -7,7 +7,10 @@ import { RunStoreError } from '../../../application/run-store.js';
 import { asNumber, asText, type DatabaseRow } from '../rows.js';
 import { hasAllFollowOnSelections } from '../run-identity-queries.js';
 import { validatePrepared, validatePreparedJourney } from './prepared-validation.js';
-import { evaluations, journeyRespondents, questionGroups, runs } from '../tables.js';
+import { hashCanonical } from '../../identity.js';
+import { isImageMaterial } from '../../../domain/study/stimulus.js';
+import type { ParsedRunRequest, RunMaterialItem } from '../../../domain/run/request.js';
+import { evaluations, journeyRespondents, questionGroups, runVisualAssets, runs } from '../tables.js';
 
 const SQLITE_INSERT_BATCH_SIZE = 250;
 
@@ -60,10 +63,13 @@ export function acceptPreparedRun(context: AcceptanceContext, submissionId: stri
       }
     }
 
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
+
     const runId = randomUUID();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedRunData(context.orm, runId, prepared);
+    insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
 }
@@ -81,12 +87,65 @@ export function acceptPreparedJourney(context: AcceptanceContext, submissionId: 
       context.reconcileInside(runId, context.now());
       return { created: false, run: context.statusInside(runId) };
     }
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedJourneyData(context.orm, runId, prepared);
+    insertRunVisualAssets(context.orm, runId, imageMaterials);
     return { created: true, run: context.statusInside(runId) };
   });
+}
+
+function requestedImageMaterials(request: ParsedRunRequest): Extract<RunMaterialItem, { type: 'image' }>[] {
+  if (request.kind === 'poll') {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    return request.material.filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
+  }
+  if (request.kind === 'journey') {
+    const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
+    return request.journey.items.filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
+  }
+  return [];
+}
+
+function verifyFrozenVisualAssets(database: DatabaseSync, request: ParsedRunRequest, frozenEvaluations: PreparedRun['evaluations'] | PreparedJourneyRun['evaluations']) {
+  const requested = requestedImageMaterials(request);
+  const materialsById = new Map(requested.map((material) => [material.id, material]));
+  for (const evaluation of frozenEvaluations) {
+    const packetMaterials = evaluation.packet.visualMaterials ?? [];
+    const boundIds = evaluation.packet.question.visual?.materialIds ?? [];
+    if (packetMaterials.length !== boundIds.length || packetMaterials.some((material) => !boundIds.includes(material.id))) {
+      throw new RunStoreError('invalid_prepared_run', 'A frozen visual packet does not match its ordered image bindings.');
+    }
+    for (const packetMaterial of packetMaterials) {
+      const material = materialsById.get(packetMaterial.id);
+      const expected = material && { id: material.id, altText: material.altText, asset: material.asset, ...(material.caption === undefined ? {} : { caption: material.caption }) };
+      if (!expected || hashCanonical(expected) !== hashCanonical(packetMaterial)) {
+        throw new RunStoreError('invalid_prepared_run', 'A frozen visual packet differs from the image descriptor accepted in the run request.');
+      }
+    }
+  }
+  for (const material of requested) {
+    const row = database.prepare('SELECT asset_id, sha256, format, width, height, byte_length, content FROM image_assets WHERE asset_id = ?').get(material.asset.assetId) as DatabaseRow | undefined;
+    if (!row) throw new RunStoreError('image_asset_not_found', 'A visual image asset is no longer available in Sheg storage.');
+    const bytes = Buffer.from(row.content as Uint8Array);
+    const actual = {
+      assetId: asText(row.asset_id, 'image asset ID'), sha256: asText(row.sha256, 'image SHA-256 digest'),
+      format: asText(row.format, 'image format'), width: asNumber(row.width, 'image width'),
+      height: asNumber(row.height, 'image height'), bytes: asNumber(row.byte_length, 'image byte length'),
+    };
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    if (hashCanonical(actual) !== hashCanonical(material.asset) || actual.sha256 !== digest || actual.bytes !== bytes.byteLength) {
+      throw new RunStoreError('image_asset_changed', 'A visual image asset changed after inspection; inspect the request again.');
+    }
+  }
+  return requested;
+}
+
+function insertRunVisualAssets(database: NodeSQLiteDatabase, runId: string, materials: readonly Extract<RunMaterialItem, { type: 'image' }>[]): void {
+  if (!materials.length) return;
+  database.insert(runVisualAssets).values(materials.map((material) => ({ runId, materialId: material.id, assetId: material.asset.assetId }))).run();
 }
 
 function chunks<T>(values: T[], size: number): T[][] {

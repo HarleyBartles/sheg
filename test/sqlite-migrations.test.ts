@@ -9,10 +9,11 @@ import { RunStoreError } from '../src/application/run-store.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { applySchemaMigrations, baselineMigration, registeredMigrations } from '../src/infrastructure/sqlite/schema.js';
 
-async function baseline(): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-migration-'));
-  const store = openRunStore(root);
-  store.close();
+async function schema10(): Promise<string> {
+  const root = await releasedSchema9();
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  applySchemaMigrations(database, root, registeredMigrations(), 10);
+  database.close();
   return root;
 }
 
@@ -100,6 +101,30 @@ test('a sequential upgrade keeps a verified source backup and commits its checks
   } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('a schema 10 datastore upgrades additively and leaves its released run rows unchanged', async () => {
+  const root = await releasedSchema9();
+  const legacy = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  applySchemaMigrations(legacy, root, registeredMigrations(), 10);
+  populateLinkedEvidence(legacy);
+  const before = {
+    run: { ...(legacy.prepare("SELECT run_id, request_json, evaluation_count, used_calls FROM runs WHERE run_id = 'run-1'").get() as Record<string, unknown>) },
+    packet: { ...(legacy.prepare("SELECT packet_json, packet_fingerprint, result_json FROM evaluations WHERE evaluation_id = 'evaluation-1'").get() as Record<string, unknown>) },
+  };
+  legacy.close();
+  const store = openRunStore(root);
+  store.close();
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
+  try {
+    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 11);
+    assert.deepEqual({
+      run: { ...(database.prepare("SELECT run_id, request_json, evaluation_count, used_calls FROM runs WHERE run_id = 'run-1'").get() as Record<string, unknown>) },
+      packet: { ...(database.prepare("SELECT packet_json, packet_fingerprint, result_json FROM evaluations WHERE evaluation_id = 'evaluation-1'").get() as Record<string, unknown>) },
+    }, before);
+    assert.equal((database.prepare('SELECT COUNT(*) AS count FROM run_visual_assets').get() as { count: number }).count, 0);
+    assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
+  } finally { database.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('a failed upgrade rolls back every schema change and retains the verified backup', async () => {
   const root = await releasedSchema9();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
@@ -124,14 +149,15 @@ test('a failed upgrade rolls back every schema change and retains the verified b
 });
 
 test('migration waits for a prepared launch and does not leave a preflight backup', async () => {
-  const root = await baseline();
+  const root = await schema10();
   const backupsBefore = (await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite'));
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   const now = Date.now();
   try {
     database.prepare(`INSERT INTO runs (run_id, submission_id, request_fingerprint, created_at, created_ms, status, request_json, evaluation_count, max_calls)
       VALUES ('live', 'live-submit', 'fingerprint', ?, ?, 'prepared', '{}', 1, 1)`).run(new Date(now).toISOString(), now);
-    assert.throws(() => applySchemaMigrations(database, root, [...registeredMigrations(), {
+    const migrations = registeredMigrations().filter(({ fromVersion }) => fromVersion !== 10);
+    assert.throws(() => applySchemaMigrations(database, root, [...migrations, {
       id: 'test-v10-to-v11', fromVersion: 10, toVersion: 11, sql: 'CREATE TABLE migration_probe (id TEXT);',
     }], 11, () => now), (error: unknown) => error instanceof RunStoreError && error.code === 'migration_deferred');
     assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10);
@@ -140,12 +166,12 @@ test('migration waits for a prepared launch and does not leave a preflight backu
 });
 
 test('a successor migration refuses a source whose schema differs from its recorded migration chain', async () => {
-  const root = await baseline();
+  const root = await schema10();
   const backupsBefore = (await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite'));
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   try {
     database.exec('DROP INDEX runs_expired_lease');
-    assert.throws(() => applySchemaMigrations(database, root, [...registeredMigrations(),
+    assert.throws(() => applySchemaMigrations(database, root, [...registeredMigrations().filter(({ fromVersion }) => fromVersion !== 10),
       { id: 'test-v10-to-v11', fromVersion: 10, toVersion: 11, sql: 'CREATE TABLE migration_probe (id TEXT);' },
     ], 11), (error: unknown) => error instanceof RunStoreError && error.code === 'datastore_schema_invalid');
     assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10);

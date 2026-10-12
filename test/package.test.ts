@@ -60,6 +60,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(plugin, 'dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
   assert.equal(await exists(path.join(plugin, 'dist/migrations/0000_baseline_v9/migration.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/migrations/0001_image_assets/migration.sql')), true);
+  assert.equal(await exists(path.join(plugin, 'dist/migrations/0002_run_visual_assets/migration.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/queries/load-journey-worker-turn.sql')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/drizzle-orm-Apache-2.0.txt')), true);
   assert.equal(await exists(path.join(plugin, 'dist/licenses/THIRD-PARTY-NOTICES.md')), true);
@@ -127,7 +128,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), false);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
   const initialized = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { readOnly: true });
-  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10); }
+  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 11); }
   finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });

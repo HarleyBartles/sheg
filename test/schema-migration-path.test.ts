@@ -15,4 +15,11 @@ test('migration paths require an explicit one-version step for every predecessor
     { fromVersion: 7, toVersion: 8 },
     { fromVersion: 9, toVersion: 10 },
   ]), false);
+  assert.equal(hasSequentialMigrationPath(9, 11, [
+    { fromVersion: 9, toVersion: 10 },
+    { fromVersion: 10, toVersion: 11 },
+  ]), true);
+  assert.equal(hasSequentialMigrationPath(9, 11, [
+    { fromVersion: 9, toVersion: 11 },
+  ]), false);
 });

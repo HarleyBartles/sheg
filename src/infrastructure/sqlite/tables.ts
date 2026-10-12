@@ -200,9 +200,18 @@ export const imageDerivations = sqliteTable('image_derivations', {
   check('image_derivations_policy_ck', sql`${table.algorithm} = 'lanczos3' AND ${table.policyVersion} = 1`),
 ]);
 
+export const runVisualAssets = sqliteTable('run_visual_assets', {
+  runId: text('run_id').notNull().references(() => runs.runId, { onDelete: 'cascade' }),
+  materialId: text('material_id').notNull(),
+  assetId: text('asset_id').notNull().references(() => imageAssets.assetId, { onDelete: 'restrict' }),
+}, (table) => [
+  primaryKey({ name: 'run_visual_assets_pk', columns: [table.runId, table.materialId] }),
+  index('run_visual_assets_asset_idx').on(table.assetId, table.runId),
+]);
+
 export const sqliteTables = {
   runs, questionGroups, evaluations, journeyRespondents, attempts,
-  attemptEvaluations, evaluationAnswerAttempts, schemaMigrations, imageAssets, imageDerivations,
+  attemptEvaluations, evaluationAnswerAttempts, schemaMigrations, imageAssets, imageDerivations, runVisualAssets,
 } as const;
 
 export type RunRow = typeof runs.$inferSelect;
