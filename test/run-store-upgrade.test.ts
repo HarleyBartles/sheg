@@ -44,17 +44,18 @@ test('inspection rejects a future schema without changing database bytes or side
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('fresh schema initialization records the recognized schema 9 migration identity and checksum', async () => {
+test('fresh schema initialization preserves the v9 baseline identity and records the v10 successor', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-baseline-'));
   try {
     const store = openRunStore(root);
     store.close();
     const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
     try {
-      const row = database.prepare('SELECT version, migration_id, length(checksum) AS checksum_length FROM schema_migrations').get() as { version: number; migration_id: string; checksum_length: number };
-      assert.deepEqual({ version: row.version, migration_id: row.migration_id, checksum_length: row.checksum_length }, {
-        version: 9, migration_id: 'baseline-v9', checksum_length: 64,
-      });
+      const rows = database.prepare('SELECT version, migration_id, length(checksum) AS checksum_length FROM schema_migrations ORDER BY version').all() as Array<{ version: number; migration_id: string; checksum_length: number }>;
+      assert.deepEqual(rows.map(({ version, migration_id, checksum_length }) => ({ version, migration_id, checksum_length })), [
+        { version: 9, migration_id: 'baseline-v9', checksum_length: 64 },
+        { version: 10, migration_id: 'image-assets-v10', checksum_length: 64 },
+      ]);
     } finally { database.close(); }
     const reopened = openRunStore(root);
     reopened.close();

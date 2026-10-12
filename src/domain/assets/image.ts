@@ -14,10 +14,12 @@ export const ImageMetadataSchema = z.object({
   assetId,
   sha256: digest,
   format: ImageFormatSchema,
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
-  bytes: z.number().int().positive(),
-}).strict();
+  width: z.number().int().positive().max(16_000_000),
+  height: z.number().int().positive().max(16_000_000),
+  bytes: z.number().int().positive().max(16 * 1024 * 1024),
+}).strict().refine((metadata) => metadata.width * metadata.height <= 16_000_000, {
+  message: 'Image dimensions exceed the 16 megapixel limit.',
+});
 
 export const ScaleRequestSchema = z.object({
   source: ImageSourceSchema,

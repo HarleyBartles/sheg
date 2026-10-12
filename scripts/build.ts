@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { respondentArchetypeGroups } from '../src/domain/respondents/archetype-catalogue.js';
 import { codecAssetNames } from '../src/infrastructure/images/codec-assets.js';
+import { MIGRATION_ASSET_DIRECTORIES } from '../src/infrastructure/sqlite/schema.js';
 import { syncPackageLockVersion } from './generate-package-lock.js';
 import { syncPluginManifest } from './generate-plugin-manifest.js';
 import { generatePluginPackage } from './generate-plugin-package.js';
@@ -42,12 +43,11 @@ export async function buildPlugin(outputDirectory = path.join(repositoryRoot, 'd
     path.join(credentialDirectory, 'windows-credential.ps1'),
   );
 
-  const migrationDirectory = path.join(resolvedOutputDirectory, 'migrations/0000_baseline_v9');
-  await mkdir(migrationDirectory, { recursive: true });
-  await cp(
-    path.join(repositoryRoot, 'migrations/0000_baseline_v9/migration.sql'),
-    path.join(migrationDirectory, 'migration.sql'),
-  );
+  for (const directory of MIGRATION_ASSET_DIRECTORIES) {
+    const migrationDirectory = path.join(resolvedOutputDirectory, 'migrations', directory);
+    await mkdir(migrationDirectory, { recursive: true });
+    await cp(path.join(repositoryRoot, 'migrations', directory, 'migration.sql'), path.join(migrationDirectory, 'migration.sql'));
+  }
   await cp(
     path.join(repositoryRoot, 'licenses/drizzle-orm-Apache-2.0.txt'),
     path.join(resolvedOutputDirectory, 'licenses/drizzle-orm-Apache-2.0.txt'),

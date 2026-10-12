@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -6,13 +7,30 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { RunStoreError } from '../src/application/run-store.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
-import { applySchemaMigrations, baselineMigration } from '../src/infrastructure/sqlite/schema.js';
+import { applySchemaMigrations, baselineMigration, registeredMigrations } from '../src/infrastructure/sqlite/schema.js';
 
 async function baseline(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-migration-'));
   const store = openRunStore(root);
   store.close();
   return root;
+}
+
+async function releasedSchema9(): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-nine-fixture-'));
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const migration = baselineMigration();
+    for (const statement of migration.sql.split('--> statement-breakpoint').map((value) => value.trim()).filter(Boolean)) database.exec(statement);
+    database.exec('PRAGMA user_version = 9');
+    const fingerprint = createHash('sha256').update(JSON.stringify(database.prepare(`SELECT type, name, tbl_name AS tableName, sql FROM sqlite_schema
+      WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name, tbl_name`).all())).digest('hex');
+    const checksum = createHash('sha256').update(migration.sql).digest('hex');
+    database.prepare('INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (9, ?, ?, ?, ?)')
+      .run(migration.id, checksum, fingerprint, '2026-10-05T00:00:00.000Z');
+    return root;
+  } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
+  finally { database.close(); }
 }
 
 function populateLinkedEvidence(database: DatabaseSync): void {
@@ -32,39 +50,17 @@ function populateLinkedEvidence(database: DatabaseSync): void {
   database.prepare(`INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES ('run-1', 'evaluation-1', 'attempt-1')`).run();
 }
 
-const rebuildQuestionGroups = `CREATE TABLE question_groups_new (
-  group_id TEXT NOT NULL PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-  ordinal INTEGER NOT NULL,
-  context_id TEXT NOT NULL,
-  respondent_id TEXT NOT NULL,
-  state_json TEXT NOT NULL,
-  question_ids_json TEXT NOT NULL,
-  display_label TEXT NOT NULL,
-  UNIQUE (run_id, ordinal),
-  UNIQUE (run_id, group_id),
-  CHECK (ordinal >= 0)
-);
-INSERT INTO question_groups_new (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json, display_label)
-  SELECT group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json, 'preserved' FROM question_groups;
-DROP TABLE question_groups;
-ALTER TABLE question_groups_new RENAME TO question_groups;`;
-
 test('a sequential upgrade keeps a verified source backup and commits its checksum ledger with the schema step', async () => {
-  const root = await baseline();
+  const root = await releasedSchema9();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   populateLinkedEvidence(database);
-  const oldConnection = openRunStore(root);
   try {
-    applySchemaMigrations(database, root, [baselineMigration(), {
-      id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10,
-      sql: rebuildQuestionGroups,
-    }], 10);
+    applySchemaMigrations(database, root, registeredMigrations(), 10);
     assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10);
     const migrationRows = database.prepare('SELECT version, migration_id, length(checksum) AS checksum_length, length(schema_fingerprint) AS fingerprint_length FROM schema_migrations ORDER BY version').all() as Array<{ version: number; migration_id: string; checksum_length: number; fingerprint_length: number }>;
     assert.deepEqual(migrationRows.map(({ version, migration_id, checksum_length, fingerprint_length }) => ({ version, migration_id, checksum_length, fingerprint_length })), [
       { version: 9, migration_id: 'baseline-v9', checksum_length: 64, fingerprint_length: 64 },
-      { version: 10, migration_id: 'test-v9-to-v10', checksum_length: 64, fingerprint_length: 64 },
+      { version: 10, migration_id: 'image-assets-v10', checksum_length: 64, fingerprint_length: 64 },
     ]);
     assert.equal((database.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys, 1);
     assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
@@ -80,8 +76,7 @@ test('a sequential upgrade keeps a verified source backup and commits its checks
       membership_attempt_id: 'attempt-1', winner_attempt_id: 'attempt-1',
       result_json: '{"formatVersion":1,"kind":"decision-value","value":{"type":"noul","noul":0.5}}',
     }]);
-    assert.equal((database.prepare('SELECT display_label FROM question_groups WHERE group_id = ?').get('group-1') as { display_label: string }).display_label, 'preserved');
-    assert.throws(() => oldConnection.getStatus('missing'), (error: unknown) => error instanceof RunStoreError && error.code === 'datastore_schema_changed');
+    assert.equal((database.prepare('SELECT COUNT(*) AS count FROM image_assets').get() as { count: number }).count, 0);
     const backups = (await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite'));
     assert.equal(backups.length, 1);
     const backup = new DatabaseSync(path.join(root, 'backups', backups[0]!), { readOnly: true });
@@ -90,52 +85,71 @@ test('a sequential upgrade keeps a verified source backup and commits its checks
       assert.equal((backup.prepare('PRAGMA integrity_check').get() as { integrity_check: string }).integrity_check, 'ok');
       assert.equal((backup.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 1);
       assert.equal((backup.prepare('SELECT COUNT(*) AS count FROM evaluation_answer_attempts').get() as { count: number }).count, 1);
+      const preserved = backup.prepare(`SELECT r.request_json, qg.state_json, e.result_json, a.execution_json, winner.attempt_id
+        FROM runs r JOIN question_groups qg ON qg.run_id = r.run_id
+        JOIN evaluations e ON e.run_id = r.run_id AND e.group_id = qg.group_id
+        JOIN attempts a ON a.run_id = r.run_id AND a.evaluation_id = e.evaluation_id
+        JOIN evaluation_answer_attempts winner ON winner.run_id = r.run_id AND winner.evaluation_id = e.evaluation_id
+        WHERE r.run_id = 'run-1'`).get() as Record<string, unknown>;
+      assert.deepEqual({ ...preserved }, {
+        request_json: '{}', state_json: '{}',
+        result_json: '{"formatVersion":1,"kind":"decision-value","value":{"type":"noul","noul":0.5}}',
+        execution_json: '{}', attempt_id: 'attempt-1',
+      });
     } finally { backup.close(); }
-  } finally { oldConnection.close(); database.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('a failed upgrade rolls back every schema change and retains the verified backup', async () => {
-  const root = await baseline();
+  const root = await releasedSchema9();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  populateLinkedEvidence(database);
   try {
-    assert.throws(() => applySchemaMigrations(database, root, [baselineMigration(), {
-      id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10,
-      sql: 'CREATE TABLE migration_probe (id TEXT PRIMARY KEY NOT NULL); CREATE TABLE runs (invalid TEXT);',
+    const migrations = registeredMigrations();
+    const imageAssetMigration = migrations[1]!;
+    assert.throws(() => applySchemaMigrations(database, root, [migrations[0]!, {
+      ...imageAssetMigration,
+      sql: `${imageAssetMigration.sql}\n; CREATE TABLE runs (invalid TEXT);`,
     }], 10), (error: unknown) => error instanceof RunStoreError && error.code === 'migration_failed');
     assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9);
-    assert.equal(database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'migration_probe'").get(), undefined);
+    assert.equal(database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'image_assets'").get(), undefined);
+    assert.equal((database.prepare("SELECT COUNT(*) AS count FROM runs WHERE run_id = 'run-1'").get() as { count: number }).count, 1);
     assert.equal((database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 1);
     const backups = (await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite'));
     assert.equal(backups.length, 1);
+    const backup = new DatabaseSync(path.join(root, 'backups', backups[0]!), { readOnly: true });
+    try { assert.equal((backup.prepare("SELECT COUNT(*) AS count FROM runs WHERE run_id = 'run-1'").get() as { count: number }).count, 1); }
+    finally { backup.close(); }
   } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('migration waits for a prepared launch and does not leave a preflight backup', async () => {
   const root = await baseline();
+  const backupsBefore = (await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite'));
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   const now = Date.now();
   try {
     database.prepare(`INSERT INTO runs (run_id, submission_id, request_fingerprint, created_at, created_ms, status, request_json, evaluation_count, max_calls)
       VALUES ('live', 'live-submit', 'fingerprint', ?, ?, 'prepared', '{}', 1, 1)`).run(new Date(now).toISOString(), now);
-    assert.throws(() => applySchemaMigrations(database, root, [baselineMigration(), {
-      id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10, sql: 'CREATE TABLE migration_probe (id TEXT);',
-    }], 10, () => now), (error: unknown) => error instanceof RunStoreError && error.code === 'migration_deferred');
-    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9);
-    assert.deepEqual((await readdir(root)).filter((name) => name === 'backups'), []);
+    assert.throws(() => applySchemaMigrations(database, root, [...registeredMigrations(), {
+      id: 'test-v10-to-v11', fromVersion: 10, toVersion: 11, sql: 'CREATE TABLE migration_probe (id TEXT);',
+    }], 11, () => now), (error: unknown) => error instanceof RunStoreError && error.code === 'migration_deferred');
+    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10);
+    assert.deepEqual((await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite')), backupsBefore);
   } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('a successor migration refuses a source whose schema differs from its recorded migration chain', async () => {
   const root = await baseline();
+  const backupsBefore = (await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite'));
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
   try {
     database.exec('DROP INDEX runs_expired_lease');
-    assert.throws(() => applySchemaMigrations(database, root, [
-      baselineMigration(),
-      { id: 'test-v9-to-v10', fromVersion: 9, toVersion: 10, sql: 'CREATE TABLE migration_probe (id TEXT);' },
-    ], 10), (error: unknown) => error instanceof RunStoreError && error.code === 'datastore_schema_invalid');
-    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 9);
+    assert.throws(() => applySchemaMigrations(database, root, [...registeredMigrations(),
+      { id: 'test-v10-to-v11', fromVersion: 10, toVersion: 11, sql: 'CREATE TABLE migration_probe (id TEXT);' },
+    ], 11), (error: unknown) => error instanceof RunStoreError && error.code === 'datastore_schema_invalid');
+    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 10);
     assert.equal(database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'migration_probe'").get(), undefined);
-    assert.deepEqual((await readdir(root)).filter((name) => name === 'backups'), []);
+    assert.deepEqual((await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite')), backupsBefore);
   } finally { database.close(); await rm(root, { recursive: true, force: true }); }
 });

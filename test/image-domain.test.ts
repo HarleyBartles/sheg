@@ -14,6 +14,7 @@ test('requires positive integer scaling targets and rejects edits outside the sc
   assert.equal(ScaleRequestSchema.safeParse({ source: { assetId: `sha256:${'c'.repeat(64)}` }, maxWidth: 0 }).success, false);
   assert.equal(ScaleRequestSchema.safeParse({ source: { assetId: `sha256:${'c'.repeat(64)}` }, crop: true }).success, false);
   assert.equal(ImageMetadataSchema.safeParse({ assetId: `sha256:${'d'.repeat(64)}`, sha256: 'd'.repeat(64), format: 'gif', width: 1, height: 1, bytes: 1 }).success, false);
+  assert.equal(ImageMetadataSchema.safeParse({ assetId: `sha256:${'d'.repeat(64)}`, sha256: 'd'.repeat(64), format: 'png', width: 5_000, height: 5_000, bytes: 1 }).success, false);
 });
 
 test('image errors expose bounded stable codes and messages', () => {

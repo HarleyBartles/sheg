@@ -23,6 +23,7 @@ test('build replaces the distribution with only current runtime outputs', async 
   assert.equal(await readFile(path.join(outputDirectory, 'queries/load-journey-worker-turn.sql'), 'utf8'), await readFile(new URL('../src/infrastructure/sqlite/queries/load-journey-worker-turn.sql', import.meta.url), 'utf8'));
   assert.equal(await readFile(path.join(outputDirectory, 'credentials/windows-credential.ps1'), 'utf8'), await readFile(new URL('../src/infrastructure/credentials/windows-credential.ps1', import.meta.url), 'utf8'));
   assert.equal(await readFile(path.join(outputDirectory, 'migrations/0000_baseline_v9/migration.sql'), 'utf8'), await readFile(new URL('../migrations/0000_baseline_v9/migration.sql', import.meta.url), 'utf8'));
+  assert.equal(await readFile(path.join(outputDirectory, 'migrations/0001_image_assets/migration.sql'), 'utf8'), await readFile(new URL('../migrations/0001_image_assets/migration.sql', import.meta.url), 'utf8'));
   assert.equal(await readFile(path.join(outputDirectory, 'licenses/drizzle-orm-Apache-2.0.txt'), 'utf8'), await readFile(new URL('../licenses/drizzle-orm-Apache-2.0.txt', import.meta.url), 'utf8'));
   assert.deepEqual((await readdir(path.join(outputDirectory, 'codec-assets'))).sort(), [...codecAssetNames].sort());
   for (const name of codecAssetNames) assert.deepEqual(await readFile(path.join(outputDirectory, 'codec-assets', name)), await readFile(new URL(`../node_modules/@jsquash/${codecSourceFor(name)}`, import.meta.url)));

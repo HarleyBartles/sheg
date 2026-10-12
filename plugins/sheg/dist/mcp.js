@@ -41529,6 +41529,37 @@ var schemaMigrations = sqliteTable("schema_migrations", {
   unique("schema_migrations_version_uq").on(table.version),
   check2("schema_migrations_version_ck", sql`${table.version} > 0`)
 ]);
+var imageAssets = sqliteTable("image_assets", {
+  assetId: text("asset_id").notNull(),
+  sha256: text("sha256").notNull(),
+  format: text("format", { enum: ["png", "jpeg", "webp"] }).notNull(),
+  width: integer2("width").notNull(),
+  height: integer2("height").notNull(),
+  byteLength: integer2("byte_length").notNull(),
+  content: blob("content", { mode: "buffer" }).notNull()
+}, (table) => [
+  primaryKey({ name: "image_assets_pk", columns: [table.assetId] }),
+  unique("image_assets_sha256_uq").on(table.sha256),
+  check2("image_assets_digest_ck", sql`${table.assetId} = 'sha256:' || ${table.sha256} AND length(${table.sha256}) = 64 AND ${table.sha256} NOT GLOB '*[^a-f0-9]*'`),
+  check2("image_assets_format_ck", sql`${table.format} IN ('png', 'jpeg', 'webp')`),
+  check2("image_assets_dimensions_ck", sql`${table.width} > 0 AND ${table.height} > 0 AND ${table.width} * ${table.height} <= 16000000`),
+  check2("image_assets_content_ck", sql`${table.byteLength} > 0 AND ${table.byteLength} <= 16777216 AND length(${table.content}) = ${table.byteLength}`)
+]);
+var imageDerivations = sqliteTable("image_derivations", {
+  sourceAssetId: text("source_asset_id").notNull().references(() => imageAssets.assetId, { onDelete: "restrict" }),
+  candidateAssetId: text("candidate_asset_id").notNull().references(() => imageAssets.assetId, { onDelete: "restrict" }),
+  width: integer2("width").notNull(),
+  height: integer2("height").notNull(),
+  algorithm: text("algorithm", { enum: ["lanczos3"] }).notNull(),
+  policyVersion: integer2("policy_version").notNull(),
+  createdAt: text("created_at").notNull()
+}, (table) => [
+  primaryKey({ name: "image_derivations_pk", columns: [table.candidateAssetId] }),
+  index("image_derivations_source_idx").on(table.sourceAssetId, table.candidateAssetId),
+  check2("image_derivations_assets_ck", sql`${table.sourceAssetId} <> ${table.candidateAssetId}`),
+  check2("image_derivations_dimensions_ck", sql`${table.width} > 0 AND ${table.height} > 0`),
+  check2("image_derivations_policy_ck", sql`${table.algorithm} = 'lanczos3' AND ${table.policyVersion} = 1`)
+]);
 var sqliteTables = {
   runs,
   questionGroups,
@@ -41537,7 +41568,9 @@ var sqliteTables = {
   attempts,
   attemptEvaluations,
   evaluationAnswerAttempts,
-  schemaMigrations
+  schemaMigrations,
+  imageAssets,
+  imageDerivations
 };
 
 // src/infrastructure/sqlite/work-policy.ts
@@ -41547,8 +41580,9 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = BASELINE_SCHEMA_VERSION;
+var SCHEMA_VERSION = 10;
 var BASELINE_MIGRATION_ID = "baseline-v9";
+var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -41569,8 +41603,17 @@ function baselineMigration() {
     sql: readFileSync(baselineSqlPath(), "utf8")
   };
 }
+function imageAssetMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0001_image_assets/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0001_image_assets/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 10 image asset migration is missing from this Sheg installation.");
+  return { id: IMAGE_ASSET_MIGRATION_ID, fromVersion: 9, toVersion: 10, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration()];
+  return [baselineMigration(), imageAssetMigration()];
 }
 function migrationChecksum(migration) {
   return createHash4("sha256").update(migration.sql).digest("hex");
@@ -41792,7 +41835,7 @@ function applySchemaMigrations(database, dataRoot, migrations, targetVersion, no
         database.exec(`PRAGMA user_version = ${migration.toVersion}`);
         database.prepare("INSERT INTO schema_migrations (version, migration_id, checksum, schema_fingerprint, applied_at) VALUES (?, ?, ?, ?, ?)").run(migration.toVersion, migration.id, migrationChecksum(migration), schemaFingerprint(database), new Date(now()).toISOString());
         checkDatabaseIntegrity(database);
-        validateSchemaShape(database);
+        if (migration.toVersion === SCHEMA_VERSION) validateSchemaShape(database);
         database.exec("COMMIT");
       } catch (error62) {
         try {

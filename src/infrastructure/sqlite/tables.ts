@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
-  check, foreignKey, index, integer, primaryKey, sqliteTable, text, unique,
+  blob, check, foreignKey, index, integer, primaryKey, sqliteTable, text, unique,
 } from 'drizzle-orm/sqlite-core';
 import { attemptStatuses, evaluationStatuses, journeyRespondentStatuses, runStatuses } from '../../domain/run/lifecycle.js';
 
@@ -167,9 +167,42 @@ export const schemaMigrations = sqliteTable('schema_migrations', {
   check('schema_migrations_version_ck', sql`${table.version} > 0`),
 ]);
 
+export const imageAssets = sqliteTable('image_assets', {
+  assetId: text('asset_id').notNull(),
+  sha256: text('sha256').notNull(),
+  format: text('format', { enum: ['png', 'jpeg', 'webp'] }).notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  byteLength: integer('byte_length').notNull(),
+  content: blob('content', { mode: 'buffer' }).notNull(),
+}, (table) => [
+  primaryKey({ name: 'image_assets_pk', columns: [table.assetId] }),
+  unique('image_assets_sha256_uq').on(table.sha256),
+  check('image_assets_digest_ck', sql`${table.assetId} = 'sha256:' || ${table.sha256} AND length(${table.sha256}) = 64 AND ${table.sha256} NOT GLOB '*[^a-f0-9]*'`),
+  check('image_assets_format_ck', sql`${table.format} IN ('png', 'jpeg', 'webp')`),
+  check('image_assets_dimensions_ck', sql`${table.width} > 0 AND ${table.height} > 0 AND ${table.width} * ${table.height} <= 16000000`),
+  check('image_assets_content_ck', sql`${table.byteLength} > 0 AND ${table.byteLength} <= 16777216 AND length(${table.content}) = ${table.byteLength}`),
+]);
+
+export const imageDerivations = sqliteTable('image_derivations', {
+  sourceAssetId: text('source_asset_id').notNull().references(() => imageAssets.assetId, { onDelete: 'restrict' }),
+  candidateAssetId: text('candidate_asset_id').notNull().references(() => imageAssets.assetId, { onDelete: 'restrict' }),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  algorithm: text('algorithm', { enum: ['lanczos3'] }).notNull(),
+  policyVersion: integer('policy_version').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  primaryKey({ name: 'image_derivations_pk', columns: [table.candidateAssetId] }),
+  index('image_derivations_source_idx').on(table.sourceAssetId, table.candidateAssetId),
+  check('image_derivations_assets_ck', sql`${table.sourceAssetId} <> ${table.candidateAssetId}`),
+  check('image_derivations_dimensions_ck', sql`${table.width} > 0 AND ${table.height} > 0`),
+  check('image_derivations_policy_ck', sql`${table.algorithm} = 'lanczos3' AND ${table.policyVersion} = 1`),
+]);
+
 export const sqliteTables = {
   runs, questionGroups, evaluations, journeyRespondents, attempts,
-  attemptEvaluations, evaluationAnswerAttempts, schemaMigrations,
+  attemptEvaluations, evaluationAnswerAttempts, schemaMigrations, imageAssets, imageDerivations,
 } as const;
 
 export type RunRow = typeof runs.$inferSelect;
