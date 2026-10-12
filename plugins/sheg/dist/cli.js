@@ -22912,10 +22912,27 @@ function isImageMaterial(item) {
 }
 
 // src/domain/decision/prompt.ts
+var visualEvidenceSchema = external_exports.object({
+  mode: external_exports.enum(["pixels", "described"]),
+  provider: providerKindSchema,
+  model: external_exports.string().min(1),
+  materials: external_exports.array(external_exports.object({
+    materialId: external_exports.string().min(1),
+    assetId: external_exports.string().min(1),
+    sha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
+    altText: external_exports.string().min(1),
+    caption: external_exports.string().min(1).optional()
+  }).strict()).min(1).max(4)
+}).strict().superRefine((evidence, context) => {
+  for (const [index2, material] of evidence.materials.entries()) if (material.assetId !== `sha256:${material.sha256}`) {
+    context.addIssue({ code: "custom", path: ["materials", index2, "assetId"], message: "Visual evidence asset ID must match its SHA-256 digest." });
+  }
+});
 var promptHistoryEventSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("exposure"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), itemId: external_exports.string().min(1) }).strict(),
   external_exports.object({ type: external_exports.literal("choice"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), choice: external_exports.string().min(1) }).strict(),
-  external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), result: decisionValueSchema }).strict()
+  external_exports.object({ type: external_exports.literal("response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), result: decisionValueSchema }).strict(),
+  external_exports.object({ type: external_exports.literal("visual-response"), sequence: external_exports.number().int().nonnegative(), nodeId: external_exports.string().min(1), taskId: external_exports.string().min(1), result: decisionValueSchema, visualEvidence: visualEvidenceSchema }).strict()
 ]);
 var trajectoryChoiceSchema = external_exports.object({
   taskId: external_exports.string().min(1),
@@ -22924,9 +22941,9 @@ var trajectoryChoiceSchema = external_exports.object({
   exposedItemIds: external_exports.array(external_exports.string().min(1))
 }).strict();
 var trajectoryResponseSchema = external_exports.discriminatedUnion("type", [
-  external_exports.object({ ...trajectoryChoiceSchema.shape, type: external_exports.literal("choice"), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)).optional(), confidence: external_exports.number().finite().min(0).max(1).optional() }).strict(),
-  external_exports.object({ type: external_exports.literal("score"), taskId: external_exports.string().min(1), score: external_exports.number().finite(), meaning: external_exports.string(), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), legend: external_exports.record(external_exports.string(), external_exports.string()), confidence: external_exports.number().finite().min(0).max(1).optional(), exposedItemIds: external_exports.array(external_exports.string().min(1)) }).strict(),
-  external_exports.object({ type: external_exports.literal("noul"), taskId: external_exports.string().min(1), noul: external_exports.number().finite().min(0).max(1), proposition: external_exports.string(), exposedItemIds: external_exports.array(external_exports.string().min(1)) }).strict()
+  external_exports.object({ ...trajectoryChoiceSchema.shape, type: external_exports.literal("choice"), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)).optional(), confidence: external_exports.number().finite().min(0).max(1).optional(), visualEvidence: visualEvidenceSchema.optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("score"), taskId: external_exports.string().min(1), score: external_exports.number().finite(), meaning: external_exports.string(), probabilities: external_exports.record(external_exports.string(), external_exports.number().finite().min(0).max(1)), legend: external_exports.record(external_exports.string(), external_exports.string()), confidence: external_exports.number().finite().min(0).max(1).optional(), exposedItemIds: external_exports.array(external_exports.string().min(1)), visualEvidence: visualEvidenceSchema.optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("noul"), taskId: external_exports.string().min(1), noul: external_exports.number().finite().min(0).max(1), proposition: external_exports.string(), exposedItemIds: external_exports.array(external_exports.string().min(1)), visualEvidence: visualEvidenceSchema.optional() }).strict()
 ]);
 var trajectorySummarySchema = external_exports.object({
   version: external_exports.literal(1),
@@ -22951,9 +22968,10 @@ function questionForTask(task) {
   return { type: "noul", id: task.id, instructions: task.instructions, ...task.criteria === void 0 ? {} : { criteria: { ...task.criteria } }, ...task.visual ? { visual: task.visual } : {} };
 }
 var promptContract = {
-  version: 9,
+  version: 10,
   stateFields: ["respondent.profile", "encounteredItems", "materialOrder", "trajectory"],
   visualBindings: "question-scoped image material IDs; image descriptors are carried as semantic context and pixel payloads are provider-specific",
+  visualHistory: "visual responses carry the exact supplied image description, caption, typed answer, provider and model as structured semantic evidence without carrying image bytes",
   encounteredMaterial: "all items exposed through the current turn, unique by item ID in first-exposure order",
   trajectory: ["prior task IDs and typed responses with meanings", "prior exposure IDs", "event counts and range"],
   responseHistory: "per-task include or omit; omitted legacy setting includes prior responses",
@@ -22966,6 +22984,7 @@ var promptContract = {
   decisionSemantics: "Choose exactly one offered stable option ID according to its description."
 };
 var v6PromptContractHash = "a39d72d1ba77b0560dac5b7ccedf07b72e80b9d7bc1330679acd9c209e831526";
+var previousVisualPromptContractHash = "671217c23a449181a29c50c826f16e079a753e5c134f9bbcc63d55932fdbc016";
 function finishTrajectory(body) {
   let payloadUtf8Bytes = 0;
   for (; ; ) {
@@ -23067,20 +23086,21 @@ function compactTrajectory(arm, history) {
       continue;
     }
     const task = arm.tasks.find((candidate) => candidate.id === event.taskId);
-    const result = event.type === "response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
+    const result = event.type === "response" || event.type === "visual-response" ? event.result : { type: "choice", choice: event.choice, probabilities: {} };
+    const visualEvidence = event.type === "visual-response" ? event.visualEvidence : void 0;
     if (!task) throw new Error(`Unknown task ${event.taskId} in journey history.`);
     if (result.type === "choice") {
       const choiceMeaning = task.type !== "score" && task.type !== "noul" ? task.options[result.choice] : void 0;
       if (choiceMeaning === void 0) throw new Error(`Unknown choice ${result.choice} for task ${event.taskId} in journey history.`);
-      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence } };
+      const response = { type: "choice", taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds], ...result.probabilities === void 0 ? {} : { probabilities: result.probabilities }, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, ...visualEvidence ? { visualEvidence } : {} };
       responses.push(response);
       choices.push({ taskId: task.id, choiceId: result.choice, choiceMeaning, exposedItemIds: [...exposureIds] });
     } else if (result.type === "score") {
       if (task.type !== "score" || result.legend[String(Math.round(result.score))] === void 0) throw new Error(`Score response does not match task ${event.taskId}.`);
-      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds] });
+      responses.push({ type: "score", taskId: task.id, score: result.score, meaning: `Expected rubric level ${result.score}; rubric: ${task.rubric.join(" | ")}`, probabilities: result.probabilities, legend: result.legend, ...result.confidence === void 0 ? {} : { confidence: result.confidence }, exposedItemIds: [...exposureIds], ...visualEvidence ? { visualEvidence } : {} });
     } else {
       if (task.type !== "noul") throw new Error(`Noul response does not match task ${event.taskId}.`);
-      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds] });
+      responses.push({ type: "noul", taskId: task.id, noul: result.noul, proposition: task.instructions, exposedItemIds: [...exposureIds], ...visualEvidence ? { visualEvidence } : {} });
     }
   }
   const body = {
@@ -23101,7 +23121,7 @@ function compileDecisionPacketForCompiler(arm, profile, taskId, history, compile
   if (compilerFingerprint === v6PromptContractHash) {
     return compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, "v6");
   }
-  if (compilerFingerprint === promptContractHash()) {
+  if (compilerFingerprint === previousVisualPromptContractHash || compilerFingerprint === promptContractHash()) {
     return compileDecisionPacket(arm, profile, taskId, history);
   }
   throw new Error(`Unsupported journey compiler identity ${compilerFingerprint}.`);
@@ -23115,7 +23135,7 @@ function compileDecisionPacketWithMaterialPolicy(arm, profile, taskId, history, 
     if (arm.presentation.kind === "sequence") {
       itemIds = arm.items.map((item) => item.id);
     } else {
-      const lastDecisionIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response");
+      const lastDecisionIndex = history.findLastIndex((event) => event.type === "choice" || event.type === "response" || event.type === "visual-response");
       itemIds = history.slice(lastDecisionIndex + 1).filter((event) => event.type === "exposure").map((event) => event.itemId);
     }
   } else {
@@ -32831,9 +32851,17 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
   if (outcome.kind === "answered") {
     const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
     const answerEvent = transition.state.events.slice(priorEvents.length).findLast(
-      (event) => event.type === "response" && event.nodeId === nodeId
+      (event) => (event.type === "response" || event.type === "visual-response") && event.nodeId === nodeId
     );
-    if (!answerEvent || answerEvent.taskId !== packet.question.id || !context.sameDecisionValue(answerEvent.result, result)) {
+    const expectedVisualMaterials = packet.question.visual?.materialIds.map((id) => packet.visualMaterials?.find((material) => material.id === id)).flatMap((material) => material ? [{
+      materialId: material.id,
+      assetId: material.asset.assetId,
+      sha256: material.asset.sha256,
+      altText: material.altText,
+      ...material.caption === void 0 ? {} : { caption: material.caption }
+    }] : []) ?? [];
+    const visualEventMatches = packet.question.visual === void 0 ? answerEvent?.type === "response" : answerEvent?.type === "visual-response" && answerEvent.visualEvidence.mode === packet.question.visual.mode && answerEvent.visualEvidence.provider === result.provider && answerEvent.visualEvidence.model === result.model && JSON.stringify(answerEvent.visualEvidence.materials) === JSON.stringify(expectedVisualMaterials);
+    if (!answerEvent || answerEvent.taskId !== packet.question.id || !visualEventMatches || !context.sameDecisionValue(answerEvent.result, result)) {
       throw new RunStoreError("journey_transition_conflict", "Journey transition must append the exact typed answer for this turn.");
     }
     const routeAddition = transition.state.route.slice(priorRoute.length);

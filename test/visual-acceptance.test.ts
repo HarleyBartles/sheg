@@ -12,6 +12,8 @@ import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js'
 import { createRunRuntime } from '../src/infrastructure/run-runtime.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
+import { hashCanonical } from '../src/infrastructure/identity.js';
+import { compileDecisionPacketForCompiler } from '../src/domain/decision/prompt.js';
 
 const bytesPromise = readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
 const config = { kind: 'clef' as const, accountId: '3327878972ea82e6b454069bba62f3d9', model: 'clef' as const, timeoutMs: 1000 };
@@ -228,6 +230,162 @@ test('journey acceptance retains a later image while its initial text packet sta
         { material_id: 'portrait', asset_id: fixture.metadata.assetId },
       ]);
     } finally { database.close(); }
+  } finally { await fixture.close(); }
+});
+
+test('a resumed visual journey carries its supplied image facts and typed Clef reaction forward without replaying pixels', async () => {
+  const fixture = await setup();
+  const bodies: Array<{ images: string[]; questions: Record<string, unknown>; state: Record<string, unknown> }> = [];
+  try {
+    const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
+    const journey = {
+      kind: 'journey' as const,
+      respondents: [{ id: 'reader-a', intent: 'Read the article', context: 'Curious', desired_outcome: 'Understand the point', engagement_cues: 'Examples', friction_cues: 'Distraction' }],
+      journey: {
+        id: 'article', label: 'Article with a visual insertion',
+        items: [
+          { id: 'section-three', text: 'The section explains the evidence.' },
+          { id: 'portrait', type: 'image' as const, text: '', altText: 'A determined specialist in a teal coat checks a ledger.', caption: 'Writ prepares the records.', asset: fixture.metadata },
+          { id: 'section-four', text: 'The next section explains the recommendation.' },
+        ],
+        tasks: [
+          { id: 'read-section-three', type: 'choice' as const, instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } },
+          { id: 'image-fit', type: 'choice' as const, instructions: 'Does the image support the next section?', options: { yes: 'It supports the section', no: 'It distracts from the section' }, visual: { mode: 'pixels' as const, materialIds: ['portrait'] } },
+          { id: 'image-confirmed', type: 'choice' as const, instructions: 'Does seeing the same image again still support the section?', options: { yes: 'It still supports the section', no: 'It now feels repetitive' }, visual: { mode: 'pixels' as const, materialIds: ['portrait'] } },
+          { id: 'image-described', type: 'choice' as const, instructions: 'Does the supplied description communicate the image clearly?', options: { yes: 'The description is clear', no: 'The description is unclear' }, visual: { mode: 'described' as const, materialIds: ['portrait'] } },
+          { id: 'read-section-four', type: 'choice' as const, instructions: 'Would you continue after this section?', options: { continue: 'Continue', leave: 'Leave' } },
+        ],
+        presentation: { kind: 'graph' as const, entryNodeId: 'expose-three', maxDecisions: 5, nodes: [
+          { id: 'expose-three', kind: 'expose' as const, itemId: 'section-three' },
+          { id: 'ask-three', kind: 'ask' as const, taskId: 'read-section-three' },
+          { id: 'expose-portrait', kind: 'expose' as const, itemId: 'portrait' },
+          { id: 'ask-portrait', kind: 'ask' as const, taskId: 'image-fit' },
+          { id: 'ask-portrait-again', kind: 'ask' as const, taskId: 'image-confirmed' },
+          { id: 'ask-described', kind: 'ask' as const, taskId: 'image-described' },
+          { id: 'expose-four', kind: 'expose' as const, itemId: 'section-four' },
+          { id: 'ask-four', kind: 'ask' as const, taskId: 'read-section-four' },
+          { id: 'complete', kind: 'terminal' as const, outcome: 'completed' },
+          { id: 'left', kind: 'terminal' as const, outcome: 'left' },
+        ], transitions: [
+          { fromNodeId: 'expose-three', toNodeId: 'ask-three' },
+          { fromNodeId: 'ask-three', optionId: 'continue', toNodeId: 'expose-portrait' },
+          { fromNodeId: 'ask-three', optionId: 'leave', toNodeId: 'left' },
+          { fromNodeId: 'expose-portrait', toNodeId: 'ask-portrait' },
+          { fromNodeId: 'ask-portrait', optionId: 'yes', toNodeId: 'ask-portrait-again' },
+          { fromNodeId: 'ask-portrait', optionId: 'no', toNodeId: 'ask-portrait-again' },
+          { fromNodeId: 'ask-portrait-again', optionId: 'yes', toNodeId: 'ask-described' },
+          { fromNodeId: 'ask-portrait-again', optionId: 'no', toNodeId: 'ask-described' },
+          { fromNodeId: 'ask-described', optionId: 'yes', toNodeId: 'expose-four' },
+          { fromNodeId: 'ask-described', optionId: 'no', toNodeId: 'expose-four' },
+          { fromNodeId: 'expose-four', toNodeId: 'ask-four' },
+          { fromNodeId: 'ask-four', optionId: 'continue', toNodeId: 'complete' },
+          { fromNodeId: 'ask-four', optionId: 'leave', toNodeId: 'left' },
+        ] },
+      },
+      provider: config, maxCalls: 6,
+    };
+    const admission = await prepareRun(journey, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(admission.journey, JSON.stringify(admission.inspection.problems));
+    const accepted = fixture.store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
+    let call = 0;
+    const fetchRequest = (async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as typeof bodies[number]);
+      const current = call++;
+      const id = ['read-section-three', 'image-fit', 'image-confirmed', 'image-described', 'read-section-four'][Math.min(current, 4)]!;
+      if (current === 4) return Response.json({ success: false }, { status: 403 });
+      const choice = id.startsWith('image-') ? 'yes' : 'continue';
+      const options = id.startsWith('image-') ? ['yes', 'no'] : ['continue', 'leave'];
+      return Response.json({ success: true, result: { model: 'clef', answers: { [id]: { type: 'choice', choice, probabilities: { [options[0]!]: 0.9, [options[1]!]: 0.1 } } }, usage: { input_tokens: 40, output_tokens: 0 } }, errors: [], messages: [] });
+    }) as typeof fetch;
+    const providerFactory = (_config: unknown, options?: { imageResolver?: typeof imageResolver }) => new ClefProvider(config, fetchRequest,
+      { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) });
+    await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, providerFactory, { imageResolver });
+    assert.equal(bodies.length, 5);
+    assert.equal(fixture.store.answers(accepted.run.runId).items.find(({ questionId }) => questionId === 'image-fit')?.status, 'answered');
+    assert.equal(fixture.store.getStatus(accepted.run.runId).status, 'failed');
+    assert.equal(fixture.store.resume(accepted.run.runId, Date.now()).started, true);
+    await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, providerFactory, { imageResolver });
+    assert.equal(bodies.length, 6);
+    assert.deepEqual(bodies.map(({ images }) => images?.length ?? 0), [0, 1, 1, 0, 0, 0]);
+    assert.deepEqual(bodies[0]?.state.visualMaterials, undefined);
+    assert.equal(JSON.stringify(bodies[1]?.state).includes('A determined specialist'), false);
+    const repeatedPixelState = bodies[2]?.state as { visualMaterials: Array<Record<string, unknown>>; trajectory: { responses: Array<Record<string, unknown>> } };
+    assert.equal(repeatedPixelState.visualMaterials[0]?.altText, undefined);
+    assert.equal((repeatedPixelState.trajectory.responses[1]?.visualEvidence as { materials: Array<{ altText: string }> }).materials[0]?.altText, 'A determined specialist in a teal coat checks a ledger.');
+    assert.deepEqual(bodies[3]?.images, undefined);
+    assert.equal((bodies[3]?.state as { visualMaterials: Array<Record<string, unknown>> }).visualMaterials[0]?.altText, 'A determined specialist in a teal coat checks a ledger.');
+    assert.equal(bodies[4]?.state.visualMaterials, undefined);
+    assert.equal(bodies[5]?.state.visualMaterials, undefined);
+    const state = bodies[4]?.state as { materialOrder: string[]; encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: Array<Record<string, unknown>> } };
+    assert.deepEqual(state.materialOrder, ['section-three', 'portrait', 'section-four']);
+    assert.deepEqual(state.encounteredItems.map(({ id }) => id), ['section-three', 'section-four']);
+    assert.deepEqual(state.trajectory.responses[1]?.visualEvidence, {
+      mode: 'pixels', provider: 'clef', model: 'clef', materials: [{ materialId: 'portrait', assetId: fixture.metadata.assetId,
+        sha256: fixture.metadata.sha256, altText: 'A determined specialist in a teal coat checks a ledger.', caption: 'Writ prepares the records.' }],
+    });
+    assert.equal(state.trajectory.responses[1]?.choiceId, 'yes');
+    assert.equal(((state.trajectory.responses[2]?.visualEvidence as { materials: Array<{ materialId: string }> }).materials[0]?.materialId), 'portrait');
+    assert.equal(state.trajectory.responses[2]?.choiceId, 'yes');
+    assert.equal(((state.trajectory.responses[3]?.visualEvidence as { mode: string })?.mode), 'described');
+    assert.equal(state.trajectory.responses[3]?.choiceId, 'yes');
+    const resumedState = bodies[5]?.state as { trajectory: { responses: Array<Record<string, unknown>> } };
+    assert.deepEqual(resumedState.trajectory.responses, state.trajectory.responses);
+    const persistedEvents = fixture.store.getJourneyRun(accepted.run.runId).respondents[0]?.events ?? [];
+    assert.deepEqual(persistedEvents.map(({ type }) => type), ['exposure', 'response', 'exposure', 'visual-response', 'visual-response', 'visual-response', 'exposure', 'response']);
+    const visualEvents = persistedEvents.filter((event) => event.type === 'visual-response');
+    assert.deepEqual(visualEvents, [{
+      type: 'visual-response', sequence: 3, nodeId: 'ask-portrait', taskId: 'image-fit', result: { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
+      visualEvidence: { mode: 'pixels', provider: 'clef', model: 'clef', materials: [{ materialId: 'portrait', assetId: fixture.metadata.assetId,
+        sha256: fixture.metadata.sha256, altText: 'A determined specialist in a teal coat checks a ledger.', caption: 'Writ prepares the records.' }] },
+    }, {
+      type: 'visual-response', sequence: 4, nodeId: 'ask-portrait-again', taskId: 'image-confirmed', result: { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
+      visualEvidence: { mode: 'pixels', provider: 'clef', model: 'clef', materials: [{ materialId: 'portrait', assetId: fixture.metadata.assetId,
+        sha256: fixture.metadata.sha256, altText: 'A determined specialist in a teal coat checks a ledger.', caption: 'Writ prepares the records.' }] },
+    }, {
+      type: 'visual-response', sequence: 5, nodeId: 'ask-described', taskId: 'image-described', result: { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
+      visualEvidence: { mode: 'described', provider: 'clef', model: 'clef', materials: [{ materialId: 'portrait', assetId: fixture.metadata.assetId,
+        sha256: fixture.metadata.sha256, altText: 'A determined specialist in a teal coat checks a ledger.', caption: 'Writ prepares the records.' }] },
+    }]);
+
+    const tamperAdmission = await prepareRun(journey, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(tamperAdmission.journey);
+    const tamperRun = fixture.store.acceptJourney(randomUUID(), materializeJourneyRun(tamperAdmission.journey));
+    let tamperDispatches = 0;
+    const tamperFetch = (async () => {
+      const current = tamperDispatches++;
+      const id = current === 0 ? 'read-section-three' : 'image-fit';
+      const choice = current === 0 ? 'continue' : 'yes';
+      const options = current === 0 ? ['continue', 'leave'] : ['yes', 'no'];
+      return Response.json({ success: true, result: { model: 'clef', answers: { [id]: { type: 'choice', choice, probabilities: { [options[0]!]: 0.9, [options[1]!]: 0.1 } } }, usage: { input_tokens: 40, output_tokens: 0 } }, errors: [], messages: [] });
+    }) as typeof fetch;
+    const persistence = splitRunStore(fixture.store);
+    const commands = persistence.commands;
+    let tamperedTransitions = 0;
+    const checkedCommands = new Proxy(commands, { get(target, property, receiver) {
+      if (property === 'settleJourney') return (...args: Parameters<typeof commands.settleJourney>) => {
+        const [claim, attemptId, outcome, transition] = args;
+        if (transition.state.events.some((event) => event.type === 'visual-response')) tamperedTransitions += 1;
+        const alteredState = { ...transition.state, events: transition.state.events.map((event) => event.type === 'visual-response'
+          ? { ...event, visualEvidence: { ...event.visualEvidence, materials: event.visualEvidence.materials.map((material) => ({ ...material, altText: 'Altered after dispatch.' })) } }
+          : event) };
+        const nextEvaluation = transition.nextEvaluation && alteredState.events.some((event) => event.type === 'visual-response') ? (() => {
+          const request = tamperAdmission.journey!.request;
+          const respondent = request.respondents.find(({ id }) => id === transition.state.respondentId)!;
+          const packet = compileDecisionPacketForCompiler(request.journey, respondent, transition.nextEvaluation!.questionId,
+            alteredState.events, tamperAdmission.journey!.compilerFingerprint);
+          return { ...transition.nextEvaluation!, packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint: tamperAdmission.journey!.compilerFingerprint }) };
+        })() : transition.nextEvaluation;
+        return commands.settleJourney(claim, attemptId, outcome, { ...transition, state: alteredState, ...(nextEvaluation ? { nextEvaluation } : {}) });
+      };
+      return Reflect.get(target, property, receiver) as unknown;
+    } });
+    await executeQuestionRun({ ...persistence, commands: checkedCommands }, tamperRun.run.runId, (_config, options) => new ClefProvider(config, tamperFetch,
+      { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
+    const rejectedEvidence = fixture.store.getJourneyRun(tamperRun.run.runId);
+    assert.equal(tamperDispatches, 2);
+    assert.equal(tamperedTransitions, 1);
+    assert.equal(rejectedEvidence.respondents[0]?.events.some(({ type }) => type === 'visual-response'), false);
+    assert.equal(rejectedEvidence.evaluations.find(({ questionId }) => questionId === 'image-fit')?.status, 'failed');
   } finally { await fixture.close(); }
 });
 

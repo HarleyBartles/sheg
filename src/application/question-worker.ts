@@ -102,7 +102,9 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
       const progress = advanceJourney(accepted.request.journey, profile, {
         currentNodeId: currentEvaluation.nodeId, events: respondentState.events, route: respondentState.route,
-      }, value, accepted.compilerFingerprint);
+      }, value, accepted.compilerFingerprint, currentEvaluation.packet.question.visual ? {
+        provider: result.provider, model: result.model, visualMaterials: currentEvaluation.packet.visualMaterials ?? [],
+      } : undefined);
       const nextEvaluation = progress.next ? {
         evaluationId: randomUUID(), turnId: randomUUID(), contextId: randomUUID(),
         respondentId: respondentState.respondentId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,

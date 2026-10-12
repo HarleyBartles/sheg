@@ -109,9 +109,19 @@ export function settleJourneyTurn(context: {
       if (outcome.kind === 'answered') {
         const result = validateDecision(packet, outcome.result, { maxAttempts: 1 });
         const answerEvent = transition.state.events.slice(priorEvents.length).findLast(
-          (event): event is Extract<JourneyRespondentState['events'][number], { type: 'response' }> => event.type === 'response' && event.nodeId === nodeId,
+          (event): event is Extract<JourneyRespondentState['events'][number], { type: 'response' | 'visual-response' }> =>
+            (event.type === 'response' || event.type === 'visual-response') && event.nodeId === nodeId,
         );
-        if (!answerEvent || answerEvent.taskId !== packet.question.id ||
+        const expectedVisualMaterials = packet.question.visual?.materialIds.map((id) => packet.visualMaterials?.find((material) => material.id === id)).flatMap((material) => material ? [{
+          materialId: material.id, assetId: material.asset.assetId, sha256: material.asset.sha256, altText: material.altText,
+          ...(material.caption === undefined ? {} : { caption: material.caption }),
+        }] : []) ?? [];
+        const visualEventMatches = packet.question.visual === undefined
+          ? answerEvent?.type === 'response'
+          : answerEvent?.type === 'visual-response' && answerEvent.visualEvidence.mode === packet.question.visual.mode &&
+            answerEvent.visualEvidence.provider === result.provider && answerEvent.visualEvidence.model === result.model &&
+            JSON.stringify(answerEvent.visualEvidence.materials) === JSON.stringify(expectedVisualMaterials);
+        if (!answerEvent || answerEvent.taskId !== packet.question.id || !visualEventMatches ||
             !context.sameDecisionValue(answerEvent.result, result)) {
           throw new RunStoreError('journey_transition_conflict', 'Journey transition must append the exact typed answer for this turn.');
         }
