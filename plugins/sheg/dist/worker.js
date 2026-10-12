@@ -846,10 +846,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1189,11 +1189,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -1643,16 +1643,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -1691,17 +1691,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -1740,8 +1740,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -18843,13 +18843,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path7 = ref.slice(1).split("/").filter(Boolean);
+  if (path7.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
+  if (path7[0] === defsKey) {
+    const key = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -19727,6 +19727,14 @@ var ScaleRequestSchema = external_exports.object({
 }).strict().refine((request) => request.maxWidth !== void 0 || request.maxHeight !== void 0 || request.maxBytes !== void 0, {
   message: "At least one image target is required."
 });
+var ImageAssetError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "ImageAssetError";
+  }
+  code;
+};
 
 // src/domain/decision/provider.ts
 var providerKinds = ["jev", "laya", "clef"];
@@ -20317,7 +20325,7 @@ var ProviderCallError = class extends Error {
 
 // src/application/question-worker.ts
 var HEARTBEAT_MS = 2e3;
-async function executeQuestionRun(persistence, runId2, providerFactory) {
+async function executeQuestionRun(persistence, runId2, providerFactory, providerOptions = {}) {
   const { reads, commands } = persistence;
   const claim2 = commands.claim(runId2, Date.now(), process.pid);
   if (!claim2) return;
@@ -20331,9 +20339,9 @@ async function executeQuestionRun(persistence, runId2, providerFactory) {
   heartbeat.unref();
   try {
     if (reads.getRequestKind(runId2) === "journey") {
-      await executeJourney(reads, commands, runId2, claim2, providerFactory);
+      await executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions);
     } else {
-      await executePoll(reads, commands, runId2, claim2, providerFactory);
+      await executePoll(reads, commands, runId2, claim2, providerFactory, providerOptions);
     }
     commands.finish(claim2);
   } catch {
@@ -20345,9 +20353,9 @@ async function executeQuestionRun(persistence, runId2, providerFactory) {
     clearInterval(heartbeat);
   }
 }
-async function executePoll(reads, commands, runId2, claim2, providerFactory) {
+async function executePoll(reads, commands, runId2, claim2, providerFactory, providerOptions) {
   const prepared = reads.getRequest(runId2);
-  const provider = providerFactory(prepared.request.provider);
+  const provider = providerFactory(prepared.request.provider, providerOptions);
   const answers = new Map(reads.evaluationStatuses(runId2).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations2 = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
@@ -20360,7 +20368,9 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory) {
         let selected = [];
         for (let size = pending.length; size >= 1; size -= 1) {
           const candidate = pending.slice(0, size);
-          const fit = await provider.measureBatch({ state: group.state, questions: candidate.map(({ packet }) => packet.question) });
+          const batchQuestions2 = candidate.map(({ packet }) => packet.question);
+          const batchMaterials2 = batchVisualMaterials(candidate.map(({ packet }) => packet.visualMaterials ?? []));
+          const fit = await provider.measureBatch({ state: group.state, questions: batchQuestions2, ...batchMaterials2.length ? { visualMaterials: batchMaterials2 } : {} });
           if (fit.status === "fits") {
             selected = candidate;
             break;
@@ -20372,7 +20382,9 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory) {
       }
       const reservation = commands.reserveBatch(claim2, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
       if (!reservation) break;
-      const batch = { state: group.state, questions: reservation.evaluations.map(({ packet }) => packet.question) };
+      const batchQuestions = reservation.evaluations.map(({ packet }) => packet.question);
+      const batchMaterials = batchVisualMaterials(reservation.evaluations.map(({ packet }) => packet.visualMaterials ?? []));
+      const batch = { state: group.state, questions: batchQuestions, ...batchMaterials.length ? { visualMaterials: batchMaterials } : {} };
       let settled;
       try {
         let result;
@@ -20399,9 +20411,9 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory) {
     }
   }
 }
-async function executeJourney(reads, commands, runId2, claim2, providerFactory) {
+async function executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions) {
   const accepted = reads.getJourneyRun(runId2);
-  const provider = providerFactory(accepted.request.provider);
+  const provider = providerFactory(accepted.request.provider, providerOptions);
   while (true) {
     if (!commands.heartbeat(claim2, Date.now())) return;
     const reservation = commands.reserveNext(claim2, Date.now());
@@ -20464,6 +20476,15 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory) 
       if (scope === "run") break;
     }
   }
+}
+function batchVisualMaterials(groups) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const group of groups) for (const material of group) {
+    const previous = byId.get(material.id);
+    if (previous && hashCanonical(previous) !== hashCanonical(material)) throw new Error("Frozen visual material changed within the accepted batch.");
+    byId.set(material.id, material);
+  }
+  return [...byId.values()];
 }
 function failureScope(error62) {
   return error62 instanceof ProviderCallError ? error62.failureScope : "evaluation";
@@ -21211,7 +21232,7 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
   const objectIds = {};
   const decodes = Array.from({ length: columns.length });
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { field, path: path6, codec: codec2, arrayDimensions } = columns[idx];
+    const { field, path: path7, codec: codec2, arrayDimensions } = columns[idx];
     let decoder;
     let decoderStr;
     let decoderFieldDestructure;
@@ -21239,26 +21260,26 @@ function makeJitQueryMapperInner(columns, joinsNotNullableMap = {}) {
     if (codec2) decodedValue = `codec${idx}(${decodedValue}, ${arrayDimensions})`;
     if (decoderStr) decodedValue = `${decoderStr}(${decodedValue})`;
     decodes[idx] = colStr === decodedValue ? `${colStr}` : `${colStr} === null ? ${colStr} : ${decodedValue}`;
-    if (path6.length !== 2 || !isColumn) continue;
-    if (objectIds[path6[0]] === void 0) objectIds[path6[0]] = [`c${idx}`];
-    else objectIds[path6[0]]?.push(`c${idx}`);
-    const [objectName] = path6;
+    if (path7.length !== 2 || !isColumn) continue;
+    if (objectIds[path7[0]] === void 0) objectIds[path7[0]] = [`c${idx}`];
+    else objectIds[path7[0]]?.push(`c${idx}`);
+    const [objectName] = path7;
     const tableName = getTableName(field.table);
     nullifyMap[objectName] = joinsNotNullableMap[tableName] ? false : typeof nullifyMap[objectName] === "string" ? nullifyMap[objectName] === tableName ? tableName : false : tableName;
   }
   fn.push(`mapped[i] = {`);
   let currentObjectPath = [];
   for (let idx = 0; idx < columns.length; ++idx) {
-    const { path: path6 } = columns[idx];
-    const jsonPath = path6.map((e) => JSON.stringify(e));
+    const { path: path7 } = columns[idx];
+    const jsonPath = path7.map((e) => JSON.stringify(e));
     const decodedValue = decodes[idx];
-    const objectPath = path6.slice(0, -1);
+    const objectPath = path7.slice(0, -1);
     let commonLen = 0;
     while (commonLen < currentObjectPath.length && commonLen < objectPath.length && currentObjectPath[commonLen] === objectPath[commonLen]) commonLen++;
     for (let d = currentObjectPath.length - 1; d >= commonLen; --d) fn.push(`${"	".repeat(d + 1)}},`);
-    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path6[0]] === "string" ? `${objectIds[path6[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
+    for (let d = commonLen; d < objectPath.length; ++d) fn.push(`${"	".repeat(d + 1)}${jsonPath[d]}: ${d === 0 && objectPath.length === 1 && typeof nullifyMap[path7[0]] === "string" ? `${objectIds[path7[0]]?.map((c) => `${c} === null`).join(" && ")} ? null : {` : "{"}`);
     currentObjectPath = objectPath;
-    fn.push(`${"	".repeat(path6.length)}${jsonPath[path6.length - 1]}: ${decodedValue},`);
+    fn.push(`${"	".repeat(path7.length)}${jsonPath[path7.length - 1]}: ${decodedValue},`);
   }
   for (let d = currentObjectPath.length - 1; d >= 0; --d) fn.push(`${"	".repeat(d + 1)}},`);
   fn.push(`};`);
@@ -21295,13 +21316,13 @@ function jitCompatCheck(isEnabled) {
   }
 }
 function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
-  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path6 }) => {
+  const interpretedData = columns.map(({ field, codec: codec2, arrayDimensions, path: path7 }) => {
     let processNullifyMap;
     let decoderSrc;
     if (is(field, Column)) {
       decoderSrc = field;
-      if (joinsNotNullableMap && path6.length === 2) {
-        const objectName = path6[0];
+      if (joinsNotNullableMap && path7.length === 2) {
+        const objectName = path7[0];
         processNullifyMap = (nullifyMap, value) => {
           if (!(objectName in nullifyMap)) nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
           else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) nullifyMap[objectName] = false;
@@ -21317,9 +21338,9 @@ function makeDefaultQueryMapper(columns, joinsNotNullableMap) {
   });
   return ((rows) => rows.map((row) => {
     const nullifyMap = {};
-    const result = columns.reduce((result2, { path: path6 }, columnIndex) => {
+    const result = columns.reduce((result2, { path: path7 }, columnIndex) => {
       let node2 = result2;
-      for (const [pathChunkIndex, pathChunk] of path6.entries()) if (pathChunkIndex < path6.length - 1) {
+      for (const [pathChunkIndex, pathChunk] of path7.entries()) if (pathChunkIndex < path7.length - 1) {
         if (!(pathChunk in node2)) node2[pathChunk] = {};
         node2 = node2[pathChunk];
       } else {
@@ -25461,8 +25482,8 @@ function drizzle(...params) {
   const { connection, client, ...config2 } = params[0];
   if (client) return construct(client, config2);
   if (typeof connection === "object") {
-    const { path: path6, ...options2 } = connection;
-    return construct(new DatabaseSync(path6 ?? ":memory:", options2), config2);
+    const { path: path7, ...options2 } = connection;
+    return construct(new DatabaseSync(path7 ?? ":memory:", options2), config2);
   }
   return construct(new DatabaseSync(connection ?? ":memory:"), config2);
 }
@@ -26576,21 +26597,21 @@ function validateMaterialChoices(questions, material, context) {
     }
   });
 }
-function validateVisualBindings(questions, material, context, path6) {
+function validateVisualBindings(questions, material, context, path7) {
   const byId = new Map(material.map((item) => [item.id, item]));
   const bound = /* @__PURE__ */ new Set();
   questions.forEach((question, questionIndex) => {
     for (const materialId of question.visual?.materialIds ?? []) {
       const candidate = byId.get(materialId);
       if (!candidate || !isImageMaterial(candidate)) {
-        context.addIssue({ code: "custom", path: [path6, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
+        context.addIssue({ code: "custom", path: [path7, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
         continue;
       }
       bound.add(materialId);
     }
   });
   for (const item of material) {
-    if (isImageMaterial(item) && !bound.has(item.id)) context.addIssue({ code: "custom", path: [path6], message: `Image material ${item.id} must be bound to a visual question.` });
+    if (isImageMaterial(item) && !bound.has(item.id)) context.addIssue({ code: "custom", path: [path7], message: `Image material ${item.id} must be bound to a visual question.` });
   }
 }
 var inlineRunRequestSchema = external_exports.object({
@@ -30292,7 +30313,7 @@ function compileClefRequest(input2, configInput, imageResolver) {
   const pixelIds = orderedMaterials.filter((id) => modeByMaterial.get(id) === "pixels");
   if (pixelIds.length > CLEF_MAX_IMAGES) throw new ClefCompilationError("image-count-exceeded", "overflow");
   const imageIndexes = new Map(pixelIds.map((id, index2) => [id, index2]));
-  const images = [];
+  const images2 = [];
   const visualMaterials = [];
   let imageBytes = 0;
   for (const id of orderedMaterials) {
@@ -30319,7 +30340,7 @@ function compileClefRequest(input2, configInput, imageResolver) {
       if (actualMetadata.width * actualMetadata.height > 16e6) throw new ClefCompilationError("image-pixel-limit-exceeded", "overflow");
       imageBytes += bytes.byteLength;
       if (imageBytes > CLEF_MAX_TOTAL_IMAGE_BYTES) throw new ClefCompilationError("total-image-size-exceeded", "overflow");
-      images.push(`data:image/${actualMetadata.format};base64,${bytes.toString("base64")}`);
+      images2.push(`data:image/${actualMetadata.format};base64,${bytes.toString("base64")}`);
       visualMaterials.push({ materialId: id, imageIndex: imageIndexes.get(id), ...material.caption === void 0 ? {} : { caption: material.caption } });
     } else {
       const describingQuestionIds = bindings.filter((binding) => binding.mode === "described" && binding.ids.includes(id)).map(({ question }) => question.id);
@@ -30330,12 +30351,12 @@ function compileClefRequest(input2, configInput, imageResolver) {
   const questions = Object.fromEntries(request.questions.map((question) => [question.id, questionForClef(question, imageIndexes)]));
   const nonImageProjection = JSON.stringify({ model: config2.model, state, questions });
   const textEstimate = Math.ceil(Buffer.byteLength(nonImageProjection, "utf8") / 3);
-  const imageTokenAllowance = images.length * CLEF_IMAGE_TOKEN_ALLOWANCE;
+  const imageTokenAllowance = images2.length * CLEF_IMAGE_TOKEN_ALLOWANCE;
   if (textEstimate + imageTokenAllowance > CLEF_SAFE_CONTEXT_TOKENS) throw new ClefCompilationError("estimated-context-over-limit", "overflow");
-  const body = JSON.stringify({ model: config2.model, state, questions, ...images.length ? { images } : {} });
+  const body = JSON.stringify({ model: config2.model, state, questions, ...images2.length ? { images: images2 } : {} });
   const bodyBytes = Buffer.byteLength(body, "utf8");
   if (bodyBytes > CLEF_MAX_BODY_BYTES) throw new ClefCompilationError("request-body-size-exceeded", "overflow");
-  return { body, nonImageProjection, textEstimate, imageCount: images.length, imageTokenAllowance, imageBytes, bodyBytes };
+  return { body, nonImageProjection, textEstimate, imageCount: images2.length, imageTokenAllowance, imageBytes, bodyBytes };
 }
 
 // src/providers/clef/fit.ts
@@ -30545,11 +30566,11 @@ function normalizeAnswer(question, raw) {
 }
 
 // src/providers/factory.ts
-function createProvider(config2) {
+function createProvider(config2, options2 = {}) {
   if (config2.kind === "jev") {
     return new JevProvider(config2);
   }
-  if (config2.kind === "clef") return new ClefProvider(config2);
+  if (config2.kind === "clef") return new ClefProvider(config2, fetch, { ...options2.imageResolver ? { imageResolver: options2.imageResolver } : {} });
   return new LayaProvider({
     kind: "laya",
     baseUrl: config2.baseUrl,
@@ -30563,12 +30584,124 @@ function createProvider(config2) {
   });
 }
 
+// src/infrastructure/sqlite/image-assets.ts
+import { createHash as createHash10 } from "node:crypto";
+import { mkdirSync as mkdirSync3 } from "node:fs";
+import path6 from "node:path";
+function imageDigest(bytes) {
+  return createHash10("sha256").update(bytes).digest("hex");
+}
+function verifyAsset(bytes, supplied) {
+  const metadata2 = ImageMetadataSchema.parse(supplied);
+  const sha2562 = imageDigest(bytes);
+  if (metadata2.sha256 !== sha2562 || metadata2.assetId !== `sha256:${sha2562}` || metadata2.bytes !== bytes.byteLength) {
+    throw new ImageAssetError("image_digest_mismatch", "Image bytes do not match the supplied digest and metadata.");
+  }
+  return metadata2;
+}
+function rowMetadata(row) {
+  const sha2562 = asText(row.sha256, "image SHA-256 digest");
+  return ImageMetadataSchema.parse({
+    assetId: asText(row.asset_id, "image asset ID"),
+    sha256: sha2562,
+    format: asText(row.format, "image format"),
+    width: asNumber(row.width, "image width"),
+    height: asNumber(row.height, "image height"),
+    bytes: asNumber(row.byte_length, "image byte length")
+  });
+}
+function findRow(database, assetId2) {
+  return database.prepare("SELECT asset_id, sha256, format, width, height, byte_length, content FROM image_assets WHERE asset_id = ?").get(assetId2);
+}
+function readMetadata(database, assetId2) {
+  const row = findRow(database, assetId2);
+  if (!row) throw new ImageAssetError("image_asset_not_found", "The requested image asset is not in Sheg storage.");
+  return rowMetadata(row);
+}
+function saveSourceInside(database, bytes, supplied) {
+  const metadata2 = verifyAsset(bytes, supplied);
+  const existing = findRow(database, metadata2.assetId);
+  if (existing) {
+    const saved = rowMetadata(existing);
+    const savedBytes = Buffer.from(existing.content);
+    if (JSON.stringify(saved) !== JSON.stringify(metadata2) || !savedBytes.equals(Buffer.from(bytes))) {
+      throw new ImageAssetError("image_digest_mismatch", "Image bytes or metadata conflict with an asset already stored for this digest.");
+    }
+    return saved;
+  }
+  database.prepare(`INSERT INTO image_assets (asset_id, sha256, format, width, height, byte_length, content)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(metadata2.assetId, metadata2.sha256, metadata2.format, metadata2.width, metadata2.height, metadata2.bytes, Buffer.from(bytes));
+  return metadata2;
+}
+function createImageAssetRepository(context) {
+  const database = context.database;
+  return {
+    metadata(assetId2) {
+      context.ensureOpen();
+      return context.readSnapshot(() => readMetadata(database, assetId2));
+    },
+    bytes(assetId2) {
+      context.ensureOpen();
+      return context.readSnapshot(() => {
+        const row = findRow(database, assetId2);
+        if (!row) throw new ImageAssetError("image_asset_not_found", "The requested image asset is not in Sheg storage.");
+        return Uint8Array.from(Buffer.from(row.content));
+      });
+    },
+    saveSource(bytes, supplied) {
+      context.ensureOpen();
+      return context.transaction(() => saveSourceInside(database, bytes, supplied));
+    },
+    savePrepared(sourceBytes, sourceInput, candidateBytes, candidateInput, scaling) {
+      context.ensureOpen();
+      const source = verifyAsset(sourceBytes, sourceInput);
+      const candidate = verifyAsset(candidateBytes, candidateInput);
+      if (source.assetId === candidate.assetId) throw new ImageAssetError("image_scale_target_unreachable", "An unchanged image does not create a separate derivation.");
+      if (!Number.isSafeInteger(scaling.width) || scaling.width < 1 || !Number.isSafeInteger(scaling.height) || scaling.height < 1 || scaling.algorithm !== "lanczos3" || scaling.policyVersion !== 1) {
+        throw new ImageAssetError("image_scale_target_unreachable", "The image scaling provenance is invalid.");
+      }
+      return context.transaction(() => {
+        saveSourceInside(database, sourceBytes, source);
+        saveSourceInside(database, candidateBytes, candidate);
+        const existing = database.prepare(`SELECT source_asset_id, width, height, algorithm, policy_version
+          FROM image_derivations WHERE candidate_asset_id = ?`).get(candidate.assetId);
+        if (existing) {
+          const matches = existing.source_asset_id === source.assetId && asNumber(existing.width, "image scale width") === scaling.width && asNumber(existing.height, "image scale height") === scaling.height && existing.algorithm === scaling.algorithm && asNumber(existing.policy_version, "image policy version") === scaling.policyVersion;
+          if (!matches) throw new ImageAssetError("image_digest_mismatch", "This candidate digest already has a different retained source or scaling history.");
+          return { source, candidate, scaling };
+        }
+        const now = new Date(context.now()).toISOString();
+        database.prepare(`INSERT INTO image_derivations (source_asset_id, candidate_asset_id, width, height, algorithm, policy_version, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(source.assetId, candidate.assetId, scaling.width, scaling.height, scaling.algorithm, scaling.policyVersion, now);
+        return { source, candidate, scaling };
+      });
+    },
+    close() {
+      context.close();
+    }
+  };
+}
+function openImageAssetRepository(dataRoot) {
+  if (!path6.isAbsolute(dataRoot)) throw new RunStoreError("datastore_path_invalid", "The Sheg data directory must be an absolute path.");
+  mkdirSync3(dataRoot, { recursive: true });
+  const databasePath = path6.join(dataRoot, "runs.sqlite");
+  const connection = openSqliteConnection(databasePath, dataRoot);
+  const context = createSqliteRepositoryContext(connection, databasePath, Date.now);
+  return createImageAssetRepository(context);
+}
+
 // src/entrypoints/worker.ts
 var [outputDirectory, runId] = process.argv.slice(2);
 if (!outputDirectory || !runId) throw new Error("Usage: worker <output-directory> <run-id>");
 var store = openRunPersistence(outputDirectory);
+var images = openImageAssetRepository(outputDirectory);
 try {
-  await executeQuestionRun(store, runId, createProvider);
+  await executeQuestionRun(store, runId, createProvider, {
+    imageResolver: { resolve(assetId2) {
+      return { metadata: images.metadata(assetId2), bytes: images.bytes(assetId2) };
+    } }
+  });
 } finally {
+  images.close();
   store.close();
 }

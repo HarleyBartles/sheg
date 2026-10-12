@@ -8,7 +8,10 @@ import test from 'node:test';
 import { materializeJourneyRun, prepareRun } from '../src/application/run-inspection.js';
 import { ClefProvider } from '../src/providers/clef.js';
 import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
-import { openRunStore } from '../src/infrastructure/run-store.js';
+import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
+import { createRunRuntime } from '../src/infrastructure/run-runtime.js';
+import { executeQuestionRun } from '../src/application/question-worker.js';
+import type { DecisionProvider } from '../src/domain/decision/provider.js';
 
 const bytesPromise = readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
 const config = { kind: 'clef' as const, accountId: '3327878972ea82e6b454069bba62f3d9', model: 'clef' as const, timeoutMs: 1000 };
@@ -66,6 +69,102 @@ test('accepted visual polls freeze ordered packet metadata and retain the exact 
     await rm(sourcePath);
     assert.deepEqual(Buffer.from(fixture.imageRepository.bytes(fixture.metadata.assetId)), fixture.bytes);
   } finally { await fixture.close(); }
+});
+
+test('worker sends the accepted frozen pixels through Clef and settles the answer in the shared attempt ledger', async () => {
+  const fixture = await setup();
+  let transportedImages: string[] = [];
+  let suppliedResolver = false;
+  try {
+    const accepted = fixture.store.accept(randomUUID(), fixture.prepared);
+    const fetchRequest = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { images: string[] };
+      transportedImages = body.images;
+      return Response.json({ success: true, result: { model: 'clef', answers: { 'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } } }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] });
+    }) as typeof fetch;
+    await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, (_config, options) => {
+      suppliedResolver = options?.imageResolver !== undefined;
+      return new ClefProvider(config, fetchRequest, { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) });
+    }, { imageResolver: { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) } });
+    assert.equal(suppliedResolver, true);
+    assert.deepEqual(transportedImages, [`data:image/png;base64,${Buffer.from(fixture.bytes).toString('base64')}`]);
+    assert.equal(fixture.store.getStatus(accepted.run.runId).status, 'completed');
+    assert.equal(fixture.store.answers(accepted.run.runId).items[0]?.result?.type, 'choice');
+    const attempts = fixture.store.attempts(accepted.run.runId).items;
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0]?.execution?.provider, 'clef');
+    assert.equal(attempts[0]?.execution?.model, 'clef');
+  } finally { await fixture.close(); }
+});
+
+test('worker settles a valid Clef sibling while keeping one malformed visual answer locally retryable', async () => {
+  const fixture = await setup();
+  let dispatches = 0;
+  try {
+    const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
+    const study = { ...request(fixture.metadata), questions: [
+      request(fixture.metadata).questions[0]!,
+      { type: 'noul' as const, id: 'image-confidence', instructions: 'Does this image communicate the intended section?', visual: { mode: 'pixels' as const, materialIds: ['portrait'] } },
+    ] };
+    const admitted = await prepareRun(study, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(admitted.prepared);
+    const accepted = fixture.store.accept(randomUUID(), admitted.prepared);
+    const fetchRequest = (async () => {
+      dispatches += 1;
+      return Response.json({ success: true, result: { model: 'clef', answers: {
+        'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
+        'image-confidence': { type: 'noul', noul: 'not numeric' },
+      }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] });
+    }) as typeof fetch;
+    await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, (_config, options) => new ClefProvider(config, fetchRequest,
+      { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
+    const answers = fixture.store.answers(accepted.run.runId).items;
+    assert.equal(dispatches, 1);
+    assert.equal(answers.find(({ questionId }) => questionId === 'image-fit')?.status, 'answered');
+    assert.equal(answers.find(({ questionId }) => questionId === 'image-confidence')?.status, 'failed');
+    assert.equal(fixture.store.attempts(accepted.run.runId).items.length, 1);
+  } finally { await fixture.close(); }
+});
+
+test('worker refuses a pixel batch on provider fit before reservation or transport', async () => {
+  const fixture = await setup();
+  let reserveCalls = 0;
+  let transportCalls = 0;
+  try {
+    const accepted = fixture.store.accept(randomUUID(), fixture.prepared);
+    const commands = fixture.store;
+    const observedCommands = new Proxy(commands, { get(target, property, receiver) {
+      if (property === 'reserveBatch') return (...args: Parameters<typeof commands.reserveBatch>) => { reserveCalls += 1; return commands.reserveBatch(...args); };
+      return Reflect.get(target, property, receiver) as unknown;
+    } });
+    const provider: DecisionProvider = {
+      measure: () => { throw new Error('Worker requires batch measurement.'); },
+      measureBatch: () => ({ provider: 'clef', status: 'overflow', method: 'test', modelIdentity: 'clef', tokenCount: 'estimated', tokens: 51_201, contextLimit: 65_536, headroomTokens: 14_336, effectiveLimit: 51_200, details: {} }),
+      async decide() { transportCalls += 1; throw new Error('Must not dispatch.'); },
+      async decideBatch() { transportCalls += 1; throw new Error('Must not dispatch.'); },
+    };
+    await executeQuestionRun({ reads: splitRunStore(fixture.store).reads, commands: observedCommands, close() {} }, accepted.run.runId, () => provider);
+    assert.equal(reserveCalls, 0);
+    assert.equal(transportCalls, 0);
+    assert.equal(fixture.store.attempts(accepted.run.runId).items.length, 0);
+  } finally { await fixture.close(); }
+});
+
+test('default runtime resolves saved image bytes during Clef inspection without requiring provider credentials', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sheg-visual-runtime-'));
+  const bytes = await bytesPromise;
+  const metadata = asset(bytes);
+  const repository = openImageAssetRepository(root);
+  repository.saveSource(bytes, metadata);
+  repository.close();
+  const runtime = createRunRuntime(root);
+  try {
+    const inspection = await runtime.service.inspect(request(metadata));
+    assert.equal(inspection.valid, true);
+    assert.equal(inspection.fits[0]?.fit.provider, 'clef');
+    assert.equal(inspection.fits[0]?.fit.status, 'fits');
+    assert.equal(inspection.fits[0]?.fit.details.imageCount, 1);
+  } finally { runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('acceptance refuses bytes that changed after inspection without creating a partial run', async () => {

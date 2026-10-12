@@ -1,15 +1,15 @@
 import { CredentialStoreError, WindowsCredentialStore } from '../infrastructure/credentials/windows.js';
 import type { DecisionProvider } from '../domain/decision/provider.js';
-import type { ProviderConfigInput } from './config.js';
+import type { ProviderConfigInput, ProviderFactoryOptions } from './config.js';
 import { JevProvider } from './jev.js';
 import { LayaProvider } from './laya.js';
 import { ClefProvider } from './clef.js';
 
-export function createProvider(config: ProviderConfigInput): DecisionProvider {
+export function createProvider(config: ProviderConfigInput, options: ProviderFactoryOptions = {}): DecisionProvider {
   if (config.kind === 'jev') {
     return new JevProvider(config);
   }
-  if (config.kind === 'clef') return new ClefProvider(config);
+  if (config.kind === 'clef') return new ClefProvider(config, fetch, { ...(options.imageResolver ? { imageResolver: options.imageResolver } : {}) });
   return new LayaProvider({
     kind: 'laya', baseUrl: config.baseUrl, checkpoint: config.checkpoint,
     contextLimit: config.contextLimit, headLimit: config.headLimit,

@@ -49153,11 +49153,11 @@ function normalizeAnswer(question, raw) {
 }
 
 // src/providers/factory.ts
-function createProvider(config2) {
+function createProvider(config2, options2 = {}) {
   if (config2.kind === "jev") {
     return new JevProvider(config2);
   }
-  if (config2.kind === "clef") return new ClefProvider(config2);
+  if (config2.kind === "clef") return new ClefProvider(config2, fetch, { ...options2.imageResolver ? { imageResolver: options2.imageResolver } : {} });
   return new LayaProvider({
     kind: "laya",
     baseUrl: config2.baseUrl,
@@ -54795,10 +54795,12 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
   let startupFailure;
   let ownedImageRepository;
   let imagePreparation;
+  const imageRepository = () => ownedImageRepository ??= openImageAssetRepository(dataRoot);
+  const providerFactory = (config2, providerOptions = {}) => createProvider(config2, config2.kind === "clef" ? { ...providerOptions, imageResolver: { resolve: (assetId2) => ({ metadata: imageRepository().metadata(assetId2), bytes: imageRepository().bytes(assetId2) }) } } : providerOptions);
   if (service) runtimeService = service;
   else {
     try {
-      const runtime = createDefaultRunService(dataRoot);
+      const runtime = createDefaultRunService(dataRoot, providerFactory);
       runtimeService = runtime.service;
       ownedStore = runtime.store;
       storeReady = true;
@@ -54812,7 +54814,7 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
       if (storeReady) return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: "current", schemaVersion: SCHEMA_VERSION } };
       const observed = inspectRunStoreCompatibility(dataRoot);
       if (observed.status === "current") {
-        const runtime = createDefaultRunService(dataRoot);
+        const runtime = createDefaultRunService(dataRoot, providerFactory);
         runtimeService = runtime.service;
         ownedStore = runtime.store;
         storeReady = true;
@@ -54834,7 +54836,7 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
         throw new RunServiceError("recovery_not_required", "The datastore no longer requires recovery; inspect its current status before taking further action.");
       }
       const reset = resetRunStore2(dataRoot);
-      const runtime = createDefaultRunService(dataRoot);
+      const runtime = createDefaultRunService(dataRoot, providerFactory);
       runtimeService = runtime.service;
       ownedStore = runtime.store;
       storeReady = true;
@@ -54854,8 +54856,7 @@ function createRunRuntime(dataRoot = resolveDataRoot(process.env, process.platfo
     get image() {
       if (!storeReady || inspectRunStoreCompatibility(dataRoot).status !== "current") throw recoveryRequiredError();
       if (!imagePreparation) {
-        ownedImageRepository = openImageAssetRepository(dataRoot);
-        imagePreparation = createImagePreparationService(ownedImageRepository, options2.imageCodec ?? createStaticImageCodec(), dataRoot);
+        imagePreparation = createImagePreparationService(imageRepository(), options2.imageCodec ?? createStaticImageCodec(), dataRoot);
       }
       return imagePreparation;
     },
@@ -54877,9 +54878,9 @@ function compatibilityStatus(observed, startupFailure) {
   if (observed.status === "uninitialized") return { status: "uninitialized", schemaVersion: 0 };
   return { status: observed.status, schemaVersion: observed.status === "unreadable" ? null : observed.schemaVersion };
 }
-function createDefaultRunService(dataRoot) {
+function createDefaultRunService(dataRoot, providerFactory) {
   const store = openRunPersistence(dataRoot);
-  return { service: createRunService(store, dataRoot, createProvider, new DetachedWorkerLauncher(), { assertProviderReady }), store };
+  return { service: createRunService(store, dataRoot, providerFactory, new DetachedWorkerLauncher(), { assertProviderReady }), store };
 }
 function unavailableRunService() {
   const unavailable3 = () => {
