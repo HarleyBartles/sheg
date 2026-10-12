@@ -75,7 +75,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
     assert.match(status.stdout.trim(), /^(AVAILABLE|MISSING)$/);
     assert.equal(status.stderr, '');
   }
-  for (const contract of ['run-request.schema.json', 'respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json']) {
+  for (const contract of ['run-request.schema.json', 'respondent-archetype.schema.json', 'respondent-archetype-library.schema.json', 'respondent-profile.schema.json', 'respondent-cohort.schema.json', 'study-manifest.schema.json', 'image-import-request.schema.json', 'image-scale-request.schema.json', 'image-get-request.schema.json']) {
     assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets', contract)), true);
   }
   assert.equal(await exists(path.join(plugin, 'skills/stimulus-response-polling/assets/reader-archetype.schema.json')), false);

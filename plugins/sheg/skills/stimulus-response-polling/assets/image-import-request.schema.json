@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "source": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "assetId": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "assetId"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "source"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:sheg:schema:image-import-request.schema.json",
+  "title": "Sheg image import request",
+  "x-validation-rules": [
+    "MCP file sources use absolute paths; CLI file sources resolve relative to the JSON request file.",
+    "Import validates static image content and stores exact source bytes without calling a model."
+  ]
+}

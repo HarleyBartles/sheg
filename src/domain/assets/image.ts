@@ -9,6 +9,8 @@ export const ImageSourceSchema = z.union([
   z.object({ path: z.string().min(1), sha256: digest }).strict(),
   z.object({ assetId }).strict(),
 ]);
+export const ImageImportRequestSchema = z.object({ source: ImageSourceSchema }).strict();
+export const ImageGetRequestSchema = z.object({ assetId, export: z.boolean().optional() }).strict();
 
 export const ImageMetadataSchema = z.object({
   assetId,
@@ -32,7 +34,7 @@ export const ScaleRequestSchema = z.object({
 
 export const IMAGE_ASSET_ERROR_CODES = [
   'image_digest_mismatch', 'image_format_unsupported', 'image_animation_unsupported', 'image_decode_failed',
-  'image_source_limit', 'image_scale_target_unreachable', 'image_asset_not_found', 'image_codec_unavailable', 'image_export_failed',
+  'image_source_limit', 'image_source_path_invalid', 'image_scale_target_unreachable', 'image_asset_not_found', 'image_codec_unavailable', 'image_export_failed',
 ] as const;
 export type ImageAssetErrorCode = typeof IMAGE_ASSET_ERROR_CODES[number];
 

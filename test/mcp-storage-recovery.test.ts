@@ -83,6 +83,7 @@ test('a future schema keeps the MCP handshake and maintenance inspection while b
       ['run_cancel', { runId: randomUUID() }],
       ['run_resume', { runId: randomUUID() }],
       ['run_delete', { runIds: [randomUUID()] }],
+      ['image_scale', { source: { assetId: `sha256:${'a'.repeat(64)}` }, maxWidth: 40 }],
       ['run_storage', { operation: 'optimize' }],
     ] as const;
     for (const [name, args] of calls) {
@@ -90,6 +91,7 @@ test('a future schema keeps the MCP handshake and maintenance inspection while b
       assert.equal(blocked.isError, true, `${name} must be blocked during recovery`);
       assert.equal((blocked.structuredContent as { error: { code: string } }).error.code, 'datastore_recovery_required', `${name} must report the recovery state`);
     }
+    assert.deepEqual(await readFile(path.join(root, 'runs.sqlite')), original, 'image preparation must not create a parallel fresh store during recovery');
     const wrongConfirmation = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'reset', confirmation: 'yes' } });
     assert.equal(wrongConfirmation.isError, true);
     const reset = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'reset', confirmation: resetConfirmation } });
