@@ -56264,7 +56264,7 @@ function assertNever2(value) {
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.4.0-dev.3",
+  version: "0.4.0-dev.4",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
