@@ -98,7 +98,7 @@ export function buildJourneyComparisonEvidence(input: {
       const completePairs = pairs.filter(({ complete }) => complete).length;
       results.push({ forkNodeId: barrier.forkNodeId, parentBranchId: barrier.parentBranchId, barrierStatus: barrier.status, comparisonKey,
         conditions: conditions.map(({ id, label, questionId }) => ({ conditionId: id, label, questionId })), cohortRespondents: respondents.length,
-        completePairs, incompletePairs: pairs.length - completePairs, pairs });
+        totalPairs: pairs.length, completePairs, incompletePairs: pairs.length - completePairs, pairs });
     }
   }
   return results;

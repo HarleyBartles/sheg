@@ -744,7 +744,7 @@ test('a failed fork branch resumes from its saved packet without replaying its p
     assert.equal(answeredPairMember.status, 'answered');
     assert.equal(failedPairMember.status, 'failed');
     const interruptedComparison = beforeReopen.comparisons.find(({ comparisonKey }) => comparisonKey === 'image-effect')!;
-    assert.deepEqual([interruptedComparison.cohortRespondents, interruptedComparison.completePairs, interruptedComparison.incompletePairs], [2, 1, 1]);
+    assert.deepEqual([interruptedComparison.cohortRespondents, interruptedComparison.totalPairs, interruptedComparison.completePairs, interruptedComparison.incompletePairs], [2, 2, 1, 1]);
     const readerAPair = interruptedComparison.pairs.find(({ respondentId }) => respondentId === 'reader-a')!;
     assert.equal(readerAPair.complete, false);
     assert.deepEqual(readerAPair.members.map(({ conditionId, status }) => [conditionId, status]), [['with-image', 'answered'], ['without-image', 'failed']]);
@@ -765,7 +765,7 @@ test('a failed fork branch resumes from its saved packet without replaying its p
     assert.equal(store.getStatus(runId).status, 'completed');
     const afterResume = store.getJourneyRun(runId).evaluations;
     const completedComparison = store.getJourneyRun(runId).comparisons.find(({ comparisonKey }) => comparisonKey === 'image-effect')!;
-    assert.deepEqual([completedComparison.completePairs, completedComparison.incompletePairs], [2, 0]);
+    assert.deepEqual([completedComparison.totalPairs, completedComparison.completePairs, completedComparison.incompletePairs], [2, 2, 0]);
     assert.equal(afterResume.find(({ evaluationId }) => evaluationId === frozenFailure.evaluationId)?.packetFingerprint, frozenFailure.fingerprint);
     assert.equal(afterResume.filter(({ questionId }) => questionId === 'prefix-interest').length, 2);
     assert.equal(calls.filter(({ questionId }) => questionId === 'prefix-interest').length, 2);
@@ -797,7 +797,7 @@ test('run-wide cancellation preserves settled fork members and leaves their pair
     assert.deepEqual(calls, ['prefix-interest', 'with-image-interest']);
     const run = store.getJourneyRun(runId);
     const comparison = run.comparisons.find(({ comparisonKey }) => comparisonKey === 'image-effect')!;
-    assert.deepEqual([comparison.cohortRespondents, comparison.completePairs, comparison.incompletePairs], [1, 0, 1]);
+    assert.deepEqual([comparison.cohortRespondents, comparison.totalPairs, comparison.completePairs, comparison.incompletePairs], [1, 1, 0, 1]);
     assert.deepEqual(comparison.pairs[0]?.members.map(({ conditionId, status }) => [conditionId, status]), [
       ['with-image', 'answered'], ['without-image', 'pending'],
     ]);

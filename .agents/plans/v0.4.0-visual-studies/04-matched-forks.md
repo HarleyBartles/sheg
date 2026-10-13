@@ -221,11 +221,11 @@ const executionIdentity = { runId, respondentId, branchId, contextId, turnId, no
 }
 ```
 
-- [ ] **Step 1: Add shared entrypoint and skill behavior tests that fail on missing fork support.** Assert both CLI and MCP accept the same valid fork request, reject an unknown branch/evaluation reference with the same structured validation semantics, expose equal per-condition statuses and complete-pair denominators, and teach a fictional agent to declare a fork and comparison key instead of composing separate runs.
-- [ ] **Step 2: Run public-contract tests and prove RED.** Run `npm test -- --test-name-pattern="CLI matched fork|MCP matched fork|skill.*fork|branch evidence"`; expected: current graph schemas, serializers, and guidance do not expose branch identities.
-- [ ] **Step 3: Implement shared application exposure and regenerate contracts.** Add no fork-specific business rules in entrypoints; use existing application services, generate contract assets with `npm run contracts:build`, and update only canonical skill source before generating package output.
-- [ ] **Step 4: Run focused entrypoint and skill behavior tests.** Run the named focused suite and `npm run guidance:check`; expected: both entrypoints describe the same frozen cohort/branch results, and old text journey instructions remain valid.
-- [ ] **Step 5: Commit public author surface.** Commit source contracts, generated schemas, canonical skill guidance, and behavior tests as `feat: expose matched forks in study design tools`.
+- [x] **Step 1: Add shared entrypoint and skill behavior tests that fail on missing fork support.** Assert both CLI and MCP accept the same valid fork request, reject an unknown branch/evaluation reference with the same structured validation semantics, expose equal per-condition statuses and complete-pair denominators, and teach a fictional agent to declare a fork and comparison key instead of composing separate runs.
+- [x] **Step 2: Run public-contract tests and prove RED.** Run `npm test -- --test-name-pattern="CLI matched fork|MCP matched fork|skill.*fork|branch evidence"`; expected: current graph schemas, serializers, and guidance do not expose branch identities.
+- [x] **Step 3: Implement shared application exposure and regenerate contracts.** Add no fork-specific business rules in entrypoints; use existing application services, generate contract assets with `npm run contracts:build`, and update only canonical skill source before generating package output.
+- [x] **Step 4: Run focused entrypoint and skill behavior tests.** Run the named focused suite and `npm run guidance:check`; expected: both entrypoints describe the same frozen cohort/branch results, and old text journey instructions remain valid.
+- [x] **Step 5: Commit public author surface.** Commit source contracts, generated schemas, canonical skill guidance, and behavior tests as `feat: expose matched forks in study design tools`.
 
 ## Task 9: Qualify the Copied Runtime, Complete the Gate, and Prepare the Integration PR
 

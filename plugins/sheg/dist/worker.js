@@ -28613,6 +28613,7 @@ function buildJourneyComparisonEvidence(input2) {
         comparisonKey,
         conditions: conditions.map(({ id, label, questionId }) => ({ conditionId: id, label, questionId })),
         cohortRespondents: respondents.length,
+        totalPairs: pairs.length,
         completePairs,
         incompletePairs: pairs.length - completePairs,
         pairs

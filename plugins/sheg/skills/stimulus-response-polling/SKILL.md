@@ -10,6 +10,7 @@ An agent can submit one or more independent typed Choice, Score, or Noul questio
 | User goal | Read before acting | Tools |
 | --- | --- | --- |
 | Turn material and a user question into the simplest supported request or journey | [Study design](../study-design/SKILL.md), optionally inspect the request | `run_inspect` |
+| Compare treatments for the same reached respondents inside one journey | [Study design](../study-design/SKILL.md) and [run and recovery](references/run-and-recovery.md) | `run_inspect`, `run_start`, `run_get` |
 | Connect a Jev key during installation or after deferring setup | [Secure setup in run and recovery](references/run-and-recovery.md) | Local interactive PowerShell helper, no key-bearing MCP tool |
 | Connect or manage a native Cloudflare Clef key | [Native Cloudflare Clef](references/native-clef.md) | `provider_credential`, `provider-credential` |
 | Configure provider catalogue, preferences, or automatic routing | [Provider selection](references/provider-selection.md) | `provider_settings`, `provider-settings` |

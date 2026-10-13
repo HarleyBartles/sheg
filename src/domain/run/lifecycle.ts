@@ -223,6 +223,7 @@ export type JourneyComparisonEvidence = {
   comparisonKey: string;
   conditions: Array<{ conditionId: string; label: string; questionId: string }>;
   cohortRespondents: number;
+  totalPairs: number;
   completePairs: number;
   incompletePairs: number;
   pairs: JourneyComparisonPair[];
