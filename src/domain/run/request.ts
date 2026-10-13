@@ -311,6 +311,14 @@ const selectedVisualMaterialEvidenceSchema = z.object({
   caption: z.string().min(1).optional(),
   asset: ImageMetadataSchema,
 }).strict();
+const sourceSelectionEvidenceSchema = z.object({
+  version: z.literal(1),
+  matchedEvaluations: z.number().int().nonnegative(),
+  includedEvaluations: z.number().int().nonnegative(),
+  representedContexts: z.number().int().nonnegative(),
+  representedRespondents: z.number().int().nonnegative(),
+  followOnEvaluations: z.number().int().nonnegative(),
+}).strict();
 
 export const followOnLineageSchema = z.object({
   sourceRunId: z.string().uuid(),
@@ -320,6 +328,7 @@ export const followOnLineageSchema = z.object({
   sourceAvailable: z.boolean().optional(),
   sourceRecordState: z.enum(['live', 'historical']).optional(),
   selectionCoverage: selectionCoverageSchema.optional(),
+  sourceSelection: sourceSelectionEvidenceSchema.optional(),
   excludedSelections: z.array(followOnExclusionSchema).default([]),
   selections: z.array(z.object({ sourceEvaluationId: z.string().uuid(), sourceContextId: z.string().uuid(), respondentId: z.string().min(1), evaluationId: z.string().uuid(), contextId: z.string().uuid(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),

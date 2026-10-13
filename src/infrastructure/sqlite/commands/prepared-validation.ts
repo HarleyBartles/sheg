@@ -26,6 +26,22 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
     if (!parsedLineage.success) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on material lineage is invalid.');
     const lineage = parsedLineage.data;
     const includesSelectedMaterial = parsedRequest.data.context.includeSelectedMaterial === true;
+    if (lineage.sourceSelection !== undefined) {
+      const includedSourceIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const excludedSourceIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const sourceContextIds = new Set(lineage.selections.map(({ sourceContextId }) => sourceContextId));
+      const respondentIds = new Set(lineage.selections.map(({ respondentId }) => respondentId));
+      const followOnEvaluationIds = new Set(lineage.selections.map(({ evaluationId }) => evaluationId));
+      if (excludedSourceIds.size !== lineage.excludedSelections.length || [...includedSourceIds].some((id) => excludedSourceIds.has(id)) ||
+          lineage.sourceSelection.matchedEvaluations !== includedSourceIds.size + excludedSourceIds.size ||
+          lineage.sourceSelection.includedEvaluations !== includedSourceIds.size ||
+          lineage.sourceSelection.representedContexts !== sourceContextIds.size ||
+          lineage.sourceSelection.representedRespondents !== respondentIds.size ||
+          lineage.sourceSelection.followOnEvaluations !== followOnEvaluationIds.size ||
+          lineage.sourceSelection.followOnEvaluations !== prepared.evaluations.length) {
+        throw new RunStoreError('invalid_prepared_run', 'Follow-on source-selection denominators do not match its frozen lineage.');
+      }
+    }
     if (includesSelectedMaterial) {
       const coverage = lineage.selectionCoverage;
       const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));

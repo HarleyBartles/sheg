@@ -62,6 +62,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const evaluations: FrozenEvaluation[] = [];
   const preparedGroups: NonNullable<PreparedRun['groups']> = [];
   const groups = new Map<string, { representative: FollowOnSourceSet['turns'][number]; turns: FollowOnSourceSet['turns'] }>();
+  const includedSourceTurns: FollowOnSourceSet['turns'] = [];
   const selectionExclusions: FollowOnSelectionExclusion[] = [];
   const excludedCounts: SelectionCoverage['excluded'] = { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 0 };
   for (const turn of source.turns) {
@@ -79,6 +80,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     }
     const groupKey = request.context.includeSelectedMaterial ? `evaluation:${turn.evaluationId}:${turn.contextId}`
       : request.context.mode === 'continue' ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
+    includedSourceTurns.push(turn);
     const group = groups.get(groupKey) ?? { representative: turn, turns: [] };
     group.turns.push(turn);
     groups.set(groupKey, group);
@@ -182,6 +184,9 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
     sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections, materialSnapshots,
+    sourceSelection: { version: 1, matchedEvaluations: source.turns.length, includedEvaluations: includedSourceTurns.length,
+      representedContexts: new Set(includedSourceTurns.map(({ contextId }) => contextId)).size,
+      representedRespondents: new Set(includedSourceTurns.map(({ respondentId }) => respondentId)).size, followOnEvaluations: evaluations.length },
     ...(selectionCoverage ? { selectionCoverage } : {}), excludedSelections: selectionExclusions };
   return { sourceVersion: source.version, inspection,
     prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, groups: preparedGroups, lineage } };

@@ -90,19 +90,19 @@
 
 ## Task 4: Make Selection and Pair Denominators Explicit
 
-**Files:** Modify `src/domain/run/request.ts`, `src/domain/run/lifecycle.ts`, `src/application/run-inspection.ts`, `src/infrastructure/sqlite/follow-on-queries.ts`, `src/infrastructure/sqlite/evidence-query.ts`, and `test/run-store.test.ts` only where a demonstrated evidence gap exists.
+**Files:** Modify `src/domain/run/request.ts`, `src/application/run-inspection.ts`, `src/infrastructure/sqlite/commands/prepared-validation.ts`, and tests in `test/run-store.test.ts` and `test/visual-acceptance.test.ts`. The existing comparison evidence in `src/domain/run/lifecycle.ts` and readers in `follow-on-queries.ts`/`evidence-query.ts` already preserve the required member evidence and counts, so they need no changes.
 
 **Consumes:** Exact source turn matches, Plan 4 `JourneyComparisonEvidence`, source selection lineage, selected text/image material evidence and existing result/query views.
 
 **Produces:** Optional additive `lineage.sourceSelection` v1 evidence with `matchedEvaluations`, `includedEvaluations`, `representedContexts`, `representedRespondents`, and `followOnEvaluations`. It describes the frozen selection operation; `excludedSelections` retains exact filtered rows. Matched-branch reports keep complete/incomplete pair denominators and each condition's own typed result, failure and provider evidence.
 
-- [ ] Add a test fixture with two respondents at a two-condition fork, one incomplete pair with a successful counterpart, and a follow-on selected from one answered branch; assert the fork retains its full reached denominator and the child lineage identifies the selected survivor and exact source evaluation/context handles.
-- [ ] Add a test that includes a mapped image choice and an unmapped choice in the follow-on selection, then assert matched, included, excluded, distinct respondent and visual/text selected-material counts account for the source rows without double-counting.
-- [ ] Inspect the exact existing `JourneyComparisonEvidence` and `run_query` output before changing reporting. Preserve its complete/incomplete pair counts and per-member `result`, `failure`, `providerSelection`, and `execution`; do not add a second aggregate of paired score/confidence values.
-- [ ] Add optional `sourceSelection: { version: 1, matchedEvaluations, includedEvaluations, representedContexts, representedRespondents, followOnEvaluations }` to `FollowOnLineage`. Compute it from the loaded source turns, included turn list, resulting unique context/respondent IDs, and prepared evaluations. Do not infer run-wide unmatched respondents from a filtered query. Keep old `selectionCoverage` and records without `sourceSelection` readable.
-- [ ] Extend `prepared-validation.ts` to recompute and reject a mismatched `sourceSelection` from lineage selections and child evaluations. Prove a forged count fails before `insertAcceptedRun` writes a child record.
-- [ ] Run the store test first and confirm that each added assertion fails for a missing/incorrect denominator or lineage field. Implement at the domain and evidence-read owners, not in MCP or CLI serializers.
-- [ ] Reopen the datastore and read both historical text lineage and new image lineage. Confirm any incomplete pair remains labeled incomplete, missing responses stay absent, and provider confidence fields remain attached only to their own evaluation.
+- [x] Add a test fixture with two respondents at a two-condition fork, one incomplete pair with a successful counterpart, and a follow-on selected from one answered branch; assert the fork retains its full reached denominator and the child lineage identifies the selected survivor and exact source evaluation/context handles.
+- [x] Add a test that includes a mapped image Choice and an unmapped Choice in the follow-on selection, then assert matched, included, excluded, distinct respondent, and visual/text selected-material counts account for the source rows.
+- [x] Preserve the existing `JourneyComparisonEvidence` and `run_query` output, including pair counts and per-member `result`, `failure`, `providerSelection`, and `execution`; no second aggregate of paired score/confidence values was added.
+- [x] Add optional `sourceSelection: { version: 1, matchedEvaluations, includedEvaluations, representedContexts, representedRespondents, followOnEvaluations }` to `FollowOnLineage`. Compute it from matched and included source turns, unique source contexts/respondents, and prepared evaluations. Keep old `selectionCoverage` and records without `sourceSelection` readable.
+- [x] Extend `prepared-validation.ts` to recompute and reject mismatched `sourceSelection` from lineage selections and child evaluations. A forged matched count is rejected before any submission record exists.
+- [x] Run denominator tests first and witness both fail on missing `sourceSelection`; implement at the domain, preparation, and validation owners rather than serializers.
+- [x] Historical text lineage, image lineage, incomplete pair denominators, missing responses, and evaluation-local provider evidence remain readable and distinct.
 
 ## Task 5: Teach and Qualify Visual Follow-on Workflows
 

@@ -752,6 +752,25 @@ test('a failed fork branch resumes from its saved packet without replaying its p
     assert.deepEqual([readerAPair.members[0]?.execution?.provider, readerAPair.members[0]?.execution?.model], ['laya', 'test-model']);
     assert.ok(readerAPair.members[1]?.failure?.code);
     assert.equal(interruptedComparison.pairs.find(({ respondentId }) => respondentId === 'reader-b')?.complete, true);
+    const survivorFollowOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: runId,
+      selection: { references: [{ evaluationId: answeredPairMember.evaluationId, contextId: answeredPairMember.contextId }] },
+      context: { mode: 'recorded' }, questions: [{ type: 'noul', id: 'survivor-reaction', instructions: 'What did the shown image change for you?' }],
+      provider: input.provider, maxCalls: 1 });
+    const survivorSource = store.resolveFollowOnSources(survivorFollowOn);
+    const survivorPrepared = await prepareFollowOnRun(survivorFollowOn, survivorSource, provider);
+    assert.equal(survivorPrepared.inspection.valid, true, JSON.stringify(survivorPrepared.inspection.problems));
+    assert.deepEqual(survivorPrepared.prepared.lineage?.sourceSelection, {
+      version: 1, matchedEvaluations: 1, includedEvaluations: 1, representedContexts: 1, representedRespondents: 1, followOnEvaluations: 1,
+    });
+    assert.deepEqual(survivorPrepared.prepared.lineage?.selections.map(({ sourceEvaluationId, sourceContextId, respondentId }) => ({ sourceEvaluationId, sourceContextId, respondentId })), [
+      { sourceEvaluationId: answeredPairMember.evaluationId, sourceContextId: answeredPairMember.contextId, respondentId: 'reader-a' },
+    ]);
+    const forgedLineage = structuredClone(survivorPrepared.prepared);
+    forgedLineage.lineage!.sourceSelection!.matchedEvaluations += 1;
+    const forgedSubmissionId = randomUUID();
+    assert.throws(() => store.accept(forgedSubmissionId, forgedLineage), (error: unknown) => error instanceof RunStoreError && error.code === 'invalid_prepared_run');
+    assert.equal(store.findSubmission(forgedSubmissionId, forgedLineage.requestFingerprint), null);
+    assert.deepEqual([store.getJourneyRun(runId).comparisons[0]?.totalPairs, store.getJourneyRun(runId).comparisons[0]?.completePairs, store.getJourneyRun(runId).comparisons[0]?.incompletePairs], [2, 1, 1]);
     const frozenFailure = { evaluationId: failedPairMember.evaluationId, packet: failedPairMember.packet, fingerprint: failedPairMember.packetFingerprint };
     assert.equal(calls.filter(({ questionId }) => questionId === 'prefix-interest').length, 2);
     assert.equal(calls.filter(({ questionId, respondentContext }) => respondentContext === 'Returning buyer' && questionId !== 'prefix-interest').length, 2);
@@ -1695,7 +1714,7 @@ test('journey mapped Choice selections contribute to matched material coverage a
 
 test('selected-material lineage is recipient-specific, survives source deletion, and rejects tampering', async () => {
   const root = await temporaryRoot();
-  const store = openRunStore(root);
+  let store = openRunStore(root);
   const quote = { id: 'pull-quote', text: 'A city is a promise.', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) };
   const p3 = { id: 'paragraph-3', text: 'Paragraph three.', sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) };
   const p7 = { id: 'paragraph-7', text: 'Paragraph seven.', sourceId: 'article-v1', sourceSha256: 'c'.repeat(64) };
@@ -1726,6 +1745,8 @@ test('selected-material lineage is recipient-specific, survives source deletion,
     assert.equal(saved.lineage?.selectionCoverage?.eligible, 3);
     assert.equal(saved.lineage?.selections.length, 3);
     assert.equal(saved.lineage?.excludedSelections.length, 1);
+    assert.deepEqual(saved.lineage?.sourceSelection, { version: 1, matchedEvaluations: 4, includedEvaluations: 3,
+      representedContexts: 3, representedRespondents: 3, followOnEvaluations: 3 });
     assert.equal(saved.lineage?.excludedSelections[0]?.reason, 'unmappedChoice');
     for (const selection of saved.lineage!.selections) {
       const output = saved.evaluations.find(({ evaluationId }) => evaluationId === selection.evaluationId)!;
@@ -1735,9 +1756,12 @@ test('selected-material lineage is recipient-specific, survives source deletion,
       assert.equal(selection.selectedMaterial!.textSha256, createHash('sha256').update(selection.selectedMaterial!.text, 'utf8').digest('hex'));
     }
     assert.equal(store.deleteRuns([sourceRunId]).deletedRunIds[0], sourceRunId);
+    store.close();
+    store = openRunStore(root);
     const recalled = store.getRequest(accepted.run.runId);
     assert.equal(recalled.lineage?.sourceAvailable, false);
     assert.deepEqual(recalled.lineage?.selections, saved.lineage?.selections);
+    assert.deepEqual(recalled.lineage?.sourceSelection, saved.lineage?.sourceSelection);
     const retry = store.accept(submissionId, admission.prepared);
     assert.equal(retry.created, false);
     assert.equal(retry.run.runId, accepted.run.runId);

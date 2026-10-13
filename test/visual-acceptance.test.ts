@@ -42,11 +42,12 @@ async function setup() {
   const bytes = await bytesPromise;
   const metadata = asset(bytes);
   imageRepository.saveSource(bytes, metadata);
-  const store = openRunStore(root);
+  let store = openRunStore(root);
   const provider = new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver: { resolve: (assetId) => ({ metadata: imageRepository.metadata(assetId), bytes: imageRepository.bytes(assetId) }) } });
   const prepared = await prepareRun(request(metadata), provider);
   assert.ok(prepared.prepared);
-  return { root, bytes, metadata, imageRepository, store, prepared: prepared.prepared, close: async () => { store.close(); imageRepository.close(); await rm(root, { recursive: true, force: true }); } };
+  return { root, bytes, metadata, imageRepository, get store() { return store; }, reopen() { store.close(); store = openRunStore(root); }, prepared: prepared.prepared,
+    close: async () => { store.close(); imageRepository.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
 test('accepted visual polls freeze ordered packet metadata and retain the exact imported image bytes', async () => {
@@ -104,14 +105,19 @@ test('pixel Choice image mappings identify options without creating text selecte
   const fixture = await setup();
   try {
     const base = request(fixture.metadata);
-    const sourceRequest = { ...base, questions: [{ ...base.questions[0]!, materialOptions: { yes: 'portrait' } }] };
+    const sourceRequest = { ...base, respondents: [...base.respondents, { ...base.respondents[0]!, id: 'reader-b', context: 'A second curious reader' }], maxCalls: 2,
+      questions: [{ ...base.questions[0]!, materialOptions: { yes: 'portrait' } }] };
     const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
     const admitted = await prepareRun(sourceRequest, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
     assert.ok(admitted.prepared, JSON.stringify(admitted.inspection.problems));
     const accepted = fixture.store.accept(randomUUID(), admitted.prepared);
-    const fetchRequest = (async () => Response.json({ success: true, result: { model: 'clef', answers: {
-      'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
-    }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] })) as typeof fetch;
+    let sourceCalls = 0;
+    const fetchRequest = (async () => {
+      const choice = sourceCalls++ === 0 ? 'yes' : 'no';
+      return Response.json({ success: true, result: { model: 'clef', answers: {
+        'image-fit': { type: 'choice', choice, probabilities: { yes: choice === 'yes' ? 0.9 : 0.1, no: choice === 'no' ? 0.9 : 0.1 } },
+      }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] });
+    }) as typeof fetch;
     await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, (_providerConfig, options) => new ClefProvider(config, fetchRequest,
       { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
     const evidence = fixture.store.queryEvidence({ sourceRunId: accepted.run.runId,
@@ -119,14 +125,25 @@ test('pixel Choice image mappings identify options without creating text selecte
     assert.equal(evidence.items[0]?.selectedMaterial, undefined);
     assert.deepEqual(evidence.items[0]?.selectedVisualMaterial, { materialId: 'portrait', altText: 'Approved specialist portrait.', caption: 'Writ at the ledger desk.', asset: fixture.metadata });
     assert.deepEqual(evidence.matchedCoverage.selectedVisualMaterials, { evaluations: 1, respondents: 1, distinctMaterials: 1 });
+    const allChoices = fixture.store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'image-fit' } });
+    assert.deepEqual(allChoices.matchedCoverage.selectedMaterials, { evaluations: 1, respondents: 1, distinctMaterials: 1 });
+    assert.deepEqual(allChoices.matchedCoverage.selectedTextMaterials, { evaluations: 0, respondents: 0, distinctMaterials: 0 });
+    assert.deepEqual(allChoices.matchedCoverage.selectedVisualMaterials, { evaluations: 1, respondents: 1, distinctMaterials: 1 });
 
     const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
-      selection: { criteria: { questionId: 'image-fit' } }, context: { mode: 'fresh-material', includeSelectedMaterial: true },
-      questions: [{ type: 'noul', id: 'image-follow-up', instructions: 'Does the image still fit the next section?' }], provider: config, maxCalls: 1 });
+      selection: { criteria: { questionId: 'image-fit' } }, context: { mode: 'fresh-material', includeSelectedMaterial: true, materialIds: ['portrait'] },
+      material: [{ id: 'next-section', text: 'The next section explains the recommendation.' }],
+      questions: [{ type: 'noul', id: 'image-follow-up', instructions: 'Does the image still fit the next section?', visual: { mode: 'pixels', materialIds: ['portrait'] } }], provider: config, maxCalls: 1 });
     const sources = fixture.store.resolveFollowOnSources(followOn);
-    assert.equal(sources.turns[0]?.status, 'answered');
-    assert.equal(sources.turns[0]?.selectedMaterial, undefined);
-    assert.deepEqual(sources.turns[0]?.selectedVisualMaterial, evidence.items[0]?.selectedVisualMaterial);
+    assert.equal(sources.turns.length, 2);
+    assert.deepEqual(sources.turns.map(({ selectedVisualMaterial }) => selectedVisualMaterial?.materialId), ['portrait', undefined]);
+    const followOnAdmission = await prepareFollowOnRun(followOn, sources, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(followOnAdmission.prepared, JSON.stringify(followOnAdmission.inspection.problems));
+    assert.deepEqual(followOnAdmission.inspection.selectionCoverage, { matched: 2, eligible: 1,
+      excluded: { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 1 } });
+    assert.deepEqual(followOnAdmission.prepared.lineage?.sourceSelection, {
+      version: 1, matchedEvaluations: 2, includedEvaluations: 1, representedContexts: 1, representedRespondents: 1, followOnEvaluations: 1,
+    });
     const database = new DatabaseSync(path.join(fixture.root, 'runs.sqlite'));
     try { database.prepare('DELETE FROM run_visual_assets WHERE run_id = ? AND material_id = ?').run(accepted.run.runId, 'portrait'); }
     finally { database.close(); }
@@ -175,10 +192,14 @@ test('accepted visual follow-on retains its selected source image after deleting
     assert.deepEqual(fixture.store.previewDelete([accepted.run.runId]).runs[0]?.retainedFollowOnRunIds, [followOnAccepted.run.runId]);
     const frozenFollowOn = fixture.store.getRequest(followOnAccepted.run.runId);
     assert.deepEqual(frozenFollowOn.lineage?.selections[0]?.selectedVisualMaterial, sources.turns[0]?.selectedVisualMaterial);
+    assert.deepEqual(frozenFollowOn.lineage?.sourceSelection, { version: 1, matchedEvaluations: 1, includedEvaluations: 1,
+      representedContexts: 1, representedRespondents: 1, followOnEvaluations: 1 });
     assert.deepEqual(frozenFollowOn.lineage?.materialSnapshots[0]?.materials.find(({ id }) => id === 'portrait'), request(fixture.metadata).material[1]);
     assert.equal(fixture.store.deleteRuns([accepted.run.runId]).deletedRunIds[0], accepted.run.runId);
+    fixture.reopen();
     const childAfterDeletion = fixture.store.getRequest(followOnAccepted.run.runId);
     assert.equal(childAfterDeletion.lineage?.sourceAvailable, false);
+    assert.deepEqual(childAfterDeletion.lineage?.sourceSelection, frozenFollowOn.lineage?.sourceSelection);
     assert.deepEqual(childAfterDeletion.evaluations[0]?.packet.visualMaterials?.map(({ id, asset }) => ({ id, asset })), [{ id: 'portrait', asset: fixture.metadata }]);
     const custody = new DatabaseSync(path.join(fixture.root, 'runs.sqlite'));
     try {

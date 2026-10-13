@@ -38924,6 +38924,14 @@ var selectedVisualMaterialEvidenceSchema = external_exports.object({
   caption: external_exports.string().min(1).optional(),
   asset: ImageMetadataSchema
 }).strict();
+var sourceSelectionEvidenceSchema = external_exports.object({
+  version: external_exports.literal(1),
+  matchedEvaluations: external_exports.number().int().nonnegative(),
+  includedEvaluations: external_exports.number().int().nonnegative(),
+  representedContexts: external_exports.number().int().nonnegative(),
+  representedRespondents: external_exports.number().int().nonnegative(),
+  followOnEvaluations: external_exports.number().int().nonnegative()
+}).strict();
 var followOnLineageSchema = external_exports.object({
   sourceRunId: external_exports.string().uuid(),
   sourceStatusAtAcceptance: runStatusSchema,
@@ -38932,6 +38940,7 @@ var followOnLineageSchema = external_exports.object({
   sourceAvailable: external_exports.boolean().optional(),
   sourceRecordState: external_exports.enum(["live", "historical"]).optional(),
   selectionCoverage: selectionCoverageSchema.optional(),
+  sourceSelection: sourceSelectionEvidenceSchema.optional(),
   excludedSelections: external_exports.array(followOnExclusionSchema).default([]),
   selections: external_exports.array(external_exports.object({
     sourceEvaluationId: external_exports.string().uuid(),
@@ -39608,6 +39617,7 @@ async function prepareFollowOnRun(request, source, provider) {
   const evaluations2 = [];
   const preparedGroups = [];
   const groups = /* @__PURE__ */ new Map();
+  const includedSourceTurns = [];
   const selectionExclusions = [];
   const excludedCounts = { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 0 };
   for (const turn of source.turns) {
@@ -39630,6 +39640,7 @@ async function prepareFollowOnRun(request, source, provider) {
       }
     }
     const groupKey = request.context.includeSelectedMaterial ? `evaluation:${turn.evaluationId}:${turn.contextId}` : request.context.mode === "continue" ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
+    includedSourceTurns.push(turn);
     const group = groups.get(groupKey) ?? { representative: turn, turns: [] };
     group.turns.push(turn);
     groups.set(groupKey, group);
@@ -39763,6 +39774,14 @@ async function prepareFollowOnRun(request, source, provider) {
     sourceVersion: source.version,
     selections,
     materialSnapshots,
+    sourceSelection: {
+      version: 1,
+      matchedEvaluations: source.turns.length,
+      includedEvaluations: includedSourceTurns.length,
+      representedContexts: new Set(includedSourceTurns.map(({ contextId }) => contextId)).size,
+      representedRespondents: new Set(includedSourceTurns.map(({ respondentId }) => respondentId)).size,
+      followOnEvaluations: evaluations2.length
+    },
     ...selectionCoverage ? { selectionCoverage } : {},
     excludedSelections: selectionExclusions
   };
@@ -47799,6 +47818,16 @@ function validatePrepared(prepared) {
     if (!parsedLineage.success) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material lineage is invalid.");
     const lineage = parsedLineage.data;
     const includesSelectedMaterial = parsedRequest.data.context.includeSelectedMaterial === true;
+    if (lineage.sourceSelection !== void 0) {
+      const includedSourceIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const excludedSourceIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const sourceContextIds = new Set(lineage.selections.map(({ sourceContextId }) => sourceContextId));
+      const respondentIds2 = new Set(lineage.selections.map(({ respondentId }) => respondentId));
+      const followOnEvaluationIds = new Set(lineage.selections.map(({ evaluationId }) => evaluationId));
+      if (excludedSourceIds.size !== lineage.excludedSelections.length || [...includedSourceIds].some((id) => excludedSourceIds.has(id)) || lineage.sourceSelection.matchedEvaluations !== includedSourceIds.size + excludedSourceIds.size || lineage.sourceSelection.includedEvaluations !== includedSourceIds.size || lineage.sourceSelection.representedContexts !== sourceContextIds.size || lineage.sourceSelection.representedRespondents !== respondentIds2.size || lineage.sourceSelection.followOnEvaluations !== followOnEvaluationIds.size || lineage.sourceSelection.followOnEvaluations !== prepared.evaluations.length) {
+        throw new RunStoreError("invalid_prepared_run", "Follow-on source-selection denominators do not match its frozen lineage.");
+      }
+    }
     if (includesSelectedMaterial) {
       const coverage = lineage.selectionCoverage;
       const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
