@@ -29191,6 +29191,17 @@ function validatePrepared(prepared) {
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError("invalid_prepared_run", "Prepared run request or fingerprint is invalid.");
   }
+  if (parsedRequest.data.kind === "follow-on" && !parsedRequest.data.provider && parsedRequest.data.providerSelection) {
+    const snapshot = prepared.providerSelectionSnapshot;
+    if (!snapshot) throw new RunStoreError("invalid_prepared_run", "Automatic follow-on routing requires its frozen provider catalogue.");
+    for (const evaluation of prepared.evaluations) {
+      const choice = providerSelectionInitialChoiceSchema.safeParse(evaluation.providerSelection);
+      const entry = choice.success ? snapshot.catalogue.entries.find(({ id }) => id === choice.data.providerId) : void 0;
+      if (!choice.success || choice.data.respondentId !== evaluation.respondentId || choice.data.questionId !== evaluation.questionId || !entry?.enabled || providerModelIdentity(entry.provider) !== choice.data.modelIdentity) {
+        throw new RunStoreError("invalid_prepared_run", "Automatic follow-on evaluations must retain a matching enabled provider from the frozen catalogue.");
+      }
+    }
+  }
   if (parsedRequest.data.kind === "follow-on") {
     const parsedLineage = followOnLineageSchema.safeParse(prepared.lineage);
     if (!parsedLineage.success) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on material lineage is invalid.");
@@ -29449,7 +29460,7 @@ function assertProviderSettingsSnapshot(database, snapshot, request) {
   if (!row || asNumber(row.revision, "provider settings revision") !== snapshot.catalogueRevision || asText(row.catalogue_json, "provider catalogue") !== JSON.stringify({ revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }) || asText(row.preferences_json, "provider preferences") !== JSON.stringify(snapshot.preferences)) {
     throw new RunStoreError("provider_settings_revision_conflict", "Provider settings changed after inspection. Inspect the request again before accepting it.");
   }
-  if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
+  if (request.expectedSelectionFingerprint && snapshot.initialChoices !== void 0 && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
     throw new RunStoreError("provider_selection_fingerprint_stale", "Provider selection inputs changed after inspection. Inspect the request again before accepting it.");
   }
 }
@@ -29591,7 +29602,7 @@ function insertPreparedRunData(database, runId2, prepared) {
     groupId: evaluation.groupId,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
-    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
+    providerSelectionJson: evaluation.providerSelection ? JSON.stringify(evaluation.providerSelection) : prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -30329,6 +30340,9 @@ function queryEvidencePage(context, input2) {
     if (!parsedRequest.success || typeof storedRecord.compilerFingerprint !== "string") {
       throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
     }
+    const parsedSelectionSnapshot = storedRecord.providerSelectionSnapshot === void 0 ? void 0 : providerSelectionPolicySnapshotSchema.safeParse(storedRecord.providerSelectionSnapshot);
+    if (parsedSelectionSnapshot && !parsedSelectionSnapshot.success) throw new RunStoreError("data_integrity_error", "Stored provider selection snapshot is invalid.");
+    const selectionSnapshot = parsedSelectionSnapshot?.success ? parsedSelectionSnapshot.data : void 0;
     const compilerFingerprint = storedRecord.compilerFingerprint;
     let lineage;
     if (parsedRequest.data.kind === "follow-on") {
@@ -30474,15 +30488,21 @@ function queryEvidencePage(context, input2) {
         WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const provider = requireExplicitProvider(parsedRequest.data);
-    const endpoint = provider.kind === "jev" ? provider.endpoint : provider.kind === "laya" ? provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
-    const model = provider.kind === "jev" || provider.kind === "clef" ? provider.model : provider.checkpoint;
     const items = pageRows.map((row) => {
       const contextId = asText(row.context_id, "context ID");
       const respondentId = asText(row.respondent_id, "respondent ID");
       const packet = decisionPacketSchema.parse(parseJson(row.packet_json, "evidence packet"));
       const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
       const failure2 = storedEvaluationFailure(row);
+      const storedChoice = row.provider_selection_json === null || row.provider_selection_json === void 0 ? void 0 : providerSelectionInitialChoiceSchema.safeParse(parseJson(row.provider_selection_json, "evaluation provider selection"));
+      if (storedChoice && !storedChoice.success) throw new RunStoreError("data_integrity_error", "Stored evaluation provider selection is invalid.");
+      const providerChoice = storedChoice?.success ? storedChoice.data : selectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === respondentId && choice.questionId === asText(row.question_id, "question ID") && (choice.branchId ?? "root") === (row.branch_id === null || row.branch_id === void 0 ? "root" : asText(row.branch_id, "branch ID")));
+      const selectedEntry = providerChoice && selectionSnapshot?.catalogue.entries.find(({ id }) => id === providerChoice.providerId);
+      if (providerChoice && !selectedEntry) throw new RunStoreError("data_integrity_error", "A frozen evaluation provider is absent from the accepted provider catalogue.");
+      const provider = parsedRequest.data.provider ? requireExplicitProvider(parsedRequest.data) : selectedEntry?.provider;
+      if (!provider) throw new RunStoreError("data_integrity_error", "The evaluation has no frozen provider provenance.");
+      const endpoint = provider.kind === "jev" ? provider.endpoint : provider.kind === "laya" ? provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
+      const model = providerModelIdentity(provider);
       let selectedMaterial;
       let selectedVisualMaterial;
       if (result?.type === "choice") {

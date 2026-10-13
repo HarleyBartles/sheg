@@ -106,6 +106,21 @@ function migrationChecksum(migration: SqliteMigration): string {
   return createHash('sha256').update(migration.sql).digest('hex');
 }
 
+export function migrationHistoryMismatchVersion(database: DatabaseSync, migrations = registeredMigrations()): number | undefined {
+  const expected = [...migrations].sort((left, right) => left.toVersion - right.toVersion);
+  const applied = database.prepare('SELECT version, migration_id, checksum FROM schema_migrations ORDER BY version').all() as DatabaseRow[];
+  const sharedLength = Math.min(expected.length, applied.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const migration = expected[index]!;
+    const row = applied[index]!;
+    if (asNumber(row.version, 'migration version') !== migration.toVersion || row.migration_id !== migration.id || row.checksum !== migrationChecksum(migration)) {
+      return migration.toVersion;
+    }
+  }
+  if (expected.length !== applied.length) return expected[sharedLength]?.toVersion ?? asNumber(applied[sharedLength]?.version, 'migration version');
+  return undefined;
+}
+
 function isTransientSqliteLock(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'errcode' in error &&
     typeof error.errcode === 'number' && SQLITE_TRANSIENT_LOCK_CODES.has(error.errcode);

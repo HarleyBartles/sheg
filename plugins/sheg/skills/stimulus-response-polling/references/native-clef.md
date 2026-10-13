@@ -2,7 +2,7 @@
 
 Pin Clef explicitly when the full study must use one provider, or enable automatic provider selection when Sheg should route each reached unit to an eligible configured provider. A pixel-bound question requires the Clef capability, so automatic routing selects an enabled Clef entry for that unit and may use another provider for text-only units. Sheg calls Cloudflare directly and does not fall back to another provider after a Clef failure. See [Provider selection](provider-selection.md) for preferences, pins, and comparisons.
 
-Connect the key through Sheg's local secure credential helper. The key is stored in Windows Credential Manager under the fixed `Sheg/Clef/Cloudflare` target. The Cloudflare account ID belongs in provider configuration, not the key field. Custom Workers AI tokens need Workers AI Read and Workers AI Edit permissions.
+Clef needs both a Workers AI API token and a Cloudflare account ID. Credential `status` confirms only that the token is available; it does not confirm account configuration. In the Cloudflare dashboard, open the Workers AI page, select **Use REST API**, then copy the value under **Get Account ID**. Cloudflare documents the steps in its [Workers AI REST API setup guide](https://developers.cloudflare.com/workers-ai/get-started/rest-api/). Save the token through Sheg's local secure credential helper in Windows Credential Manager under the fixed `Sheg/Clef/Cloudflare` target, and put the copied account ID in `accountId` on an enabled Clef entry through `provider_settings` (see [Provider selection](provider-selection.md)). Custom Workers AI tokens need Workers AI Read and Workers AI Edit permissions.
 
 ```powershell
 node .\dist\cli.js provider-credential --route clef --operation setup

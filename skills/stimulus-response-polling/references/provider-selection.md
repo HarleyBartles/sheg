@@ -6,6 +6,8 @@ An agent may pin an eligible provider for a unit, supply request `preferredOrder
 
 Use comparison locks when members must share a provider and model, or when the study intentionally varies one dimension. A provider or model change is a treatment change. Keep the model fixed when comparing respondents or stimuli unless the study explicitly tests provider or model effects. A capability requirement, such as pixel inspection, can constrain that choice.
 
+Automatic follow-on routing resolves each selected source context independently. Follow-on `comparisonLocks` are currently rejected because their respondent/question handles do not uniquely identify the frozen source contexts; pin one provider for the whole follow-on or omit the lock until context-specific comparison handles are supported.
+
 Sheg batches independent questions that share one frozen respondent state, or splits them when provider fit requires it. Set `providerSelection.batching: "singleton"` when separate calls are part of the design. The `maxCalls` ceiling includes splits and retries.
 
 Use `provider_settings` through MCP or `provider-settings --request <json>` through the CLI to read or revision-check the provider catalogue and preference order. Settings never contain credentials. Manage keys only through `provider_credential` or `provider-credential`.

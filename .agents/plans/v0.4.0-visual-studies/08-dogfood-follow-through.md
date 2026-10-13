@@ -36,7 +36,7 @@
 - [ ] Add failing tests proving automatic follow-on inspection resolves providers from settings, uses the exact selected source contexts, and refuses when no ready provider fits.
 - [ ] Add a failing acceptance/worker test proving the chosen provider configuration and choice evidence are frozen before dispatch and survive reopening the store.
 - [ ] Route follow-ons through common automatic candidate selection and fit admission without calling a provider during inspection.
-- [ ] Preserve explicit provider selection and compare-lock semantics. Do not silently substitute after acceptance or provider failure.
+- [ ] Preserve explicit provider selection and prevent silent comparison-lock drift. Automatic follow-on comparison locks that cannot be tied to unique source contexts must fail inspection with a clear explanation; do not silently ignore them or substitute after acceptance/provider failure.
 - [ ] Assert stale selection fingerprints and source changes between inspection and acceptance are refused, and physical call accounting remains unchanged.
 
 ## Task 3: Useful authored-graph validation diagnostics

@@ -41,7 +41,9 @@ export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process
         return { ...runtimeService.storageInfo(), recoveryRequired: false, compatibility: { status: 'current', schemaVersion: SCHEMA_VERSION } };
       }
       const issue = startupFailure instanceof RunStoreError
-        ? { code: startupFailure.code }
+        ? { code: startupFailure.code, ...(observed.status === 'migration_history_mismatch'
+          ? { message: `Migration history does not match at version ${observed.migrationVersion}. Study data was not reset or resealed. Preserve runs.sqlite and its backups before pursuing recovery.` }
+          : {}) }
         : { code: observed.status === 'unreadable' ? 'datastore_unreadable' : 'datastore_open_failed' };
       const compatibility = compatibilityStatus(observed, startupFailure);
       return { recoveryRequired: true, compatibility, issue, backupAvailable: runStoreBackupAvailable(dataRoot) };
@@ -88,6 +90,7 @@ export function createRunRuntime(dataRoot = resolveDataRoot(process.env, process
 }
 
 function compatibilityStatus(observed: ReturnType<typeof inspectRunStoreCompatibility>, startupFailure: unknown): Record<string, unknown> {
+  if (observed.status === 'migration_history_mismatch') return { status: observed.status, schemaVersion: observed.schemaVersion, migrationVersion: observed.migrationVersion };
   if (startupFailure instanceof RunStoreError && startupFailure.code.startsWith('migration_')) {
     return { status: 'migration_failed', schemaVersion: observed.status === 'migration_available' ? observed.schemaVersion : null };
   }

@@ -6,7 +6,7 @@ import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest, DecisionV
 import type { ProviderKind } from '../domain/decision/provider.js';
 import { requireExplicitProvider, runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineRunRequest, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage, type RunMaterialItem, type FollowOnSelectionExclusion, type SelectionCoverage } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
-import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
+import type { JourneyRespondentState, ProviderSelectionInitialChoice } from '../domain/run/lifecycle.js';
 import type { PreparedJourneyRun } from '../domain/run/request.js';
 import { hashCanonical } from '../infrastructure/identity.js';
 import type { PreflightPacket } from '../domain/journey/packet-walker.js';
@@ -54,13 +54,19 @@ function validateFollowOnMaterialChoices(request: ParsedFollowOnRunRequest, mate
   }
 }
 
-export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, source: FollowOnSourceSet, provider: DecisionProvider): Promise<PreparedFollowOnAdmission> {
-  const configured = requireExplicitProvider(request);
+export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, source: FollowOnSourceSet, provider?: DecisionProvider,
+  automatic?: { catalogue: ProviderCatalogue; preferences: ProviderPreference; candidates: ProviderBatchCandidate[] }): Promise<PreparedFollowOnAdmission> {
+  const explicit = request.provider ? requireExplicitProvider(request) : undefined;
+  if (!explicit && (!automatic || !request.providerSelection)) throw new Error('Automatic provider selection requires a frozen catalogue and ready provider candidates.');
   const compilerFingerprint = promptContractHash();
   const fits: Inspection['fits'] = [];
   const problems: RunProblem[] = [];
   const evaluations: FrozenEvaluation[] = [];
   const preparedGroups: NonNullable<PreparedRun['groups']> = [];
+  const initialChoices: ProviderSelectionInitialChoice[] = [];
+  if (automatic && (request.providerSelection?.comparisonLocks?.length ?? 0) > 0) {
+    problems.push({ code: 'follow_on_comparison_lock_unsupported', message: 'Automatic follow-on comparison locks cannot yet be resolved against exact source contexts. Remove the locks or pin one provider for this follow-on.' });
+  }
   const groups = new Map<string, { representative: FollowOnSourceSet['turns'][number]; turns: FollowOnSourceSet['turns'] }>();
   const includedSourceTurns: FollowOnSourceSet['turns'] = [];
   const selectionExclusions: FollowOnSelectionExclusion[] = [];
@@ -152,15 +158,57 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
     }
-    const modelIdentity = configured.kind === 'jev' || configured.kind === 'clef' ? configured.model : configured.checkpoint;
     const contextId = randomUUID(); const groupId = randomUUID();
-    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets }, provider, configured.kind, modelIdentity, request.providerSelection?.batching ?? 'automatic');
-    minimumCalls += planned.batches.length;
-    fits.push(...planned.fits);
-    problems.push(...planned.problems);
+    let chosenProvider = provider;
+    let chosenConfig = explicit;
+    let providerChoice: ProviderSelectionInitialChoice | undefined;
+    if (automatic) {
+      const unitId = `${turn.respondentId}/${request.questions.map(({ id }) => id).join('+')}`;
+      const pins = [...new Set([request.providerSelection?.unitOverrides?.[unitId], ...request.questions.flatMap(({ id }) =>
+        [request.providerSelection?.unitOverrides?.[`${turn.respondentId}/${id}`], request.providerSelection?.unitOverrides?.[id]])].filter((id): id is string => id !== undefined))];
+      if (pins.length > 1) problems.push({ code: 'comparison_unit_pins_conflict', respondentId: turn.respondentId, message: `Questions in shared follow-on group ${unitId} have conflicting provider pins.` });
+      const requiredCapabilities = [...new Set(['text', ...(request.providerSelection?.requiredCapabilities ?? []),
+        ...(packets.some(({ visualMaterials }) => (visualMaterials?.length ?? 0) > 0) ? ['pixels'] : [])])];
+      const selected = await assessAndSelectProviderBatches({ catalogue: automatic.catalogue, preferences: automatic.preferences,
+        unitId, requiredCapabilities, questionType: request.questions[0]!.type,
+        questionTypes: [...new Set(request.questions.map(({ type }) => type))], remainingCalls: request.maxCalls - minimumCalls,
+        group: { groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets },
+        candidates: automatic.candidates, batching: request.providerSelection?.batching ?? 'automatic',
+        ...(request.providerSelection?.preferredOrder === undefined ? {} : { preferredOrder: request.providerSelection.preferredOrder }),
+        ...(pins[0] === undefined ? {} : { unitOverride: pins[0] }) });
+      const choice = selected.selection.selected;
+      if (!choice) {
+        const reasons = selected.selection.candidates.filter(({ exclusion }) => exclusion).map(({ id, exclusion }) => `${id}: ${exclusion!.code}`).join(', ');
+        problems.push({ code: selected.selection.decisionReason, respondentId: turn.respondentId,
+          message: `No provider is eligible for follow-on group ${unitId}.${reasons ? ` ${reasons}` : ''}` });
+      } else {
+        chosenConfig = automatic.catalogue.entries.find(({ id }) => id === choice.id)?.provider;
+        chosenProvider = automatic.candidates.find(({ id }) => id === choice.id)?.provider;
+        if (!chosenConfig || !chosenProvider) throw new RunProblemError('provider_selection_incomplete', `Selected provider ${choice.id} is missing from the frozen follow-on catalogue.`);
+        const plan = selected.plans[choice.id]!;
+        minimumCalls += plan.minimumCalls;
+        fits.push(...plan.fits.map(({ questionIds, fit }) => ({ respondentId: turn.respondentId, groupId, contextId, questionIds, fit })));
+        problems.push(...plan.problems.map(({ code, message }) => ({ code, respondentId: turn.respondentId, message })));
+        const candidates = selected.selection.candidates.map((candidate) => ({ id: candidate.id, eligible: candidate.eligible, selected: candidate.selected,
+          ...(candidate.fit === undefined ? {} : { fit: candidate.fit }), ...(candidate.cost === undefined ? {} : { cost: candidate.cost }),
+          ...(candidate.exclusion === undefined ? {} : { exclusion: candidate.exclusion }), ...(candidate.preferenceRank === undefined ? {} : { preferenceRank: candidate.preferenceRank }) }));
+        const modelIdentity = providerModelIdentity(chosenConfig);
+        providerChoice = { respondentId: turn.respondentId, questionId: request.questions[0]!.id, providerId: choice.id, modelIdentity,
+          decisionReason: selected.selection.decisionReason, candidates };
+        for (const question of request.questions.slice(1)) initialChoices.push({ ...providerChoice, questionId: question.id });
+        initialChoices.push(providerChoice);
+      }
+    } else {
+      if (!chosenProvider || !chosenConfig) throw new Error('The explicit follow-on provider is unavailable.');
+      const modelIdentity = chosenConfig.kind === 'jev' || chosenConfig.kind === 'clef' ? chosenConfig.model : chosenConfig.checkpoint;
+      const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questions: request.questions, packets }, chosenProvider, chosenConfig.kind, modelIdentity, request.providerSelection?.batching ?? 'automatic');
+      minimumCalls += planned.batches.length;
+      fits.push(...planned.fits);
+      problems.push(...planned.problems);
+    }
     const groupEvaluations: FrozenEvaluation[] = packets.map((packet) => {
       const evaluation = { groupId, evaluationId: randomUUID(), contextId, respondentId: turn.respondentId,
-        questionId: packet.question.id, packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }) };
+        questionId: packet.question.id, packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }), ...(providerChoice ? { providerSelection: { ...providerChoice, questionId: packet.question.id } } : {}) };
       evaluations.push(evaluation);
       return evaluation;
     });
@@ -191,7 +239,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const selectionCoverage: SelectionCoverage | undefined = request.context.includeSelectedMaterial ? {
     matched: source.turns.length, eligible: groups.size, excluded: excludedCounts,
   } : undefined;
-  const inspection: Inspection = { valid: problems.length === 0, respondentCount: groups.size, minimumCalls, problems, fits,
+  const inspection: Inspection = { valid: problems.length === 0, respondentCount: groups.size, minimumCalls, problems, fits, ...(initialChoices.length ? { initialChoices } : {}),
     ...(selectionCoverage ? { selectionCoverage, selectionExclusions } : {}),
     ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,

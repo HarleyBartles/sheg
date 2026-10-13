@@ -4,10 +4,11 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { RunStoreError } from '../../application/run-store.js';
 import { asNumber, type DatabaseRow } from './rows.js';
-import { checkDatabaseIntegrity, hasMigrationPath, SCHEMA_VERSION, validateSchemaShape, verifiedBackup } from './schema.js';
+import { checkDatabaseIntegrity, hasMigrationPath, migrationHistoryMismatchVersion, SCHEMA_VERSION, validateSchemaShape, verifiedBackup } from './schema.js';
 
 export type StoreCompatibility =
   | { status: 'current'; schemaVersion: number }
+  | { status: 'migration_history_mismatch'; schemaVersion: number; migrationVersion: number }
   | { status: 'migration_available'; schemaVersion: number; targetSchemaVersion: number }
   | { status: 'unsupported'; schemaVersion: number | null; targetSchemaVersion: number }
   | { status: 'uninitialized'; schemaVersion: 0; targetSchemaVersion: number }
@@ -28,6 +29,8 @@ export function inspectRunStoreCompatibility(dataRoot: string): StoreCompatibili
     const tableCount = asNumber(existing?.count, 'table count');
     if (version === SCHEMA_VERSION) {
       checkDatabaseIntegrity(database);
+      const migrationVersion = migrationHistoryMismatchVersion(database);
+      if (migrationVersion !== undefined) return { status: 'migration_history_mismatch', schemaVersion: version, migrationVersion };
       validateSchemaShape(database);
       return { status: 'current', schemaVersion: SCHEMA_VERSION };
     }

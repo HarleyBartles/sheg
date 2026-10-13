@@ -232,6 +232,29 @@ test('a current datastore missing a declared column enters recovery before norma
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('run_storage identifies a current-schema migration checksum mismatch without changing the original database', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  store.close();
+  const databasePath = path.join(root, 'runs.sqlite');
+  const database = new DatabaseSync(databasePath);
+  try { database.prepare('UPDATE schema_migrations SET checksum = ? WHERE version = 14').run('5c8c6ab33d98366caa321340de79fcf10f64ee19c6845d3a29545faddf9d0f6e'); }
+  finally { database.close(); }
+  const f = await connectDefault(root);
+  try {
+    const inspection = await f.client.callTool({ name: 'run_storage', arguments: { operation: 'inspect' } });
+    assert.equal(inspection.isError ?? false, false);
+    assert.deepEqual((inspection.structuredContent as { compatibility: unknown }).compatibility,
+      { status: 'migration_history_mismatch', schemaVersion: 14, migrationVersion: 14 });
+    assert.equal((inspection.structuredContent as { issue: { code: string } }).issue.code, 'datastore_schema_invalid');
+    assert.match((inspection.structuredContent as { issue: { message: string } }).issue.message, /Preserve runs\.sqlite and its backups/);
+    const readOnly = new DatabaseSync(databasePath, { readOnly: true });
+    try { assert.equal((readOnly.prepare('SELECT checksum FROM schema_migrations WHERE version = 14').get() as { checksum: string }).checksum,
+      '5c8c6ab33d98366caa321340de79fcf10f64ee19c6845d3a29545faddf9d0f6e'); }
+    finally { readOnly.close(); }
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('an unsupported pre-release schema remains inspectable and explicitly resettable with a verified backup', async () => {
   const root = await temporaryRoot();
   await seedSchemaV7(root);
