@@ -12,6 +12,8 @@ Sheg accepts static PNG, JPEG, and WebP images up to 16 MiB and 16 megapixels. I
 
 Import reads a file once, checks its supplied SHA-256 digest, validates its image content, and stores the exact bytes in the shared Sheg datastore. The resolved file path is reported by the CLI, but image identity and later operations use the digest-based asset ID. For a file source, include the lowercase 64-character digest. A saved asset reference uses the `assetId` returned by Sheg.
 
+For visual follow-ons, query the source answer and use its `selectedVisualMaterial.materialId` as the exact saved image reference. Add that ID to `context.materialIds` and bind it to each question that needs pixels; inspect the child request to confirm only the intended images are included. An accepted follow-on retains its image asset independently of the source run, so source deletion does not remove pixels already pinned to the child. The agent supplies and preserves the description and caption; Sheg does not inspect the image to create them. See the [native Clef guide](../providers/clef.md) for image limits and [follow-on context projection](../../skills/stimulus-response-polling/references/run-and-recovery.md#choose-a-follow-on-context-explicitly) for text and answer-history controls.
+
 On Windows, calculate the digest with PowerShell:
 
 ```powershell

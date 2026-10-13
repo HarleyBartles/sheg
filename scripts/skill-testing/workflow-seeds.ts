@@ -6,6 +6,9 @@ import { executeQuestionRun } from '../../src/application/question-worker.js';
 import { materializeJourneyRun, prepareRun } from '../../src/application/run-inspection.js';
 import { runRequestSchema } from '../../src/domain/run/request.js';
 import { openRunPersistence } from '../../src/infrastructure/run-store.js';
+import { openImageAssetRepository } from '../../src/infrastructure/sqlite/image-assets.js';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { CampaignManifest } from './contracts.js';
 
 type WorkflowSetup = NonNullable<CampaignManifest['workflowSetup']>;
@@ -69,6 +72,18 @@ const selectedMaterialRequest = runRequestSchema.parse({
   maxCalls: 3,
 });
 
+const visualFollowOnRequest = runRequestSchema.parse({
+  kind: 'poll',
+  respondents: [{ id: 'reader-a', intent: 'Judge a character design', context: 'A reader looking for a clever and heroic lead', desired_outcome: 'Choose the portrait that fits', engagement_cues: 'Resourcefulness and courage', friction_cues: 'A design that feels timid or careless' }],
+  material: [{ id: 'character-brief', text: 'Writ is a resourceful, observant hero who stays calm under pressure and helps others recover what was lost.', sourceId: 'writ-character-brief', sourceSha256: 'b'.repeat(64) },
+    { id: 'writ-portrait', type: 'image', text: '', altText: 'Approved portrait of Writ, an observant teal-clad specialist with a compact crossbody bag.', caption: 'Writ, the crew archivist.', asset: { assetId: `sha256:${'c'.repeat(64)}`, sha256: 'c'.repeat(64), format: 'png', width: 80, height: 40, bytes: 100 } }],
+  questions: [
+    { type: 'choice', id: 'character-fit', instructions: 'Which portrait best fits the character brief?', options: { writ: 'Writ', noFit: 'Neither portrait fits' }, materialOptions: { writ: 'writ-portrait' }, visual: { mode: 'pixels', materialIds: ['writ-portrait'] } },
+    { type: 'choice', id: 'sibling-opinion', instructions: 'Would you read a story about this character?', options: { yes: 'Yes', no: 'No' } },
+  ],
+  provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef', timeoutMs: 1000 }, maxCalls: 2,
+});
+
 function fit(): ProviderContextFit {
   return { provider: 'jev', status: 'fits', method: 'deterministic-workflow-fixture', modelIdentity: 'controlled/partial-journey-recovery', tokenCount: 'estimated',
     tokens: 1, contextLimit: 32_000, headroomTokens: 0, effectiveLimit: 32_000, details: {} };
@@ -100,10 +115,35 @@ const seedProvider: DecisionProvider = {
 
 export function seedWorkflowState(setup: Extract<WorkflowSetup, { kind: 'partial-journey-recovery' }>, dataRoot: string): Promise<{ runId: string }>;
 export function seedWorkflowState(setup: Extract<WorkflowSetup, { kind: 'selected-material-follow-on' }>, dataRoot: string): Promise<{ sourceRunId: string }>;
+export function seedWorkflowState(setup: Extract<WorkflowSetup, { kind: 'visual-follow-on-context-projection' }>, dataRoot: string): Promise<{ sourceRunId: string }>;
 export function seedWorkflowState(setup: WorkflowSetup, dataRoot: string): Promise<Record<string, string>>;
 export async function seedWorkflowState(setup: WorkflowSetup, dataRoot: string): Promise<Record<string, string>> {
   if (setup.version !== 1) throw new Error('Unsupported workflow state fixture.');
-  if (setup.kind !== 'partial-journey-recovery' && setup.kind !== 'selected-material-follow-on') throw new Error('Unsupported workflow state fixture.');
+  if (setup.kind !== 'partial-journey-recovery' && setup.kind !== 'selected-material-follow-on' && setup.kind !== 'visual-follow-on-context-projection') throw new Error('Unsupported workflow state fixture.');
+  if (setup.kind === 'visual-follow-on-context-projection') {
+    if (visualFollowOnRequest.kind !== 'poll') throw new Error('Visual follow-on fixture request must remain a poll.');
+    const repository = openImageAssetRepository(dataRoot);
+    const bytes = await readFile(path.resolve('test/fixtures/images/four-corners-transparent.png'));
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const saved = repository.saveSource(bytes, { assetId: `sha256:${sha256}`, sha256, format: 'png', width: 80, height: 40, bytes: bytes.byteLength });
+    const request = runRequestSchema.parse({ ...visualFollowOnRequest, material: visualFollowOnRequest.material?.map((item) => item.id === 'writ-portrait' ? { ...item, asset: saved } : item) });
+    const provider: DecisionProvider = { ...seedProvider, measure() { return { ...fit(), provider: 'clef', modelIdentity: 'controlled/visual-follow-on-context-projection' }; }, async decide(input) {
+      if (input.question.id === 'character-fit') return { type: 'choice', choice: 'writ', probabilities: { writ: 0.99, noFit: 0.01 }, attempts: 1, provider: 'clef', model: 'controlled/visual-follow-on-context-projection', latencyMs: 1, usage: {} };
+      return { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 }, attempts: 1, provider: 'clef', model: 'controlled/visual-follow-on-context-projection', latencyMs: 1, usage: {} };
+    } };
+    try {
+      const admission = await prepareRun(request, provider);
+      if (!admission.prepared) throw new Error(`Could not prepare visual follow-on source run: ${admission.inspection.problems.map(({ message }) => message).join('; ')}`);
+      const store = openRunPersistence(dataRoot);
+      try {
+        const accepted = store.commands.accept(randomUUID(), admission.prepared);
+        await executeQuestionRun(store, accepted.run.runId, () => provider);
+        const evidence = store.reads.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'character-fit' } });
+        if (store.reads.getStatus(accepted.run.runId).status !== 'completed' || evidence.items.length !== 1 || evidence.items[0]?.selectedVisualMaterial?.materialId !== 'writ-portrait' || evidence.items[0]?.selectedMaterial) throw new Error('Visual follow-on source did not freeze the expected mapped image Choice evidence.');
+        return { sourceRunId: accepted.run.runId };
+      } finally { store.close(); }
+    } finally { repository.close(); }
+  }
   const isSelectedMaterial = setup.kind === 'selected-material-follow-on';
   const admission = await prepareRun(isSelectedMaterial ? selectedMaterialRequest : partialJourneyRequest, seedProvider);
   if (isSelectedMaterial) {
