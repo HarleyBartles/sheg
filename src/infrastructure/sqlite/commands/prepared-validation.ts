@@ -122,7 +122,11 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
         ]));
       for (const group of prepared.groups) {
         const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
-        const expectedIds = new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
+        const groupEvaluationIds = new Set(prepared.evaluations.filter(({ groupId }) => groupId === group.groupId).map(({ evaluationId }) => evaluationId));
+        const selectedLineageIds = lineage.selections.filter(({ evaluationId }) => groupEvaluationIds.has(evaluationId))
+          .flatMap(({ selectedMaterial, selectedVisualMaterial }) => [selectedMaterial?.materialId, selectedVisualMaterial?.materialId])
+          .filter((id): id is string => id !== undefined);
+        const expectedIds = new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds, ...selectedLineageIds]);
         if (!snapshot || JSON.stringify([...snapshot.materials.map(({ id }) => id)].sort()) !== JSON.stringify([...expectedIds].sort())) {
           throw new RunStoreError('invalid_prepared_run', 'Selected-material catalog contains unrelated material or omits a packet dependency.');
         }

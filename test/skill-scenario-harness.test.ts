@@ -331,7 +331,7 @@ test('selected-material fixture matches the current run query contract and omits
   assert.deepEqual(queryResult.items.map((item) => item.selectedMaterial?.materialId), ['p2', undefined, 'p5']);
   assert.deepEqual(queryResult.matchedCoverage, { evaluations: { total: 3, pending: 0, answered: 3, failed: 0, unreached: 0 },
     representedRespondents: 3, selectedMaterials: { evaluations: 2, respondents: 2, distinctMaterials: 2 },
-    selectedTextMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 }, selectedVisualMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
+    selectedTextMaterials: { evaluations: 2, respondents: 2, distinctMaterials: 2 }, selectedVisualMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
   assert.equal(new Set(evidence.respondentProfiles.map(({ profile }) => profile)).size, 3);
   assert.equal(new Set(queryResult.items.flatMap((item) => item.selectedMaterial ? [item.selectedMaterial.materialId] : [])).size, 2);
   assert.equal(evidence.pullQuote, 'A city is a promise people keep making to each other.');

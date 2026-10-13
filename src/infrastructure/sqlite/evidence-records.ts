@@ -48,8 +48,7 @@ export function materialCatalogForRequest(request: ParsedRunRequest, lineage: Fo
 export function materialCatalogForExactContext(request: ParsedRunRequest, lineage: FollowOnLineage | undefined, contextId: string, respondentId: string,
   packet: DecisionRequest & { state: PromptState }, branchId?: string): RunMaterialItem[] {
   const catalog = materialCatalogForRequest(request, lineage, contextId, respondentId, packet.state.encounteredItems);
-  if (request.kind !== 'journey' || !branchId) return catalog;
-  const siblingMaterialIds = siblingJourneyMaterialIds(request, branchId);
+  const siblingMaterialIds = request.kind === 'journey' && branchId ? siblingJourneyMaterialIds(request, branchId) : new Set<string>();
   const exposedVisualIds = new Set([
     ...(packet.visualMaterials ?? []).map(({ id }) => id),
     ...packet.state.trajectory.responses.flatMap((response) => response.visualEvidence?.materials.map(({ materialId }) => materialId) ?? []),
@@ -75,6 +74,10 @@ function siblingJourneyMaterialIds(request: Extract<ParsedRunRequest, { kind: 'j
       const node = nodes.get(nodeId);
       if (!node) continue;
       if (node.kind === 'expose') exposed.add(node.itemId);
+      if (node.kind === 'ask') {
+        const task = request.journey.tasks.find(({ id }) => id === node.taskId);
+        if (task?.type === 'choice') for (const id of Object.values(task.materialOptions ?? {})) exposed.add(id);
+      }
       pending.push(...journeyControlSuccessors(graph, nodeId).map(({ toNodeId }) => toNodeId));
     }
     return exposed;

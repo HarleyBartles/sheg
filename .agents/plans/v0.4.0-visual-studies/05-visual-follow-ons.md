@@ -22,7 +22,7 @@
 - Resolve source material by exact context lineage; reject missing, unexposed, ambiguous, conflicting or sibling material. Preserve encountered order for retained materials and explicit authored order for newly supplied material.
 - A continuing follow-on that includes a selected visual answer carries that turn's compact visual evidence (descriptor, caption, digest/material identity and provider/model) without carrying pixels; omitting the selected answer omits its response evidence.
 - Selected-image lineage is checked against the recipient context snapshot, while pixels remain question-scoped so a mixed visual/text group does not attach images to text questions.
-- Retain accepted asset dependencies after source run deletion and release them only when every dependent run and image derivation is deleted. Verify this through public store operations and foreign-key/integrity checks.
+- Retain accepted asset dependencies after source run deletion, including selected-image lineage carried by text-only child packets, and release them only when every dependent run and image derivation is deleted. Verify this through public store operations and foreign-key/integrity checks.
 - Preserve matched-pair evidence as observed condition outcomes plus complete/incomplete denominators, provider/model identity, and source selection lineage. Never impute missing responses, convert incomplete pairs to ties, combine provider confidence scales, or claim independent human observations.
 - Generate schemas, runtime bundles and skill packages from canonical source. No repo-local path or test fixture becomes a runtime dependency.
 - Propose `0.4.0-dev.8` for the eventual integration PR only after checking uniqueness on refreshed `origin/develop`; rebuild all derived identities.
@@ -33,6 +33,9 @@
 - A visual Choice mapped to an image must return exact material identity, digest, supplied alt text and caption for agent-authored follow-on reuse while remaining distinct from text selected-material evidence.
 - Pixel reuse from a source visual question must resolve its frozen image after original-file removal, must not attach sibling/unselected pixels, and must be retained after source-run deletion.
 - A mapped image absent from the selected context or a digest/metadata mismatch must refuse acceptance before writing a partial run or dispatching a provider call.
+- A selected image may remain in recipient lineage and asset custody for a text-only child without being bound to any question packet; acceptance must compare that image lineage separately from question dependencies.
+- Follow-on image reuse must be limited to the selected packet's bound image evidence and prior visual history for polls as well as journeys; catalog membership alone is not proof of exposure.
+- Sibling-branch Choice material options must be excluded from a journey context catalog while a current-branch offered text candidate remains selectable even if it was not encountered.
 - Follow-on denominators must distinguish matched source evaluations, represented respondents, excluded visual selections, and launched follow-on evaluations; incomplete fork pairs remain incomplete and retain the successful counterpart/provider evidence.
 
 ## Current Code Seams

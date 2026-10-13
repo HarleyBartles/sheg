@@ -34079,8 +34079,7 @@ function materialCatalogForRequest(request, lineage, contextId, respondentId, en
 }
 function materialCatalogForExactContext(request, lineage, contextId, respondentId, packet, branchId) {
   const catalog = materialCatalogForRequest(request, lineage, contextId, respondentId, packet.state.encounteredItems);
-  if (request.kind !== "journey" || !branchId) return catalog;
-  const siblingMaterialIds = siblingJourneyMaterialIds(request, branchId);
+  const siblingMaterialIds = request.kind === "journey" && branchId ? siblingJourneyMaterialIds(request, branchId) : /* @__PURE__ */ new Set();
   const exposedVisualIds = /* @__PURE__ */ new Set([
     ...(packet.visualMaterials ?? []).map(({ id }) => id),
     ...packet.state.trajectory.responses.flatMap((response) => response.visualEvidence?.materials.map(({ materialId }) => materialId) ?? [])
@@ -34105,6 +34104,10 @@ function siblingJourneyMaterialIds(request, branchId) {
       const node2 = nodes.get(nodeId);
       if (!node2) continue;
       if (node2.kind === "expose") exposed.add(node2.itemId);
+      if (node2.kind === "ask") {
+        const task = request.journey.tasks.find(({ id }) => id === node2.taskId);
+        if (task?.type === "choice") for (const id of Object.values(task.materialOptions ?? {})) exposed.add(id);
+      }
       pending.push(...journeyControlSuccessors(graph, nodeId).map(({ toNodeId }) => toNodeId));
     }
     return exposed;
@@ -35228,7 +35231,9 @@ function validatePrepared(prepared) {
       ]));
       for (const group of prepared.groups) {
         const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
-        const expectedIds = /* @__PURE__ */ new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
+        const groupEvaluationIds = new Set(prepared.evaluations.filter(({ groupId }) => groupId === group.groupId).map(({ evaluationId }) => evaluationId));
+        const selectedLineageIds = lineage.selections.filter(({ evaluationId }) => groupEvaluationIds.has(evaluationId)).flatMap(({ selectedMaterial, selectedVisualMaterial }) => [selectedMaterial?.materialId, selectedVisualMaterial?.materialId]).filter((id) => id !== void 0);
+        const expectedIds = /* @__PURE__ */ new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds, ...selectedLineageIds]);
         if (!snapshot || JSON.stringify([...snapshot.materials.map(({ id }) => id)].sort()) !== JSON.stringify([...expectedIds].sort())) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material catalog contains unrelated material or omits a packet dependency.");
         }
@@ -35443,7 +35448,8 @@ function requestedImageMaterials(request, lineage) {
   }
   if (request.kind === "follow-on") {
     const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
-    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item) => isImageMaterial(item) && bound.has(item.id));
+    const selected = new Set((lineage?.selections ?? []).flatMap(({ selectedVisualMaterial }) => selectedVisualMaterial ? [selectedVisualMaterial.materialId] : []));
+    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item) => isImageMaterial(item) && (bound.has(item.id) || selected.has(item.id)));
     return [...new Map(linked.map((material) => [material.id, material])).values()];
   }
   return [];

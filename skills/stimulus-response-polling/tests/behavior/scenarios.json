@@ -141,7 +141,9 @@
         "matchedCoverage": {
           "evaluations": { "total": 3, "pending": 0, "answered": 3, "failed": 0, "unreached": 0 },
           "representedRespondents": 3,
-          "selectedMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 }
+          "selectedMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 },
+          "selectedTextMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 },
+          "selectedVisualMaterials": { "evaluations": 0, "respondents": 0, "distinctMaterials": 0 }
         }
       },
       "mockOnly": true
