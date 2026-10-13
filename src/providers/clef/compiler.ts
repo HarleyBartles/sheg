@@ -63,7 +63,8 @@ export function compileClefRequest(input: DecisionRequest | DecisionBatchRequest
   }
   const metadataById = new Map((request.visualMaterials ?? []).map((material) => [material.id, material]));
   const materialOrder = Array.isArray(request.state.materialOrder) ? request.state.materialOrder as string[] : [];
-  const orderedMaterials = [...modeByMaterial.keys()].sort((left, right) => {
+  const singleQuestionOrder = request.questions.length === 1 ? request.questions[0]!.visual?.materialIds : undefined;
+  const orderedMaterials = singleQuestionOrder ? [...singleQuestionOrder] : [...modeByMaterial.keys()].sort((left, right) => {
     const leftIndex = materialOrder.indexOf(left); const rightIndex = materialOrder.indexOf(right);
     if (leftIndex < 0 && rightIndex < 0) return left.localeCompare(right);
     if (leftIndex < 0) return 1;
