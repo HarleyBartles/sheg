@@ -140,8 +140,9 @@ export function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJ
   const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
   const respondentIdSet = new Set(respondentIds);
   const forkNodeIds = new Set(journeyTopology(parsedRequest.data.journey).nodes.filter((node) => node.kind === 'fork').map(({ id }) => id));
-  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length < respondentIds.length || prepared.evaluations.length === 0) {
-    throw new RunStoreError('invalid_prepared_run', 'Prepared journey requires unique respondent state and at least one reached turn.');
+  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length < respondentIds.length ||
+      (prepared.evaluations.length === 0 && prepared.respondents.some((state) => state.status !== 'waiting-fork'))) {
+    throw new RunStoreError('invalid_prepared_run', 'Prepared journey requires unique respondent state and either a reached turn or an initial fork barrier.');
   }
   const stateById = new Map<string, JourneyRespondentState>();
   const stateKey = (respondentId: string, branchId: string) => JSON.stringify([respondentId, branchId]);

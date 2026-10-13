@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
+import { materializeJourneyRun, prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import { compileDecisionRequest, emptyTrajectory } from '../src/domain/decision/prompt.js';
 import type { DecisionBatchRequest, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
@@ -595,6 +595,20 @@ function journeyRequestWithFork() {
   };
 }
 
+function journeyRequestStartingAtFork() {
+  const base = journeyRequestWithFork();
+  const graph = base.journey.presentation as Extract<StudyPresentation, { kind: 'graph' }>;
+  return {
+    ...base,
+    maxCalls: 4,
+    journey: { ...base.journey, presentation: {
+      ...graph, entryNodeId: 'treatment-fork',
+      nodes: graph.nodes.filter((node) => node.id !== 'entry' && node.id !== 'expose-section-three'),
+      transitions: graph.transitions.filter((edge) => edge.fromNodeId !== 'entry' && edge.toNodeId !== 'expose-section-three' && edge.fromNodeId !== 'expose-section-three'),
+    } },
+  };
+}
+
 const boundsRespondent: RespondentProfile = {
   id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose',
   engagement_cues: 'Examples', friction_cues: 'Hype',
@@ -623,14 +637,27 @@ test('journey admission measures initial contexts and reports reached-turn fit c
   assert.equal(fixture.decisions, 0);
 });
 
-test('journey admission refuses any study containing a matched fork before measuring an initial packet', async () => {
+test('journey admission measures only the true initial packet before a later matched fork', async () => {
   const fixture = makeProvider();
   const result = await prepareRun(journeyRequestWithFork(), fixture.provider);
-  assert.equal(result.inspection.valid, false);
-  assert.equal(result.inspection.problems.some(({ code, message }) => code === 'invalid_journey' && /matched forks require durable runtime execution/i.test(message)), true);
-  assert.equal(result.journey, undefined);
-  assert.equal(fixture.measured.length, 0);
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 1);
+  assert.equal(result.inspection.maximumCalls, 3);
+  assert.equal(result.journey?.packets.length, 1);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue']);
   assert.equal(fixture.decisions, 0);
+});
+
+test('journey beginning at a matched fork admits waiting states without inventing an initial turn', async () => {
+  const fixture = makeProvider();
+  const result = await prepareRun(journeyRequestStartingAtFork(), fixture.provider);
+  assert.equal(result.inspection.valid, true, JSON.stringify(result.inspection.problems));
+  assert.equal(result.journey?.packets.length, 0);
+  assert.equal(fixture.measured.length, 0);
+  const prepared = materializeJourneyRun(result.journey!);
+  assert.equal(prepared.evaluations.length, 0);
+  assert.ok(prepared.respondents.every((state) => state.status === 'waiting-fork' && state.currentNodeId === 'treatment-fork'));
+  assert.ok(prepared.respondents.every((state) => state.currentTurnId === null && state.currentContextId !== null));
 });
 
 test('fork call bounds count the prefix once and sum both condition asks while response alternatives retain min and max', () => {

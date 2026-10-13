@@ -124,8 +124,26 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
     }
     if (node.kind === 'fork') {
       if (edges.length > 0) context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index], message: 'Fork nodes cannot have ordinary transitions; use condition entry nodes.' });
-      for (const condition of node.conditions) if (!nodesById.has(condition.entryNodeId)) {
-        context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index, 'conditions'], message: `Fork condition ${condition.id} references unknown entry node ${condition.entryNodeId}.` });
+      for (const [conditionIndex, condition] of node.conditions.entries()) {
+        if (!nodesById.has(condition.entryNodeId)) {
+          context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index, 'conditions', conditionIndex, 'entryNodeId'], message: `Fork condition ${condition.id} references unknown entry node ${condition.entryNodeId}.` });
+          continue;
+        }
+        const seen = new Set<string>();
+        let currentNodeId = condition.entryNodeId;
+        let reachesAsk = false;
+        while (!seen.has(currentNodeId)) {
+          seen.add(currentNodeId);
+          const entryNode = nodesById.get(currentNodeId);
+          if (entryNode?.kind === 'ask') { reachesAsk = true; break; }
+          if (entryNode?.kind !== 'expose') break;
+          const exposureEdges = outgoing.get(entryNode.id) ?? [];
+          const exposureEdge = exposureEdges[0];
+          if (exposureEdges.length !== 1 || !exposureEdge || exposureEdge.optionId !== undefined || exposureEdge.when !== undefined) break;
+          currentNodeId = exposureEdge.toNodeId;
+        }
+        if (!reachesAsk) context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index, 'conditions', conditionIndex, 'entryNodeId'],
+          message: `Fork condition ${condition.id} must reach its first ask before a terminal or nested fork.` });
       }
       continue;
     }

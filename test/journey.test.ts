@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { JourneyExecutionError, runJourney } from '../src/domain/journey/run.js';
+import { advanceJourney, JourneyExecutionError, runJourney } from '../src/domain/journey/run.js';
 import { walkStudyPackets } from '../src/domain/journey/packet-walker.js';
 import { journeyControlSuccessors, journeyTopology } from '../src/domain/journey/topology.js';
 import type { PromptState } from '../src/domain/decision/prompt.js';
@@ -98,6 +98,22 @@ test('matched fork graph contract rejects malformed conditions, targets, and ord
   assert.equal(studyArmSchema.safeParse({ ...arm, presentation: { ...presentation, transitions: [...presentation.transitions, { fromNodeId: 'treatment-fork', optionId: 'continue', toNodeId: 'fork-end' }] } }).success, false);
 });
 
+test('matched fork conditions must reach a first ask before a terminal or nested fork', () => {
+  const arm = matchedForkArm();
+  const graph = arm.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>;
+  const fork = graph.nodes.find((node) => node.id === 'treatment-fork');
+  assert.equal(fork?.kind, 'fork');
+  if (fork?.kind !== 'fork') return;
+  const rejected = studyArmSchema.safeParse({
+    ...arm,
+    presentation: { ...graph, nodes: graph.nodes.map((node) => node.id === fork.id ? {
+      ...fork, conditions: fork.conditions.map((condition, index) => index === 0 ? { ...condition, entryNodeId: 'fork-end' } : condition),
+    } : node) },
+  });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) assert.equal(rejected.error.issues.some(({ message }) => /must reach its first ask before a terminal or nested fork/i.test(message)), true);
+});
+
 test('comparisonKey across fork rejects different question instructions, history policy, and typed interpretation', () => {
   const arm = matchedForkArm();
   const assertSemanticMismatch = (input: StudyArm): void => {
@@ -159,6 +175,35 @@ test('runJourney and packet walking fail closed at matched forks before asking e
   assert.equal(walk.incompleteReason, 'Matched forks require durable runtime execution.');
   assert.equal(walk.packetCount, 0);
   assert.deepEqual(packets, []);
+});
+
+test('durable journey advancement records fork arrival without exposing a condition early', () => {
+  const base = matchedForkArm();
+  const graph = base.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>;
+  const prefix: StudyArm = {
+    ...base,
+    tasks: [{ id: 'prefix-question', type: 'choice', instructions: 'Continue?', options: { continue: 'Continue', stop: 'Stop' } }, ...base.tasks],
+    presentation: {
+      ...graph,
+      entryNodeId: 'prefix-ask',
+      nodes: [{ id: 'prefix-ask', kind: 'ask', taskId: 'prefix-question' }, ...graph.nodes],
+      transitions: [
+        { fromNodeId: 'prefix-ask', optionId: 'continue', toNodeId: 'treatment-fork' },
+        { fromNodeId: 'prefix-ask', optionId: 'stop', toNodeId: 'fork-end' },
+        ...graph.transitions,
+      ],
+    },
+  };
+  const progress = advanceJourney(prefix, profile, {
+    branchId: 'root', currentNodeId: 'prefix-ask', events: [], route: [],
+  }, { type: 'choice', choice: 'continue' });
+
+  assert.equal(progress.status, 'waiting-fork');
+  assert.equal(progress.forkNodeId, 'treatment-fork');
+  assert.equal(progress.next, undefined);
+  assert.equal(progress.events.length, 1);
+  assert.equal(progress.events[0]?.type, 'response');
+  assert.equal(progress.events[0]?.nodeId, 'prefix-ask');
 });
 
 test('sequence mode exposes bounded stimulus then asks each typed task', async () => {

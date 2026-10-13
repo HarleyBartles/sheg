@@ -5,6 +5,7 @@ import { decisionRequestSchema, decisionValueFromResult, decisionValueSchema, ty
 import { compileDecisionPacketForCompiler } from '../../../domain/decision/prompt.js';
 import { validateDecision } from '../../../domain/decision/validate.js';
 import type { JourneyDefinition } from '../../../domain/study/arm.js';
+import { journeyTopology } from '../../../domain/journey/topology.js';
 import { journeyEventsSchema, journeyRouteSchema, type JourneyRespondentState, type WorkerClaim } from '../../../domain/run/lifecycle.js';
 import { runRequestSchema } from '../../../domain/run/request.js';
 import type { AttemptOutcome, JourneyTransition } from '../../../application/run-store.js';
@@ -45,6 +46,29 @@ export function persistNextJourneyTurn(database: NodeSQLiteDatabase, runId: stri
   }).run();
   database.update(runs).set({ evaluationCount: sql`${runs.evaluationCount} + 1` })
     .where(eq(runs.runId, runId)).run();
+}
+
+function firstNodeAfterExposures(journey: JourneyDefinition, startNodeId: string | undefined): {
+  nodeId: string;
+  exposures: Array<Extract<ReturnType<typeof journeyTopology>['nodes'][number], { kind: 'expose' }>>;
+} | undefined {
+  if (!startNodeId) return undefined;
+  const graph = journeyTopology(journey);
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const exposures: Array<Extract<typeof graph.nodes[number], { kind: 'expose' }>> = [];
+  const visited = new Set<string>();
+  let currentNodeId = startNodeId;
+  while (!visited.has(currentNodeId)) {
+    visited.add(currentNodeId);
+    const node = nodes.get(currentNodeId);
+    if (!node) return undefined;
+    if (node.kind !== 'expose') return { nodeId: node.id, exposures };
+    exposures.push(node);
+    const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id);
+    if (!edge) return undefined;
+    currentNodeId = edge.toNodeId;
+  }
+  return undefined;
 }
 
 export function persistJourneyRespondentState(database: NodeSQLiteDatabase, runId: string, transition: JourneyTransition): boolean {
@@ -139,6 +163,20 @@ export function settleJourneyTurn(context: {
               transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId ||
               transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
             throw new RunStoreError('journey_transition_conflict', 'An active respondent must point to exactly one next reached turn.');
+          }
+        } else if (transition.state.status === 'waiting-fork') {
+          const checkpoint = firstNodeAfterExposures(parsedRunRequest.data.journey, expectedTarget);
+          const nextNode = checkpoint && parsedRunRequest.data.journey.presentation.kind === 'graph'
+            ? parsedRunRequest.data.journey.presentation.nodes.find((candidate) => candidate.id === checkpoint.nodeId)
+            : undefined;
+          const expectedExposures = (checkpoint?.exposures ?? []).map((node, index) => ({
+            type: 'exposure' as const, sequence: priorEvents.length + index + 1, nodeId: node.id, itemId: node.itemId,
+          }));
+          const actualExposures = transition.state.events.slice(priorEvents.length + 1);
+          if (transition.nextEvaluation || nextNode?.kind !== 'fork' || transition.state.currentNodeId !== checkpoint?.nodeId ||
+              hashCanonical(actualExposures) !== hashCanonical(expectedExposures) ||
+              transition.state.currentTurnId !== null || transition.state.currentContextId === null) {
+            throw new RunStoreError('journey_transition_conflict', 'A fork arrival must retain its context at the reached fork without creating a turn.');
           }
         } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
           throw new RunStoreError('journey_transition_conflict', 'A terminal respondent state cannot have a next reached turn.');

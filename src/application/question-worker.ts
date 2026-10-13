@@ -99,11 +99,20 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
 
 async function executeJourney(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions, assertProviderReady?: (config: ProviderConfigInput) => Promise<void>): Promise<void> {
   const accepted = reads.getJourneyRun(runId);
-  const evaluations = [...accepted.evaluations];
   const explicitProvider = accepted.request.provider ? requireExplicitProvider(accepted.request) : undefined;
   while (true) {
     if (!commands.heartbeat(claim, Date.now())) return;
-    const pending = evaluations.find((evaluation) => evaluation.status === 'pending');
+    const waitingForks = new Map(accepted.respondents.filter((state) => state.status === 'waiting-fork' && state.currentNodeId !== null)
+      .map((state) => [JSON.stringify([state.branchId, state.currentNodeId]), { forkNodeId: state.currentNodeId!, parentBranchId: state.branchId }]));
+    for (const fork of waitingForks.values()) {
+      const advanced = commands.advanceJourneyFork(claim, fork.forkNodeId, fork.parentBranchId);
+      if (advanced.status === 'closed' && advanced.createdEvaluations.length > 0) {
+        accepted.evaluations.push(...advanced.createdEvaluations);
+        accepted.respondents = accepted.respondents.filter((state) => !(state.status === 'waiting-fork' && state.branchId === fork.parentBranchId && state.currentNodeId === fork.forkNodeId));
+        accepted.respondents.push(...advanced.parentRespondents, ...advanced.childRespondents);
+      }
+    }
+    const pending = accepted.evaluations.find((evaluation) => evaluation.status === 'pending');
     if (!pending) break;
     const existingChoice = pending.providerSelection ?? accepted.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === pending.respondentId && choice.questionId === pending.questionId && (choice.branchId ?? 'root') === pending.branchId);
     let choice;
@@ -113,6 +122,10 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       commands.failPendingJourneyEvaluation(claim, pending.evaluationId, pending.packetFingerprint,
         { code: 'provider_selection_unavailable', message: 'No enabled provider fits the reached journey unit and its declared comparison constraints.' }, Date.now());
       pending.status = 'failed';
+      pending.failure = { code: 'provider_selection_unavailable', message: 'No enabled provider fits the reached journey unit and its declared comparison constraints.' };
+      accepted.respondents = accepted.respondents.map((state) => state.respondentId === pending.respondentId && state.branchId === pending.branchId ? {
+        ...state, status: 'failed', currentNodeId: null, currentTurnId: null, currentContextId: null, revision: state.revision + 1,
+      } : state);
       continue;
     }
     const reservation = commands.reserveNext(claim, Date.now(), choice ? { evaluationId: pending.evaluationId, packetFingerprint: pending.packetFingerprint, providerSelection: choice } : undefined);
@@ -142,9 +155,9 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       const state: JourneyRespondentState = {
         ...respondentState,
         status: progress.status,
-        currentNodeId: nextEvaluation?.nodeId ?? null,
+        currentNodeId: nextEvaluation?.nodeId ?? progress.forkNodeId ?? null,
         currentTurnId: nextEvaluation?.turnId ?? null,
-        currentContextId: nextEvaluation?.contextId ?? null,
+        currentContextId: nextEvaluation?.contextId ?? (progress.status === 'waiting-fork' ? currentEvaluation.contextId : null),
         revision: respondentState.revision + 1,
         events: progress.events,
         route: progress.route,
@@ -153,8 +166,12 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       commands.settleJourney(claim, reservation.attemptId, { kind: 'answered', result }, {
         respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state, ...(nextEvaluation ? { nextEvaluation } : {}),
       });
-      pending.status = 'answered';
-      if (nextEvaluation) evaluations.push({ ...nextEvaluation, status: 'pending' });
+      const settled = accepted.evaluations.find(({ evaluationId }) => evaluationId === currentEvaluation.evaluationId);
+      if (!settled) throw new Error('The settled journey turn is absent from the worker snapshot.');
+      settled.status = 'answered';
+      settled.result = result;
+      if (nextEvaluation) accepted.evaluations.push({ ...nextEvaluation, status: 'pending' });
+      accepted.respondents = accepted.respondents.map((existingState) => existingState.respondentId === respondentState.respondentId && existingState.branchId === respondentState.branchId ? state : existingState);
     } catch (error) {
       const scope = failureScope(error);
       const state: JourneyRespondentState = {
@@ -168,7 +185,11 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       commands.settleJourney(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope }, {
         respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state,
       });
-      pending.status = 'failed';
+      const settled = accepted.evaluations.find(({ evaluationId }) => evaluationId === currentEvaluation.evaluationId);
+      if (!settled) throw new Error('The failed journey turn is absent from the worker snapshot.', { cause: error });
+      settled.status = 'failed';
+      settled.failure = { code: failureDetails(error, scope).code, message: failureDetails(error, scope).message };
+      accepted.respondents = accepted.respondents.map((existingState) => existingState.respondentId === respondentState.respondentId && existingState.branchId === respondentState.branchId ? state : existingState);
       if (scope === 'run') break;
     }
   }

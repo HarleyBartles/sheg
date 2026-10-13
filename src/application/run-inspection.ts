@@ -177,12 +177,20 @@ export function materializeJourneyRun(admission: PreparedJourneyAdmission): Prep
   const { request, requestFingerprint, compilerFingerprint, packets } = admission;
   const evaluations: PreparedJourneyRun['evaluations'] = [];
   const respondents: JourneyRespondentState[] = [];
+  const initialPath = initialJourneyPath(request.journey);
   let ordinal = 0;
   for (const profile of request.respondents) {
     const firstPacket = packets.find((packet) => packet.respondentId === profile.id);
-    if (!firstPacket) throw new Error(`Journey has no initial ask packet for respondent ${profile.id}.`);
-    const evaluationId = randomUUID();
     const contextId = randomUUID();
+    if (!firstPacket) {
+      if (initialPath.kind !== 'fork') throw new Error(`Journey has no initial ask packet for respondent ${profile.id}.`);
+      respondents.push({
+        respondentId: profile.id, branchId: 'root', status: 'waiting-fork', currentNodeId: initialPath.forkNodeId,
+        currentTurnId: null, currentContextId: contextId, revision: 0, events: initialPath.events, route: [],
+      });
+      continue;
+    }
+    const evaluationId = randomUUID();
     const turnId = randomUUID();
     const evaluation = {
       evaluationId, contextId, respondentId: profile.id, branchId: 'root', questionId: firstPacket.request.question.id,
@@ -190,16 +198,18 @@ export function materializeJourneyRun(admission: PreparedJourneyAdmission): Prep
       turnId, nodeId: firstPacket.nodeId, pathId: firstPacket.pathId, occurrence: 1, ordinal: ordinal++,
     };
     evaluations.push(evaluation);
-    const events = initialJourneyPath(request.journey).events;
     respondents.push({
       respondentId: profile.id, branchId: 'root', status: 'active', currentNodeId: firstPacket.nodeId, currentTurnId: turnId,
-      currentContextId: contextId, revision: 0, events, route: [],
+      currentContextId: contextId, revision: 0, events: initialPath.events, route: [],
     });
   }
   return { request, requestFingerprint, compilerFingerprint, evaluations, respondents };
 }
 
-function initialJourneyPath(arm: ParsedInlineJourneyRequest['journey']): { events: JourneyRespondentState['events']; nodeId: string; taskId: string } {
+type InitialJourneyPath = { events: JourneyRespondentState['events'] } &
+  ({ kind: 'ask'; nodeId: string; taskId: string } | { kind: 'fork'; forkNodeId: string });
+
+function initialJourneyPath(arm: ParsedInlineJourneyRequest['journey']): InitialJourneyPath {
   const events: JourneyRespondentState['events'] = [];
   const graph = journeyTopology(arm);
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -207,8 +217,8 @@ function initialJourneyPath(arm: ParsedInlineJourneyRequest['journey']): { event
   while (true) {
     const node = nodes.get(current);
     if (!node) throw new Error(`Journey points to unknown node ${current}.`);
-    if (node.kind === 'ask') return { events, nodeId: node.id, taskId: node.taskId };
-    if (node.kind === 'fork') throw new Error('Matched forks require durable runtime execution.');
+    if (node.kind === 'ask') return { kind: 'ask', events, nodeId: node.id, taskId: node.taskId };
+    if (node.kind === 'fork') return { kind: 'fork', events, forkNodeId: node.id };
     if (node.kind === 'terminal') throw new Error('Journey must reach an ask node before a terminal node.');
     events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
     const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id);
@@ -494,7 +504,6 @@ export async function prepareAutomaticallySelectedJourney(
   settings: { catalogue: ProviderCatalogue; preferences: ProviderPreference },
   providerCandidates: ProviderBatchCandidate[],
 ): Promise<{ inspection: Inspection; journey?: PreparedJourneyAdmission }> {
-  if (journeyHasFork(request.journey)) return unsupportedForkInspection(request.respondents.length);
   const compilerFingerprint = promptContractHash();
   let callBounds: ReturnType<typeof estimateRunDecisionCalls>;
   try { callBounds = estimateRunDecisionCalls([request.journey], request.respondents); }
@@ -511,12 +520,12 @@ export async function prepareAutomaticallySelectedJourney(
   catch (error) { return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
     maximumCalls: callBounds.maximumDecisionCalls, problems: [...problems, { code: 'invalid_journey', message: error instanceof Error ? error.message : 'Journey has no initial ask packet.' }],
     ...(warnings.length === 0 ? {} : { warnings }), fits: [] } }; }
-  if (!request.journey.tasks.some(({ id }) => id === initialPath.taskId)) return { inspection: { valid: false, respondentCount: request.respondents.length,
+  if (initialPath.kind === 'ask' && !request.journey.tasks.some(({ id }) => id === initialPath.taskId)) return { inspection: { valid: false, respondentCount: request.respondents.length,
     minimumCalls: callBounds.minimumDecisionCalls, maximumCalls: callBounds.maximumDecisionCalls,
     problems: [...problems, { code: 'invalid_journey', message: `Initial ask references unknown task ${initialPath.taskId}.` }],
     ...(warnings.length === 0 ? {} : { warnings }), fits: [] } };
 
-  const packets: PreflightPacket[] = request.respondents.map((respondent) => {
+  const packets: PreflightPacket[] = initialPath.kind === 'fork' ? [] : request.respondents.map((respondent) => {
     const packetRequest = compileDecisionPacket(request.journey, respondent, initialPath.taskId, initialPath.events);
     const identity = JSON.stringify([respondent.id, request.journey.id, 'root', 1, initialPath.nodeId]);
     return { packetId: `packet-${createHash('sha256').update(identity).digest('hex')}`, respondentId: respondent.id, armId: request.journey.id,
@@ -611,10 +620,10 @@ export async function prepareAutomaticallySelectedJourney(
       ...(resolved?.lockId === undefined ? {} : { comparisonLockId: resolved.lockId }), decisionReason: resolved!.result.decisionReason, candidates }];
   });
   const graph = journeyTopology(request.journey);
-  const futureAskNodes = graph.nodes.filter((node): node is Extract<typeof node, { kind: 'ask' }> => node.kind === 'ask' && node.id !== initialPath.nodeId);
+  const futureAskNodes = graph.nodes.filter((node): node is Extract<typeof node, { kind: 'ask' }> => node.kind === 'ask' && (initialPath.kind === 'fork' || node.id !== initialPath.nodeId));
   const unresolvedFutureJourneyUnits = request.respondents.flatMap((respondent) => futureAskNodes.map((node) => ({ respondentId: respondent.id, nodeId: node.id,
     questionId: node.taskId, unitId: `${respondent.id}/${node.taskId}`, reason: 'reached-context-not-yet-known' as const })));
-  if (callBounds.maximumDecisionCalls > request.respondents.length) warnings.push({ code: 'reached_turn_fit_check', message: `${fits.length === request.respondents.length ? 'Initial packets passed fit checks.' : 'One or more initial packets failed fit checks.'} Each later reached turn is checked against the selected provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
+  if (callBounds.maximumDecisionCalls > packets.length) warnings.push({ code: 'reached_turn_fit_check', message: `${packets.length === 0 ? 'No provider packet is reached before the initial fork.' : fits.length === packets.length ? 'Initial packets passed fit checks.' : 'One or more initial packets failed fit checks.'} Each later reached turn is checked against the selected provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
   const inspection: Inspection = { valid: problems.length === 0, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
     maximumCalls: callBounds.maximumDecisionCalls, problems, ...(warnings.length === 0 ? {} : { warnings }), fits, initialChoices, unresolvedFutureJourneyUnits };
   if (!inspection.valid) return { inspection };
@@ -639,7 +648,6 @@ async function planQuestionBatches(
 }
 
 async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, provider: DecisionProvider): Promise<{ inspection: Inspection; journey?: PreparedJourneyAdmission }> {
-  if (journeyHasFork(request.journey)) return unsupportedForkInspection(request.respondents.length);
   const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   let callBounds: ReturnType<typeof estimateRunDecisionCalls>;
@@ -666,12 +674,12 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
       problems: [...problems, { code: 'invalid_journey', message: error instanceof Error ? error.message : 'Journey has no initial ask packet.' }],
       ...(warnings.length === 0 ? {} : { warnings }), fits: [] } };
   }
-  const task = request.journey.tasks.find(({ id }) => id === initialPath.taskId);
-  if (!task) return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
+  const task = initialPath.kind === 'ask' ? request.journey.tasks.find(({ id }) => id === initialPath.taskId) : undefined;
+  if (initialPath.kind === 'ask' && !task) return { inspection: { valid: false, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
     maximumCalls: callBounds.maximumDecisionCalls,
     problems: [...problems, { code: 'invalid_journey', message: `Initial ask references unknown task ${initialPath.taskId}.` }],
     ...(warnings.length === 0 ? {} : { warnings }), fits: [] } };
-  for (const respondent of request.respondents) {
+  if (initialPath.kind === 'ask') for (const respondent of request.respondents) {
     const packetRequest = compileDecisionPacket(request.journey, respondent, initialPath.taskId, initialPath.events);
     const identity = JSON.stringify([respondent.id, request.journey.id, 'root', 1, initialPath.nodeId]);
     packets.push({ packetId: `packet-${createHash('sha256').update(identity).digest('hex')}`,
@@ -697,8 +705,8 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
     const problem = problemForFit(packet.respondentId, fit);
     if (problem) problems.push({ ...problem, nodeId: packet.nodeId, pathId: packet.pathId });
   }
-  if (callBounds.maximumDecisionCalls > request.respondents.length) {
-    const initialFitMessage = fits.every(({ fit }) => fit.status === 'fits')
+  if (callBounds.maximumDecisionCalls > packets.length) {
+    const initialFitMessage = packets.length === 0 ? 'No provider packet is reached before the initial fork.' : fits.every(({ fit }) => fit.status === 'fits')
       ? 'Initial packets passed fit checks.'
       : 'One or more initial packets failed fit checks.';
     warnings.push({ code: 'reached_turn_fit_check', message: `${initialFitMessage} Each later reached turn is checked by the provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
@@ -725,13 +733,4 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
       packets,
     },
   };
-}
-
-function journeyHasFork(journey: ParsedInlineJourneyRequest['journey']): boolean {
-  return journey.presentation.kind === 'graph' && journey.presentation.nodes.some((node) => node.kind === 'fork');
-}
-
-function unsupportedForkInspection(respondentCount: number): { inspection: Inspection } {
-  return { inspection: { valid: false, respondentCount, minimumCalls: 0,
-    problems: [{ code: 'invalid_journey', message: 'Matched forks require durable runtime execution.' }], fits: [] } };
 }

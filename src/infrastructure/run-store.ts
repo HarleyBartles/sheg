@@ -64,6 +64,7 @@ export function splitRunStore(store: RunStore): RunPersistence {
     settleBatch: store.settleBatch.bind(store),
     settle: store.settle.bind(store),
     settleJourney: store.settleJourney.bind(store),
+    advanceJourneyFork: store.advanceJourneyFork.bind(store),
     finish: store.finish.bind(store),
     failLaunch: store.failLaunch.bind(store),
     failRun: store.failRun.bind(store),

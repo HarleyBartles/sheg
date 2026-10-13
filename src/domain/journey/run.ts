@@ -18,8 +18,9 @@ export class JourneyExecutionError extends Error {
 export type JourneyProgress = {
   events: JourneyEvent[];
   route: Array<{ branchId?: string | undefined; nodeId: string; response: DecisionValue; toNodeId: string }>;
-  status: 'active' | 'completed';
+  status: 'active' | 'waiting-fork' | 'completed';
   outcome: string | null;
+  forkNodeId?: string;
   next?: { nodeId: string; taskId: string; pathId: string; packet: DecisionRequest & { state: PromptState } };
 };
 export type JourneyVisualExecution = { provider: DecisionResult['provider']; model: string; visualMaterials: NonNullable<DecisionRequest['visualMaterials']> };
@@ -67,14 +68,14 @@ export function advanceJourney(
   } else answerEvent = { type: 'response', sequence: events.length, nodeId, taskId, result };
   events.push(answerEvent);
   route.push({ branchId: state.branchId ?? 'root', nodeId, response: result, toNodeId: routeTarget });
-  const pathId = route.length === 0 ? 'root' : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`}`).join('>');
+  const pathId = journeyPathId(route);
 
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   let current = routeTarget;
   while (true) {
     const node = nodes.get(current);
     if (!node) throw new JourneyExecutionError(`Graph points to unknown node ${current}.`);
-    if (node.kind === 'fork') throw new JourneyExecutionError('Matched fork journeys require durable runtime execution.');
+    if (node.kind === 'fork') return { events, route, status: 'waiting-fork', outcome: null, forkNodeId: node.id };
     if (node.kind === 'terminal') return { events, route, status: 'completed', outcome: node.outcome };
     if (node.kind === 'expose') {
       events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
@@ -88,6 +89,11 @@ export function advanceJourney(
       : compileDecisionPacketForCompiler(arm, profile, node.taskId, events, compilerFingerprint);
     return { events, route, status: 'active', outcome: null, next: { nodeId: node.id, taskId: node.taskId, pathId, packet } };
   }
+}
+
+export function journeyPathId(route: readonly JourneyProgress['route'][number][]): string {
+  return route.length === 0 ? 'root' : route.map(({ nodeId, response }) =>
+    `${nodeId}=${response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`}`).join('>');
 }
 
 export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise<JourneyResult> {

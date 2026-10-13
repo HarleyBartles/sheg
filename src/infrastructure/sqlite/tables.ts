@@ -29,7 +29,7 @@ export const runs = sqliteTable('runs', {
   unique('runs_submission_id_uq').on(table.submissionId),
   unique('runs_run_submission_uq').on(table.runId, table.submissionId),
   check('runs_status_ck', sql`${table.status} IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')`),
-  check('runs_count_ck', sql`${table.evaluationCount} > 0 AND ${table.maxCalls} > 0 AND ${table.usedCalls} >= 0 AND ${table.reservedCalls} >= 0 AND ${table.usedCalls} + ${table.reservedCalls} <= ${table.maxCalls}`),
+  check('runs_count_ck', sql`${table.evaluationCount} >= 0 AND ${table.maxCalls} > 0 AND ${table.usedCalls} >= 0 AND ${table.reservedCalls} >= 0 AND ${table.usedCalls} + ${table.reservedCalls} <= ${table.maxCalls}`),
   check('runs_owner_ck', sql`(${table.status} = 'running' AND ${table.ownerToken} IS NOT NULL AND ${table.ownerPid} IS NOT NULL AND ${table.leaseExpiresMs} IS NOT NULL) OR (${table.status} <> 'running' AND ${table.ownerToken} IS NULL AND ${table.ownerPid} IS NULL)`),
   check('runs_cancel_ck', sql`${table.cancelRequested} IN (0, 1)`),
   check('runs_failure_scope_ck', sql`${table.failureScope} IS NULL OR ${table.failureScope} IN ('evaluation', 'run')`),

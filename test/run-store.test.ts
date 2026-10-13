@@ -12,6 +12,7 @@ import type { DecisionProvider, ProviderContextFit } from '../src/domain/decisio
 import type { DecisionResult } from '../src/domain/decision/decision.js';
 import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedFollowOnRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun, type RunMaterialItem } from '../src/domain/run/request.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
+import type { WorkerClaim } from '../src/domain/run/lifecycle.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
 import { openRunStore, RunStoreError, splitRunStore } from '../src/infrastructure/run-store.js';
@@ -107,6 +108,85 @@ function preparedJourneyRun(): PreparedJourneyRun {
     route: [],
   }));
   return { request, requestFingerprint, compilerFingerprint, evaluations, respondents };
+}
+
+function barrierJourneyRequest(respondents: InlineJourneyRequest['respondents'] = journeyRequest.respondents): InlineJourneyRequest {
+  return {
+    ...journeyRequest,
+    respondents,
+    maxCalls: respondents.length * 3,
+    journey: {
+      id: 'barrier-article', label: 'Matched image placement',
+      items: [
+        { id: 'section-three', text: 'The article section before its visual comparison.' },
+        { id: 'image-condition', text: 'The image appears between sections.' },
+        { id: 'text-condition', text: 'No image appears between sections.' },
+      ],
+      tasks: [
+        { id: 'prefix-interest', type: 'choice', instructions: 'Would you continue into the next section?', options: { continue: 'Continue reading.', stop: 'Stop reading.' } },
+        { id: 'with-image-interest', type: 'choice', comparisonKey: 'image-effect', instructions: 'Would you continue into the next section?', options: { continue: 'Continue reading.', stop: 'Stop reading.' } },
+        { id: 'without-image-interest', type: 'choice', comparisonKey: 'image-effect', instructions: 'Would you continue into the next section?', options: { continue: 'Continue reading.', stop: 'Stop reading.' } },
+      ],
+      presentation: { kind: 'graph', entryNodeId: 'prefix-ask', maxDecisions: 3, nodes: [
+        { id: 'prefix-ask', kind: 'ask', taskId: 'prefix-interest' },
+        { id: 'section-three-exposure', kind: 'expose', itemId: 'section-three' },
+        { id: 'treatment-fork', kind: 'fork', conditions: [
+          { id: 'with-image', label: 'With the image', entryNodeId: 'image-exposure' },
+          { id: 'without-image', label: 'Without the image', entryNodeId: 'text-exposure' },
+        ] },
+        { id: 'image-exposure', kind: 'expose', itemId: 'image-condition' },
+        { id: 'ask-with-image', kind: 'ask', taskId: 'with-image-interest' },
+        { id: 'text-exposure', kind: 'expose', itemId: 'text-condition' },
+        { id: 'ask-without-image', kind: 'ask', taskId: 'without-image-interest' },
+        { id: 'finished', kind: 'terminal', outcome: 'complete' },
+        { id: 'left', kind: 'terminal', outcome: 'left' },
+      ], transitions: [
+        { fromNodeId: 'prefix-ask', optionId: 'continue', toNodeId: 'section-three-exposure' },
+        { fromNodeId: 'prefix-ask', optionId: 'stop', toNodeId: 'left' },
+        { fromNodeId: 'section-three-exposure', toNodeId: 'treatment-fork' },
+        { fromNodeId: 'image-exposure', toNodeId: 'ask-with-image' },
+        { fromNodeId: 'text-exposure', toNodeId: 'ask-without-image' },
+        { fromNodeId: 'ask-with-image', optionId: 'continue', toNodeId: 'finished' },
+        { fromNodeId: 'ask-with-image', optionId: 'stop', toNodeId: 'finished' },
+        { fromNodeId: 'ask-without-image', optionId: 'continue', toNodeId: 'finished' },
+        { fromNodeId: 'ask-without-image', optionId: 'stop', toNodeId: 'finished' },
+      ] },
+    },
+  };
+}
+
+function preparedBarrierJourneyRun(respondents: InlineJourneyRequest['respondents']): PreparedJourneyRun {
+  const parsed = runRequestSchema.parse(barrierJourneyRequest(respondents));
+  if (parsed.kind !== 'journey') throw new Error('Barrier fixture did not parse as a journey.');
+  const compilerFingerprint = promptContractHash();
+  const requestFingerprint = hashCanonical({ request: parsed, compilerFingerprint });
+  const evaluations = parsed.respondents.map((respondent, index) => {
+    const contextId = `barrier-context-${respondent.id}`;
+    const turnId = `barrier-turn-${respondent.id}`;
+    const packet = compileDecisionPacket(parsed.journey, respondent, 'prefix-interest', []);
+    return { evaluationId: `barrier-evaluation-${respondent.id}`, contextId, respondentId: respondent.id, branchId: 'root', questionId: 'prefix-interest',
+      packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }), turnId, nodeId: 'prefix-ask', pathId: 'root', occurrence: 1, ordinal: index };
+  });
+  const journeyRespondents: JourneyRespondentState[] = evaluations.map((evaluation) => ({ respondentId: evaluation.respondentId, branchId: 'root',
+    status: 'active', currentNodeId: evaluation.nodeId, currentTurnId: evaluation.turnId, currentContextId: evaluation.contextId,
+    revision: 0, events: [], route: [] }));
+  return { request: parsed, requestFingerprint, compilerFingerprint, evaluations, respondents: journeyRespondents };
+}
+
+function preparedInitialBarrierJourneyRun(respondents: InlineJourneyRequest['respondents']): PreparedJourneyRun {
+  const base = barrierJourneyRequest(respondents);
+  const graph = base.journey.presentation as Extract<InlineJourneyRequest['journey']['presentation'], { kind: 'graph' }>;
+  const request = runRequestSchema.parse({ ...base, maxCalls: respondents.length * 2,
+    journey: { ...base.journey, tasks: base.journey.tasks.filter(({ id }) => id !== 'prefix-interest'), presentation: {
+      ...graph, entryNodeId: 'treatment-fork',
+      nodes: graph.nodes.filter((node) => node.id !== 'prefix-ask' && node.id !== 'section-three-exposure' && node.id !== 'left'),
+      transitions: graph.transitions.filter((edge) => edge.fromNodeId !== 'prefix-ask' && edge.toNodeId !== 'section-three-exposure' && edge.fromNodeId !== 'section-three-exposure'),
+    } } });
+  if (request.kind !== 'journey') throw new Error('Initial fork fixture did not parse as a journey.');
+  const compilerFingerprint = promptContractHash();
+  return { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations: [],
+    respondents: request.respondents.map((respondent) => ({ respondentId: respondent.id, branchId: 'root', status: 'waiting-fork',
+      currentNodeId: 'treatment-fork', currentTurnId: null, currentContextId: randomUUID(), revision: 0, events: [], route: [] })) };
 }
 
 async function resumableFixture(value: InlineRunRequest = input) {
@@ -499,6 +579,140 @@ test('journey worker advances and closes each stored branch independently', asyn
     assert.deepEqual(evidence.items.map(({ branchId }) => branchId), ['root', 'condition-b', 'root', 'condition-b']);
     assert.deepEqual(evidence.coverage.respondents, { total: 2, completed: 2, failed: 0, unreached: 0, active: 0 });
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('settled fork cohort waits for every eligible respondent, excludes paths that stop or fail, and fans out once', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const profiles = [
+    { ...journeyRequest.respondents[1]!, id: 'reader-b', intent: 'reader-b' },
+    { ...journeyRequest.respondents[0]!, id: 'reader-a', intent: 'reader-a' },
+    { ...journeyRequest.respondents[0]!, id: 'reader-stop', intent: 'reader-stop' },
+    { ...journeyRequest.respondents[0]!, id: 'reader-fail', intent: 'reader-fail' },
+  ];
+  const accepted = store.acceptJourney(randomUUID(), preparedBarrierJourneyRun(profiles));
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  let barrierObservation: unknown;
+  let closedBarrierRepeatWasEmpty = false;
+  const calls: string[] = [];
+  const deterministicProvider: DecisionProvider = { ...provider, async decide(packet) {
+    const intent = (packet.state.respondent as { profile: { intent: string } }).profile.intent;
+    calls.push(`${intent}/${packet.question.id}`);
+    if (intent === 'reader-a' && packet.question.id === 'prefix-interest') {
+      const states = store.getJourneyRun(accepted.run.runId).respondents;
+      const barrier = database.prepare('SELECT status, cohort_count FROM journey_forks WHERE run_id = ? AND fork_node_id = ? AND parent_branch_id = ?')
+        .get(accepted.run.runId, 'treatment-fork', 'root') as { status: string; cohort_count: number } | undefined;
+      const childCount = database.prepare('SELECT COUNT(*) AS count FROM journey_fork_members WHERE run_id = ?').get(accepted.run.runId) as { count: number };
+      const treatmentEvaluations = database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND branch_id <> 'root'")
+        .get(accepted.run.runId) as { count: number };
+      barrierObservation = { states: states.map(({ respondentId, branchId, status, currentNodeId }) => ({ respondentId, branchId, status, currentNodeId })),
+        evaluations: store.getJourneyRun(accepted.run.runId).evaluations.map(({ respondentId, status, failure }) => ({ respondentId, status, failure })),
+        barrier, childCount: childCount.count, treatmentEvaluations: treatmentEvaluations.count };
+    }
+    if (intent === 'reader-fail') throw new Error('bounded upstream failure fixture');
+    const choice = intent === 'reader-stop' && packet.question.id === 'prefix-interest' ? 'stop' : 'continue';
+    const values = packet.question.id === 'prefix-interest' ? ['continue', 'stop'] : ['continue', 'stop'];
+    return { ...savedAnswer, choice, probabilities: Object.fromEntries(values.map((value) => [value, value === choice ? 0.9 : 0.1])) };
+  } };
+  try {
+    const persistence = splitRunStore(store);
+    const instrumentedPersistence = { ...persistence, commands: { ...persistence.commands, advanceJourneyFork(claim: WorkerClaim, forkNodeId: string, parentBranchId: string) {
+      const result = persistence.commands.advanceJourneyFork(claim, forkNodeId, parentBranchId);
+      if (result.status === 'closed') {
+        const repeated = persistence.commands.advanceJourneyFork(claim, forkNodeId, parentBranchId);
+        closedBarrierRepeatWasEmpty = repeated.status === 'closed' && repeated.createdEvaluationIds.length === 0;
+      }
+      return result;
+    } } };
+    await executeQuestionRun(instrumentedPersistence, accepted.run.runId, () => deterministicProvider);
+    const openObservation = barrierObservation as { states: Array<{ respondentId: string; branchId: string; status: string; currentNodeId: string | null }>;
+      barrier?: { status: string; cohort_count: number }; childCount: number; treatmentEvaluations: number };
+    assert.equal(openObservation.barrier?.status, 'open', JSON.stringify(barrierObservation));
+    assert.equal(openObservation.barrier?.cohort_count, 0);
+    assert.equal(openObservation.states.find(({ respondentId, branchId }) => respondentId === 'reader-b' && branchId === 'root')?.status, 'waiting-fork');
+    assert.equal(openObservation.states.find(({ respondentId }) => respondentId === 'reader-a')?.status, 'active');
+    assert.equal(openObservation.childCount, 0);
+    assert.equal(openObservation.treatmentEvaluations, 0);
+    assert.equal(closedBarrierRepeatWasEmpty, true);
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.equal(store.getStatus(accepted.run.runId).status, 'partial');
+    const rootStates = run.respondents.filter(({ branchId }) => branchId === 'root');
+    assert.deepEqual(rootStates.map(({ respondentId, status }) => [respondentId, status]).sort(), [
+      ['reader-a', 'branched'], ['reader-b', 'branched'], ['reader-fail', 'failed'], ['reader-stop', 'completed'],
+    ]);
+    const fork = { ...(database.prepare('SELECT status, cohort_count FROM journey_forks WHERE run_id = ? AND fork_node_id = ? AND parent_branch_id = ?')
+      .get(accepted.run.runId, 'treatment-fork', 'root') as { status: string; cohort_count: number }) };
+    assert.equal(fork.status, 'closed');
+    assert.equal(fork.cohort_count, 2);
+    const members = database.prepare('SELECT respondent_id, condition_ordinal, condition_id, child_branch_id, source_context_id, child_context_id, child_turn_id, child_evaluation_id FROM journey_fork_members WHERE run_id = ? ORDER BY respondent_id, condition_ordinal')
+      .all(accepted.run.runId) as Array<Record<string, string | number>>;
+    assert.deepEqual(members.map(({ respondent_id, condition_ordinal, condition_id, child_branch_id }) => [respondent_id, condition_ordinal, condition_id, child_branch_id]), [
+      ['reader-a', 0, 'with-image', 'root/treatment-fork=with-image'],
+      ['reader-a', 1, 'without-image', 'root/treatment-fork=without-image'],
+      ['reader-b', 0, 'with-image', 'root/treatment-fork=with-image'],
+      ['reader-b', 1, 'without-image', 'root/treatment-fork=without-image'],
+    ]);
+    assert.equal(new Set(members.map(({ child_context_id }) => child_context_id)).size, 4);
+    assert.equal(new Set(members.map(({ child_turn_id }) => child_turn_id)).size, 4);
+    assert.equal(new Set(members.map(({ child_evaluation_id }) => child_evaluation_id)).size, 4);
+    const sourceContexts = new Map(run.evaluations.filter(({ nodeId }) => nodeId === 'prefix-ask').map(({ respondentId, contextId }) => [respondentId, contextId]));
+    assert.ok(members.every(({ respondent_id, source_context_id }) => sourceContexts.get(String(respondent_id)) === source_context_id));
+    const childEvaluations = run.evaluations.filter(({ branchId }) => branchId !== 'root');
+    assert.equal(childEvaluations.length, 4);
+    assert.ok(childEvaluations.every(({ status, packet }) => status === 'answered' && packet.state.trajectory.responses.length === 1));
+    assert.ok(childEvaluations.some(({ branchId, packet }) => branchId.endsWith('=with-image') && packet.state.encounteredItems.some(({ id }) => id === 'image-condition')));
+    assert.ok(childEvaluations.some(({ branchId, packet }) => branchId.endsWith('=without-image') && packet.state.encounteredItems.some(({ id }) => id === 'text-condition')));
+    assert.equal(calls.filter((call) => call.includes('with-image-interest') || call.includes('without-image-interest')).length, 4);
+  } finally { database.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('a journey beginning at a fork creates its branch turns before the first provider call', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedInitialBarrierJourneyRun(journeyRequest.respondents));
+    const calls: string[] = [];
+    const deterministicProvider: DecisionProvider = { ...provider, async decide(packet) {
+      calls.push(packet.question.id);
+      return { ...savedAnswer, choice: 'continue', probabilities: { continue: 0.9, stop: 0.1 } };
+    } };
+    assert.equal(accepted.run.totalEvaluations, 0);
+    await executeQuestionRun(splitRunStore(store), accepted.run.runId, () => deterministicProvider);
+    assert.equal(store.getStatus(accepted.run.runId).status, 'completed');
+    assert.equal(calls.length, 4);
+    assert.equal(calls.includes('prefix-interest'), false);
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.equal(run.evaluations.length, 4);
+    assert.ok(run.respondents.filter(({ branchId }) => branchId !== 'root').every(({ status }) => status === 'completed'));
+    const evidence = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: {}, limit: 10 });
+    assert.deepEqual(evidence.coverage.respondents, { total: 2, completed: 2, failed: 0, unreached: 0, active: 0 });
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('a journey worker freezes the prefix cohort before dispatching any matched branch call', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const respondents = journeyRequest.respondents;
+    const accepted = store.acceptJourney(randomUUID(), preparedBarrierJourneyRun(respondents));
+    const calls: string[] = [];
+    const deterministicProvider: DecisionProvider = { ...provider, async decide(packet) {
+      calls.push(packet.question.id);
+      return { ...savedAnswer, choice: packet.question.id === 'prefix-interest' ? 'continue' : 'stop', probabilities: { continue: 0.9, stop: 0.1 } };
+    } };
+
+    await executeQuestionRun(splitRunStore(store), accepted.run.runId, () => deterministicProvider);
+
+    assert.equal(store.getStatus(accepted.run.runId).status, 'completed');
+    assert.equal(calls.filter((call) => call === 'prefix-interest').length, respondents.length);
+    assert.equal(calls.filter((call) => call === 'with-image-interest' || call === 'without-image-interest').length, respondents.length * 2);
+    const fork = { ...(database.prepare('SELECT status, cohort_count FROM journey_forks WHERE run_id = ? AND fork_node_id = ? AND parent_branch_id = ?')
+      .get(accepted.run.runId, 'treatment-fork', 'root') as { status: string; cohort_count: number }) };
+    assert.deepEqual(fork, { status: 'closed', cohort_count: respondents.length });
+    const parents = store.getJourneyRun(accepted.run.runId).respondents.filter(({ branchId }) => branchId === 'root');
+    assert.ok(parents.every(({ status }) => status === 'branched'));
+  } finally { database.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('corrupt branch context references fail journey recall', async () => {

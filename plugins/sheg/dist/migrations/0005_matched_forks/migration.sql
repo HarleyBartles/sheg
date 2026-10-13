@@ -1,5 +1,44 @@
 PRAGMA foreign_keys = OFF;
 --> statement-breakpoint
+CREATE TABLE runs_new (
+  run_id TEXT NOT NULL PRIMARY KEY,
+  submission_id TEXT NOT NULL UNIQUE,
+  request_fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  created_ms INTEGER NOT NULL,
+  label TEXT,
+  status TEXT NOT NULL,
+  request_json TEXT NOT NULL,
+  evaluation_count INTEGER NOT NULL,
+  max_calls INTEGER NOT NULL,
+  used_calls INTEGER NOT NULL DEFAULT 0,
+  reserved_calls INTEGER NOT NULL DEFAULT 0,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  owner_token TEXT,
+  owner_pid INTEGER,
+  lease_expires_ms INTEGER,
+  failure_scope TEXT,
+  failure_code TEXT,
+  failure_message TEXT,
+  CONSTRAINT runs_run_submission_uq UNIQUE (run_id, submission_id),
+  CONSTRAINT runs_status_ck CHECK (status IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')),
+  CONSTRAINT runs_count_ck CHECK (evaluation_count >= 0 AND max_calls > 0 AND used_calls >= 0 AND reserved_calls >= 0 AND used_calls + reserved_calls <= max_calls),
+  CONSTRAINT runs_owner_ck CHECK ((status = 'running' AND owner_token IS NOT NULL AND owner_pid IS NOT NULL AND lease_expires_ms IS NOT NULL) OR (status <> 'running' AND owner_token IS NULL AND owner_pid IS NULL)),
+  CONSTRAINT runs_cancel_ck CHECK (cancel_requested IN (0, 1)),
+  CONSTRAINT runs_failure_scope_ck CHECK (failure_scope IS NULL OR failure_scope IN ('evaluation', 'run'))
+);
+--> statement-breakpoint
+INSERT INTO runs_new (run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls, used_calls, reserved_calls, cancel_requested, owner_token, owner_pid, lease_expires_ms, failure_scope, failure_code, failure_message)
+SELECT run_id, submission_id, request_fingerprint, created_at, created_ms, label, status, request_json, evaluation_count, max_calls, used_calls, reserved_calls, cancel_requested, owner_token, owner_pid, lease_expires_ms, failure_scope, failure_code, failure_message FROM runs;
+--> statement-breakpoint
+DROP TABLE runs;
+--> statement-breakpoint
+ALTER TABLE runs_new RENAME TO runs;
+--> statement-breakpoint
+CREATE INDEX runs_created_identity ON runs (created_ms, run_id);
+--> statement-breakpoint
+CREATE INDEX runs_expired_lease ON runs (lease_expires_ms, run_id);
+--> statement-breakpoint
 CREATE TABLE evaluations_new (
   evaluation_id TEXT NOT NULL PRIMARY KEY,
   run_id TEXT NOT NULL,

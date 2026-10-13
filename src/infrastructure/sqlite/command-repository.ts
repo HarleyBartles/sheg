@@ -13,6 +13,7 @@ import { asNumber, asText, parseJson, parseJsonRecord, parseStored, type Databas
 import { reservePhysicalAttempt } from './commands/reservation.js';
 import { chargeReservedAttempt, markAttemptUncertain, settlePollBatch, settleSingleAttempt } from './commands/settlement.js';
 import { settleJourneyTurn } from './commands/journey-transition.js';
+import { advanceJourneyForkBarrier } from './commands/fork-barrier.js';
 import { deleteRunSelection, markActiveJourneyRespondentsUnreached, markPendingEvaluationsUnreached, prepareResumedRun, reopenFailedQuestions, reopenJourneyEvaluation, reopenSharedFailure, restoreFailedJourneyRespondent } from './commands/recovery.js';
 import { acceptPreparedJourney, acceptPreparedRun } from './commands/acceptance.js';
 import { reconcileSelectedRuns } from './commands/reconciliation.js';
@@ -243,6 +244,12 @@ export function createSqliteCommandRepository(
         journeyRouteTarget,
         isJourneyAskNode,
       }, claim, attemptId, outcome, transition));
+    },
+
+    advanceJourneyFork(claim, forkNodeId, parentBranchId) {
+      context.ensureOpen();
+      return context.transaction(() => advanceJourneyForkBarrier({ database: context.database, orm: context.connection.orm,
+        now: context.now, ownedRun: context.ownedRun }, claim, forkNodeId, parentBranchId));
     },
 
     finish(claim) {

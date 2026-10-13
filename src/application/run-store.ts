@@ -1,6 +1,6 @@
 import type { ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import type { DecisionFailureDetail, DecisionResult, DecisionBatchResult } from '../domain/decision/decision.js';
-import type { AnswerRow, AttemptReservation, JourneyEvaluation, JourneyRespondentState, JourneyRunRecord, JourneyWorkerTurn, Page, ProviderSelectionInitialChoice, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
+import type { AnswerRow, AttemptReservation, JourneyEvaluation, JourneyEvaluationRecord, JourneyRespondentState, JourneyRunRecord, JourneyWorkerTurn, Page, ProviderSelectionInitialChoice, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
 import type { FollowOnSourceSet, FrozenEvaluation, ParsedFollowOnRunRequest, PreparedJourneyRun, PreparedRun, RunListQueryInput } from '../domain/run/request.js';
 import type { ProviderCatalogue, ProviderPreference } from '../providers/config.js';
 
@@ -21,6 +21,7 @@ export type DeleteResult = {
 };
 export type StorageInfo = { integrity: 'ok' | 'failed'; databaseBytes: number; runCount: number; evaluationCount: number; attemptCount: number; activeRunCount: number };
 export type JourneyTransition = { respondentId: string; expectedRevision: number; state: JourneyRespondentState; nextEvaluation?: JourneyEvaluation };
+export type ForkAdvanceResult = { status: 'waiting' | 'closed'; createdEvaluationIds: string[]; createdEvaluations: JourneyEvaluationRecord[]; parentRespondents: JourneyRespondentState[]; childRespondents: JourneyRespondentState[] };
 
 export class RunStoreError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -65,6 +66,7 @@ export interface RunCommandRepository {
   settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): BatchEvaluationOutcome[];
   settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void;
   settleJourney(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome, transition: JourneyTransition): void;
+  advanceJourneyFork(claim: WorkerClaim, forkNodeId: string, parentBranchId: string): ForkAdvanceResult;
   finish(claim: WorkerClaim): RunStatusView;
   failLaunch(runId: string, code: string): void;
   failRun(claim: WorkerClaim, code: string, message: string): void;
