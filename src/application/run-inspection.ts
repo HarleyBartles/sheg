@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { compileDecisionPacket, compileDecisionRequest, emptyTrajectory, prepareFollowOnPacket, promptContractHash } from '../domain/decision/prompt.js';
 import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit } from '../domain/decision/provider.js';
-import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
+import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest, DecisionVisualMaterial } from '../domain/decision/decision.js';
 import type { ProviderKind } from '../domain/decision/provider.js';
 import { requireExplicitProvider, runRequestSchema, type FrozenEvaluation, type PreparedRun, type ParsedInlineRunRequest, type ParsedInlineJourneyRequest, type ParsedFollowOnRunRequest, type FollowOnSourceSet, type FollowOnLineage, type RunMaterialItem, type FollowOnSelectionExclusion, type SelectionCoverage } from '../domain/run/request.js';
 import type { Inspection, RunProblem } from '../domain/run/lifecycle.js';
@@ -44,6 +44,10 @@ function validateFollowOnMaterialChoices(request: ParsedFollowOnRunRequest, mate
     for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
       const candidate = byId.get(materialId);
       if (!candidate) throw new RunProblemError('follow_on_material_not_found', `Material ${materialId} is not available in evaluation ${evaluationId}.`);
+      if (isImageMaterial(candidate)) {
+        if (question.visual?.mode !== 'pixels' || !question.visual.materialIds.includes(materialId)) throw new RunProblemError('follow_on_material_mismatch', `Image material ${materialId} must be bound to the follow-on pixel question in evaluation ${evaluationId}.`);
+        continue;
+      }
       if (candidate.sourceId === undefined || candidate.sourceSha256 === undefined) throw new RunProblemError('follow_on_material_unprovenanced', `Material ${materialId} has no source identity and digest in evaluation ${evaluationId}.`);
       if (question.options[optionId] !== candidate.text) throw new RunProblemError('follow_on_material_mismatch', `Choice option ${optionId} does not exactly match material ${materialId} in evaluation ${evaluationId}.`);
     }
@@ -87,12 +91,20 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     const sourceMaterials = mergeMaterials(turn.materials ?? [], turn.packet.state.encounteredItems);
     const catalog = mergeMaterials(sourceMaterials, request.material ?? []);
     validateFollowOnMaterialChoices(request, catalog, turn.evaluationId);
+    const visualMaterialsFor = (question: DecisionQuestion): DecisionVisualMaterial[] => (question.visual?.materialIds ?? []).map((id) => {
+      const item = catalog.find((candidate) => candidate.id === id);
+      if (!item) throw new RunProblemError('follow_on_material_not_found', `Visual image ${id} is not available in evaluation ${turn.evaluationId}.`);
+      if (!isImageMaterial(item)) throw new RunProblemError('follow_on_material_mismatch', `Visual binding ${id} is not an image in evaluation ${turn.evaluationId}.`);
+      return { id: item.id, altText: item.altText, asset: item.asset, ...(item.caption === undefined ? {} : { caption: item.caption }) };
+    });
     if (request.context.materialIds) {
       const referencedMaterial: Array<{ id: string; text: string }> = [];
       for (const id of request.context.materialIds) {
         const item = catalog.find((candidate) => candidate.id === id);
         if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
-        referencedMaterial.push(item);
+        if (isImageMaterial(item)) {
+          if (!request.questions.some((question) => question.visual?.materialIds.includes(id))) throw new RunProblemError('follow_on_material_mismatch', `Image material ${id} must be bound to a follow-on visual question in evaluation ${turn.evaluationId}.`);
+        } else referencedMaterial.push(item);
       }
       selectedMaterial = [...referencedMaterial, ...selectedMaterial];
     }
@@ -104,7 +116,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     try {
       for (const question of request.questions) {
         packets.push(prepareFollowOnPacket({ source: turn.packet, mode: request.context.mode, question,
-          ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }), ...(rawResult ? { result: rawResult } : {}) }));
+          ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }), visualMaterials: visualMaterialsFor(question), ...(rawResult ? { result: rawResult } : {}) }));
       }
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
@@ -121,7 +133,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       evaluations.push(evaluation);
       return evaluation;
     });
-    const linkedMaterialIds = new Set(request.questions.flatMap((question) => question.type === 'choice' ? Object.values(question.materialOptions ?? {}) : []));
+    const linkedMaterialIds = new Set(request.questions.flatMap((question) => [...(question.visual?.materialIds ?? []), ...(question.type === 'choice' ? Object.values(question.materialOptions ?? []) : [])]));
     const linkedMaterials = [...linkedMaterialIds].map((id) => {
       const item = catalog.find((candidate) => candidate.id === id);
       if (!item) throw new RunProblemError('follow_on_material_not_found', `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
@@ -596,9 +608,13 @@ export async function prepareAutomaticallySelectedJourney(
     return [{ respondentId: packet.respondentId, questionId: packet.request.question.id, providerId: selected.id, modelIdentity: providerModelIdentity(entry.provider),
       ...(resolved?.lockId === undefined ? {} : { comparisonLockId: resolved.lockId }), decisionReason: resolved!.result.decisionReason, candidates }];
   });
+  const graph = journeyTopology(request.journey);
+  const futureAskNodes = graph.nodes.filter((node): node is Extract<typeof node, { kind: 'ask' }> => node.kind === 'ask' && node.id !== initialPath.nodeId);
+  const unresolvedFutureJourneyUnits = request.respondents.flatMap((respondent) => futureAskNodes.map((node) => ({ respondentId: respondent.id, nodeId: node.id,
+    questionId: node.taskId, unitId: `${respondent.id}/${node.taskId}`, reason: 'reached-context-not-yet-known' as const })));
   if (callBounds.maximumDecisionCalls > request.respondents.length) warnings.push({ code: 'reached_turn_fit_check', message: `${fits.length === request.respondents.length ? 'Initial packets passed fit checks.' : 'One or more initial packets failed fit checks.'} Each later reached turn is checked against the selected provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
   const inspection: Inspection = { valid: problems.length === 0, respondentCount: request.respondents.length, minimumCalls: callBounds.minimumDecisionCalls,
-    maximumCalls: callBounds.maximumDecisionCalls, problems, ...(warnings.length === 0 ? {} : { warnings }), fits, initialChoices };
+    maximumCalls: callBounds.maximumDecisionCalls, problems, ...(warnings.length === 0 ? {} : { warnings }), fits, initialChoices, unresolvedFutureJourneyUnits };
   if (!inspection.valid) return { inspection };
   return { inspection, journey: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint,
     minimumCalls: callBounds.minimumDecisionCalls, maximumCalls: callBounds.maximumDecisionCalls, packets } };

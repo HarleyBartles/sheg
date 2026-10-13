@@ -646,5 +646,29 @@
         { "respondentId": "reader-b", "status": "failed", "failureScope": "evaluation" }
       ]
     }
+  },
+  {
+    "id": "automatic-provider-routing-visual-journey",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["provider-selection", "visual-study", "journey", "matched-comparison"],
+    "referencePaths": ["references/run-and-recovery.md", "references/native-clef.md", "references/provider-selection.md"],
+    "userRequest": "I have a five-section article. I want one study that uses the economical text provider for reading questions, then compares section 4 with and without its image using Clef. Do I need separate studies, and how do I keep the image comparison fair?",
+    "controlledEvidence": {
+      "providerSettings": {
+        "preferences": { "preferredOrder": [] },
+        "catalogue": [
+          { "id": "local-reader", "enabled": true, "execution": "local", "capabilities": ["text"], "pricing": { "kind": "no-provider-invoice" } },
+          { "id": "cloudflare-visual", "enabled": true, "execution": "hosted", "capabilities": ["text", "pixels"], "pricing": { "kind": "unknown" } }
+        ]
+      },
+      "requestShape": { "kind": "journey", "providerSelection": {}, "maxCalls": 8 },
+      "inspection": {
+        "valid": true,
+        "initialChoices": [{ "respondentId": "reader-a", "questionId": "continue-reading", "providerId": "local-reader", "modelIdentity": "reader-v1", "decisionReason": "local_execution_without_provider_invoice" }],
+        "unresolvedFutureJourneyUnits": [{ "respondentId": "reader-a", "nodeId": "image-question", "questionId": "image-fit", "unitId": "reader-a/image-fit", "reason": "reached-context-not-yet-known" }]
+      },
+      "comparisonRule": "The image and no-image conditions must use the same provider and model when the study aims to isolate the image as the only changed variable. A same-provider/model comparison lock can keep both conditions on Clef; the text-only condition remains a Clef text call so provider choice is held fixed."
+    }
   }
 ]

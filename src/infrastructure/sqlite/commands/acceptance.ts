@@ -67,7 +67,7 @@ export function acceptPreparedRun(context: AcceptanceContext, submissionId: stri
       }
     }
 
-    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations, prepared.lineage);
 
     const runId = randomUUID();
     const nowMs = context.now();
@@ -156,7 +156,7 @@ function validateInitialProviderChoices(
   }
 }
 
-function requestedImageMaterials(request: ParsedRunRequest): Extract<RunMaterialItem, { type: 'image' }>[] {
+function requestedImageMaterials(request: ParsedRunRequest, lineage?: PreparedRun['lineage']): Extract<RunMaterialItem, { type: 'image' }>[] {
   if (request.kind === 'poll') {
     const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
     return request.material.filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
@@ -165,11 +165,16 @@ function requestedImageMaterials(request: ParsedRunRequest): Extract<RunMaterial
     const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
     return request.journey.items.filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
   }
+  if (request.kind === 'follow-on') {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
+    return [...new Map(linked.map((material) => [material.id, material])).values()];
+  }
   return [];
 }
 
-function verifyFrozenVisualAssets(database: DatabaseSync, request: ParsedRunRequest, frozenEvaluations: PreparedRun['evaluations'] | PreparedJourneyRun['evaluations']) {
-  const requested = requestedImageMaterials(request);
+function verifyFrozenVisualAssets(database: DatabaseSync, request: ParsedRunRequest, frozenEvaluations: PreparedRun['evaluations'] | PreparedJourneyRun['evaluations'], lineage?: PreparedRun['lineage']) {
+  const requested = requestedImageMaterials(request, lineage);
   const materialsById = new Map(requested.map((material) => [material.id, material]));
   for (const evaluation of frozenEvaluations) {
     const packetMaterials = evaluation.packet.visualMaterials ?? [];

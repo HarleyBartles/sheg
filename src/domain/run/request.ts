@@ -72,7 +72,7 @@ function validateComparisonMembers(request: { kind: 'poll' | 'journey'; provider
   }
 }
 
-function validateMaterialChoices(questions: readonly { type?: string | undefined; id: string; options?: Record<string, string> | undefined; materialOptions?: Record<string, string> | undefined }[], material: readonly z.infer<typeof materialItemSchema>[], context: z.RefinementCtx): void {
+function validateMaterialChoices(questions: readonly { type?: string | undefined; id: string; options?: Record<string, string> | undefined; materialOptions?: Record<string, string> | undefined; visual?: { mode: 'pixels' | 'described'; materialIds: string[] } | undefined }[], material: readonly z.infer<typeof materialItemSchema>[], context: z.RefinementCtx): void {
   const materials = new Map(material.map((item) => [item.id, item]));
   questions.forEach((question, questionIndex) => {
     if (question.type !== undefined && question.type !== 'choice' || !question.materialOptions || !question.options) return;
@@ -84,7 +84,9 @@ function validateMaterialChoices(questions: readonly { type?: string | undefined
         continue;
       }
       if (isImageMaterial(candidate)) {
-        context.addIssue({ code: 'custom', path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        if (question.visual?.mode !== 'pixels' || !question.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: 'custom', path: issuePath, message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (candidate.sourceId === undefined || candidate.sourceSha256 === undefined) {
@@ -97,12 +99,16 @@ function validateMaterialChoices(questions: readonly { type?: string | undefined
   });
 }
 
-function validateVisualBindings(questions: readonly { id: string; visual?: { materialIds: string[] } | undefined }[], material: readonly RunMaterialItem[], context: z.RefinementCtx, path: string): void {
+function validateVisualBindings(questions: readonly { id: string; visual?: { materialIds: string[] } | undefined }[], material: readonly RunMaterialItem[], context: z.RefinementCtx, path: string, allowedSourceMaterialIds: ReadonlySet<string> = new Set()): void {
   const byId = new Map(material.map((item) => [item.id, item]));
   const bound = new Set<string>();
   questions.forEach((question, questionIndex) => {
     for (const materialId of question.visual?.materialIds ?? []) {
       const candidate = byId.get(materialId);
+      if (!candidate && allowedSourceMaterialIds.has(materialId)) {
+        bound.add(materialId);
+        continue;
+      }
       if (!candidate || !isImageMaterial(candidate)) {
         context.addIssue({ code: 'custom', path: [path, questionIndex, 'visual', 'materialIds'], message: `Visual binding references unknown image material ${materialId}.` });
         continue;
@@ -239,10 +245,8 @@ export const followOnRunRequestSchema = z.object({
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: 'custom', path: ['material'], message: 'Material IDs must be unique within a follow-on request.' });
   }
-  if (request.material) {
-    if (request.material.some(isImageMaterial)) context.addIssue({ code: 'custom', path: ['material'], message: 'Image material in follow-on runs is not supported in this slice.' });
-    validateVisualBindings(request.questions, request.material, context, 'questions');
-  }
+  if (request.material && request.material.some(isImageMaterial)) context.addIssue({ code: 'custom', path: ['material'], message: 'Image material in follow-on runs must be referenced from the selected source context.' });
+  validateVisualBindings(request.questions, request.material ?? [], context, 'questions', new Set(request.context.materialIds ?? []));
   if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
     context.addIssue({ code: 'custom', path: ['material'], message: 'Inline material IDs must not duplicate selected source material IDs.' });
   }

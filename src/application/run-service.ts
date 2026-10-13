@@ -5,11 +5,12 @@ import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
 import type { ParsedRunRequest, PreparedRun, RunRequest } from '../domain/run/request.js';
 import { followOnRunRequestSchema, requireExplicitProvider, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput, ProviderFactoryOptions } from '../providers/config.js';
-import type { DeletePreview, DeleteResult, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
+import type { DeletePreview, DeleteResult, ProviderSettings, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
 import { fingerprintRunRequest, materializeJourneyRun, prepareAutomaticallySelectedJourney, prepareAutomaticallySelectedPoll, prepareFollowOnRun, prepareRun } from './run-inspection.js';
 import { providerSelectionFingerprint, providerSelectionFingerprintRevision } from './provider-selection-fingerprint.js';
 import { providerModelIdentity } from '../providers/config.js';
 import type { ProviderBatchCandidate } from './provider-batch-planning.js';
+import { providerSettingsOperationSchema } from './provider-settings.js';
 
 export class RunServiceError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -23,6 +24,7 @@ export type ProviderFactory = (config: ProviderConfigInput, options?: ProviderFa
 export type RunServiceOptions = { assertProviderReady?: (config: ProviderConfigInput) => Promise<void> };
 
 export interface RunService {
+  providerSettings(operation: unknown): ProviderSettings;
   inspect(input: unknown): Promise<Awaited<ReturnType<typeof prepareRun>>['inspection']>;
   start(submissionId: string, input: RunRequest): Promise<RunStatusView>;
   resume(runId: string): Promise<RunStatusView>;
@@ -251,6 +253,12 @@ export function createRunService(
   }
 
   return {
+    providerSettings: (input) => {
+      const parsed = providerSettingsOperationSchema.safeParse(input);
+      if (!parsed.success) throw new RunServiceError('invalid_provider_settings', 'Provider settings operation is invalid.');
+      if (parsed.data.operation === 'get') return reads.getProviderSettings();
+      return commands.setProviderSettings({ catalogue: parsed.data.catalogue, preferences: parsed.data.preferences }, parsed.data.expectedRevision);
+    },
     inspect,
     start,
     resume,

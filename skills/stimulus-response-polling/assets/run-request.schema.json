@@ -2413,6 +2413,8 @@
     "Material text is preserved exactly as authored.",
     "A follow-on selects one source run by explicit evidence criteria or exact evaluation/context references.",
     "Fresh-material and omit-history follow-ons require explicit material; omit-history removes prior trajectory and exposure-order metadata.",
-    "Continue requires a selected completed answer and retains it in the next respondent trajectory."
+    "Continue requires a selected completed answer and retains it in the next respondent trajectory.",
+    "Automatic routing requires providerSelection: {} and at least one enabled compatible entry in Sheg provider settings; otherwise use an explicit provider configuration. Preferences, unit overrides, comparison locks, and batching are per-study controls.",
+    "A Choice option may map to an image only when that exact image is bound to the question for pixel input; image mappings guide visual option identity and do not produce text selectedMaterial evidence."
   ]
 }

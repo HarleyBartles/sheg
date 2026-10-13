@@ -49,7 +49,9 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
         continue;
       }
       if (isImageMaterial(item)) {
-        context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'materialOptions', optionId], message: `Choice option ${optionId} can only link to text material.` });
+        if (task.visual?.mode !== 'pixels' || !task.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: 'custom', path: ['tasks', taskIndex, 'materialOptions', optionId], message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (item.sourceId === undefined || item.sourceSha256 === undefined) {

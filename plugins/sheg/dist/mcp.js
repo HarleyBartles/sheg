@@ -37775,7 +37775,8 @@ function prepareFollowOnPacket(input2) {
     respondentProfile: source.state.respondent.profile,
     encounteredItems: source.state.encounteredItems,
     trajectory: source.state.trajectory,
-    question
+    question,
+    ...input2.visualMaterials === void 0 ? {} : { visualMaterials: [...input2.visualMaterials] }
   });
   const material = input2.material ? input2.material.map(({ id, text: text2 }) => ({ id, text: text2 })) : [];
   let state;
@@ -37795,7 +37796,13 @@ function prepareFollowOnPacket(input2) {
       trajectory: emptyTrajectory()
     };
   }
-  return compileDecisionRequest({ respondentProfile: state.respondent.profile, encounteredItems: state.encounteredItems, trajectory: state.trajectory, question });
+  return compileDecisionRequest({
+    respondentProfile: state.respondent.profile,
+    encounteredItems: state.encounteredItems,
+    trajectory: state.trajectory,
+    question,
+    ...input2.visualMaterials === void 0 ? {} : { visualMaterials: [...input2.visualMaterials] }
+  });
 }
 function compactTrajectory(arm, history) {
   const exposureIds = [];
@@ -38342,7 +38349,9 @@ function validateJourneyDefinition(arm, context) {
         continue;
       }
       if (isImageMaterial(item)) {
-        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can only link to text material.` });
+        if (task.visual?.mode !== "pixels" || !task.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
@@ -38583,7 +38592,9 @@ function validateMaterialChoices(questions, material, context) {
         continue;
       }
       if (isImageMaterial(candidate)) {
-        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        if (question.visual?.mode !== "pixels" || !question.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
@@ -38595,12 +38606,16 @@ function validateMaterialChoices(questions, material, context) {
     }
   });
 }
-function validateVisualBindings(questions, material, context, path15) {
+function validateVisualBindings(questions, material, context, path15, allowedSourceMaterialIds = /* @__PURE__ */ new Set()) {
   const byId = new Map(material.map((item) => [item.id, item]));
   const bound = /* @__PURE__ */ new Set();
   questions.forEach((question, questionIndex) => {
     for (const materialId of question.visual?.materialIds ?? []) {
       const candidate = byId.get(materialId);
+      if (!candidate && allowedSourceMaterialIds.has(materialId)) {
+        bound.add(materialId);
+        continue;
+      }
       if (!candidate || !isImageMaterial(candidate)) {
         context.addIssue({ code: "custom", path: [path15, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
         continue;
@@ -38728,10 +38743,8 @@ var followOnRunRequestSchema = external_exports.object({
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
   }
-  if (request.material) {
-    if (request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs is not supported in this slice." });
-    validateVisualBindings(request.questions, request.material, context, "questions");
-  }
+  if (request.material && request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs must be referenced from the selected source context." });
+  validateVisualBindings(request.questions, request.material ?? [], context, "questions", new Set(request.context.materialIds ?? []));
   if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
     context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
   }
@@ -39409,6 +39422,10 @@ function validateFollowOnMaterialChoices(request, materials, evaluationId) {
     for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
       const candidate = byId.get(materialId);
       if (!candidate) throw new RunProblemError("follow_on_material_not_found", `Material ${materialId} is not available in evaluation ${evaluationId}.`);
+      if (isImageMaterial(candidate)) {
+        if (question.visual?.mode !== "pixels" || !question.visual.materialIds.includes(materialId)) throw new RunProblemError("follow_on_material_mismatch", `Image material ${materialId} must be bound to the follow-on pixel question in evaluation ${evaluationId}.`);
+        continue;
+      }
       if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) throw new RunProblemError("follow_on_material_unprovenanced", `Material ${materialId} has no source identity and digest in evaluation ${evaluationId}.`);
       if (question.options[optionId] !== candidate.text) throw new RunProblemError("follow_on_material_mismatch", `Choice option ${optionId} does not exactly match material ${materialId} in evaluation ${evaluationId}.`);
     }
@@ -39456,12 +39473,20 @@ async function prepareFollowOnRun(request, source, provider) {
     const sourceMaterials = mergeMaterials(turn.materials ?? [], turn.packet.state.encounteredItems);
     const catalog = mergeMaterials(sourceMaterials, request.material ?? []);
     validateFollowOnMaterialChoices(request, catalog, turn.evaluationId);
+    const visualMaterialsFor = (question) => (question.visual?.materialIds ?? []).map((id) => {
+      const item = catalog.find((candidate) => candidate.id === id);
+      if (!item) throw new RunProblemError("follow_on_material_not_found", `Visual image ${id} is not available in evaluation ${turn.evaluationId}.`);
+      if (!isImageMaterial(item)) throw new RunProblemError("follow_on_material_mismatch", `Visual binding ${id} is not an image in evaluation ${turn.evaluationId}.`);
+      return { id: item.id, altText: item.altText, asset: item.asset, ...item.caption === void 0 ? {} : { caption: item.caption } };
+    });
     if (request.context.materialIds) {
       const referencedMaterial = [];
       for (const id of request.context.materialIds) {
         const item = catalog.find((candidate) => candidate.id === id);
         if (!item) throw new RunProblemError("follow_on_material_not_found", `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
-        referencedMaterial.push(item);
+        if (isImageMaterial(item)) {
+          if (!request.questions.some((question) => question.visual?.materialIds.includes(id))) throw new RunProblemError("follow_on_material_mismatch", `Image material ${id} must be bound to a follow-on visual question in evaluation ${turn.evaluationId}.`);
+        } else referencedMaterial.push(item);
       }
       selectedMaterial = [...referencedMaterial, ...selectedMaterial];
     }
@@ -39477,6 +39502,7 @@ async function prepareFollowOnRun(request, source, provider) {
           mode: request.context.mode,
           question,
           ...request.context.mode === "recorded" ? {} : { material: selectedMaterial },
+          visualMaterials: visualMaterialsFor(question),
           ...rawResult ? { result: rawResult } : {}
         }));
       }
@@ -39503,7 +39529,7 @@ async function prepareFollowOnRun(request, source, provider) {
       evaluations2.push(evaluation);
       return evaluation;
     });
-    const linkedMaterialIds = new Set(request.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
+    const linkedMaterialIds = new Set(request.questions.flatMap((question) => [...question.visual?.materialIds ?? [], ...question.type === "choice" ? Object.values(question.materialOptions ?? []) : []]));
     const linkedMaterials = [...linkedMaterialIds].map((id) => {
       const item = catalog.find((candidate) => candidate.id === id);
       if (!item) throw new RunProblemError("follow_on_material_not_found", `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
@@ -40125,6 +40151,15 @@ async function prepareAutomaticallySelectedJourney(request, settings, providerCa
       candidates
     }];
   });
+  const graph = journeyTopology(request.journey);
+  const futureAskNodes = graph.nodes.filter((node2) => node2.kind === "ask" && node2.id !== initialPath.nodeId);
+  const unresolvedFutureJourneyUnits = request.respondents.flatMap((respondent) => futureAskNodes.map((node2) => ({
+    respondentId: respondent.id,
+    nodeId: node2.id,
+    questionId: node2.taskId,
+    unitId: `${respondent.id}/${node2.taskId}`,
+    reason: "reached-context-not-yet-known"
+  })));
   if (callBounds.maximumDecisionCalls > request.respondents.length) warnings.push({ code: "reached_turn_fit_check", message: `${fits.length === request.respondents.length ? "Initial packets passed fit checks." : "One or more initial packets failed fit checks."} Each later reached turn is checked against the selected provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
   const inspection = {
     valid: problems.length === 0,
@@ -40134,7 +40169,8 @@ async function prepareAutomaticallySelectedJourney(request, settings, providerCa
     problems,
     ...warnings.length === 0 ? {} : { warnings },
     fits,
-    initialChoices
+    initialChoices,
+    unresolvedFutureJourneyUnits
   };
   if (!inspection.valid) return { inspection };
   return { inspection, journey: {
@@ -40272,6 +40308,17 @@ function providerSelectionFingerprintRevision(fingerprint) {
   const match = /^r(\d+)-[a-f\d]{64}$/i.exec(fingerprint);
   return match ? Number(match[1]) : void 0;
 }
+
+// src/application/provider-settings.ts
+var providerSettingsWriteSchema = external_exports.object({
+  expectedRevision: external_exports.number().int().nonnegative(),
+  catalogue: external_exports.object({ entries: external_exports.array(providerCatalogueEntrySchema) }).strict(),
+  preferences: providerPreferenceSchema
+}).strict();
+var providerSettingsOperationSchema = external_exports.discriminatedUnion("operation", [
+  external_exports.object({ operation: external_exports.literal("get") }).strict(),
+  external_exports.object({ operation: external_exports.literal("set"), ...providerSettingsWriteSchema.shape }).strict()
+]);
 
 // src/application/run-service.ts
 var RunServiceError = class extends Error {
@@ -40506,6 +40553,12 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
     return reads.getStatus(runId);
   }
   return {
+    providerSettings: (input2) => {
+      const parsed = providerSettingsOperationSchema.safeParse(input2);
+      if (!parsed.success) throw new RunServiceError("invalid_provider_settings", "Provider settings operation is invalid.");
+      if (parsed.data.operation === "get") return reads.getProviderSettings();
+      return commands.setProviderSettings({ catalogue: parsed.data.catalogue, preferences: parsed.data.preferences }, parsed.data.expectedRevision);
+    },
     inspect,
     start,
     resume,
@@ -46978,6 +47031,7 @@ function validatePrepared(prepared) {
         const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
         for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
           const item = catalog.find(({ id }) => id === materialId);
+          if (item && "type" in item && item.type === "image" && packet.data.question.visual?.mode === "pixels" && packet.data.question.visual.materialIds.includes(materialId)) continue;
           if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
             throw new RunStoreError("invalid_prepared_run", `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
           }
@@ -47121,7 +47175,7 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
         throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
       }
     }
-    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations, prepared.lineage);
     const runId = randomUUID3();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
@@ -47198,7 +47252,7 @@ function validateInitialProviderChoices(snapshot, request, evaluations2) {
     if (memberChoices.some(({ comparisonLockId }) => comparisonLockId !== lock.id)) throw new RunStoreError("invalid_prepared_run", `Initial provider choices do not retain comparison identity ${lock.id}.`);
   }
 }
-function requestedImageMaterials(request) {
+function requestedImageMaterials(request, lineage) {
   if (request.kind === "poll") {
     const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
     return request.material.filter((item) => isImageMaterial(item) && bound.has(item.id));
@@ -47207,10 +47261,15 @@ function requestedImageMaterials(request) {
     const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
     return request.journey.items.filter((item) => isImageMaterial(item) && bound.has(item.id));
   }
+  if (request.kind === "follow-on") {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item) => isImageMaterial(item) && bound.has(item.id));
+    return [...new Map(linked.map((material) => [material.id, material])).values()];
+  }
   return [];
 }
-function verifyFrozenVisualAssets(database, request, frozenEvaluations) {
-  const requested = requestedImageMaterials(request);
+function verifyFrozenVisualAssets(database, request, frozenEvaluations, lineage) {
+  const requested = requestedImageMaterials(request, lineage);
   const materialsById = new Map(requested.map((material) => [material.id, material]));
   for (const evaluation of frozenEvaluations) {
     const packetMaterials = evaluation.packet.visualMaterials ?? [];
@@ -48089,14 +48148,17 @@ function queryEvidencePage(context, input2) {
         const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
         if (materialId) {
           const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-          if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-          selectedMaterial = {
-            materialId,
-            text: candidate.text,
-            sourceId: candidate.sourceId,
-            sourceSha256: candidate.sourceSha256,
-            textSha256: createHash7("sha256").update(candidate.text, "utf8").digest("hex")
-          };
+          if (!candidate) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+          if (!isImageMaterial(candidate)) {
+            if (!candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            selectedMaterial = {
+              materialId,
+              text: candidate.text,
+              sourceId: candidate.sourceId,
+              sourceSha256: candidate.sourceSha256,
+              textSha256: createHash7("sha256").update(candidate.text, "utf8").digest("hex")
+            };
+          }
         }
       }
       return {
@@ -48325,14 +48387,14 @@ function loadFollowOnSources(database, input2, notFound) {
     const materials = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems);
     const selectedMaterialId = result?.type === "choice" && packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
     const selectedMaterial = selectedMaterialId ? materials.find(({ id }) => id === selectedMaterialId) : void 0;
-    const selectedSource = selectedMaterial?.sourceId && selectedMaterial.sourceSha256 ? {
+    const selectedSource = selectedMaterial && !isImageMaterial(selectedMaterial) && selectedMaterial.sourceId && selectedMaterial.sourceSha256 ? {
       materialId: selectedMaterial.id,
       text: selectedMaterial.text,
       sourceId: selectedMaterial.sourceId,
       sourceSha256: selectedMaterial.sourceSha256,
       textSha256: createHash8("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
-    if (selectedMaterialId && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
+    if (selectedMaterialId && (!selectedMaterial || !isImageMaterial(selectedMaterial)) && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
       evaluationId: asText(row.evaluation_id, "evaluation ID"),
       contextId,
@@ -56138,6 +56200,7 @@ function unavailableRunService() {
     throw recoveryRequiredError();
   };
   return {
+    providerSettings: () => unavailable3(),
     inspect: async () => unavailable3(),
     start: async () => unavailable3(),
     resume: async () => unavailable3(),
@@ -56276,8 +56339,9 @@ function createPollingServer(service, dataRoot, imageCodec, credentialStore = ne
   const runtime = createRunRuntime(dataRoot, service, imageCodec === void 0 ? {} : { imageCodec });
   const server = new McpServer({ name: "sheg", version: productVersion }, { instructions: "Submit typed question groups, finite journeys, or follow-on requests built from recorded evidence, then recall machine-readable run evidence by run ID. Questions in one group share the same frozen respondent state and never see sibling answers. Use run_inspect when a fit preview would help; run_start validates admission itself. Reads never start or resume work." });
   server.registerTool("provider_credential", { description: "Check, set up, or remove a provider API key in Windows Credential Manager. Setup reads the secret through Sheg secure input; secrets are never accepted as tool input or returned. Clef always uses its fixed Cloudflare credential target.", inputSchema: providerCredentialRequestSchema }, async (input2) => safeResult(() => manageProviderCredential(input2, credentialStore)));
-  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Journey fit is measured for initial respondent inputs; each later reached turn is checked immediately before inference and may stop only that respondent if it does not fit. Independent questions in one group share one frozen state; fit entries identify measured inputs and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
-  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered candidate. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
+  server.registerTool("provider_settings", { description: "Read or replace the enabled provider catalogue and preference order using an expected revision. Settings contain provider configuration only; API keys remain in Windows Credential Manager and are never accepted or returned here.", inputSchema: providerSettingsOperationSchema }, async (input2) => safeResult(() => runtime.service.providerSettings(input2)));
+  server.registerTool("run_inspect", { description: "Validate a direct typed request, finite respondent journey, or follow-on selection and measure provider context fit without inference or run creation. Journey fit is measured for initial respondent inputs; each later reached turn is checked immediately before inference and may stop only that respondent if it does not fit. Inspection shows initial automatic provider choices and marks later journey units whose reached context is not yet known. Independent questions in one group share one frozen state; fit entries identify measured inputs and the minimum physical-call count.", inputSchema: external_exports.object({ request: runRequestSchema }).strict() }, async ({ request }) => safeResult(() => runtime.service.inspect(request)));
+  server.registerTool("run_start", { description: "Accept a direct respondent request, finite journey, or follow-on selection as a durable run and return its identity immediately. Multiple independent Choice, Score, or Noul questions share each respondent context and remain separate answers. Sheg batches or splits provider calls within the run-wide physical-attempt limit. For a follow-on, use run_query evaluationId/contextId handles and, when a mapped Choice selection supplies selectedMaterial, pass its materialId in context.materialIds to reuse that exact offered text candidate. To reuse an image, reference its materialId in context.materialIds and bind it to the follow-on pixel question; image choices are never returned as text selectedMaterial. Use a fresh submission ID; retrying the same ID and request returns the same run.", inputSchema: external_exports.object({ submissionId: external_exports.string().uuid(), request: runRequestSchema }).strict() }, async ({ submissionId, request }) => safeResult(() => runtime.service.start(submissionId, request)));
   server.registerTool("run_list", { description: "Find durable runs in this local Sheg data directory using optional status, label, time, material, and cursor filters.", inputSchema: runListSchema }, async (query) => safeResult(() => runtime.service.list(query)));
   server.registerTool("run_query", { description: "Query typed answers and route outcomes in one run. Results identify per-question evaluation IDs, their shared respondent context, and provider execution evidence for follow-on requests. A Choice answer explicitly linked to a material option also returns selectedMaterial with materialId, exact text, author-supplied sourceId/sourceSha256, and Sheg-computed textSha256; pass materialId in a follow-on context.materialIds to reuse it. Unlinked options, including no-fit, have no selectedMaterial. sourceComplete means the run reached completed; lifecycle explains whether execution is active, stopped, or complete and whether explicit resume is currently eligible. coverage describes the whole run; matchedCoverage describes only rows matching these query criteria, including represented respondents and mapped selected materials. Call totals do not measure input diversity.", inputSchema: runEvidenceQuerySchema }, async (query) => safeResult(() => runtime.service.queryEvidence(query)));
   server.registerTool("run_get", { description: "Retrieve run status, frozen request, bounded exact context detail by evaluationId/contextId, paginated answers or physical attempts, or journey contexts and routes. Discovery never launches or resumes work.", inputSchema: runGetSchema }, async (input2) => safeResult(() => {

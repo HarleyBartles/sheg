@@ -20,7 +20,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\sheg\dist\cr
 
 For OpenRouter, use `-TargetName Sheg/Jev/OpenRouter`. The helper writes directly to the current user's Windows Credential Manager. Run `Status` to check safely, `Setup` again to replace, or `Remove` to delete the selected entry. If secure storage is unavailable or rejects setup, explain the failure and stop key setup. There is no plaintext fallback. macOS and Linux backends are future work.
 
-Credential setup makes no inference request and does not authorize a paid study. When a user who skipped setup later selects Jev, offer this local prompt again for the selected route. Having both keys never chooses or switches routes automatically.
+Credential setup makes no inference request and does not authorize a paid study. When an agent selects an explicit hosted provider, offer its local credential setup if it is missing. Automatic routing uses only enabled, ready provider catalogue entries; credential presence alone never enables or selects a route.
 
 The marketplace entry points to `./plugins/sheg`, resolved from the repository root. Codex installs a cached copy, so package edits require refreshing the marketplace and restarting Codex. Follow the current [Codex plugin installation guide](https://developers.openai.com/plugins/build/plugins) for local marketplace behavior.
 

@@ -87,6 +87,10 @@ test('automatic journey routes reached units, preserves matched-provider locks, 
     });
     const inspected = await service.inspect(request);
     assert.equal(inspected.valid, true, JSON.stringify(inspected.problems));
+    assert.deepEqual(inspected.unresolvedFutureJourneyUnits, [
+      { respondentId: 'reader-a', nodeId: 'image-node', questionId: 'image-fit', unitId: 'reader-a/image-fit', reason: 'reached-context-not-yet-known' },
+      { respondentId: 'reader-b', nodeId: 'image-node', questionId: 'image-fit', unitId: 'reader-b/image-fit', reason: 'reached-context-not-yet-known' },
+    ]);
     assert.equal(inspected.initialChoices?.[0]?.providerId, lockedOverflow ? 'vision' : 'local');
     const accepted = await service.start(randomUUID(), { ...request, expectedSelectionFingerprint: inspected.selectionFingerprint });
     const failOnce = { questionId: 'image-fit', used: false };

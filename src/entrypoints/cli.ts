@@ -65,6 +65,9 @@ class CliInputError extends Error {}
 
 async function durableOperation(command: string, options: Record<string, string>, runtime: ReturnType<typeof createRunRuntime>): Promise<unknown> {
   const { service, storage } = runtime;
+  if (command === 'provider-settings') {
+    return service.providerSettings(await readJson(required(options, 'request')));
+  }
   if (command === 'inspect') return service.inspect(await readRequest(options));
   if (command === 'start') return service.start(uuid(required(options, 'submission-id')), await readRequest(options));
   if (command === 'list') return service.list(runListQuerySchema.parse(await readJson(required(options, 'query'))));
@@ -167,7 +170,7 @@ function validateOptions(command: string | undefined, options: Record<string, st
     list: ['query', 'data-root'], query: ['query', 'data-root'], get: ['request', 'data-root'],
     cancel: ['run-id', 'data-root'], resume: ['run-id', 'data-root'], delete: ['request', 'data-root'], storage: ['request', 'data-root'],
     'image-import': ['request', 'data-root'], 'image-scale': ['request', 'data-root'], 'image-get': ['request', 'data-root'],
-    'provider-credential': ['route', 'operation'],
+    'provider-credential': ['route', 'operation'], 'provider-settings': ['request', 'data-root'],
   };
   const allowed = commands[command ?? ''];
   if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ''}`);
@@ -206,6 +209,7 @@ Commands:
   image-scale --request <json-file>               Create a proportional image candidate
   image-get --request <json-file>                 Read metadata or explicitly export a preview
   provider-credential --route clef --operation status|setup|remove  Manage a provider key in Windows Credential Manager
+  provider-settings --request <json-file>          Read or revision-check provider catalogue and preferences
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
   CLI and MCP share the platform's Sheg data directory by default.

@@ -14,6 +14,7 @@ import { decisionValueSchema } from '../../domain/decision/decision.js';
 import { decodeStoredPayload } from './payload-codecs.js';
 import { z } from 'zod';
 import { evaluationCriteriaSql } from './evaluation-criteria.js';
+import { isImageMaterial } from '../../domain/study/stimulus.js';
 
 type EvidenceCursorPayload = {
   kind: 'evidence';
@@ -188,9 +189,12 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
           const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
           if (materialId) {
             const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-            if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            selectedMaterial = { materialId, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
-              textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') };
+            if (!candidate) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            if (!isImageMaterial(candidate)) {
+              if (!candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+              selectedMaterial = { materialId, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
+                textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') };
+            }
           }
         }
         return {

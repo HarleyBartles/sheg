@@ -20726,7 +20726,9 @@ function validateJourneyDefinition(arm, context) {
         continue;
       }
       if (isImageMaterial(item)) {
-        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can only link to text material.` });
+        if (task.visual?.mode !== "pixels" || !task.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
@@ -20967,7 +20969,9 @@ function validateMaterialChoices(questions, material, context) {
         continue;
       }
       if (isImageMaterial(candidate)) {
-        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        if (question.visual?.mode !== "pixels" || !question.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
@@ -20979,12 +20983,16 @@ function validateMaterialChoices(questions, material, context) {
     }
   });
 }
-function validateVisualBindings(questions, material, context, path7) {
+function validateVisualBindings(questions, material, context, path7, allowedSourceMaterialIds = /* @__PURE__ */ new Set()) {
   const byId = new Map(material.map((item) => [item.id, item]));
   const bound = /* @__PURE__ */ new Set();
   questions.forEach((question, questionIndex) => {
     for (const materialId of question.visual?.materialIds ?? []) {
       const candidate = byId.get(materialId);
+      if (!candidate && allowedSourceMaterialIds.has(materialId)) {
+        bound.add(materialId);
+        continue;
+      }
       if (!candidate || !isImageMaterial(candidate)) {
         context.addIssue({ code: "custom", path: [path7, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
         continue;
@@ -21112,10 +21120,8 @@ var followOnRunRequestSchema = external_exports.object({
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
   }
-  if (request.material) {
-    if (request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs is not supported in this slice." });
-    validateVisualBindings(request.questions, request.material, context, "questions");
-  }
+  if (request.material && request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs must be referenced from the selected source context." });
+  validateVisualBindings(request.questions, request.material ?? [], context, "questions", new Set(request.context.materialIds ?? []));
   if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
     context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
   }
@@ -28174,6 +28180,7 @@ function validatePrepared(prepared) {
         const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
         for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
           const item = catalog.find(({ id }) => id === materialId);
+          if (item && "type" in item && item.type === "image" && packet.data.question.visual?.mode === "pixels" && packet.data.question.visual.materialIds.includes(materialId)) continue;
           if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
             throw new RunStoreError("invalid_prepared_run", `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
           }
@@ -28324,7 +28331,7 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
         throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
       }
     }
-    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations, prepared.lineage);
     const runId2 = randomUUID3();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId: runId2, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
@@ -28401,7 +28408,7 @@ function validateInitialProviderChoices(snapshot, request, evaluations2) {
     if (memberChoices.some(({ comparisonLockId }) => comparisonLockId !== lock.id)) throw new RunStoreError("invalid_prepared_run", `Initial provider choices do not retain comparison identity ${lock.id}.`);
   }
 }
-function requestedImageMaterials(request) {
+function requestedImageMaterials(request, lineage) {
   if (request.kind === "poll") {
     const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
     return request.material.filter((item) => isImageMaterial(item) && bound.has(item.id));
@@ -28410,10 +28417,15 @@ function requestedImageMaterials(request) {
     const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
     return request.journey.items.filter((item) => isImageMaterial(item) && bound.has(item.id));
   }
+  if (request.kind === "follow-on") {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item) => isImageMaterial(item) && bound.has(item.id));
+    return [...new Map(linked.map((material) => [material.id, material])).values()];
+  }
   return [];
 }
-function verifyFrozenVisualAssets(database, request, frozenEvaluations) {
-  const requested = requestedImageMaterials(request);
+function verifyFrozenVisualAssets(database, request, frozenEvaluations, lineage) {
+  const requested = requestedImageMaterials(request, lineage);
   const materialsById = new Map(requested.map((material) => [material.id, material]));
   for (const evaluation of frozenEvaluations) {
     const packetMaterials = evaluation.packet.visualMaterials ?? [];
@@ -29292,14 +29304,17 @@ function queryEvidencePage(context, input2) {
         const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
         if (materialId) {
           const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-          if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-          selectedMaterial = {
-            materialId,
-            text: candidate.text,
-            sourceId: candidate.sourceId,
-            sourceSha256: candidate.sourceSha256,
-            textSha256: createHash6("sha256").update(candidate.text, "utf8").digest("hex")
-          };
+          if (!candidate) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+          if (!isImageMaterial(candidate)) {
+            if (!candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            selectedMaterial = {
+              materialId,
+              text: candidate.text,
+              sourceId: candidate.sourceId,
+              sourceSha256: candidate.sourceSha256,
+              textSha256: createHash6("sha256").update(candidate.text, "utf8").digest("hex")
+            };
+          }
         }
       }
       return {
@@ -29528,14 +29543,14 @@ function loadFollowOnSources(database, input2, notFound) {
     const materials = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems);
     const selectedMaterialId = result?.type === "choice" && packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
     const selectedMaterial = selectedMaterialId ? materials.find(({ id }) => id === selectedMaterialId) : void 0;
-    const selectedSource = selectedMaterial?.sourceId && selectedMaterial.sourceSha256 ? {
+    const selectedSource = selectedMaterial && !isImageMaterial(selectedMaterial) && selectedMaterial.sourceId && selectedMaterial.sourceSha256 ? {
       materialId: selectedMaterial.id,
       text: selectedMaterial.text,
       sourceId: selectedMaterial.sourceId,
       sourceSha256: selectedMaterial.sourceSha256,
       textSha256: createHash7("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
-    if (selectedMaterialId && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
+    if (selectedMaterialId && (!selectedMaterial || !isImageMaterial(selectedMaterial)) && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
       evaluationId: asText(row.evaluation_id, "evaluation ID"),
       contextId,

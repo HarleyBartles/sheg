@@ -68,6 +68,7 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
         const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
         for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
           const item = catalog.find(({ id }) => id === materialId);
+          if (item && 'type' in item && item.type === 'image' && packet.data.question.visual?.mode === 'pixels' && packet.data.question.visual.materialIds.includes(materialId)) continue;
           if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
             throw new RunStoreError('invalid_prepared_run', `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
           }

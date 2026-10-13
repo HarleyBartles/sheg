@@ -194,6 +194,7 @@ export type Inspection = {
   warnings?: RunProblem[];
   fits: Array<{ respondentId: string; groupId?: string; contextId?: string; questionIds?: string[]; nodeId?: string; pathId?: string; packetId?: string; fit: ProviderContextFit }>;
   initialChoices?: ProviderSelectionInitialChoice[];
+  unresolvedFutureJourneyUnits?: Array<{ respondentId: string; nodeId: string; questionId: string; unitId: string; reason: 'reached-context-not-yet-known' }>;
   selectionFingerprint?: string;
 };
 

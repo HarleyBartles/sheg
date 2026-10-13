@@ -8,6 +8,7 @@ import { runRequestSchema } from '../src/domain/run/request.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 import { ImageGetRequestSchema, ImageImportRequestSchema, ScaleRequestSchema } from '../src/domain/assets/image.js';
 import { providerCredentialRequestSchema } from '../src/application/provider-credentials.js';
+import { providerSettingsOperationSchema } from '../src/application/provider-settings.js';
 
 const contractDirectory = resolve('skills/stimulus-response-polling/assets');
 const schemaBaseUri = 'urn:sheg:schema:';
@@ -20,6 +21,8 @@ const contracts: Array<{ filename: string; title: string; schema: z.ZodType; val
     'A follow-on selects one source run by explicit evidence criteria or exact evaluation/context references.',
     'Fresh-material and omit-history follow-ons require explicit material; omit-history removes prior trajectory and exposure-order metadata.',
     'Continue requires a selected completed answer and retains it in the next respondent trajectory.',
+    'Automatic routing requires providerSelection: {} and at least one enabled compatible entry in Sheg provider settings; otherwise use an explicit provider configuration. Preferences, unit overrides, comparison locks, and batching are per-study controls.',
+    'A Choice option may map to an image only when that exact image is bound to the question for pixel input; image mappings guide visual option identity and do not produce text selectedMaterial evidence.',
   ] },
   { filename: 'respondent-archetype.schema.json', title: 'Respondent archetype', schema: respondentArchetypeSchema },
   { filename: 'respondent-archetype-library.schema.json', title: 'Respondent archetype library', schema: respondentArchetypeLibrarySchema },
@@ -52,6 +55,10 @@ const contracts: Array<{ filename: string; title: string; schema: z.ZodType; val
   { filename: 'provider-credential-request.schema.json', title: 'Sheg provider credential operation', schema: providerCredentialRequestSchema, validationRules: [
     'Credential status, setup, and removal accept only a provider route and operation; secret values and endpoint overrides are not request fields.',
     'Clef credentials use Sheg/Clef/Cloudflare in Windows Credential Manager.',
+  ] },
+  { filename: 'provider-settings-operation.schema.json', title: 'Sheg provider settings operation', schema: providerSettingsOperationSchema, validationRules: [
+    'Settings operations read or replace enabled provider configurations and preference order under optimistic revision control.',
+    'Provider API keys are not accepted or returned; use provider-credential for secure credential operations.',
   ] },
 ];
 await rm(contractDirectory, { recursive: true, force: true });
