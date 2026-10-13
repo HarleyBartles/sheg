@@ -1823,6 +1823,77 @@ test('follow-on snapshots source material for query and another follow-on after 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('continue follow-on can explicitly retain no prior material while including the selected answer', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourceRequest: InlineRunRequest = { ...input, respondents: [input.respondents[0]!],
+      material: [{ id: 'section-one', text: 'Opening paragraph.' }, { id: 'section-two', text: 'Second paragraph.' }] };
+    const sourceRunId = await completedRun(store, sourceRequest);
+    const source = store.answers(sourceRunId).items[0]!;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: source.evaluationId, contextId: source.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: [], includeSelectedAnswer: true },
+      questions: [{ type: 'noul', id: 'next', instructions: 'Would you continue?' }],
+      provider: input.provider, maxCalls: 1,
+    });
+    const prepared = await prepareFollowOnRun(request, store.resolveFollowOnSources(request), provider);
+    assert.equal(prepared.inspection.valid, true, JSON.stringify(prepared.inspection));
+    const packet = prepared.prepared.evaluations[0]!.packet;
+    const state = packet.state as { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: Array<{ taskId: string; type: string }> } };
+    assert.deepEqual(state.encounteredItems, []);
+    assert.equal(state.trajectory.responses.at(-1)?.taskId, 'interest');
+    assert.equal(state.trajectory.responses.at(-1)?.type, 'choice');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('continue follow-on retains only an ordered source-context subset independently of selected-answer inclusion', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourceRequest: InlineRunRequest = { ...input, respondents: [input.respondents[0]!],
+      material: [
+        { id: 'section-one', text: 'Opening paragraph.' },
+        { id: 'section-two', text: 'Second paragraph.' },
+        { id: 'section-three', text: 'Third paragraph.' },
+      ] };
+    const sourceRunId = await completedRun(store, sourceRequest);
+    const source = store.answers(sourceRunId).items[0]!;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: source.evaluationId, contextId: source.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: ['section-three', 'section-one'], includeSelectedAnswer: false },
+      questions: [{ type: 'noul', id: 'next', instructions: 'Would you continue?' }],
+      provider: input.provider, maxCalls: 1,
+    });
+    const prepared = await prepareFollowOnRun(request, store.resolveFollowOnSources(request), provider);
+    assert.equal(prepared.inspection.valid, true, JSON.stringify(prepared.inspection));
+    const packet = prepared.prepared.evaluations[0]!.packet;
+    const state = packet.state as { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: Array<{ taskId: string }> } };
+    assert.deepEqual(state.encounteredItems, [
+      { id: 'section-one', text: 'Opening paragraph.' },
+      { id: 'section-three', text: 'Third paragraph.' },
+    ]);
+    assert.equal(state.trajectory.responses.some(({ taskId }) => taskId === 'interest'), false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('continue follow-on refuses retained material that was not encountered in its selected source context', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourceRunId = await completedRun(store, { ...input, respondents: [input.respondents[0]!] });
+    const source = store.answers(sourceRunId).items[0]!;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: source.evaluationId, contextId: source.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: ['sibling-only-section'] },
+      questions: [{ type: 'noul', id: 'next', instructions: 'Would you continue?' }],
+      provider: input.provider, maxCalls: 1,
+    });
+    await assert.rejects(prepareFollowOnRun(request, store.resolveFollowOnSources(request), provider), /was not encountered/i);
+    assert.equal(store.list({}).items.length, 1);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('follow-on source resolution freezes criteria matches and validates exact evaluation/context references', async () => {
   const root = await temporaryRoot();
   const store = openRunStore(root);

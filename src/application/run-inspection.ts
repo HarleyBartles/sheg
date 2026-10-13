@@ -111,12 +111,23 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
+    const encountered = turn.packet.state.encounteredItems;
+    const retainedMaterial = request.context.retainedMaterialIds === undefined
+      ? encountered
+      : (() => {
+        const requested = new Set(request.context.retainedMaterialIds);
+        const missing = [...requested].filter((id) => !encountered.some((item) => item.id === id));
+        if (missing.length > 0) throw new RunProblemError('follow_on_material_not_found', `Retained material ${missing[0]} was not encountered in evaluation ${turn.evaluationId}.`);
+        return encountered.filter(({ id }) => requested.has(id));
+      })();
     const rawResult = turn.result ? decisionValueFromResult(turn.result) : undefined;
     const packets: DecisionRequest[] = [];
     try {
       for (const question of request.questions) {
         packets.push(prepareFollowOnPacket({ source: turn.packet, mode: request.context.mode, question,
-          ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }), visualMaterials: visualMaterialsFor(question), ...(rawResult ? { result: rawResult } : {}) }));
+          ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }),
+          ...(request.context.mode === 'continue' ? { retainedMaterial, includeSelectedAnswer: request.context.includeSelectedAnswer ?? true } : {}),
+          visualMaterials: visualMaterialsFor(question), ...(rawResult ? { result: rawResult } : {}) }));
       }
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');

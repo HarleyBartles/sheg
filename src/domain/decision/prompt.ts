@@ -160,6 +160,8 @@ export function prepareFollowOnPacket(input: {
   mode: 'recorded' | 'fresh-material' | 'omit-history' | 'continue';
   question: DecisionRequest['question'];
   material?: readonly { id: string; text: string }[];
+  retainedMaterial?: readonly { id: string; text: string }[];
+  includeSelectedAnswer?: boolean;
   visualMaterials?: readonly DecisionVisualMaterial[];
   result?: DecisionValue;
 }): DecisionRequest & { state: PromptState } {
@@ -176,10 +178,13 @@ export function prepareFollowOnPacket(input: {
   if (mode === 'continue') {
     if (!input.result) throw new Error('Continue context requires the selected completed answer.');
     const currentIds = source.state.encounteredItems.map(({ id }) => id);
+    const trajectory = input.includeSelectedAnswer === false
+      ? source.state.trajectory
+      : appendTrajectoryResponse(source.state.trajectory, source.question, input.result, currentIds);
     state = {
       respondent: { profile: { ...source.state.respondent.profile } },
-      encounteredItems: [...source.state.encounteredItems.map((item) => ({ ...item })), ...material],
-      trajectory: appendTrajectoryResponse(source.state.trajectory, source.question, input.result, currentIds),
+      encounteredItems: [...(input.retainedMaterial ?? source.state.encounteredItems).map((item) => ({ ...item })), ...material],
+      trajectory: { ...trajectory, choices: [...trajectory.choices], responses: [...trajectory.responses] },
     };
   } else {
     if (material.length === 0) throw new Error(`${mode} context requires explicit material.`);

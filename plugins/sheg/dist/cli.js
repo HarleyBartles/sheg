@@ -23062,10 +23062,11 @@ function prepareFollowOnPacket(input2) {
   if (mode === "continue") {
     if (!input2.result) throw new Error("Continue context requires the selected completed answer.");
     const currentIds = source.state.encounteredItems.map(({ id }) => id);
+    const trajectory = input2.includeSelectedAnswer === false ? source.state.trajectory : appendTrajectoryResponse(source.state.trajectory, source.question, input2.result, currentIds);
     state = {
       respondent: { profile: { ...source.state.respondent.profile } },
-      encounteredItems: [...source.state.encounteredItems.map((item) => ({ ...item })), ...material],
-      trajectory: appendTrajectoryResponse(source.state.trajectory, source.question, input2.result, currentIds)
+      encounteredItems: [...(input2.retainedMaterial ?? source.state.encounteredItems).map((item) => ({ ...item })), ...material],
+      trajectory: { ...trajectory, choices: [...trajectory.choices], responses: [...trajectory.responses] }
     };
   } else {
     if (material.length === 0) throw new Error(`${mode} context requires explicit material.`);
@@ -26096,10 +26097,24 @@ var followOnSelectionSchema = external_exports.union([
 var followOnContextSchema = external_exports.object({
   mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
   materialIds: external_exports.array(stimulusItemSchema.shape.id).min(1).optional(),
+  retainedMaterialIds: external_exports.array(stimulusItemSchema.shape.id).optional(),
+  includeSelectedAnswer: external_exports.boolean().optional(),
   includeSelectedMaterial: external_exports.boolean().optional()
 }).strict().superRefine((contextInput, context) => {
   if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
     context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
+  }
+  if (contextInput.retainedMaterialIds && new Set(contextInput.retainedMaterialIds).size !== contextInput.retainedMaterialIds.length) {
+    context.addIssue({ code: "custom", path: ["retainedMaterialIds"], message: "Retained material references must be unique." });
+  }
+  if (contextInput.retainedMaterialIds?.some((id) => contextInput.materialIds?.includes(id))) {
+    context.addIssue({ code: "custom", path: ["retainedMaterialIds"], message: "Retained and additionally selected material references must not overlap." });
+  }
+  if (contextInput.retainedMaterialIds !== void 0 && contextInput.mode !== "continue") {
+    context.addIssue({ code: "custom", path: ["retainedMaterialIds"], message: "Retained material subsets require continue context." });
+  }
+  if (contextInput.includeSelectedAnswer !== void 0 && contextInput.mode !== "continue") {
+    context.addIssue({ code: "custom", path: ["includeSelectedAnswer"], message: "Selected-answer control requires continue context." });
   }
   if (contextInput.mode === "recorded" && contextInput.materialIds) {
     context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
@@ -26884,6 +26899,13 @@ async function prepareFollowOnRun(request, source, provider) {
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
+    const encountered = turn.packet.state.encounteredItems;
+    const retainedMaterial = request.context.retainedMaterialIds === void 0 ? encountered : (() => {
+      const requested = new Set(request.context.retainedMaterialIds);
+      const missing = [...requested].filter((id) => !encountered.some((item) => item.id === id));
+      if (missing.length > 0) throw new RunProblemError("follow_on_material_not_found", `Retained material ${missing[0]} was not encountered in evaluation ${turn.evaluationId}.`);
+      return encountered.filter(({ id }) => requested.has(id));
+    })();
     const rawResult = turn.result ? decisionValueFromResult(turn.result) : void 0;
     const packets = [];
     try {
@@ -26893,6 +26915,7 @@ async function prepareFollowOnRun(request, source, provider) {
           mode: request.context.mode,
           question,
           ...request.context.mode === "recorded" ? {} : { material: selectedMaterial },
+          ...request.context.mode === "continue" ? { retainedMaterial, includeSelectedAnswer: request.context.includeSelectedAnswer ?? true } : {},
           visualMaterials: visualMaterialsFor(question),
           ...rawResult ? { result: rawResult } : {}
         }));

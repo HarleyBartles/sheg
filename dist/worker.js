@@ -21214,10 +21214,24 @@ var followOnSelectionSchema = external_exports.union([
 var followOnContextSchema = external_exports.object({
   mode: external_exports.enum(["recorded", "fresh-material", "omit-history", "continue"]),
   materialIds: external_exports.array(stimulusItemSchema.shape.id).min(1).optional(),
+  retainedMaterialIds: external_exports.array(stimulusItemSchema.shape.id).optional(),
+  includeSelectedAnswer: external_exports.boolean().optional(),
   includeSelectedMaterial: external_exports.boolean().optional()
 }).strict().superRefine((contextInput, context) => {
   if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
     context.addIssue({ code: "custom", path: ["materialIds"], message: "Material references must be unique and ordered." });
+  }
+  if (contextInput.retainedMaterialIds && new Set(contextInput.retainedMaterialIds).size !== contextInput.retainedMaterialIds.length) {
+    context.addIssue({ code: "custom", path: ["retainedMaterialIds"], message: "Retained material references must be unique." });
+  }
+  if (contextInput.retainedMaterialIds?.some((id) => contextInput.materialIds?.includes(id))) {
+    context.addIssue({ code: "custom", path: ["retainedMaterialIds"], message: "Retained and additionally selected material references must not overlap." });
+  }
+  if (contextInput.retainedMaterialIds !== void 0 && contextInput.mode !== "continue") {
+    context.addIssue({ code: "custom", path: ["retainedMaterialIds"], message: "Retained material subsets require continue context." });
+  }
+  if (contextInput.includeSelectedAnswer !== void 0 && contextInput.mode !== "continue") {
+    context.addIssue({ code: "custom", path: ["includeSelectedAnswer"], message: "Selected-answer control requires continue context." });
   }
   if (contextInput.mode === "recorded" && contextInput.materialIds) {
     context.addIssue({ code: "custom", path: ["materialIds"], message: "Recorded context does not allow material changes." });
