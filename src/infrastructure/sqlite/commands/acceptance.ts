@@ -12,6 +12,7 @@ import { providerSelectionFingerprint } from '../../../application/provider-sele
 import { isImageMaterial } from '../../../domain/study/stimulus.js';
 import type { ParsedRunRequest, RunMaterialItem } from '../../../domain/run/request.js';
 import { evaluations, journeyRespondents, questionGroups, runVisualAssets, runs } from '../tables.js';
+import { providerConfigurationIdentity, providerModelIdentity } from '../../../providers/config.js';
 
 const SQLITE_INSERT_BATCH_SIZE = 250;
 
@@ -47,6 +48,7 @@ export function acceptPreparedRun(context: AcceptanceContext, submissionId: stri
       return { created: false, run: context.statusInside(runId) };
     }
     assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
 
     if (prepared.request.kind === 'follow-on') {
       const lineage = prepared.lineage;
@@ -90,6 +92,7 @@ export function acceptPreparedJourney(context: AcceptanceContext, submissionId: 
       return { created: false, run: context.statusInside(runId) };
     }
     assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID();
     const nowMs = context.now();
@@ -110,6 +113,46 @@ function assertProviderSettingsSnapshot(database: DatabaseSync, snapshot: Prepar
   }
   if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
     throw new RunStoreError('provider_selection_fingerprint_stale', 'Provider selection inputs changed after inspection. Inspect the request again before accepting it.');
+  }
+}
+
+function validateInitialProviderChoices(
+  snapshot: PreparedRun['providerSelectionSnapshot'] | PreparedJourneyRun['providerSelectionSnapshot'],
+  request: ParsedRunRequest,
+  evaluations: PreparedRun['evaluations'] | PreparedJourneyRun['evaluations'],
+): void {
+  const choices = snapshot?.initialChoices;
+  if (request.providerSelection && (request.kind === 'poll' || request.kind === 'journey') && choices === undefined) {
+    throw new RunStoreError('invalid_prepared_run', 'Automatic run acceptance requires the inspected initial provider choices.');
+  }
+  if (!choices) return;
+  const unitKey = (unit: { respondentId: string; questionId: string; branchId?: string | undefined }) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? null]);
+  const expected = new Set(evaluations.map(({ respondentId, questionId }) => unitKey({ respondentId, questionId })));
+  if (expected.size !== choices.length || choices.some((choice) => !expected.has(unitKey(choice)))) {
+    throw new RunStoreError('invalid_prepared_run', 'Initial provider choices must cover exactly the accepted evaluations.');
+  }
+  for (const choice of choices) {
+    const entry = snapshot!.catalogue.entries.find(({ id }) => id === choice.providerId);
+    if (!entry?.enabled) throw new RunStoreError('invalid_prepared_run', `Initial provider choice ${choice.providerId} is absent or disabled in the frozen catalogue.`);
+    const configuredModel = providerModelIdentity(entry.provider);
+    if (configuredModel !== choice.modelIdentity) throw new RunStoreError('invalid_prepared_run', `Initial provider choice ${choice.providerId} does not match its frozen model identity.`);
+  }
+  for (const lock of request.providerSelection?.comparisonLocks ?? []) {
+    const memberChoices = lock.members.flatMap((member) => {
+      if (member.branchId) return [];
+      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId);
+      return choice ? [choice] : [];
+    });
+    if (lock.members.some((member) => member.branchId === undefined && expected.has(unitKey(member)) &&
+      !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId))) {
+      throw new RunStoreError('invalid_prepared_run', `Initial provider choices omit a known member of comparison ${lock.id}.`);
+    }
+    if (memberChoices.length < 2) continue;
+    const providers = new Set(memberChoices.map(({ providerId }) => providerConfigurationIdentity(snapshot!.catalogue.entries.find((entry) => entry.id === providerId)!.provider)));
+    const models = new Set(memberChoices.map(({ modelIdentity }) => modelIdentity));
+    if (lock.equality.provider === 'same' && providers.size !== 1) throw new RunStoreError('invalid_prepared_run', `Initial provider choices violate provider equality for comparison ${lock.id}.`);
+    if (lock.equality.model === 'same' && models.size !== 1) throw new RunStoreError('invalid_prepared_run', `Initial provider choices violate model equality for comparison ${lock.id}.`);
+    if (memberChoices.some(({ comparisonLockId }) => comparisonLockId !== lock.id)) throw new RunStoreError('invalid_prepared_run', `Initial provider choices do not retain comparison identity ${lock.id}.`);
   }
 }
 

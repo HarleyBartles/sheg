@@ -5,6 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { providerCatalogueSchema, providerPreferenceSchema } from '../src/providers/config.js';
+import { inlineJourneyRequestSchema, inlineRunRequestSchema } from '../src/domain/run/request.js';
+import { fingerprintRunRequest } from '../src/application/run-inspection.js';
 import { providerSelectionPolicySnapshotSchema, type ProviderSelectionPolicySnapshot } from '../src/domain/run/lifecycle.js';
 import { prepareRun } from '../src/application/run-inspection.js';
 import { createRunService } from '../src/application/run-service.js';
@@ -73,8 +75,8 @@ test('stale provider settings revisions are rejected without overwriting the cur
 test('initial selection evidence rejects duplicate units and providers outside the frozen catalogue', () => {
   const snapshot = { version: 1, catalogueRevision: 1, catalogue: { entries: catalogue.entries }, preferences,
     policy: { batching: 'automatic' }, initialChoices: [
-      { respondentId: 'reader-a', questionId: 'continue', providerId: 'missing', modelIdentity: 'jev-1', decisionReason: 'policy' },
-      { respondentId: 'reader-a', questionId: 'continue', providerId: 'missing', modelIdentity: 'jev-1', decisionReason: 'policy' },
+      { respondentId: 'reader-a', questionId: 'continue', providerId: 'missing', modelIdentity: 'jev-1', decisionReason: 'policy', candidates: [{ id: 'missing', eligible: true, selected: true }] },
+      { respondentId: 'reader-a', questionId: 'continue', providerId: 'missing', modelIdentity: 'jev-1', decisionReason: 'policy', candidates: [{ id: 'missing', eligible: true, selected: true }] },
     ] };
   assert.equal(providerSelectionPolicySnapshotSchema.safeParse(snapshot).success, false);
 });
@@ -90,7 +92,9 @@ test('acceptance stores the inspected secret-free selection snapshot with the re
     assert.ok(prepared);
     const snapshot: ProviderSelectionPolicySnapshot = { version: 1, catalogueRevision: 1,
       catalogue: { entries: catalogue.entries }, preferences, policy: { batching: 'automatic' },
-      initialChoices: [{ respondentId: 'reader-a', questionId: 'continue', providerId: 'hosted-text', modelIdentity: 'openrouter/jev-1.13', decisionReason: 'lowest_comparable_published_rate_estimate' }] };
+      initialChoices: [{ respondentId: 'reader-a', questionId: 'continue', providerId: 'hosted-text', modelIdentity: 'typesafe/jev-1.13', decisionReason: 'lowest_comparable_published_rate_estimate', candidates: [
+        { id: 'hosted-text', eligible: true, selected: true, cost: { kind: 'estimate', amount: 0.0001, currency: 'USD', basis: 'published-rate estimate', source: 'https://provider.example/rates', observedAt: '2026-10-13' } },
+      ] }] };
     const accepted = store.accept('provider-snapshot', { ...prepared, providerSelectionSnapshot: snapshot });
     assert.equal(accepted.created, true);
     store.setProviderSettings({ catalogue: { entries: [] }, preferences: { preferredOrder: [] } }, 1);
@@ -104,6 +108,124 @@ test('acceptance stores the inspected secret-free selection snapshot with the re
     assert.deepEqual(reopenedStore.getRequest(accepted.run.runId).providerSelectionSnapshot, snapshot);
     reopenedStore.close();
   } finally { store?.close(); reopenedStore?.close(); await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test('automatic inspection freezes selected initial choices into accepted poll state', async () => {
+  const dataRoot = await root();
+  let store: ReturnType<typeof openRunStore> | undefined;
+  let reopened: ReturnType<typeof openRunStore> | undefined;
+  try {
+    store = openRunStore(dataRoot);
+    store.setProviderSettings({ catalogue: { entries: catalogue.entries }, preferences }, 0);
+    let launches = 0;
+    const service = createRunService({ reads: store, commands: store, close: store.close.bind(store) }, dataRoot,
+      () => provider, { async launch() { launches += 1; } }, { assertProviderReady: async () => undefined });
+    const automaticInput = { ...request, providerSelection: {} };
+    delete (automaticInput as { provider?: unknown }).provider;
+    const inspected = await service.inspect(automaticInput);
+    assert.equal(inspected.valid, true, JSON.stringify(inspected.problems));
+    assert.equal(inspected.initialChoices?.length, 1);
+    assert.equal(inspected.initialChoices?.[0]?.providerId, 'hosted-text');
+    const run = await service.start('automatic-initial-choice', { ...automaticInput, expectedSelectionFingerprint: inspected.selectionFingerprint });
+    assert.equal(launches, 1);
+    const accepted = store.getRequest(run.runId);
+    assert.equal(accepted.providerSelectionSnapshot?.initialChoices?.[0]?.providerId, 'hosted-text');
+    store.close();
+    reopened = openRunStore(dataRoot);
+    assert.equal(reopened.getRequest(run.runId).providerSelectionSnapshot?.initialChoices?.[0]?.questionId, 'continue');
+  } finally { store?.close(); reopened?.close(); await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test('automatic journey acceptance freezes only the known initial asks and leaves later turns unresolved', async () => {
+  const dataRoot = await root();
+  let store: ReturnType<typeof openRunStore> | undefined;
+  try {
+    store = openRunStore(dataRoot);
+    store.setProviderSettings({ catalogue: { entries: catalogue.entries }, preferences }, 0);
+    let launches = 0;
+    const service = createRunService({ reads: store, commands: store, close: store.close.bind(store) }, dataRoot, () => provider,
+      { async launch() { launches += 1; } }, { assertProviderReady: async () => undefined });
+    const automaticJourney = {
+      kind: 'journey' as const,
+      respondents: [request.respondents[0]!, { ...request.respondents[0]!, id: 'reader-b' }],
+      journey: { id: 'article', label: 'Article', items: [{ id: 'section-one', text: 'The opening.' }, { id: 'section-two', text: 'The next section.' }], tasks: [
+        { id: 'continue', type: 'choice' as const, instructions: 'Would you continue?', options: { yes: 'Continue', no: 'Stop' } },
+        { id: 'rate-next', type: 'score' as const, instructions: 'How useful was the next section?', rubric: ['Not useful', 'Very useful'] },
+      ], presentation: { kind: 'graph' as const, entryNodeId: 'first', maxDecisions: 2, nodes: [
+        { id: 'first', kind: 'ask' as const, taskId: 'continue' }, { id: 'second', kind: 'ask' as const, taskId: 'rate-next' },
+        { id: 'done', kind: 'terminal' as const, outcome: 'complete' },
+      ], transitions: [
+        { fromNodeId: 'first', optionId: 'yes', toNodeId: 'second' }, { fromNodeId: 'first', optionId: 'no', toNodeId: 'done' },
+        { fromNodeId: 'second', when: { type: 'score', minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: true }, toNodeId: 'done' },
+      ] } },
+      providerSelection: { comparisonLocks: [{ id: 'same-initial-provider', members: [
+        { respondentId: 'reader-a', questionId: 'continue' }, { respondentId: 'reader-a', questionId: 'rate-next' },
+      ] }] },
+      maxCalls: 4,
+    };
+    const parsedJourney = inlineJourneyRequestSchema.parse(automaticJourney);
+    const inspected = await service.inspect(parsedJourney);
+    assert.equal(inspected.valid, true, JSON.stringify(inspected.problems));
+    assert.equal(inspected.initialChoices?.length, 2);
+    const run = await service.start('automatic-initial-journey-choice', { ...parsedJourney, expectedSelectionFingerprint: inspected.selectionFingerprint });
+    assert.equal(launches, 1);
+    const accepted = store.getJourneyRun(run.runId);
+    assert.equal(accepted.providerSelectionSnapshot?.initialChoices?.length, 2);
+    assert.ok(accepted.providerSelectionSnapshot?.initialChoices?.every(({ questionId }) => questionId === 'continue'));
+    assert.equal(accepted.providerSelectionSnapshot?.initialChoices?.filter(({ comparisonLockId }) => comparisonLockId === 'same-initial-provider').length, 1);
+  } finally { store?.close(); await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test('acceptance refuses an initial provider choice that does not reference a frozen evaluation', async () => {
+  const dataRoot = await root();
+  let store: ReturnType<typeof openRunStore> | undefined;
+  try {
+    store = openRunStore(dataRoot);
+    store.setProviderSettings({ catalogue: { entries: catalogue.entries }, preferences }, 0);
+    const prepared = (await prepareRun(request, provider)).prepared;
+    assert.ok(prepared);
+    const snapshot: ProviderSelectionPolicySnapshot = { version: 1, catalogueRevision: 1, catalogue: { entries: catalogue.entries }, preferences,
+      policy: { batching: 'automatic' }, initialChoices: [{ respondentId: 'reader-a', questionId: 'not-in-this-run', providerId: 'hosted-text',
+        modelIdentity: 'typesafe/jev-1.13', decisionReason: 'request_preference', candidates: [{ id: 'hosted-text', eligible: true, selected: true }] }] };
+    assert.throws(() => store!.accept('invalid-initial-choice', { ...prepared, providerSelectionSnapshot: snapshot }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'invalid_prepared_run');
+    assert.equal(store.storageInfo().runCount, 0);
+  } finally { store?.close(); await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test('acceptance refuses initial choices that violate a declared comparison provider lock', async () => {
+  const dataRoot = await root();
+  let store: ReturnType<typeof openRunStore> | undefined;
+  try {
+    store = openRunStore(dataRoot);
+    const local = { kind: 'laya' as const, baseUrl: 'http://127.0.0.1:7071', checkpoint: 'local-reader', contextLimit: 16000, headLimit: 4000,
+      tokenizerJsonPath: 'C:/models/tokenizer.json', tokenizerSha256: 'a'.repeat(64), timeoutMs: 30000 };
+    const selectionCatalogue = providerCatalogueSchema.parse({ revision: 0, entries: [
+      ...catalogue.entries,
+      { id: 'local-reader', enabled: true, provider: local, execution: 'local', capabilities: ['text'], questionTypes: ['choice', 'score', 'noul'], pricing: { kind: 'no-provider-invoice' } },
+    ] });
+    store.setProviderSettings({ catalogue: selectionCatalogue, preferences }, 0);
+    const twoRespondentRequest = { ...request, maxCalls: 2, respondents: [request.respondents[0]!, { ...request.respondents[0]!, id: 'reader-b' }] };
+    const prepared = (await prepareRun(twoRespondentRequest, provider)).prepared;
+    assert.ok(prepared);
+    const automaticInput = { ...twoRespondentRequest, providerSelection: { comparisonLocks: [{ id: 'same-model-pair', members: [
+      { respondentId: 'reader-a', questionId: 'continue' }, { respondentId: 'reader-b', questionId: 'continue' },
+    ] }] } };
+    delete (automaticInput as { provider?: unknown }).provider;
+    const automaticRequest = inlineRunRequestSchema.parse(automaticInput);
+    if (automaticRequest.kind !== 'poll') throw new Error('Expected a poll request.');
+    const fingerprint = fingerprintRunRequest(automaticRequest);
+    assert.ok(fingerprint);
+    const updatedPrepared = { ...prepared, request: automaticRequest, requestFingerprint: fingerprint };
+    const snapshot: ProviderSelectionPolicySnapshot = { version: 1, catalogueRevision: 1, catalogue: { entries: selectionCatalogue.entries }, preferences,
+      policy: { batching: 'automatic' }, initialChoices: [
+        { respondentId: 'reader-a', questionId: 'continue', providerId: 'hosted-text', modelIdentity: 'typesafe/jev-1.13', comparisonLockId: 'same-model-pair', decisionReason: 'request_preference', candidates: [{ id: 'hosted-text', eligible: true, selected: true }] },
+        { respondentId: 'reader-b', questionId: 'continue', providerId: 'local-reader', modelIdentity: 'local-reader', comparisonLockId: 'same-model-pair', decisionReason: 'request_preference', candidates: [{ id: 'local-reader', eligible: true, selected: true }] },
+      ] };
+    assert.throws(() => store!.accept('broken-comparison-lock', { ...updatedPrepared, providerSelectionSnapshot: snapshot }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'invalid_prepared_run');
+    assert.equal(store.storageInfo().runCount, 0);
+  } finally { store?.close(); await rm(dataRoot, { recursive: true, force: true }); }
 });
 
 test('acceptance rejects a catalogue snapshot changed after inspection before creating the run', async () => {

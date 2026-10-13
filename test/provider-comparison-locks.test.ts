@@ -29,7 +29,10 @@ const selectLock = (selectionModule as unknown as { selectProviderComparisonLock
 
 test('comparison lock members are authored by stable respondent and question references', () => {
   const base = {
-    kind: 'poll' as const, respondents: [{ id: 'reader-a', intent: 'Read', context: 'A page', desired_outcome: 'Decide', engagement_cues: 'Specific', friction_cues: 'Confusing' }],
+    kind: 'poll' as const, respondents: [
+      { id: 'reader-a', intent: 'Read', context: 'A page', desired_outcome: 'Decide', engagement_cues: 'Specific', friction_cues: 'Confusing' },
+      { id: 'reader-b', intent: 'Read', context: 'A page', desired_outcome: 'Decide', engagement_cues: 'Specific', friction_cues: 'Confusing' },
+    ],
     material: [{ id: 'article', text: 'The article.' }], questions: [
       { type: 'choice' as const, id: 'with-image', instructions: 'Does the image help?', options: { yes: 'Yes', no: 'No' } },
       { type: 'choice' as const, id: 'without-image', instructions: 'Does the section work without its image?', options: { yes: 'Yes', no: 'No' } },
@@ -37,27 +40,27 @@ test('comparison lock members are authored by stable respondent and question ref
     maxCalls: 4,
   };
   const parsed = inlineRunRequestSchema.safeParse({ ...base, providerSelection: { comparisonLocks: [{ id: 'visual-a-b', members: [
-    { respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-a', questionId: 'without-image' },
+    { respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-b', questionId: 'without-image' },
   ], equality: { provider: 'same', model: 'same' } }] } });
   assert.equal(parsed.success, true, parsed.success ? undefined : JSON.stringify(parsed.error.issues));
   assert.equal(inlineRunRequestSchema.safeParse({ ...base, providerSelection: { comparisonLocks: [{ id: 'bad-member', members: [
     { respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-a', questionId: 'missing-question' },
   ], equality: { provider: 'same', model: 'same' } }] } }).success, false);
-  const crossRespondent = inlineRunRequestSchema.safeParse({ ...base, respondents: [
-    ...base.respondents,
-    { id: 'reader-b', intent: 'Read', context: 'A page', desired_outcome: 'Decide', engagement_cues: 'Specific', friction_cues: 'Confusing' },
-  ], providerSelection: { comparisonLocks: [{ id: 'cross-respondent', members: [
+  assert.equal(inlineRunRequestSchema.safeParse({ ...base, providerSelection: { comparisonLocks: [{ id: 'same-group', members: [
+    { respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-a', questionId: 'without-image' },
+  ], equality: { provider: 'same', model: 'same' } }] } }).success, false, 'a poll group has one shared provider selection');
+  const crossRespondent = inlineRunRequestSchema.safeParse({ ...base, providerSelection: { comparisonLocks: [{ id: 'cross-respondent', members: [
     { respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-b', questionId: 'without-image' },
   ], equality: { provider: 'same', model: 'same' } }] } });
   assert.equal(crossRespondent.success, true, crossRespondent.success ? undefined : JSON.stringify(crossRespondent.error.issues));
   const defaultEquality = inlineRunRequestSchema.safeParse({ ...base, providerSelection: { comparisonLocks: [{ id: 'default-lock', members: [
-    { respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-a', questionId: 'without-image' },
+    { respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-b', questionId: 'without-image' },
   ] }] } });
   assert.equal(defaultEquality.success, true, defaultEquality.success ? undefined : JSON.stringify(defaultEquality.error.issues));
   if (defaultEquality.success) assert.deepEqual(defaultEquality.data.providerSelection?.comparisonLocks?.[0]?.equality, { provider: 'same', model: 'same' });
   assert.equal(inlineRunRequestSchema.safeParse({ ...base, providerSelection: { comparisonLocks: [
-    { id: 'first-lock', members: [{ respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-a', questionId: 'without-image' }], equality: { provider: 'same', model: 'same' } },
-    { id: 'overlapping-lock', members: [{ respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-a', questionId: 'without-image' }], equality: { provider: 'vary', model: 'same' } },
+    { id: 'first-lock', members: [{ respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-b', questionId: 'without-image' }], equality: { provider: 'same', model: 'same' } },
+    { id: 'overlapping-lock', members: [{ respondentId: 'reader-a', questionId: 'with-image' }, { respondentId: 'reader-b', questionId: 'without-image' }], equality: { provider: 'vary', model: 'same' } },
   ] } }).success, false, 'an authored unit cannot silently join two comparison locks');
 });
 

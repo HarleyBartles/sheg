@@ -1,5 +1,5 @@
 import type { ProviderContextFit } from '../domain/decision/provider.js';
-import type { ProviderPreference, ProviderCatalogue, ProviderCatalogueEntry } from '../providers/config.js';
+import { providerConfigurationIdentity, providerModelIdentity, type ProviderPreference, type ProviderCatalogue, type ProviderCatalogueEntry } from '../providers/config.js';
 
 export type CandidateCost =
   | { kind: 'no-provider-invoice'; basis: 'provider pricing contract' }
@@ -20,6 +20,7 @@ export type ProviderSelectionInput = {
   unitId: string;
   requiredCapabilities: string[];
   questionType: string;
+  questionTypes?: string[];
   candidates: ProviderCandidateAssessment[];
   remainingCalls: number;
   preferredOrder?: string[];
@@ -83,7 +84,10 @@ export function selectProvider(input: ProviderSelectionInput): ProviderSelection
       ...(assessment.fit === undefined ? {} : { fit: assessment.fit }), cost: assessment.cost ?? estimateCost(entry, assessment.fit) };
     if (!entry.enabled) exclude(candidate, 'provider_disabled', 'The provider is not explicitly enabled in the frozen catalogue.');
     else if (input.requiredCapabilities.some((capability) => !entry.capabilities.includes(capability as 'text' | 'pixels'))) exclude(candidate, 'missing_capability', 'The provider does not support every required capability.');
-    else if (!entry.questionTypes.includes(input.questionType as 'choice' | 'score' | 'noul')) exclude(candidate, 'unsupported_question_type', `The provider does not support ${input.questionType} questions.`);
+    else if ((input.questionTypes ?? [input.questionType]).some((questionType) => !entry.questionTypes.includes(questionType as 'choice' | 'score' | 'noul'))) {
+      const unsupported = (input.questionTypes ?? [input.questionType]).find((questionType) => !entry.questionTypes.includes(questionType as 'choice' | 'score' | 'noul'));
+      exclude(candidate, 'unsupported_question_type', `The provider does not support ${unsupported} questions.`);
+    }
     else if (assessment.ready === false) exclude(candidate, 'provider_unavailable', 'The configured provider is not currently ready.');
     else if (assessment.ready !== true) exclude(candidate, 'provider_readiness_unverified', 'Current provider readiness was not established.');
     else if (!assessment.fit || assessment.fit.status === 'unavailable') exclude(candidate, 'fit_unavailable', assessment.fit?.reason ?? 'Provider fit could not be measured.');
@@ -148,13 +152,7 @@ export function selectProviderComparisonLock(input: ProviderComparisonLockInput)
     return { id: input.id, memberIds, treatmentDimensions, decisionReason: 'comparison_members_invalid', candidates: [] };
   }
   if (treatmentDimensions.length) {
-    const dimensions = (entry: ProviderCatalogueEntry) => {
-      const providerConfig = { ...entry.provider } as Record<string, unknown>;
-      const model = providerConfig.model ?? providerConfig.checkpoint;
-      delete providerConfig.model;
-      delete providerConfig.checkpoint;
-      return { provider: JSON.stringify(providerConfig), model: typeof model === 'string' ? model : '' };
-    };
+    const dimensions = (entry: ProviderCatalogueEntry) => ({ provider: providerConfigurationIdentity(entry.provider), model: providerModelIdentity(entry.provider) });
     const shared = (['provider', 'model'] as const).filter((dimension) => input.equality[dimension] === 'same');
     const first = input.members[0]!;
     const keys = [...new Set(first.catalogue.entries.map((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension]))))];
@@ -185,6 +183,9 @@ export function selectProviderComparisonLock(input: ProviderComparisonLockInput)
     const chosenGroup = viableGroups[0];
     if (chosenGroup) {
       const selectedIds = chosenGroup.selections.map(({ selection }) => selection.selected!.id);
+      const plannedCalls = input.members.reduce((sum, member, index) => sum + (member.candidates.find(({ id }) => id === selectedIds[index])?.plannedCalls ?? 0), 0);
+      const remainingCalls = Math.min(...input.members.map(({ remainingCalls: remaining }) => remaining));
+      if (plannedCalls > remainingCalls) return { id: input.id, memberIds, treatmentDimensions, decisionReason: 'comparison_call_allowance_exceeded', candidates: [], members: chosenGroup.selections };
       const displayCandidates = [...new Set(selectedIds)].map((id) => {
         const entry = first.catalogue.entries.find((candidate) => candidate.id === id)!;
         const fit = chosenGroup.selections.find(({ selection }) => selection.selected?.id === id)?.selection.selected?.fit;
@@ -203,7 +204,7 @@ export function selectProviderComparisonLock(input: ProviderComparisonLockInput)
   const first = input.members[0]!;
   const catalogue = first.catalogue;
   const requiredCapabilities = [...new Set(input.members.flatMap(({ requiredCapabilities: required }) => required))];
-  const questionTypes = [...new Set(input.members.map(({ questionType }) => questionType))];
+  const questionTypes = [...new Set(input.members.flatMap(({ questionTypes: types, questionType }) => types ?? [questionType]))];
   const candidates = catalogue.entries.map((entry) => {
     const memberSelections = input.members.map((member) => selectProvider({ ...member, unitOverride: entry.id }));
     const eligibleForAll = memberSelections.every((selection) => selection.selected?.id === entry.id) &&
@@ -222,7 +223,7 @@ export function selectProviderComparisonLock(input: ProviderComparisonLockInput)
     return { id: entry.id, ready, ...(fit === undefined ? {} : { fit }), plannedCalls, ...(cost === undefined ? {} : { cost }) };
   });
   const remainingCalls = Math.min(...input.members.map(({ remainingCalls: remaining }) => remaining));
-  const selectionInput: ProviderSelectionInput = { ...first, requiredCapabilities, questionType: questionTypes[0]!, remainingCalls, candidates };
+  const selectionInput: ProviderSelectionInput = { ...first, requiredCapabilities, questionType: questionTypes[0]!, questionTypes, remainingCalls, candidates };
   delete selectionInput.unitOverride;
   delete selectionInput.unitOverrides;
   if (pins[0]) selectionInput.unitOverride = pins[0];

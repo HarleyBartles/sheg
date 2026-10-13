@@ -145,6 +145,8 @@ export async function assessProviderBatchPlan(input: ProviderBatchPlanInput): Pr
 
 export async function assessAndSelectProviderBatches(input: ProviderBatchSelectionInput): Promise<ProviderBatchSelection> {
   const plans = Object.fromEntries(await Promise.all(input.candidates.map(async (candidate) => {
+    if (!candidate.ready) return [candidate.id, { batches: [], questionIdsByBatch: [], fits: [], problems: [], minimumCalls: 1,
+      repeatedInputTokens: null, cost: { kind: 'unknown' as const, basis: 'unverified' as const }, exceedsRemainingCalls: false } satisfies ProviderBatchPlan] as const;
     const entry = input.catalogue.entries.find(({ id }) => id === candidate.id);
     const plan = await assessProviderBatchPlan({ group: input.group, provider: candidate.provider, providerKind: candidate.providerKind,
       modelIdentity: candidate.modelIdentity, batching: input.batching, remainingCalls: input.remainingCalls, ...(entry ? { pricing: entry.pricing } : {}) });
@@ -155,14 +157,16 @@ export async function assessAndSelectProviderBatches(input: ProviderBatchSelecti
     const fit = aggregateFit(input.group, plan, candidate.providerKind, candidate.modelIdentity);
     return { id: candidate.id, ready: candidate.ready, fit, plannedCalls: plan.minimumCalls, cost: plan.cost };
   });
+  const assessed = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const completeCandidates = input.catalogue.entries.map((entry) => assessed.get(entry.id) ?? { id: entry.id, ready: false, plannedCalls: 1 });
   const selectionInput: Omit<ProviderSelectionInput, 'candidates'> = {
     catalogue: input.catalogue, preferences: input.preferences, unitId: input.unitId, requiredCapabilities: input.requiredCapabilities,
-    questionType: input.questionType, remainingCalls: input.remainingCalls,
+    questionType: input.questionType, ...(input.questionTypes === undefined ? {} : { questionTypes: input.questionTypes }), remainingCalls: input.remainingCalls,
     ...(input.preferredOrder === undefined ? {} : { preferredOrder: input.preferredOrder }),
     ...(input.unitOverride === undefined ? {} : { unitOverride: input.unitOverride }),
     ...(input.unitOverrides === undefined ? {} : { unitOverrides: input.unitOverrides }),
   };
-  return { selection: selectProvider({ ...selectionInput, candidates }), plans };
+  return { selection: selectProvider({ ...selectionInput, candidates: completeCandidates }), plans };
 }
 
 function aggregateFit(group: ProviderBatchGroup, plan: ProviderBatchPlan, provider: ProviderKind, modelIdentity: string): ProviderContextFit {

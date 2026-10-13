@@ -20479,6 +20479,15 @@ var providerPreferenceSchema = external_exports.object({
 }).strict().superRefine((preferences, context) => {
   if (new Set(preferences.preferredOrder).size !== preferences.preferredOrder.length) context.addIssue({ code: "custom", path: ["preferredOrder"], message: "Provider preference identities must be unique." });
 });
+function providerModelIdentity(provider) {
+  return provider.kind === "laya" ? provider.checkpoint : provider.model;
+}
+function providerConfigurationIdentity(provider) {
+  const configuration = { ...provider };
+  delete configuration.model;
+  delete configuration.checkpoint;
+  return JSON.stringify(configuration);
+}
 
 // src/domain/study/presentation.ts
 var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -20785,6 +20794,20 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
 }
 
 // src/domain/run/lifecycle.ts
+var providerSelectionCostSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("no-provider-invoice"), basis: external_exports.literal("provider pricing contract") }).strict(),
+  external_exports.object({ kind: external_exports.literal("estimate"), amount: external_exports.number().finite().nonnegative(), currency: external_exports.string().regex(/^[A-Z]{3}$/), basis: external_exports.literal("published-rate estimate"), source: external_exports.string().url(), observedAt: external_exports.string().date() }).strict(),
+  external_exports.object({ kind: external_exports.literal("unknown"), basis: external_exports.enum(["unverified", "incomparable currency"]) }).strict()
+]);
+var providerSelectionCandidateSchema = external_exports.object({
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  eligible: external_exports.boolean(),
+  selected: external_exports.boolean(),
+  fit: providerContextFitSchema.optional(),
+  cost: providerSelectionCostSchema.optional(),
+  exclusion: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional(),
+  preferenceRank: external_exports.object({ source: external_exports.enum(["request", "saved"]), index: external_exports.number().int().nonnegative() }).strict().optional()
+}).strict();
 var providerSelectionInitialChoiceSchema = external_exports.object({
   respondentId: external_exports.string().min(1),
   questionId: external_exports.string().min(1),
@@ -20792,8 +20815,13 @@ var providerSelectionInitialChoiceSchema = external_exports.object({
   providerId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
   modelIdentity: external_exports.string().min(1),
   comparisonLockId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
-  decisionReason: external_exports.string().min(1)
-}).strict();
+  decisionReason: external_exports.string().min(1),
+  candidates: external_exports.array(providerSelectionCandidateSchema).min(1)
+}).strict().superRefine((choice, context) => {
+  const selected = choice.candidates.filter(({ selected: isSelected }) => isSelected);
+  if (selected.length !== 1 || selected[0]?.id !== choice.providerId) context.addIssue({ code: "custom", path: ["candidates"], message: "Exactly one candidate must be selected and it must match providerId." });
+  if (new Set(choice.candidates.map(({ id }) => id)).size !== choice.candidates.length) context.addIssue({ code: "custom", path: ["candidates"], message: "Initial choice candidate identities must be unique." });
+});
 var providerSelectionPolicySnapshotSchema = external_exports.object({
   version: external_exports.literal(1),
   catalogueRevision: external_exports.number().int().nonnegative(),
@@ -20899,7 +20927,7 @@ var providerSelectionSchema = external_exports.object({
     }
   }
 });
-var selectionFingerprintSchema = external_exports.string().regex(/^[a-f\d]{64}$/i);
+var selectionFingerprintSchema = external_exports.string().regex(/^(?:[a-f\d]{64}|r\d+-[a-f\d]{64})$/i);
 var runProviderSelectionShape = {
   provider: providerConfigSchema.optional(),
   providerSelection: providerSelectionSchema.optional(),
@@ -20911,10 +20939,19 @@ function requireProviderChoice(request, context) {
 function validateComparisonMembers(request, context) {
   const respondentIds = new Set(request.respondents.map(({ id }) => id));
   const questionIds = new Set(request.questionIds);
+  const assignedPollRespondents = /* @__PURE__ */ new Map();
   for (const [lockIndex, lock] of (request.providerSelection?.comparisonLocks ?? []).entries()) {
+    const pollRespondents = /* @__PURE__ */ new Set();
     lock.members.forEach((member, memberIndex) => {
       if (!respondentIds.has(member.respondentId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex, "respondentId"], message: `Comparison member respondent ${member.respondentId} is not part of this request.` });
       if (!questionIds.has(member.questionId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex, "questionId"], message: `Comparison member question ${member.questionId} is not part of this request.` });
+      if (request.kind === "poll" && pollRespondents.has(member.respondentId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex], message: "Poll comparison members must identify distinct respondent question groups." });
+      pollRespondents.add(member.respondentId);
+      if (request.kind === "poll") {
+        const previousLock = assignedPollRespondents.get(member.respondentId);
+        if (previousLock && previousLock !== lock.id) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex], message: `A poll respondent group cannot belong to both ${previousLock} and ${lock.id}.` });
+        else assignedPollRespondents.set(member.respondentId, lock.id);
+      }
     });
   }
 }
@@ -20969,7 +21006,7 @@ var inlineRunRequestSchema = external_exports.object({
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
-  validateComparisonMembers({ ...request, questionIds: request.questions.map(({ id }) => id) }, context);
+  validateComparisonMembers({ ...request, kind: "poll", questionIds: request.questions.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
@@ -20997,7 +21034,7 @@ var inlineJourneyRequestSchema = external_exports.object({
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
-  validateComparisonMembers({ ...request, questionIds: request.journey.tasks.map(({ id }) => id) }, context);
+  validateComparisonMembers({ ...request, kind: "journey", questionIds: request.journey.tasks.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
@@ -28055,7 +28092,7 @@ function validatePreparedJourney(prepared) {
 function providerSelectionFingerprint(request, snapshot) {
   const requestInputs = { ...request };
   delete requestInputs.expectedSelectionFingerprint;
-  return hashCanonical({ policyVersion: snapshot.version, request: requestInputs, snapshot });
+  return `r${snapshot.catalogueRevision}-${hashCanonical({ policyVersion: snapshot.version, request: requestInputs, snapshot })}`;
 }
 
 // src/infrastructure/sqlite/commands/acceptance.ts
@@ -28074,6 +28111,7 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
       return { created: false, run: context.statusInside(runId3) };
     }
     assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
     if (prepared.request.kind === "follow-on") {
       const lineage = prepared.lineage;
       if (!lineage) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage is missing.");
@@ -28112,6 +28150,7 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
       return { created: false, run: context.statusInside(runId3) };
     }
     assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId2 = randomUUID3();
     const nowMs = context.now();
@@ -28129,6 +28168,40 @@ function assertProviderSettingsSnapshot(database, snapshot, request) {
   }
   if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
     throw new RunStoreError("provider_selection_fingerprint_stale", "Provider selection inputs changed after inspection. Inspect the request again before accepting it.");
+  }
+}
+function validateInitialProviderChoices(snapshot, request, evaluations2) {
+  const choices = snapshot?.initialChoices;
+  if (request.providerSelection && (request.kind === "poll" || request.kind === "journey") && choices === void 0) {
+    throw new RunStoreError("invalid_prepared_run", "Automatic run acceptance requires the inspected initial provider choices.");
+  }
+  if (!choices) return;
+  const unitKey = (unit) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? null]);
+  const expected = new Set(evaluations2.map(({ respondentId, questionId }) => unitKey({ respondentId, questionId })));
+  if (expected.size !== choices.length || choices.some((choice) => !expected.has(unitKey(choice)))) {
+    throw new RunStoreError("invalid_prepared_run", "Initial provider choices must cover exactly the accepted evaluations.");
+  }
+  for (const choice of choices) {
+    const entry = snapshot.catalogue.entries.find(({ id }) => id === choice.providerId);
+    if (!entry?.enabled) throw new RunStoreError("invalid_prepared_run", `Initial provider choice ${choice.providerId} is absent or disabled in the frozen catalogue.`);
+    const configuredModel = providerModelIdentity(entry.provider);
+    if (configuredModel !== choice.modelIdentity) throw new RunStoreError("invalid_prepared_run", `Initial provider choice ${choice.providerId} does not match its frozen model identity.`);
+  }
+  for (const lock of request.providerSelection?.comparisonLocks ?? []) {
+    const memberChoices = lock.members.flatMap((member) => {
+      if (member.branchId) return [];
+      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId);
+      return choice ? [choice] : [];
+    });
+    if (lock.members.some((member) => member.branchId === void 0 && expected.has(unitKey(member)) && !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId))) {
+      throw new RunStoreError("invalid_prepared_run", `Initial provider choices omit a known member of comparison ${lock.id}.`);
+    }
+    if (memberChoices.length < 2) continue;
+    const providers = new Set(memberChoices.map(({ providerId }) => providerConfigurationIdentity(snapshot.catalogue.entries.find((entry) => entry.id === providerId).provider)));
+    const models = new Set(memberChoices.map(({ modelIdentity }) => modelIdentity));
+    if (lock.equality.provider === "same" && providers.size !== 1) throw new RunStoreError("invalid_prepared_run", `Initial provider choices violate provider equality for comparison ${lock.id}.`);
+    if (lock.equality.model === "same" && models.size !== 1) throw new RunStoreError("invalid_prepared_run", `Initial provider choices violate model equality for comparison ${lock.id}.`);
+    if (memberChoices.some(({ comparisonLockId }) => comparisonLockId !== lock.id)) throw new RunStoreError("invalid_prepared_run", `Initial provider choices do not retain comparison identity ${lock.id}.`);
   }
 }
 function requestedImageMaterials(request) {

@@ -42,7 +42,7 @@ const providerSelectionSchema = z.object({
     }
   }
 });
-const selectionFingerprintSchema = z.string().regex(/^[a-f\d]{64}$/i);
+const selectionFingerprintSchema = z.string().regex(/^(?:[a-f\d]{64}|r\d+-[a-f\d]{64})$/i);
 const runProviderSelectionShape = {
   provider: providerConfigSchema.optional(),
   providerSelection: providerSelectionSchema.optional(),
@@ -52,13 +52,22 @@ function requireProviderChoice<T extends { provider?: unknown; providerSelection
   if ((request.provider === undefined) === (request.providerSelection === undefined)) context.addIssue({ code: 'custom', path: ['providerSelection'], message: 'Specify either an explicit provider or automatic provider selection.' });
 }
 
-function validateComparisonMembers(request: { providerSelection?: z.infer<typeof providerSelectionSchema> | undefined; respondents: Array<{ id: string }>; questionIds: string[] }, context: z.RefinementCtx): void {
+function validateComparisonMembers(request: { kind: 'poll' | 'journey'; providerSelection?: z.infer<typeof providerSelectionSchema> | undefined; respondents: Array<{ id: string }>; questionIds: string[] }, context: z.RefinementCtx): void {
   const respondentIds = new Set(request.respondents.map(({ id }) => id));
   const questionIds = new Set(request.questionIds);
+  const assignedPollRespondents = new Map<string, string>();
   for (const [lockIndex, lock] of (request.providerSelection?.comparisonLocks ?? []).entries()) {
+    const pollRespondents = new Set<string>();
     lock.members.forEach((member, memberIndex) => {
       if (!respondentIds.has(member.respondentId)) context.addIssue({ code: 'custom', path: ['providerSelection', 'comparisonLocks', lockIndex, 'members', memberIndex, 'respondentId'], message: `Comparison member respondent ${member.respondentId} is not part of this request.` });
       if (!questionIds.has(member.questionId)) context.addIssue({ code: 'custom', path: ['providerSelection', 'comparisonLocks', lockIndex, 'members', memberIndex, 'questionId'], message: `Comparison member question ${member.questionId} is not part of this request.` });
+      if (request.kind === 'poll' && pollRespondents.has(member.respondentId)) context.addIssue({ code: 'custom', path: ['providerSelection', 'comparisonLocks', lockIndex, 'members', memberIndex], message: 'Poll comparison members must identify distinct respondent question groups.' });
+      pollRespondents.add(member.respondentId);
+      if (request.kind === 'poll') {
+        const previousLock = assignedPollRespondents.get(member.respondentId);
+        if (previousLock && previousLock !== lock.id) context.addIssue({ code: 'custom', path: ['providerSelection', 'comparisonLocks', lockIndex, 'members', memberIndex], message: `A poll respondent group cannot belong to both ${previousLock} and ${lock.id}.` });
+        else assignedPollRespondents.set(member.respondentId, lock.id);
+      }
     });
   }
 }
@@ -116,7 +125,7 @@ export const inlineRunRequestSchema = z.object({
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
-  validateComparisonMembers({ ...request, questionIds: request.questions.map(({ id }) => id) }, context);
+  validateComparisonMembers({ ...request, kind: 'poll', questionIds: request.questions.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });
@@ -147,7 +156,7 @@ export const inlineJourneyRequestSchema = z.object({
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
-  validateComparisonMembers({ ...request, questionIds: request.journey.tasks.map(({ id }) => id) }, context);
+  validateComparisonMembers({ ...request, kind: 'journey', questionIds: request.journey.tasks.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });

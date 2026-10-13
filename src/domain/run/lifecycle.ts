@@ -8,6 +8,22 @@ import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 import { providerCatalogueEntrySchema, providerPreferenceSchema } from '../../providers/config.js';
+import { providerContextFitSchema } from '../decision/provider-failure.js';
+
+const providerSelectionCostSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('no-provider-invoice'), basis: z.literal('provider pricing contract') }).strict(),
+  z.object({ kind: z.literal('estimate'), amount: z.number().finite().nonnegative(), currency: z.string().regex(/^[A-Z]{3}$/), basis: z.literal('published-rate estimate'), source: z.string().url(), observedAt: z.string().date() }).strict(),
+  z.object({ kind: z.literal('unknown'), basis: z.enum(['unverified', 'incomparable currency']) }).strict(),
+]);
+const providerSelectionCandidateSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  eligible: z.boolean(),
+  selected: z.boolean(),
+  fit: providerContextFitSchema.optional(),
+  cost: providerSelectionCostSchema.optional(),
+  exclusion: z.object({ code: z.string().min(1), message: z.string().min(1) }).strict().optional(),
+  preferenceRank: z.object({ source: z.enum(['request', 'saved']), index: z.number().int().nonnegative() }).strict().optional(),
+}).strict();
 
 export const providerSelectionInitialChoiceSchema = z.object({
   respondentId: z.string().min(1),
@@ -17,7 +33,13 @@ export const providerSelectionInitialChoiceSchema = z.object({
   modelIdentity: z.string().min(1),
   comparisonLockId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
   decisionReason: z.string().min(1),
-}).strict();
+  candidates: z.array(providerSelectionCandidateSchema).min(1),
+}).strict().superRefine((choice, context) => {
+  const selected = choice.candidates.filter(({ selected: isSelected }) => isSelected);
+  if (selected.length !== 1 || selected[0]?.id !== choice.providerId) context.addIssue({ code: 'custom', path: ['candidates'], message: 'Exactly one candidate must be selected and it must match providerId.' });
+  if (new Set(choice.candidates.map(({ id }) => id)).size !== choice.candidates.length) context.addIssue({ code: 'custom', path: ['candidates'], message: 'Initial choice candidate identities must be unique.' });
+});
+export type ProviderSelectionInitialChoice = z.infer<typeof providerSelectionInitialChoiceSchema>;
 
 export const providerSelectionPolicySnapshotSchema = z.object({
   version: z.literal(1),
@@ -171,6 +193,7 @@ export type Inspection = {
   problems: RunProblem[];
   warnings?: RunProblem[];
   fits: Array<{ respondentId: string; groupId?: string; contextId?: string; questionIds?: string[]; nodeId?: string; pathId?: string; packetId?: string; fit: ProviderContextFit }>;
+  initialChoices?: ProviderSelectionInitialChoice[];
   selectionFingerprint?: string;
 };
 

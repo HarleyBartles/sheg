@@ -114,8 +114,8 @@
 - [ ] **Step 2: Run `node --import tsx --test test/provider-comparison-locks.test.ts`**; expected: failure because no comparison identity, lock selection, or lock persistence exists.
 - [ ] **Step 3: Implement authored comparison membership and lock resolution** using stable evaluation references and Task 4's whole-group candidate assessments; check every currently available member packet before saving the common provider and preserve unresolved future members and policy provenance.
 - [ ] **Step 4: Resolve all known initial poll units and first journey asks using the same inspection selector; atomically save initial choices, comparison locks, and selection evidence with the accepted catalogue snapshot. Extend `expectedSelectionFingerprint` to include these initial-choice explanations while excluding itself from its hash input.**
-- [ ] **Step 5: Add a failing late-member test** where a later packet exceeds the lock's context limit; require a zero-attempt member failure and assert the resolved lock is unchanged and no alternative provider receives a request.
-- [ ] **Step 6: Run lock, acceptance, stale-fingerprint, idempotency, and persistence/reopen tests**; verify no comparison member is silently dropped, regrouped, or changed from the inspected initial selection.
+- [ ] **Step 5: Add failing acceptance tests** for duplicate/unknown authored member references, mismatched locked initial choices, and a journey lock spanning a known first ask and an unresolved later ask; verify only the first ask is initially selected and the lock identity is retained for later resolution.
+- [ ] **Step 6: Run lock, acceptance, stale-fingerprint, idempotency, and persistence/reopen tests**; verify no currently known comparison member is silently dropped, regrouped, or changed from the inspected initial selection.
 - [ ] **Step 7: Commit** comparison identity, locks, and acceptance-time initial choices.
 
 ### Task 6: Resolve Reached Units Before Dispatch and Preserve Choices on Recovery
@@ -131,7 +131,8 @@
 - [ ] **Step 3: Implement resolution persistence and worker lookup** with a transaction boundary that makes the resolved choice durable before a physical attempt can be reserved; ambiguous write outcomes must be reconciled before any dispatch.
 - [ ] **Step 4: Add interruption tests** for failure before dispatch, timeout after dispatch, process restart, and local catalogue change; expected: pre-dispatch failures consume no physical call, dispatched uncertainty follows existing accounting, and all retries retain the same provider and packet.
 - [ ] **Step 5: Add a no-eligible-provider reached-unit test**; expected: zero-call identified failure, no fallback, unaffected respondents and independent groups continue.
-- [ ] **Step 6: Run migration, worker, reservation, resume, journey visual history, and failure-isolation tests**; commit only after persisted attempt/evaluation evidence matches observed dispatches.
+- [ ] **Step 6: Add a late comparison-lock member test** where the actual later packet exceeds the locked provider's context limit; require a zero-attempt member failure, preserve the resolved lock unchanged, and prove no alternative provider receives a request.
+- [ ] **Step 7: Run migration, worker, reservation, resume, journey visual history, comparison-lock overflow, and failure-isolation tests**; commit only after persisted attempt/evaluation evidence matches observed dispatches.
 
 ### Task 7: Explain Selection Through CLI, MCP, and Shipped Agent Guidance
 

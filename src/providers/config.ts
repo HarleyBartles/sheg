@@ -83,3 +83,14 @@ export const providerPreferenceSchema = z.object({
 export type ProviderCatalogue = z.infer<typeof providerCatalogueSchema>;
 export type ProviderCatalogueEntry = z.infer<typeof providerCatalogueEntrySchema>;
 export type ProviderPreference = z.infer<typeof providerPreferenceSchema>;
+
+export function providerModelIdentity(provider: ProviderConfig): string {
+  return provider.kind === 'laya' ? provider.checkpoint : provider.model;
+}
+
+export function providerConfigurationIdentity(provider: ProviderConfig): string {
+  const configuration = { ...provider } as Record<string, unknown>;
+  delete configuration.model;
+  delete configuration.checkpoint;
+  return JSON.stringify(configuration);
+}
