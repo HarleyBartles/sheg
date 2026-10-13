@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { RunCommandRepository, RunPersistence, RunReadRepository } from './run-store.js';
 import { hashCanonical } from '../infrastructure/identity.js';
 import { advanceJourney, normalizeResponse } from '../domain/journey/run.js';
-import type { JourneyRespondentState } from '../domain/run/lifecycle.js';
+import { providerSelectionInitialChoiceSchema, type JourneyRespondentState } from '../domain/run/lifecycle.js';
 import { ProviderCallError } from '../domain/decision/provider-failure.js';
 import type { EvaluationFailure } from '../domain/run/lifecycle.js';
 import type { ProviderFactory } from './run-service.js';
@@ -12,9 +12,13 @@ import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionBatchRequest, DecisionBatchResult } from '../domain/decision/decision.js';
 import { requireExplicitProvider } from '../domain/run/request.js';
 import { assessProviderBatchPlan } from './provider-batch-planning.js';
+import { selectProvider } from './provider-selection.js';
+import { providerModelIdentity } from '../providers/config.js';
+import type { ProviderConfigInput } from '../providers/config.js';
 
 const HEARTBEAT_MS = 2_000;
-export async function executeQuestionRun(persistence: RunPersistence, runId: string, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions = {}): Promise<void> {
+class NoEligibleJourneyProviderError extends Error {}
+export async function executeQuestionRun(persistence: RunPersistence, runId: string, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions = {}, assertProviderReady?: (config: ProviderConfigInput) => Promise<void>): Promise<void> {
   const { reads, commands } = persistence;
   const claim = commands.claim(runId, Date.now(), process.pid);
   if (!claim) return;
@@ -26,7 +30,7 @@ export async function executeQuestionRun(persistence: RunPersistence, runId: str
   heartbeat.unref();
   try {
     if (reads.getRequestKind(runId) === 'journey') {
-      await executeJourney(reads, commands, runId, claim, providerFactory, providerOptions);
+      await executeJourney(reads, commands, runId, claim, providerFactory, providerOptions, assertProviderReady);
     } else {
       await executePoll(reads, commands, runId, claim, providerFactory, providerOptions);
     }
@@ -40,13 +44,17 @@ export async function executeQuestionRun(persistence: RunPersistence, runId: str
 
 async function executePoll(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions): Promise<void> {
   const prepared = reads.getRequest(runId);
-  const configured = requireExplicitProvider(prepared.request);
-  const provider = providerFactory(configured, providerOptions);
-  const providerKind = configured.kind;
-  const modelIdentity = providerKind === 'jev' || providerKind === 'clef' ? configured.model : configured.checkpoint;
+  const explicitProvider = prepared.request.provider ? requireExplicitProvider(prepared.request) : undefined;
   const answers = new Map(reads.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
+    const initialChoice = evaluations[0]?.providerSelection ?? prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === group.respondentId && choice.questionId === evaluations[0]?.questionId);
+    const configured = explicitProvider ?? prepared.providerSelectionSnapshot?.catalogue.entries.find(({ id }) => id === initialChoice?.providerId)?.provider;
+    if (!configured) throw new Error('The accepted question group has no frozen provider choice.');
+    if (evaluations.some((evaluation) => evaluation.providerSelection && evaluation.providerSelection.providerId !== initialChoice?.providerId)) throw new Error('A question group contains incompatible frozen provider choices.');
+    const provider = providerFactory(configured, providerOptions);
+    const providerKind = configured.kind;
+    const modelIdentity = providerKind === 'jev' || providerKind === 'clef' ? configured.model : configured.checkpoint;
     while (true) {
       if (!commands.heartbeat(claim, Date.now())) return;
       const pending = evaluations.filter((evaluation) => answers.get(evaluation.evaluationId) === 'pending');
@@ -89,15 +97,32 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
   }
 }
 
-async function executeJourney(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions): Promise<void> {
+async function executeJourney(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions, assertProviderReady?: (config: ProviderConfigInput) => Promise<void>): Promise<void> {
   const accepted = reads.getJourneyRun(runId);
-  const provider = providerFactory(requireExplicitProvider(accepted.request), providerOptions);
+  const evaluations = [...accepted.evaluations];
+  const explicitProvider = accepted.request.provider ? requireExplicitProvider(accepted.request) : undefined;
   while (true) {
     if (!commands.heartbeat(claim, Date.now())) return;
-    const reservation = commands.reserveNext(claim, Date.now());
+    const pending = evaluations.find((evaluation) => evaluation.status === 'pending');
+    if (!pending) break;
+    const existingChoice = pending.providerSelection ?? accepted.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === pending.respondentId && choice.questionId === pending.questionId);
+    let choice;
+    try { choice = explicitProvider ? undefined : existingChoice ?? await resolveJourneyProvider(reads, runId, accepted, pending, providerFactory, providerOptions, assertProviderReady); }
+    catch (error) {
+      if (!(error instanceof NoEligibleJourneyProviderError)) throw error;
+      commands.failPendingJourneyEvaluation(claim, pending.evaluationId, pending.packetFingerprint,
+        { code: 'provider_selection_unavailable', message: 'No enabled provider fits the reached journey unit and its declared comparison constraints.' }, Date.now());
+      pending.status = 'failed';
+      continue;
+    }
+    const reservation = commands.reserveNext(claim, Date.now(), choice ? { evaluationId: pending.evaluationId, packetFingerprint: pending.packetFingerprint, providerSelection: choice } : undefined);
     if (!reservation) break;
+    if (choice) pending.providerSelection = choice;
     const currentTurn = reads.getJourneyWorkerTurn(runId, reservation.evaluation.evaluationId, reservation.evaluation.respondentId);
     const { evaluation: currentEvaluation, respondent: respondentState, profile } = currentTurn;
+    const providerConfig = explicitProvider ?? accepted.providerSelectionSnapshot?.catalogue.entries.find(({ id }) => id === reservation.evaluation.providerSelection?.providerId)?.provider;
+    if (!providerConfig) throw new Error('The frozen provider choice is absent from the accepted catalogue.');
+    const provider = providerFactory(providerConfig, providerOptions);
     try {
       const result = await provider.decide(reservation.evaluation.packet, 1);
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
@@ -128,6 +153,8 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       commands.settleJourney(claim, reservation.attemptId, { kind: 'answered', result }, {
         respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state, ...(nextEvaluation ? { nextEvaluation } : {}),
       });
+      pending.status = 'answered';
+      if (nextEvaluation) evaluations.push({ ...nextEvaluation, status: 'pending' });
     } catch (error) {
       const scope = failureScope(error);
       const state: JourneyRespondentState = {
@@ -141,9 +168,48 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       commands.settleJourney(claim, reservation.attemptId, { kind: 'failed', ...failureDetails(error, scope), scope }, {
         respondentId: respondentState.respondentId, expectedRevision: respondentState.revision, state,
       });
+      pending.status = 'failed';
       if (scope === 'run') break;
     }
   }
+}
+
+async function resolveJourneyProvider(reads: RunReadRepository, runId: string, run: import('../domain/run/lifecycle.js').JourneyRunRecord, evaluation: import('../domain/run/lifecycle.js').JourneyEvaluationRecord,
+  providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions, assertProviderReady?: (config: ProviderConfigInput) => Promise<void>) {
+  const snapshot = run.providerSelectionSnapshot;
+  if (!snapshot) throw new Error('The automatic provider catalogue was not frozen with the accepted run.');
+  const status = reads.getStatus(runId);
+  const remainingCalls = Math.max(0, status.maxCalls - status.usedCalls - status.reservedCalls);
+  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members }) => members.some(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId));
+  const prior = lock ? run.evaluations.filter((item) => item.providerSelection?.comparisonLockId === lock.id).map((item) => item.providerSelection!) : [];
+  const lockedProvider = lock?.equality.provider === 'same' ? prior[0]?.providerId : undefined;
+  const lockedModel = lock?.equality.model === 'same' ? prior[0]?.modelIdentity : undefined;
+  const unitId = `${evaluation.respondentId}/${evaluation.questionId}`;
+  const pins = [...new Set([run.request.providerSelection?.unitOverrides?.[unitId], run.request.providerSelection?.unitOverrides?.[evaluation.questionId]].filter((id): id is string => id !== undefined))];
+  if (pins.length > 1 || (lockedProvider && pins[0] && lockedProvider !== pins[0])) throw new NoEligibleJourneyProviderError('The reached unit has conflicting binding provider constraints.');
+  const candidates = await Promise.all(snapshot.catalogue.entries.map(async (entry) => {
+    if (!entry.enabled) return { id: entry.id, ready: false, plannedCalls: 1 };
+    if (lockedProvider && entry.id !== lockedProvider) return { id: entry.id, ready: false, plannedCalls: 1 };
+    if (lockedModel && providerModelIdentity(entry.provider) !== lockedModel) return { id: entry.id, ready: false, plannedCalls: 1 };
+    try {
+      await assertProviderReady?.(entry.provider);
+      const provider = providerFactory(entry.provider, providerOptions);
+      const fit = provider.measure ? await provider.measure(evaluation.packet) : undefined;
+      return { id: entry.id, ready: true, plannedCalls: 1, ...(fit ? { fit } : {}) };
+    } catch { return { id: entry.id, ready: false, plannedCalls: 1 }; }
+  }));
+  const requiredCapabilities = [...new Set(['text', ...(run.request.providerSelection?.requiredCapabilities ?? []),
+    ...((evaluation.packet.visualMaterials?.length ?? 0) > 0 ? ['pixels'] : [])])];
+  const selected = selectProvider({ catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }, preferences: snapshot.preferences,
+    unitId, requiredCapabilities, questionType: evaluation.packet.question.type,
+    candidates, remainingCalls, ...(run.request.providerSelection?.preferredOrder === undefined ? {} : { preferredOrder: run.request.providerSelection.preferredOrder }),
+    ...((lockedProvider ?? pins[0]) ? { unitOverride: lockedProvider ?? pins[0] } : {}) });
+  if (!selected.selected) throw new NoEligibleJourneyProviderError('No eligible provider fits the reached journey unit.');
+  return providerSelectionInitialChoiceSchema.parse({ respondentId: evaluation.respondentId, questionId: evaluation.questionId,
+    ...(lock ? { comparisonLockId: lock.id } : {}), providerId: selected.selected.id,
+    modelIdentity: providerModelIdentity(selected.selected.provider!), decisionReason: selected.decisionReason,
+    candidates: selected.candidates.map(({ id, eligible, selected: isSelected, fit, cost, exclusion, preferenceRank }) => ({ id, eligible, selected: isSelected,
+      ...(fit ? { fit } : {}), ...(cost ? { cost } : {}), ...(exclusion ? { exclusion } : {}), ...(preferenceRank ? { preferenceRank } : {}) })) });
 }
 
 function batchVisualMaterials(groups: readonly (readonly NonNullable<DecisionBatchRequest['visualMaterials']>[number][])[]): NonNullable<DecisionBatchRequest['visualMaterials']> {

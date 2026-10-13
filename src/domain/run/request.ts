@@ -400,6 +400,7 @@ export type FrozenEvaluation = {
   questionId: string;
   packet: import('../decision/decision.js').DecisionRequest;
   packetFingerprint: string;
+  providerSelection?: import('./lifecycle.js').ProviderSelectionInitialChoice;
 };
 
 export type PreparedQuestionGroup = {

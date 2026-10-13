@@ -2,12 +2,13 @@ import { decisionRequestSchema } from '../../domain/decision/decision.js';
 import type { FrozenEvaluation } from '../../domain/run/request.js';
 import type { RunStatusView, WorkerClaim } from '../../domain/run/lifecycle.js';
 import { RunStoreError } from '../../application/run-store.js';
-import { asNumber, asText, parseJson, type DatabaseRow } from './rows.js';
+import { asNumber, asText, parseJson, parseStored, type DatabaseRow } from './rows.js';
 import { readStatusViews } from './reads/status.js';
 import { reconcileRun } from './commands/reconciliation.js';
 import type { SqliteConnection } from './connection.js';
 import { readTransaction, writeTransaction } from './connection.js';
 import { SCHEMA_VERSION } from './schema.js';
+import { providerSelectionInitialChoiceSchema } from '../../domain/run/lifecycle.js';
 
 export type SqliteRepositoryContext = ReturnType<typeof createSqliteRepositoryContext>;
 
@@ -53,6 +54,7 @@ export function createSqliteRepositoryContext(connection: SqliteConnection, data
       questionId: asText(row.question_id, 'question ID'),
       packet: decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet')),
       packetFingerprint: asText(row.packet_fingerprint, 'packet fingerprint'),
+      ...(row.provider_selection_json === null || row.provider_selection_json === undefined ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(row.provider_selection_json, 'provider selection'), 'provider selection') }),
     };
   }
 

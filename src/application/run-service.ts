@@ -225,10 +225,23 @@ export function createRunService(
     if (!current.lifecycle.resume.eligible) {
       throw new RunServiceError('run_not_resumable', resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    const frozenProvider = reads.getRequestKind(runId) === 'journey'
-      ? requireExplicitProvider(reads.getJourneyRun(runId).request)
-      : requireExplicitProvider(reads.getRequest(runId).request);
-    await assertReady(frozenProvider);
+    const journey = reads.getRequestKind(runId) === 'journey' ? reads.getJourneyRun(runId) : undefined;
+    const prepared = journey ? undefined : reads.getRequest(runId);
+    const request = journey?.request ?? prepared!.request;
+    if (request.provider) await assertReady(requireExplicitProvider(request));
+    else {
+      const snapshot = journey?.providerSelectionSnapshot ?? prepared?.providerSelectionSnapshot;
+      if (!snapshot) throw new RunServiceError('provider_selection_snapshot_missing', 'The accepted automatic run has no frozen provider catalogue.');
+      const unresolved = journey?.evaluations ?? prepared?.evaluations ?? [];
+      const used = new Map<string, ProviderConfigInput>();
+      for (const evaluation of unresolved) {
+        if ('status' in evaluation && evaluation.status !== 'pending' && evaluation.status !== 'failed') continue;
+        const choice = evaluation.providerSelection ?? snapshot.initialChoices?.find(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId);
+        const config = snapshot.catalogue.entries.find(({ id }) => id === choice?.providerId)?.provider;
+        if (config) used.set(JSON.stringify(config), config);
+      }
+      for (const config of used.values()) await assertReady(config);
+    }
     const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {
       try { await launcher.launch(dataRoot, runId); }

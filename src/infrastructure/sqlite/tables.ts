@@ -77,6 +77,7 @@ export const evaluations = sqliteTable('evaluations', {
   occurrence: integer('occurrence'),
   packetJson: text('packet_json').notNull(),
   packetFingerprint: text('packet_fingerprint').notNull(),
+  providerSelectionJson: text('provider_selection_json'),
   status: text('status', { enum: evaluationStatuses }).notNull(),
   resultJson: text('result_json'),
   failureCode: text('failure_code'),

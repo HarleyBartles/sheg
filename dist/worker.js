@@ -20313,52 +20313,6 @@ function normalizeResponse(answer, expectedType) {
   return parsed.data;
 }
 
-// src/domain/decision/provider-failure.ts
-var providerContextFitSchema = external_exports.object({
-  provider: providerKindSchema,
-  status: providerContextFitStatusSchema,
-  method: external_exports.string().min(1),
-  modelIdentity: external_exports.string().min(1),
-  tokenCount: providerTokenCountKindSchema,
-  tokens: external_exports.number().finite().nonnegative(),
-  contextLimit: external_exports.number().finite().nonnegative().nullable(),
-  headroomTokens: external_exports.number().finite().nullable(),
-  effectiveLimit: external_exports.number().finite().nonnegative().nullable(),
-  details: external_exports.record(external_exports.string(), external_exports.union([external_exports.number().finite(), external_exports.string()])),
-  reason: external_exports.string().optional()
-}).strict();
-var providerFailureEvidenceSchema = external_exports.object({
-  category: external_exports.enum(["admission", "credential", "transport", "http", "envelope", "answer", "execution"]),
-  attempts: external_exports.number().int().nonnegative(),
-  scope: external_exports.enum(["evaluation", "run"]),
-  httpStatus: external_exports.number().int().min(100).max(599).optional(),
-  contextFit: providerContextFitSchema.optional()
-}).strict();
-var ProviderCallError = class extends Error {
-  attempts;
-  failureScope;
-  failureCode;
-  contextFit;
-  validationFailure;
-  evidence;
-  constructor(message, options2) {
-    super(message);
-    this.name = "ProviderCallError";
-    this.attempts = options2.attempts;
-    this.failureScope = options2.scope ?? "evaluation";
-    this.failureCode = options2.code ?? "provider_unavailable";
-    this.contextFit = options2.contextFit;
-    this.validationFailure = options2.validationFailure;
-    this.evidence = providerFailureEvidenceSchema.parse({
-      category: options2.category ?? (options2.contextFit ? "admission" : options2.validationFailure ? "answer" : options2.code?.startsWith("credential_") ? "credential" : "execution"),
-      attempts: options2.attempts,
-      scope: this.failureScope,
-      ...options2.contextFit ? { contextFit: options2.contextFit } : {},
-      ...options2.httpStatus === void 0 ? {} : { httpStatus: options2.httpStatus }
-    });
-  }
-};
-
 // src/providers/jev/config.ts
 var jevRouteSchema = external_exports.enum(["openrouter", "typesafe"]);
 var routeDefaults = {
@@ -20488,6 +20442,156 @@ function providerConfigurationIdentity(provider) {
   delete configuration.checkpoint;
   return JSON.stringify(configuration);
 }
+
+// src/domain/decision/provider-failure.ts
+var providerContextFitSchema = external_exports.object({
+  provider: providerKindSchema,
+  status: providerContextFitStatusSchema,
+  method: external_exports.string().min(1),
+  modelIdentity: external_exports.string().min(1),
+  tokenCount: providerTokenCountKindSchema,
+  tokens: external_exports.number().finite().nonnegative(),
+  contextLimit: external_exports.number().finite().nonnegative().nullable(),
+  headroomTokens: external_exports.number().finite().nullable(),
+  effectiveLimit: external_exports.number().finite().nonnegative().nullable(),
+  details: external_exports.record(external_exports.string(), external_exports.union([external_exports.number().finite(), external_exports.string()])),
+  reason: external_exports.string().optional()
+}).strict();
+var providerFailureEvidenceSchema = external_exports.object({
+  category: external_exports.enum(["admission", "credential", "transport", "http", "envelope", "answer", "execution"]),
+  attempts: external_exports.number().int().nonnegative(),
+  scope: external_exports.enum(["evaluation", "run"]),
+  httpStatus: external_exports.number().int().min(100).max(599).optional(),
+  contextFit: providerContextFitSchema.optional()
+}).strict();
+var ProviderCallError = class extends Error {
+  attempts;
+  failureScope;
+  failureCode;
+  contextFit;
+  validationFailure;
+  evidence;
+  constructor(message, options2) {
+    super(message);
+    this.name = "ProviderCallError";
+    this.attempts = options2.attempts;
+    this.failureScope = options2.scope ?? "evaluation";
+    this.failureCode = options2.code ?? "provider_unavailable";
+    this.contextFit = options2.contextFit;
+    this.validationFailure = options2.validationFailure;
+    this.evidence = providerFailureEvidenceSchema.parse({
+      category: options2.category ?? (options2.contextFit ? "admission" : options2.validationFailure ? "answer" : options2.code?.startsWith("credential_") ? "credential" : "execution"),
+      attempts: options2.attempts,
+      scope: this.failureScope,
+      ...options2.contextFit ? { contextFit: options2.contextFit } : {},
+      ...options2.httpStatus === void 0 ? {} : { httpStatus: options2.httpStatus }
+    });
+  }
+};
+
+// src/domain/run/lifecycle.ts
+var providerSelectionCostSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("no-provider-invoice"), basis: external_exports.literal("provider pricing contract") }).strict(),
+  external_exports.object({ kind: external_exports.literal("estimate"), amount: external_exports.number().finite().nonnegative(), currency: external_exports.string().regex(/^[A-Z]{3}$/), basis: external_exports.literal("published-rate estimate"), source: external_exports.string().url(), observedAt: external_exports.string().date() }).strict(),
+  external_exports.object({ kind: external_exports.literal("unknown"), basis: external_exports.enum(["unverified", "incomparable currency"]) }).strict()
+]);
+var providerSelectionCandidateSchema = external_exports.object({
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  eligible: external_exports.boolean(),
+  selected: external_exports.boolean(),
+  fit: providerContextFitSchema.optional(),
+  cost: providerSelectionCostSchema.optional(),
+  exclusion: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional(),
+  preferenceRank: external_exports.object({ source: external_exports.enum(["request", "saved"]), index: external_exports.number().int().nonnegative() }).strict().optional()
+}).strict();
+var providerSelectionInitialChoiceSchema = external_exports.object({
+  respondentId: external_exports.string().min(1),
+  questionId: external_exports.string().min(1),
+  branchId: external_exports.string().min(1).optional(),
+  providerId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  modelIdentity: external_exports.string().min(1),
+  comparisonLockId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
+  decisionReason: external_exports.string().min(1),
+  candidates: external_exports.array(providerSelectionCandidateSchema).min(1)
+}).strict().superRefine((choice, context) => {
+  const selected = choice.candidates.filter(({ selected: isSelected }) => isSelected);
+  if (selected.length !== 1 || selected[0]?.id !== choice.providerId) context.addIssue({ code: "custom", path: ["candidates"], message: "Exactly one candidate must be selected and it must match providerId." });
+  if (new Set(choice.candidates.map(({ id }) => id)).size !== choice.candidates.length) context.addIssue({ code: "custom", path: ["candidates"], message: "Initial choice candidate identities must be unique." });
+});
+var providerSelectionPolicySnapshotSchema = external_exports.object({
+  version: external_exports.literal(1),
+  catalogueRevision: external_exports.number().int().nonnegative(),
+  catalogue: external_exports.object({
+    entries: external_exports.array(providerCatalogueEntrySchema)
+  }).strict(),
+  preferences: providerPreferenceSchema,
+  policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict(),
+  initialChoices: external_exports.array(providerSelectionInitialChoiceSchema).optional()
+}).strict().superRefine((snapshot, context) => {
+  const units = /* @__PURE__ */ new Set();
+  for (const [index2, choice] of (snapshot.initialChoices ?? []).entries()) {
+    const key = JSON.stringify([choice.respondentId, choice.questionId, choice.branchId ?? null]);
+    if (units.has(key)) context.addIssue({ code: "custom", path: ["initialChoices", index2], message: "Initial provider choices must have unique authored evaluation references." });
+    units.add(key);
+    if (!snapshot.catalogue.entries.some(({ id }) => id === choice.providerId)) context.addIssue({ code: "custom", path: ["initialChoices", index2, "providerId"], message: `Selected provider ${choice.providerId} is absent from the frozen catalogue.` });
+  }
+});
+var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
+var runStatusSchema = external_exports.enum(runStatuses);
+var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
+var evaluationStatusSchema = external_exports.enum(evaluationStatuses);
+var journeyRespondentStatuses = ["active", "completed", "failed", "unreached"];
+var journeyRespondentStatusSchema = external_exports.enum(journeyRespondentStatuses);
+var attemptStatuses = ["reserved", "answered", "failed", "uncertain"];
+var attemptStatusSchema = external_exports.enum(attemptStatuses);
+var runLifecycleStates = ["active", "stopped", "complete"];
+var runLifecycleStateSchema = external_exports.enum(runLifecycleStates);
+var resumeRefusalReasons = ["already_active", "already_completed", "cancelled", "unsupported_status", "partial_journey", "cancellation_requested", "attempt_unresolved", "call_allowance_exhausted", "no_unfinished_work"];
+var resumeRefusalReasonSchema = external_exports.enum(resumeRefusalReasons);
+function deriveRunLifecycle(facts) {
+  const state = facts.status === "completed" ? "complete" : facts.status === "prepared" || facts.status === "running" ? "active" : "stopped";
+  const refuse = (reason) => ({ state, resume: { eligible: false, reason } });
+  if (facts.status === "prepared" || facts.status === "running") return refuse("already_active");
+  if (facts.status === "completed") return refuse("already_completed");
+  if (facts.status === "cancelled") return refuse("cancelled");
+  if (facts.status !== "interrupted" && facts.status !== "failed" && facts.status !== "partial") return refuse("unsupported_status");
+  if (facts.cancelRequested) return refuse("cancellation_requested");
+  if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
+  if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
+  if (facts.status === "partial" && facts.kind === "journey" && !facts.hasRetryableJourneyFailure) return refuse("partial_journey");
+  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && (facts.kind === "journey" ? facts.hasRetryableJourneyFailure : facts.hasFailedEvaluations) || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
+  if (!hasResumableWork) return refuse("no_unfinished_work");
+  return { state, resume: { eligible: true } };
+}
+function resumeRefusalMessage(reason) {
+  switch (reason) {
+    case "already_active":
+      return "A run that is already active does not need to be resumed.";
+    case "already_completed":
+      return "A completed run cannot be resumed.";
+    case "cancelled":
+      return "A cancelled run cannot be resumed.";
+    case "unsupported_status":
+      return "This run state cannot be resumed.";
+    case "partial_journey":
+      return "A partial journey run cannot be resumed from this state.";
+    case "cancellation_requested":
+      return "A run with a cancellation request cannot be resumed.";
+    case "attempt_unresolved":
+      return "A run with an unresolved provider attempt cannot be resumed.";
+    case "call_allowance_exhausted":
+      return "This run has no remaining provider-call allowance.";
+    case "no_unfinished_work":
+      return "This run has no resumable unfinished work.";
+  }
+}
+var journeyRouteEntrySchema = external_exports.object({
+  nodeId: external_exports.string().min(1),
+  response: decisionValueSchema,
+  toNodeId: external_exports.string().min(1)
+}).strict();
+var journeyEventsSchema = external_exports.array(promptHistoryEventSchema);
+var journeyRouteSchema = external_exports.array(journeyRouteEntrySchema);
 
 // src/domain/study/presentation.ts
 var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -20792,110 +20896,6 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
     }
   }
 }
-
-// src/domain/run/lifecycle.ts
-var providerSelectionCostSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ kind: external_exports.literal("no-provider-invoice"), basis: external_exports.literal("provider pricing contract") }).strict(),
-  external_exports.object({ kind: external_exports.literal("estimate"), amount: external_exports.number().finite().nonnegative(), currency: external_exports.string().regex(/^[A-Z]{3}$/), basis: external_exports.literal("published-rate estimate"), source: external_exports.string().url(), observedAt: external_exports.string().date() }).strict(),
-  external_exports.object({ kind: external_exports.literal("unknown"), basis: external_exports.enum(["unverified", "incomparable currency"]) }).strict()
-]);
-var providerSelectionCandidateSchema = external_exports.object({
-  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  eligible: external_exports.boolean(),
-  selected: external_exports.boolean(),
-  fit: providerContextFitSchema.optional(),
-  cost: providerSelectionCostSchema.optional(),
-  exclusion: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional(),
-  preferenceRank: external_exports.object({ source: external_exports.enum(["request", "saved"]), index: external_exports.number().int().nonnegative() }).strict().optional()
-}).strict();
-var providerSelectionInitialChoiceSchema = external_exports.object({
-  respondentId: external_exports.string().min(1),
-  questionId: external_exports.string().min(1),
-  branchId: external_exports.string().min(1).optional(),
-  providerId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  modelIdentity: external_exports.string().min(1),
-  comparisonLockId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
-  decisionReason: external_exports.string().min(1),
-  candidates: external_exports.array(providerSelectionCandidateSchema).min(1)
-}).strict().superRefine((choice, context) => {
-  const selected = choice.candidates.filter(({ selected: isSelected }) => isSelected);
-  if (selected.length !== 1 || selected[0]?.id !== choice.providerId) context.addIssue({ code: "custom", path: ["candidates"], message: "Exactly one candidate must be selected and it must match providerId." });
-  if (new Set(choice.candidates.map(({ id }) => id)).size !== choice.candidates.length) context.addIssue({ code: "custom", path: ["candidates"], message: "Initial choice candidate identities must be unique." });
-});
-var providerSelectionPolicySnapshotSchema = external_exports.object({
-  version: external_exports.literal(1),
-  catalogueRevision: external_exports.number().int().nonnegative(),
-  catalogue: external_exports.object({
-    entries: external_exports.array(providerCatalogueEntrySchema)
-  }).strict(),
-  preferences: providerPreferenceSchema,
-  policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict(),
-  initialChoices: external_exports.array(providerSelectionInitialChoiceSchema).optional()
-}).strict().superRefine((snapshot, context) => {
-  const units = /* @__PURE__ */ new Set();
-  for (const [index2, choice] of (snapshot.initialChoices ?? []).entries()) {
-    const key = JSON.stringify([choice.respondentId, choice.questionId, choice.branchId ?? null]);
-    if (units.has(key)) context.addIssue({ code: "custom", path: ["initialChoices", index2], message: "Initial provider choices must have unique authored evaluation references." });
-    units.add(key);
-    if (!snapshot.catalogue.entries.some(({ id }) => id === choice.providerId)) context.addIssue({ code: "custom", path: ["initialChoices", index2, "providerId"], message: `Selected provider ${choice.providerId} is absent from the frozen catalogue.` });
-  }
-});
-var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
-var runStatusSchema = external_exports.enum(runStatuses);
-var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
-var evaluationStatusSchema = external_exports.enum(evaluationStatuses);
-var journeyRespondentStatuses = ["active", "completed", "failed", "unreached"];
-var journeyRespondentStatusSchema = external_exports.enum(journeyRespondentStatuses);
-var attemptStatuses = ["reserved", "answered", "failed", "uncertain"];
-var attemptStatusSchema = external_exports.enum(attemptStatuses);
-var runLifecycleStates = ["active", "stopped", "complete"];
-var runLifecycleStateSchema = external_exports.enum(runLifecycleStates);
-var resumeRefusalReasons = ["already_active", "already_completed", "cancelled", "unsupported_status", "partial_journey", "cancellation_requested", "attempt_unresolved", "call_allowance_exhausted", "no_unfinished_work"];
-var resumeRefusalReasonSchema = external_exports.enum(resumeRefusalReasons);
-function deriveRunLifecycle(facts) {
-  const state = facts.status === "completed" ? "complete" : facts.status === "prepared" || facts.status === "running" ? "active" : "stopped";
-  const refuse = (reason) => ({ state, resume: { eligible: false, reason } });
-  if (facts.status === "prepared" || facts.status === "running") return refuse("already_active");
-  if (facts.status === "completed") return refuse("already_completed");
-  if (facts.status === "cancelled") return refuse("cancelled");
-  if (facts.status !== "interrupted" && facts.status !== "failed" && facts.status !== "partial") return refuse("unsupported_status");
-  if (facts.cancelRequested) return refuse("cancellation_requested");
-  if (facts.reservedCalls > 0) return refuse("attempt_unresolved");
-  if (facts.usedCalls >= facts.maxCalls) return refuse("call_allowance_exhausted");
-  if (facts.status === "partial" && facts.kind === "journey" && !facts.hasRetryableJourneyFailure) return refuse("partial_journey");
-  const hasResumableWork = facts.status === "interrupted" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure) || facts.status === "partial" && (facts.kind === "journey" ? facts.hasRetryableJourneyFailure : facts.hasFailedEvaluations) || facts.status === "failed" && facts.failureScope === "run" && (facts.hasPendingEvaluations || facts.canRetrySharedFailure);
-  if (!hasResumableWork) return refuse("no_unfinished_work");
-  return { state, resume: { eligible: true } };
-}
-function resumeRefusalMessage(reason) {
-  switch (reason) {
-    case "already_active":
-      return "A run that is already active does not need to be resumed.";
-    case "already_completed":
-      return "A completed run cannot be resumed.";
-    case "cancelled":
-      return "A cancelled run cannot be resumed.";
-    case "unsupported_status":
-      return "This run state cannot be resumed.";
-    case "partial_journey":
-      return "A partial journey run cannot be resumed from this state.";
-    case "cancellation_requested":
-      return "A run with a cancellation request cannot be resumed.";
-    case "attempt_unresolved":
-      return "A run with an unresolved provider attempt cannot be resumed.";
-    case "call_allowance_exhausted":
-      return "This run has no remaining provider-call allowance.";
-    case "no_unfinished_work":
-      return "This run has no resumable unfinished work.";
-  }
-}
-var journeyRouteEntrySchema = external_exports.object({
-  nodeId: external_exports.string().min(1),
-  response: decisionValueSchema,
-  toNodeId: external_exports.string().min(1)
-}).strict();
-var journeyEventsSchema = external_exports.array(promptHistoryEventSchema);
-var journeyRouteSchema = external_exports.array(journeyRouteEntrySchema);
 
 // src/domain/run/request.ts
 var providerSelectionSchema = external_exports.object({
@@ -21243,6 +21243,99 @@ function requireExplicitProvider(request) {
   return providerConfigSchema.parse(request.provider);
 }
 
+// src/application/provider-selection.ts
+function estimateCost(entry, fit) {
+  if (entry.pricing.kind === "no-provider-invoice") return { kind: "no-provider-invoice", basis: "provider pricing contract" };
+  if (entry.pricing.kind === "published-rate" && fit && fit.status === "fits") {
+    return {
+      kind: "estimate",
+      amount: entry.pricing.amount * fit.tokens / 1e6,
+      currency: entry.pricing.currency,
+      basis: "published-rate estimate",
+      source: entry.pricing.source,
+      observedAt: entry.pricing.observedAt
+    };
+  }
+  return { kind: "unknown", basis: "unverified" };
+}
+function exclude(candidate, code, message) {
+  candidate.eligible = false;
+  candidate.exclusion = { code, message };
+}
+function selectProvider(input2) {
+  const entries = new Map(input2.catalogue.entries.map((entry) => [entry.id, entry]));
+  const candidates = input2.candidates.map((assessment) => {
+    const entry = entries.get(assessment.id);
+    if (!entry) return {
+      id: assessment.id,
+      eligible: false,
+      selected: false,
+      exclusion: { code: "unknown_provider", message: "The candidate is absent from the frozen provider catalogue." }
+    };
+    const candidate = {
+      id: entry.id,
+      provider: entry.provider,
+      eligible: true,
+      selected: false,
+      ...assessment.fit === void 0 ? {} : { fit: assessment.fit },
+      cost: assessment.cost ?? estimateCost(entry, assessment.fit)
+    };
+    if (!entry.enabled) exclude(candidate, "provider_disabled", "The provider is not explicitly enabled in the frozen catalogue.");
+    else if (input2.requiredCapabilities.some((capability) => !entry.capabilities.includes(capability))) exclude(candidate, "missing_capability", "The provider does not support every required capability.");
+    else if ((input2.questionTypes ?? [input2.questionType]).some((questionType) => !entry.questionTypes.includes(questionType))) {
+      const unsupported = (input2.questionTypes ?? [input2.questionType]).find((questionType) => !entry.questionTypes.includes(questionType));
+      exclude(candidate, "unsupported_question_type", `The provider does not support ${unsupported} questions.`);
+    } else if (assessment.ready === false) exclude(candidate, "provider_unavailable", "The configured provider is not currently ready.");
+    else if (assessment.ready !== true) exclude(candidate, "provider_readiness_unverified", "Current provider readiness was not established.");
+    else if (!assessment.fit || assessment.fit.status === "unavailable") exclude(candidate, "fit_unavailable", assessment.fit?.reason ?? "Provider fit could not be measured.");
+    else if (assessment.fit.status === "overflow") exclude(candidate, "provider_overflow", assessment.fit.reason ?? "The complete packet exceeds this provider\u2019s context limit.");
+    else if (!Number.isSafeInteger(assessment.plannedCalls) || assessment.plannedCalls < 1) exclude(candidate, "call_plan_invalid", "The candidate call plan is invalid.");
+    else if (assessment.plannedCalls > input2.remainingCalls) exclude(candidate, "call_allowance_exceeded", "The candidate plan exceeds the remaining study call allowance.");
+    return candidate;
+  });
+  const eligible = candidates.filter(({ eligible: fits }) => fits);
+  const unitOverride = input2.unitOverride ?? input2.unitOverrides?.[input2.unitId];
+  if (unitOverride) {
+    const pinned = eligible.find(({ id }) => id === unitOverride);
+    if (!pinned) return { candidates, decisionReason: "binding_unit_override_ineligible" };
+    pinned.selected = true;
+    return { selected: pinned, candidates, decisionReason: "binding_unit_override" };
+  }
+  if (eligible.length === 0) return { candidates, decisionReason: "no_eligible_provider" };
+  const requestOrder = input2.preferredOrder ?? [];
+  const savedOrder = input2.preferences.preferredOrder;
+  const requestMatch = requestOrder.map((id, index2) => ({ candidate: eligible.find((value) => value.id === id), index: index2 })).find(({ candidate }) => candidate);
+  const savedMatch = savedOrder.map((id, index2) => ({ candidate: eligible.find((value) => value.id === id), index: index2 })).find(({ candidate }) => candidate);
+  if (requestMatch?.candidate) {
+    requestMatch.candidate.preferenceRank = { source: "request", index: requestMatch.index };
+    requestMatch.candidate.selected = true;
+    return { selected: requestMatch.candidate, candidates, decisionReason: "request_preference" };
+  }
+  if (savedMatch?.candidate) {
+    savedMatch.candidate.preferenceRank = { source: "saved", index: savedMatch.index };
+    savedMatch.candidate.selected = true;
+    return { selected: savedMatch.candidate, candidates, decisionReason: "saved_user_preference" };
+  }
+  const local = eligible.find((candidate) => candidate.cost?.kind === "no-provider-invoice");
+  if (local) {
+    local.selected = true;
+    return { selected: local, candidates, decisionReason: "local_execution_without_provider_invoice" };
+  }
+  const hosted = eligible.filter((candidate) => candidate.cost?.kind !== "no-provider-invoice");
+  const currencies = new Set(hosted.filter((candidate) => candidate.cost?.kind === "estimate").map((candidate) => candidate.cost.currency));
+  let orderedHosted;
+  if (hosted.length && hosted.every((candidate) => candidate.cost?.kind === "estimate") && currencies.size === 1) {
+    orderedHosted = [...hosted].sort((left, right) => left.cost.amount - right.cost.amount || input2.catalogue.entries.findIndex(({ id }) => id === left.id) - input2.catalogue.entries.findIndex(({ id }) => id === right.id));
+    for (const candidate of orderedHosted) if (candidate.cost?.kind === "estimate") candidate.cost.basis = "published-rate estimate";
+  } else {
+    if (currencies.size > 1) for (const candidate of hosted) candidate.cost = { kind: "unknown", basis: "incomparable currency" };
+    orderedHosted = [...hosted].sort((left, right) => input2.catalogue.entries.findIndex(({ id }) => id === left.id) - input2.catalogue.entries.findIndex(({ id }) => id === right.id));
+  }
+  const selected = orderedHosted[0];
+  selected.selected = true;
+  return { selected, candidates, decisionReason: selected.cost?.kind === "estimate" ? "lowest_comparable_published_rate_estimate" : "stable_catalogue_order_cost_unverified" };
+}
+
 // src/application/provider-batch-planning.ts
 function missingFit(provider, kind, modelIdentity) {
   return {
@@ -21376,7 +21469,9 @@ async function assessProviderBatchPlan(input2) {
 
 // src/application/question-worker.ts
 var HEARTBEAT_MS = 2e3;
-async function executeQuestionRun(persistence, runId2, providerFactory, providerOptions = {}) {
+var NoEligibleJourneyProviderError = class extends Error {
+};
+async function executeQuestionRun(persistence, runId2, providerFactory, providerOptions = {}, assertProviderReady2) {
   const { reads, commands } = persistence;
   const claim2 = commands.claim(runId2, Date.now(), process.pid);
   if (!claim2) return;
@@ -21390,7 +21485,7 @@ async function executeQuestionRun(persistence, runId2, providerFactory, provider
   heartbeat.unref();
   try {
     if (reads.getRequestKind(runId2) === "journey") {
-      await executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions);
+      await executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions, assertProviderReady2);
     } else {
       await executePoll(reads, commands, runId2, claim2, providerFactory, providerOptions);
     }
@@ -21406,13 +21501,17 @@ async function executeQuestionRun(persistence, runId2, providerFactory, provider
 }
 async function executePoll(reads, commands, runId2, claim2, providerFactory, providerOptions) {
   const prepared = reads.getRequest(runId2);
-  const configured = requireExplicitProvider(prepared.request);
-  const provider = providerFactory(configured, providerOptions);
-  const providerKind = configured.kind;
-  const modelIdentity = providerKind === "jev" || providerKind === "clef" ? configured.model : configured.checkpoint;
+  const explicitProvider = prepared.request.provider ? requireExplicitProvider(prepared.request) : void 0;
   const answers = new Map(reads.evaluationStatuses(runId2).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations2 = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
+    const initialChoice = evaluations2[0]?.providerSelection ?? prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === group.respondentId && choice.questionId === evaluations2[0]?.questionId);
+    const configured = explicitProvider ?? prepared.providerSelectionSnapshot?.catalogue.entries.find(({ id }) => id === initialChoice?.providerId)?.provider;
+    if (!configured) throw new Error("The accepted question group has no frozen provider choice.");
+    if (evaluations2.some((evaluation) => evaluation.providerSelection && evaluation.providerSelection.providerId !== initialChoice?.providerId)) throw new Error("A question group contains incompatible frozen provider choices.");
+    const provider = providerFactory(configured, providerOptions);
+    const providerKind = configured.kind;
+    const modelIdentity = providerKind === "jev" || providerKind === "clef" ? configured.model : configured.checkpoint;
     while (true) {
       if (!commands.heartbeat(claim2, Date.now())) return;
       const pending = evaluations2.filter((evaluation) => answers.get(evaluation.evaluationId) === "pending");
@@ -21467,15 +21566,38 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory, pro
     }
   }
 }
-async function executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions) {
+async function executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions, assertProviderReady2) {
   const accepted = reads.getJourneyRun(runId2);
-  const provider = providerFactory(requireExplicitProvider(accepted.request), providerOptions);
+  const evaluations2 = [...accepted.evaluations];
+  const explicitProvider = accepted.request.provider ? requireExplicitProvider(accepted.request) : void 0;
   while (true) {
     if (!commands.heartbeat(claim2, Date.now())) return;
-    const reservation = commands.reserveNext(claim2, Date.now());
+    const pending = evaluations2.find((evaluation) => evaluation.status === "pending");
+    if (!pending) break;
+    const existingChoice = pending.providerSelection ?? accepted.providerSelectionSnapshot?.initialChoices?.find((choice2) => choice2.respondentId === pending.respondentId && choice2.questionId === pending.questionId);
+    let choice;
+    try {
+      choice = explicitProvider ? void 0 : existingChoice ?? await resolveJourneyProvider(reads, runId2, accepted, pending, providerFactory, providerOptions, assertProviderReady2);
+    } catch (error62) {
+      if (!(error62 instanceof NoEligibleJourneyProviderError)) throw error62;
+      commands.failPendingJourneyEvaluation(
+        claim2,
+        pending.evaluationId,
+        pending.packetFingerprint,
+        { code: "provider_selection_unavailable", message: "No enabled provider fits the reached journey unit and its declared comparison constraints." },
+        Date.now()
+      );
+      pending.status = "failed";
+      continue;
+    }
+    const reservation = commands.reserveNext(claim2, Date.now(), choice ? { evaluationId: pending.evaluationId, packetFingerprint: pending.packetFingerprint, providerSelection: choice } : void 0);
     if (!reservation) break;
+    if (choice) pending.providerSelection = choice;
     const currentTurn = reads.getJourneyWorkerTurn(runId2, reservation.evaluation.evaluationId, reservation.evaluation.respondentId);
     const { evaluation: currentEvaluation, respondent: respondentState, profile } = currentTurn;
+    const providerConfig = explicitProvider ?? accepted.providerSelectionSnapshot?.catalogue.entries.find(({ id }) => id === reservation.evaluation.providerSelection?.providerId)?.provider;
+    if (!providerConfig) throw new Error("The frozen provider choice is absent from the accepted catalogue.");
+    const provider = providerFactory(providerConfig, providerOptions);
     try {
       const result = await provider.decide(reservation.evaluation.packet, 1);
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
@@ -21518,6 +21640,8 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
         state,
         ...nextEvaluation ? { nextEvaluation } : {}
       });
+      pending.status = "answered";
+      if (nextEvaluation) evaluations2.push({ ...nextEvaluation, status: "pending" });
     } catch (error62) {
       const scope = failureScope(error62);
       const state = {
@@ -21533,9 +21657,70 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
         expectedRevision: respondentState.revision,
         state
       });
+      pending.status = "failed";
       if (scope === "run") break;
     }
   }
+}
+async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2) {
+  const snapshot = run.providerSelectionSnapshot;
+  if (!snapshot) throw new Error("The automatic provider catalogue was not frozen with the accepted run.");
+  const status = reads.getStatus(runId2);
+  const remainingCalls = Math.max(0, status.maxCalls - status.usedCalls - status.reservedCalls);
+  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members: members2 }) => members2.some(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId));
+  const prior = lock ? run.evaluations.filter((item) => item.providerSelection?.comparisonLockId === lock.id).map((item) => item.providerSelection) : [];
+  const lockedProvider = lock?.equality.provider === "same" ? prior[0]?.providerId : void 0;
+  const lockedModel = lock?.equality.model === "same" ? prior[0]?.modelIdentity : void 0;
+  const unitId = `${evaluation.respondentId}/${evaluation.questionId}`;
+  const pins = [...new Set([run.request.providerSelection?.unitOverrides?.[unitId], run.request.providerSelection?.unitOverrides?.[evaluation.questionId]].filter((id) => id !== void 0))];
+  if (pins.length > 1 || lockedProvider && pins[0] && lockedProvider !== pins[0]) throw new NoEligibleJourneyProviderError("The reached unit has conflicting binding provider constraints.");
+  const candidates = await Promise.all(snapshot.catalogue.entries.map(async (entry) => {
+    if (!entry.enabled) return { id: entry.id, ready: false, plannedCalls: 1 };
+    if (lockedProvider && entry.id !== lockedProvider) return { id: entry.id, ready: false, plannedCalls: 1 };
+    if (lockedModel && providerModelIdentity(entry.provider) !== lockedModel) return { id: entry.id, ready: false, plannedCalls: 1 };
+    try {
+      await assertProviderReady2?.(entry.provider);
+      const provider = providerFactory(entry.provider, providerOptions);
+      const fit = provider.measure ? await provider.measure(evaluation.packet) : void 0;
+      return { id: entry.id, ready: true, plannedCalls: 1, ...fit ? { fit } : {} };
+    } catch {
+      return { id: entry.id, ready: false, plannedCalls: 1 };
+    }
+  }));
+  const requiredCapabilities = [.../* @__PURE__ */ new Set([
+    "text",
+    ...run.request.providerSelection?.requiredCapabilities ?? [],
+    ...(evaluation.packet.visualMaterials?.length ?? 0) > 0 ? ["pixels"] : []
+  ])];
+  const selected = selectProvider({
+    catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries },
+    preferences: snapshot.preferences,
+    unitId,
+    requiredCapabilities,
+    questionType: evaluation.packet.question.type,
+    candidates,
+    remainingCalls,
+    ...run.request.providerSelection?.preferredOrder === void 0 ? {} : { preferredOrder: run.request.providerSelection.preferredOrder },
+    ...lockedProvider ?? pins[0] ? { unitOverride: lockedProvider ?? pins[0] } : {}
+  });
+  if (!selected.selected) throw new NoEligibleJourneyProviderError("No eligible provider fits the reached journey unit.");
+  return providerSelectionInitialChoiceSchema.parse({
+    respondentId: evaluation.respondentId,
+    questionId: evaluation.questionId,
+    ...lock ? { comparisonLockId: lock.id } : {},
+    providerId: selected.selected.id,
+    modelIdentity: providerModelIdentity(selected.selected.provider),
+    decisionReason: selected.decisionReason,
+    candidates: selected.candidates.map(({ id, eligible, selected: isSelected, fit, cost, exclusion, preferenceRank }) => ({
+      id,
+      eligible,
+      selected: isSelected,
+      ...fit ? { fit } : {},
+      ...cost ? { cost } : {},
+      ...exclusion ? { exclusion } : {},
+      ...preferenceRank ? { preferenceRank } : {}
+    }))
+  });
 }
 function batchVisualMaterials(groups) {
   const byId = /* @__PURE__ */ new Map();
@@ -26666,6 +26851,7 @@ var evaluations = sqliteTable("evaluations", {
   occurrence: integer2("occurrence"),
   packetJson: text("packet_json").notNull(),
   packetFingerprint: text("packet_fingerprint").notNull(),
+  providerSelectionJson: text("provider_selection_json"),
   status: text("status", { enum: evaluationStatuses }).notNull(),
   resultJson: text("result_json"),
   failureCode: text("failure_code"),
@@ -26822,11 +27008,12 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 12;
+var SCHEMA_VERSION = 13;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
 var PROVIDER_SELECTION_MIGRATION_ID = "provider-selection-v12";
+var EVALUATION_PROVIDER_SELECTION_MIGRATION_ID = "evaluation-provider-selection-v13";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -26874,8 +27061,17 @@ function providerSelectionMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 12 provider selection migration is missing from this Sheg installation.");
   return { id: PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 11, toVersion: 12, sql: readFileSync(match, "utf8") };
 }
+function evaluationProviderSelectionMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0004_evaluation_provider_selection/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0004_evaluation_provider_selection/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 13 evaluation provider selection migration is missing from this Sheg installation.");
+  return { id: EVALUATION_PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 12, toVersion: 13, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration()];
 }
 function migrationChecksum(migration) {
   return createHash3("sha256").update(migration.sql).digest("hex");
@@ -27909,7 +28105,8 @@ function loadPreparedEvaluations(database, runId2) {
     respondentId: evaluations.respondentId,
     questionId: evaluations.questionId,
     packetJson: evaluations.packetJson,
-    packetFingerprint: evaluations.packetFingerprint
+    packetFingerprint: evaluations.packetFingerprint,
+    providerSelectionJson: evaluations.providerSelectionJson
   }).from(evaluations).where(eq(evaluations.runId, runId2)).orderBy(asc(evaluations.ordinal)).all();
 }
 function loadQuestionGroups(database, runId2) {
@@ -28298,6 +28495,7 @@ function insertPreparedRunData(database, runId2, prepared) {
     groupId: evaluation.groupId,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -28327,6 +28525,7 @@ function insertPreparedJourneyData(database, runId2, prepared) {
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -28607,13 +28806,23 @@ function createSqliteCommandRepository(context, storageInfo) {
       context.ensureOpen();
       return context.transaction(() => refreshWorkerLease(context.connection.orm, claim2, nowMs, WORKER_LEASE_DURATION_MS));
     },
-    reserveNext(claim2, nowMs) {
+    reserveNext(claim2, nowMs, expected) {
       context.ensureOpen();
       return context.transaction(() => {
         const run = context.ownedRun(claim2, nowMs);
         if (asNumber(run.cancel_requested, "cancel flag") === 1 || asNumber(run.reserved_calls, "reserved calls") !== 0 || asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
         const row = context.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
         if (!row) return null;
+        if (expected && (asText(row.evaluation_id, "evaluation ID") !== expected.evaluationId || asText(row.packet_fingerprint, "packet fingerprint") !== expected.packetFingerprint)) {
+          throw new RunStoreError("evaluation_changed_before_reservation", "The reached evaluation changed after provider selection. Resolve the current evaluation again before dispatch.");
+        }
+        if (expected?.providerSelection) {
+          if (row.provider_selection_json !== null && row.provider_selection_json !== void 0 && asText(row.provider_selection_json, "provider selection") !== JSON.stringify(expected.providerSelection)) {
+            throw new RunStoreError("provider_selection_changed_before_reservation", "A frozen provider choice changed before reservation.");
+          }
+          context.connection.orm.update(evaluations).set({ providerSelectionJson: JSON.stringify(expected.providerSelection) }).where(eq(evaluations.evaluationId, expected.evaluationId)).run();
+          row.provider_selection_json = JSON.stringify(expected.providerSelection);
+        }
         const attemptId = randomUUID4();
         const evaluationId = asText(row.evaluation_id, "evaluation ID");
         reservePhysicalAttempt(context.connection.orm, {
@@ -28627,6 +28836,22 @@ function createSqliteCommandRepository(context, storageInfo) {
           evaluationIds: [evaluationId]
         });
         return { attemptId, evaluation: context.evaluationFromRow(row) };
+      });
+    },
+    failPendingJourneyEvaluation(claim2, evaluationId, packetFingerprint, failure2, nowMs) {
+      context.ensureOpen();
+      context.transaction(() => {
+        const run = context.ownedRun(claim2, nowMs);
+        if (asNumber(run.reserved_calls, "reserved calls") !== 0) throw new RunStoreError("attempt_unresolved", "A zero-attempt failure cannot be recorded while a provider call is reserved.");
+        const row = context.database.prepare("SELECT respondent_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim2.runId, evaluationId);
+        if (!row || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || row.turn_id === null) {
+          throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
+        }
+        const respondentId = asText(row.respondent_id, "respondent ID");
+        const updated = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").run(failure2.code, failure2.message, claim2.runId, evaluationId);
+        if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
+        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND status = 'active'").run(claim2.runId, respondentId);
+        if (Number(respondent.changes) !== 1) throw new RunStoreError("journey_checkpoint_changed", "The reached respondent checkpoint changed before its failure could be recorded.");
       });
     },
     reserveBatch(claim2, groupId, evaluationIds, nowMs) {
@@ -29187,6 +29412,7 @@ var journeyTurnRowSchema = external_exports.object({
   status: external_exports.string(),
   respondent_status: external_exports.string(),
   respondent_current_node_id: external_exports.string().nullable(),
+  provider_selection_json: external_exports.string().nullable(),
   respondent_current_turn_id: external_exports.string().nullable(),
   respondent_current_context_id: external_exports.string().nullable(),
   respondent_revision: sqliteInteger,
@@ -29220,7 +29446,8 @@ function loadJourneyWorkerTurn(database, runId2, evaluationId, respondentId) {
     pathId: asText(first.path_id, "path ID"),
     occurrence: asNumber(first.occurrence, "turn occurrence"),
     ordinal: asNumber(first.ordinal, "evaluation ordinal"),
-    status: parseStored(evaluationStatusSchema, asText(first.status, "evaluation status"), "evaluation status")
+    status: parseStored(evaluationStatusSchema, asText(first.status, "evaluation status"), "evaluation status"),
+    ...first.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(first.provider_selection_json, "provider selection"), "provider selection") }
   };
   if (evaluation.status !== "pending" || evaluation.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {
     throw new RunStoreError("data_integrity_error", "The reserved journey packet does not match its pending turn identity.");
@@ -29365,7 +29592,8 @@ function readPreparedRun(database, runId2, options2) {
     respondentId: evaluation.respondentId,
     questionId: evaluation.questionId,
     packet: parseStored(decisionRequestSchema, parseJson(evaluation.packetJson, "frozen packet"), "frozen packet"),
-    packetFingerprint: evaluation.packetFingerprint
+    packetFingerprint: evaluation.packetFingerprint,
+    ...evaluation.providerSelectionJson === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.providerSelectionJson, "provider selection"), "provider selection") }
   })) });
   if (parsed.requestFingerprint !== row.requestFingerprint) throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
   if (parsed.request.kind === "follow-on" && parsed.lineage) {
@@ -29403,7 +29631,8 @@ function readJourneyRun(database, runId2, notFound) {
       pathId: asText(evaluation.path_id, "path ID"),
       occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
       ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
-      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status")
+      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status"),
+      ...evaluation.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.provider_selection_json, "provider selection"), "provider selection") }
     };
     if (base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
       throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
@@ -29798,7 +30027,8 @@ function createSqliteRepositoryContext(connection, databasePath, now) {
       respondentId: asText(row.respondent_id, "respondent ID"),
       questionId: asText(row.question_id, "question ID"),
       packet: decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")),
-      packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint")
+      packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint"),
+      ...row.provider_selection_json === null || row.provider_selection_json === void 0 ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(row.provider_selection_json, "provider selection"), "provider selection") }
     };
   }
   function ownedRun(claim2, nowMs) {
@@ -31061,6 +31291,14 @@ function createProvider(config2, options2 = {}) {
     ...config2.precision === void 0 ? {} : { precision: config2.precision }
   });
 }
+async function assertProviderReady(config2, credentials = new WindowsCredentialStore()) {
+  if (config2.kind === "laya") return;
+  const route = config2.kind === "jev" ? config2.route ?? "openrouter" : "clef";
+  const state = await credentials.availability(route);
+  if (state === "malformed") throw new CredentialStoreError("credential_malformed", route);
+  if (state === "missing") throw new CredentialStoreError("credential_missing", route);
+  if (state === "unavailable") throw new CredentialStoreError("credential_unavailable", route);
+}
 
 // src/infrastructure/sqlite/image-assets.ts
 import { createHash as createHash10 } from "node:crypto";
@@ -31178,7 +31416,7 @@ try {
     imageResolver: { resolve(assetId2) {
       return { metadata: images.metadata(assetId2), bytes: images.bytes(assetId2) };
     } }
-  });
+  }, assertProviderReady);
 } finally {
   images.close();
   store.close();

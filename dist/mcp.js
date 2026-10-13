@@ -40478,8 +40478,23 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
     if (!current.lifecycle.resume.eligible) {
       throw new RunServiceError("run_not_resumable", resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    const frozenProvider = reads.getRequestKind(runId) === "journey" ? requireExplicitProvider(reads.getJourneyRun(runId).request) : requireExplicitProvider(reads.getRequest(runId).request);
-    await assertReady(frozenProvider);
+    const journey = reads.getRequestKind(runId) === "journey" ? reads.getJourneyRun(runId) : void 0;
+    const prepared = journey ? void 0 : reads.getRequest(runId);
+    const request = journey?.request ?? prepared.request;
+    if (request.provider) await assertReady(requireExplicitProvider(request));
+    else {
+      const snapshot = journey?.providerSelectionSnapshot ?? prepared?.providerSelectionSnapshot;
+      if (!snapshot) throw new RunServiceError("provider_selection_snapshot_missing", "The accepted automatic run has no frozen provider catalogue.");
+      const unresolved = journey?.evaluations ?? prepared?.evaluations ?? [];
+      const used = /* @__PURE__ */ new Map();
+      for (const evaluation of unresolved) {
+        if ("status" in evaluation && evaluation.status !== "pending" && evaluation.status !== "failed") continue;
+        const choice = evaluation.providerSelection ?? snapshot.initialChoices?.find(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId);
+        const config2 = snapshot.catalogue.entries.find(({ id }) => id === choice?.providerId)?.provider;
+        if (config2) used.set(JSON.stringify(config2), config2);
+      }
+      for (const config2 of used.values()) await assertReady(config2);
+    }
     const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {
       try {
@@ -45640,6 +45655,7 @@ var evaluations = sqliteTable("evaluations", {
   occurrence: integer2("occurrence"),
   packetJson: text("packet_json").notNull(),
   packetFingerprint: text("packet_fingerprint").notNull(),
+  providerSelectionJson: text("provider_selection_json"),
   status: text("status", { enum: evaluationStatuses }).notNull(),
   resultJson: text("result_json"),
   failureCode: text("failure_code"),
@@ -45796,11 +45812,12 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 12;
+var SCHEMA_VERSION = 13;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
 var PROVIDER_SELECTION_MIGRATION_ID = "provider-selection-v12";
+var EVALUATION_PROVIDER_SELECTION_MIGRATION_ID = "evaluation-provider-selection-v13";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -45848,8 +45865,17 @@ function providerSelectionMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 12 provider selection migration is missing from this Sheg installation.");
   return { id: PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 11, toVersion: 12, sql: readFileSync(match, "utf8") };
 }
+function evaluationProviderSelectionMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0004_evaluation_provider_selection/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0004_evaluation_provider_selection/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 13 evaluation provider selection migration is missing from this Sheg installation.");
+  return { id: EVALUATION_PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 12, toVersion: 13, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration()];
 }
 function migrationChecksum(migration) {
   return createHash4("sha256").update(migration.sql).digest("hex");
@@ -46883,7 +46909,8 @@ function loadPreparedEvaluations(database, runId) {
     respondentId: evaluations.respondentId,
     questionId: evaluations.questionId,
     packetJson: evaluations.packetJson,
-    packetFingerprint: evaluations.packetFingerprint
+    packetFingerprint: evaluations.packetFingerprint,
+    providerSelectionJson: evaluations.providerSelectionJson
   }).from(evaluations).where(eq(evaluations.runId, runId)).orderBy(asc(evaluations.ordinal)).all();
 }
 function loadQuestionGroups(database, runId) {
@@ -47265,6 +47292,7 @@ function insertPreparedRunData(database, runId, prepared) {
     groupId: evaluation.groupId,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -47294,6 +47322,7 @@ function insertPreparedJourneyData(database, runId, prepared) {
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -47574,13 +47603,23 @@ function createSqliteCommandRepository(context, storageInfo) {
       context.ensureOpen();
       return context.transaction(() => refreshWorkerLease(context.connection.orm, claim2, nowMs, WORKER_LEASE_DURATION_MS));
     },
-    reserveNext(claim2, nowMs) {
+    reserveNext(claim2, nowMs, expected) {
       context.ensureOpen();
       return context.transaction(() => {
         const run = context.ownedRun(claim2, nowMs);
         if (asNumber(run.cancel_requested, "cancel flag") === 1 || asNumber(run.reserved_calls, "reserved calls") !== 0 || asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
         const row = context.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
         if (!row) return null;
+        if (expected && (asText(row.evaluation_id, "evaluation ID") !== expected.evaluationId || asText(row.packet_fingerprint, "packet fingerprint") !== expected.packetFingerprint)) {
+          throw new RunStoreError("evaluation_changed_before_reservation", "The reached evaluation changed after provider selection. Resolve the current evaluation again before dispatch.");
+        }
+        if (expected?.providerSelection) {
+          if (row.provider_selection_json !== null && row.provider_selection_json !== void 0 && asText(row.provider_selection_json, "provider selection") !== JSON.stringify(expected.providerSelection)) {
+            throw new RunStoreError("provider_selection_changed_before_reservation", "A frozen provider choice changed before reservation.");
+          }
+          context.connection.orm.update(evaluations).set({ providerSelectionJson: JSON.stringify(expected.providerSelection) }).where(eq(evaluations.evaluationId, expected.evaluationId)).run();
+          row.provider_selection_json = JSON.stringify(expected.providerSelection);
+        }
         const attemptId = randomUUID4();
         const evaluationId = asText(row.evaluation_id, "evaluation ID");
         reservePhysicalAttempt(context.connection.orm, {
@@ -47594,6 +47633,22 @@ function createSqliteCommandRepository(context, storageInfo) {
           evaluationIds: [evaluationId]
         });
         return { attemptId, evaluation: context.evaluationFromRow(row) };
+      });
+    },
+    failPendingJourneyEvaluation(claim2, evaluationId, packetFingerprint, failure2, nowMs) {
+      context.ensureOpen();
+      context.transaction(() => {
+        const run = context.ownedRun(claim2, nowMs);
+        if (asNumber(run.reserved_calls, "reserved calls") !== 0) throw new RunStoreError("attempt_unresolved", "A zero-attempt failure cannot be recorded while a provider call is reserved.");
+        const row = context.database.prepare("SELECT respondent_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim2.runId, evaluationId);
+        if (!row || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || row.turn_id === null) {
+          throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
+        }
+        const respondentId = asText(row.respondent_id, "respondent ID");
+        const updated = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").run(failure2.code, failure2.message, claim2.runId, evaluationId);
+        if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
+        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND status = 'active'").run(claim2.runId, respondentId);
+        if (Number(respondent.changes) !== 1) throw new RunStoreError("journey_checkpoint_changed", "The reached respondent checkpoint changed before its failure could be recorded.");
       });
     },
     reserveBatch(claim2, groupId, evaluationIds, nowMs) {
@@ -48154,6 +48209,7 @@ var journeyTurnRowSchema = external_exports.object({
   status: external_exports.string(),
   respondent_status: external_exports.string(),
   respondent_current_node_id: external_exports.string().nullable(),
+  provider_selection_json: external_exports.string().nullable(),
   respondent_current_turn_id: external_exports.string().nullable(),
   respondent_current_context_id: external_exports.string().nullable(),
   respondent_revision: sqliteInteger,
@@ -48187,7 +48243,8 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
     pathId: asText(first.path_id, "path ID"),
     occurrence: asNumber(first.occurrence, "turn occurrence"),
     ordinal: asNumber(first.ordinal, "evaluation ordinal"),
-    status: parseStored(evaluationStatusSchema, asText(first.status, "evaluation status"), "evaluation status")
+    status: parseStored(evaluationStatusSchema, asText(first.status, "evaluation status"), "evaluation status"),
+    ...first.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(first.provider_selection_json, "provider selection"), "provider selection") }
   };
   if (evaluation.status !== "pending" || evaluation.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {
     throw new RunStoreError("data_integrity_error", "The reserved journey packet does not match its pending turn identity.");
@@ -48332,7 +48389,8 @@ function readPreparedRun(database, runId, options2) {
     respondentId: evaluation.respondentId,
     questionId: evaluation.questionId,
     packet: parseStored(decisionRequestSchema, parseJson(evaluation.packetJson, "frozen packet"), "frozen packet"),
-    packetFingerprint: evaluation.packetFingerprint
+    packetFingerprint: evaluation.packetFingerprint,
+    ...evaluation.providerSelectionJson === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.providerSelectionJson, "provider selection"), "provider selection") }
   })) });
   if (parsed.requestFingerprint !== row.requestFingerprint) throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
   if (parsed.request.kind === "follow-on" && parsed.lineage) {
@@ -48370,7 +48428,8 @@ function readJourneyRun(database, runId, notFound) {
       pathId: asText(evaluation.path_id, "path ID"),
       occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
       ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
-      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status")
+      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status"),
+      ...evaluation.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.provider_selection_json, "provider selection"), "provider selection") }
     };
     if (base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
       throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
@@ -48765,7 +48824,8 @@ function createSqliteRepositoryContext(connection, databasePath, now) {
       respondentId: asText(row.respondent_id, "respondent ID"),
       questionId: asText(row.question_id, "question ID"),
       packet: decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")),
-      packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint")
+      packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint"),
+      ...row.provider_selection_json === null || row.provider_selection_json === void 0 ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(row.provider_selection_json, "provider selection"), "provider selection") }
     };
   }
   function ownedRun(claim2, nowMs) {

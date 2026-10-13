@@ -3,7 +3,7 @@ import { hashCanonical } from '../../identity.js';
 import { decisionPacketSchema } from '../../../domain/decision/prompt.js';
 import { validateDecision } from '../../../domain/decision/validate.js';
 import { runRequestSchema } from '../../../domain/run/request.js';
-import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, providerSelectionPolicySnapshotSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord } from '../../../domain/run/lifecycle.js';
+import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, providerSelectionInitialChoiceSchema, providerSelectionPolicySnapshotSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord } from '../../../domain/run/lifecycle.js';
 import { RunStoreError } from '../../../application/run-store.js';
 import { asNumber, asNullableText, asText, parseJson, parseJsonRecord, parseStored, type DatabaseRow } from '../rows.js';
 import { decodeResultAndExecution, storedEvaluationFailure } from '../evidence-records.js';
@@ -31,6 +31,7 @@ export function readJourneyRun(database: DatabaseSync, runId: string, notFound: 
       nodeId: asText(evaluation.node_id, 'node ID'), pathId: asText(evaluation.path_id, 'path ID'),
       occurrence: asNumber(evaluation.occurrence, 'turn occurrence'), ordinal: asNumber(evaluation.ordinal, 'evaluation ordinal'),
       status: parseStored(evaluationStatusSchema, asText(evaluation.status, 'evaluation status'), 'evaluation status'),
+      ...(evaluation.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.provider_selection_json, 'provider selection'), 'provider selection') }),
     };
     if ((base.status === 'answered' && evaluation.result_json === null) || (base.status === 'failed' && evaluation.failure_code === null)) {
       throw new RunStoreError('data_integrity_error', 'Stored journey evaluation status does not match its answer evidence.');

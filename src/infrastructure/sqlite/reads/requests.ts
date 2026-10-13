@@ -5,7 +5,7 @@ import { decisionRequestSchema } from '../../../domain/decision/decision.js';
 import { RunStoreError } from '../../../application/run-store.js';
 import { parseJson, parseJsonRecord, parseStored } from '../rows.js';
 import { loadAcceptedRequest, loadPreparedEvaluations, loadQuestionGroups, runExists } from '../run-identity-queries.js';
-import { providerSelectionPolicySnapshotSchema } from '../../../domain/run/lifecycle.js';
+import { providerSelectionInitialChoiceSchema, providerSelectionPolicySnapshotSchema } from '../../../domain/run/lifecycle.js';
 
 const preparedRunRecordSchema = z.object({
   request: z.union([inlineRunRequestSchema, followOnRunRequestSchema]),
@@ -47,6 +47,7 @@ export function readPreparedRun(
     questionId: evaluation.questionId,
     packet: parseStored(decisionRequestSchema, parseJson(evaluation.packetJson, 'frozen packet'), 'frozen packet'),
     packetFingerprint: evaluation.packetFingerprint,
+    ...(evaluation.providerSelectionJson === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.providerSelectionJson, 'provider selection'), 'provider selection') }),
   })) });
   if (parsed.requestFingerprint !== row.requestFingerprint) throw new RunStoreError('data_integrity_error', 'Stored run and request fingerprints do not match.');
   if (parsed.request.kind === 'follow-on' && parsed.lineage) {

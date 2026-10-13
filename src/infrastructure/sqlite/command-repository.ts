@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { decisionRequestSchema, type DecisionValue } from '../../domain/decision/decision.js';
 import type { JourneyDefinition } from '../../domain/study/arm.js';
@@ -20,6 +21,7 @@ import { PREPARED_LAUNCH_WINDOW_MS, RECONCILE_SELECTION_LIMIT, WORKER_LEASE_DURA
 import type { SqliteRepositoryContext } from './repository-context.js';
 import { validateRunIds } from './run-ids.js';
 import { writeProviderSettings } from './provider-settings.js';
+import { evaluations } from './tables.js';
 
 export function createSqliteCommandRepository(
   context: SqliteRepositoryContext,
@@ -139,7 +141,7 @@ export function createSqliteCommandRepository(
       return context.transaction(() => refreshWorkerLease(context.connection.orm, claim, nowMs, WORKER_LEASE_DURATION_MS));
     },
 
-    reserveNext(claim, nowMs) {
+    reserveNext(claim, nowMs, expected) {
       context.ensureOpen();
       return context.transaction(() => {
         const run = context.ownedRun(claim, nowMs);
@@ -147,6 +149,17 @@ export function createSqliteCommandRepository(
             asNumber(run.used_calls, 'used calls') + asNumber(run.reserved_calls, 'reserved calls') >= asNumber(run.max_calls, 'maximum calls')) return null;
         const row = context.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim.runId) as DatabaseRow | undefined;
         if (!row) return null;
+        if (expected && (asText(row.evaluation_id, 'evaluation ID') !== expected.evaluationId || asText(row.packet_fingerprint, 'packet fingerprint') !== expected.packetFingerprint)) {
+          throw new RunStoreError('evaluation_changed_before_reservation', 'The reached evaluation changed after provider selection. Resolve the current evaluation again before dispatch.');
+        }
+        if (expected?.providerSelection) {
+          if (row.provider_selection_json !== null && row.provider_selection_json !== undefined && asText(row.provider_selection_json, 'provider selection') !== JSON.stringify(expected.providerSelection)) {
+            throw new RunStoreError('provider_selection_changed_before_reservation', 'A frozen provider choice changed before reservation.');
+          }
+          context.connection.orm.update(evaluations).set({ providerSelectionJson: JSON.stringify(expected.providerSelection) })
+            .where(eq(evaluations.evaluationId, expected.evaluationId)).run();
+          row.provider_selection_json = JSON.stringify(expected.providerSelection);
+        }
         const attemptId = randomUUID();
         const evaluationId = asText(row.evaluation_id, 'evaluation ID');
         reservePhysicalAttempt(context.connection.orm, {
@@ -155,6 +168,25 @@ export function createSqliteCommandRepository(
           startedMs: nowMs, evaluationIds: [evaluationId],
         });
         return { attemptId, evaluation: context.evaluationFromRow(row) };
+      });
+    },
+
+    failPendingJourneyEvaluation(claim, evaluationId, packetFingerprint, failure, nowMs) {
+      context.ensureOpen();
+      context.transaction(() => {
+        const run = context.ownedRun(claim, nowMs);
+        if (asNumber(run.reserved_calls, 'reserved calls') !== 0) throw new RunStoreError('attempt_unresolved', 'A zero-attempt failure cannot be recorded while a provider call is reserved.');
+        const row = context.database.prepare("SELECT respondent_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim.runId, evaluationId) as DatabaseRow | undefined;
+        if (!row || asText(row.packet_fingerprint, 'packet fingerprint') !== packetFingerprint || row.turn_id === null) {
+          throw new RunStoreError('evaluation_changed_before_failure', 'The reached journey evaluation changed before its zero-attempt failure could be recorded.');
+        }
+        const respondentId = asText(row.respondent_id, 'respondent ID');
+        const updated = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'")
+          .run(failure.code, failure.message, claim.runId, evaluationId);
+        if (Number(updated.changes) !== 1) throw new RunStoreError('evaluation_changed_before_failure', 'The reached journey evaluation changed before its zero-attempt failure could be recorded.');
+        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND status = 'active'")
+          .run(claim.runId, respondentId);
+        if (Number(respondent.changes) !== 1) throw new RunStoreError('journey_checkpoint_changed', 'The reached respondent checkpoint changed before its failure could be recorded.');
       });
     },
 

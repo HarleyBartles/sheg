@@ -247,6 +247,7 @@ export function insertPreparedRunData(database: NodeSQLiteDatabase, runId: strin
     groupId: evaluation.groupId!,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: 'pending' as const,
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -277,6 +278,7 @@ export function insertPreparedJourneyData(database: NodeSQLiteDatabase, runId: s
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: 'pending' as const,
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();

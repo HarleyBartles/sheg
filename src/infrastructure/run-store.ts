@@ -59,6 +59,7 @@ export function splitRunStore(store: RunStore): RunPersistence {
     claim: store.claim.bind(store),
     heartbeat: store.heartbeat.bind(store),
     reserveNext: store.reserveNext.bind(store),
+    failPendingJourneyEvaluation: store.failPendingJourneyEvaluation.bind(store),
     reserveBatch: store.reserveBatch.bind(store),
     settleBatch: store.settleBatch.bind(store),
     settle: store.settle.bind(store),

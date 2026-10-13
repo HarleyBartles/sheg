@@ -57,6 +57,7 @@ test('fresh schema initialization preserves the v9 baseline identity and records
         { version: 10, migration_id: 'image-assets-v10', checksum_length: 64 },
         { version: 11, migration_id: 'run-visual-assets-v11', checksum_length: 64 },
         { version: 12, migration_id: 'provider-selection-v12', checksum_length: 64 },
+        { version: 13, migration_id: 'evaluation-provider-selection-v13', checksum_length: 64 },
       ]);
     } finally { database.close(); }
     const reopened = openRunStore(root);
