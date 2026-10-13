@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { providerCatalogueSchema, providerPreferenceSchema } from '../src/providers/config.js';
-import type { ProviderSelectionPolicySnapshot } from '../src/domain/run/lifecycle.js';
+import { providerSelectionPolicySnapshotSchema, type ProviderSelectionPolicySnapshot } from '../src/domain/run/lifecycle.js';
 import { prepareRun } from '../src/application/run-inspection.js';
 import { createRunService } from '../src/application/run-service.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
@@ -70,6 +70,15 @@ test('stale provider settings revisions are rejected without overwriting the cur
   } finally { store?.close(); await rm(dataRoot, { recursive: true, force: true }); }
 });
 
+test('initial selection evidence rejects duplicate units and providers outside the frozen catalogue', () => {
+  const snapshot = { version: 1, catalogueRevision: 1, catalogue: { entries: catalogue.entries }, preferences,
+    policy: { batching: 'automatic' }, initialChoices: [
+      { respondentId: 'reader-a', questionId: 'continue', providerId: 'missing', modelIdentity: 'jev-1', decisionReason: 'policy' },
+      { respondentId: 'reader-a', questionId: 'continue', providerId: 'missing', modelIdentity: 'jev-1', decisionReason: 'policy' },
+    ] };
+  assert.equal(providerSelectionPolicySnapshotSchema.safeParse(snapshot).success, false);
+});
+
 test('acceptance stores the inspected secret-free selection snapshot with the request', async () => {
   const dataRoot = await root();
   let store: ReturnType<typeof openRunStore> | undefined;
@@ -80,7 +89,8 @@ test('acceptance stores the inspected secret-free selection snapshot with the re
     const prepared = (await prepareRun(request, provider)).prepared;
     assert.ok(prepared);
     const snapshot: ProviderSelectionPolicySnapshot = { version: 1, catalogueRevision: 1,
-      catalogue: { entries: catalogue.entries }, preferences, policy: { batching: 'automatic' } };
+      catalogue: { entries: catalogue.entries }, preferences, policy: { batching: 'automatic' },
+      initialChoices: [{ respondentId: 'reader-a', questionId: 'continue', providerId: 'hosted-text', modelIdentity: 'openrouter/jev-1.13', decisionReason: 'lowest_comparable_published_rate_estimate' }] };
     const accepted = store.accept('provider-snapshot', { ...prepared, providerSelectionSnapshot: snapshot });
     assert.equal(accepted.created, true);
     store.setProviderSettings({ catalogue: { entries: [] }, preferences: { preferredOrder: [] } }, 1);

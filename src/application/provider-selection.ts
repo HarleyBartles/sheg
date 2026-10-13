@@ -44,6 +44,21 @@ export type ProviderSelectionResult = {
   decisionReason: string;
 };
 
+export type ProviderComparisonLockInput = {
+  id: string;
+  equality: { provider: 'same' | 'vary'; model: 'same' | 'vary' };
+  members: ProviderSelectionInput[];
+};
+export type ProviderComparisonLockResult = {
+  id: string;
+  memberIds: string[];
+  treatmentDimensions: Array<'provider' | 'model'>;
+  decisionReason: string;
+  selected?: ProviderCandidateEvidence;
+  candidates: ProviderCandidateEvidence[];
+  members?: Array<{ unitId: string; selection: ProviderSelectionResult }>;
+};
+
 function estimateCost(entry: ProviderCatalogueEntry, fit?: ProviderContextFit): CandidateCost {
   if (entry.pricing.kind === 'no-provider-invoice') return { kind: 'no-provider-invoice', basis: 'provider pricing contract' };
   if (entry.pricing.kind === 'published-rate' && fit && fit.status === 'fits') {
@@ -121,4 +136,108 @@ export function selectProvider(input: ProviderSelectionInput): ProviderSelection
   const selected = orderedHosted[0]!;
   selected.selected = true;
   return { selected, candidates, decisionReason: selected.cost?.kind === 'estimate' ? 'lowest_comparable_published_rate_estimate' : 'stable_catalogue_order_cost_unverified' };
+}
+
+export function selectProviderComparisonLock(input: ProviderComparisonLockInput): ProviderComparisonLockResult {
+  const memberIds = input.members.map(({ unitId }) => unitId);
+  const treatmentDimensions = [
+    ...(input.equality.provider === 'vary' ? ['provider' as const] : []),
+    ...(input.equality.model === 'vary' ? ['model' as const] : []),
+  ];
+  if (input.members.length < 2 || new Set(memberIds).size !== memberIds.length) {
+    return { id: input.id, memberIds, treatmentDimensions, decisionReason: 'comparison_members_invalid', candidates: [] };
+  }
+  if (treatmentDimensions.length) {
+    const dimensions = (entry: ProviderCatalogueEntry) => {
+      const providerConfig = { ...entry.provider } as Record<string, unknown>;
+      const model = providerConfig.model ?? providerConfig.checkpoint;
+      delete providerConfig.model;
+      delete providerConfig.checkpoint;
+      return { provider: JSON.stringify(providerConfig), model: typeof model === 'string' ? model : '' };
+    };
+    const shared = (['provider', 'model'] as const).filter((dimension) => input.equality[dimension] === 'same');
+    const first = input.members[0]!;
+    const keys = [...new Set(first.catalogue.entries.map((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension]))))];
+    const viableGroups: Array<{ selections: NonNullable<ProviderComparisonLockResult['members']>; rank: number[]; key: string }> = [];
+    for (const key of keys) {
+      const groupEntries = first.catalogue.entries.filter((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension])) === key);
+      const selections = input.members.map((member) => {
+        if (member.catalogue.revision !== first.catalogue.revision || JSON.stringify(member.catalogue.entries) !== JSON.stringify(first.catalogue.entries)) {
+          return { unitId: member.unitId, selection: { candidates: [], decisionReason: 'comparison_catalogue_mismatch' } as ProviderSelectionResult };
+        }
+        const candidateIds = new Set(groupEntries.map(({ id }) => id));
+        return { unitId: member.unitId, selection: selectProvider({ ...member, candidates: member.candidates.filter(({ id }) => candidateIds.has(id)) }) };
+      });
+      if (selections.every(({ selection }) => selection.selected)) {
+        const preferencePenalty = selections.reduce((sum, { selection }) => sum + (selection.decisionReason === 'request_preference' ? 0 : selection.decisionReason === 'saved_user_preference' ? 1 : 2), 0);
+        const variedProviderCount = input.equality.provider === 'vary' ? new Set(selections.map(({ selection }) => {
+          const selected = first.catalogue.entries.find(({ id }) => id === selection.selected!.id)!;
+          return dimensions(selected).provider;
+        })).size : 0;
+        const variedModelCount = input.equality.model === 'vary' ? new Set(selections.map(({ selection }) => {
+          const selected = first.catalogue.entries.find(({ id }) => id === selection.selected!.id)!;
+          return dimensions(selected).model;
+        })).size : 0;
+        viableGroups.push({ selections, key, rank: [preferencePenalty, -(variedProviderCount + variedModelCount)] });
+      }
+    }
+    viableGroups.sort((left, right) => left.rank[0]! - right.rank[0]! || left.rank[1]! - right.rank[1]! || keys.indexOf(left.key) - keys.indexOf(right.key));
+    const chosenGroup = viableGroups[0];
+    if (chosenGroup) {
+      const selectedIds = chosenGroup.selections.map(({ selection }) => selection.selected!.id);
+      const displayCandidates = [...new Set(selectedIds)].map((id) => {
+        const entry = first.catalogue.entries.find((candidate) => candidate.id === id)!;
+        const fit = chosenGroup.selections.find(({ selection }) => selection.selected?.id === id)?.selection.selected?.fit;
+        const cost = aggregateCandidateCost(input.members.map((member) => member.candidates.find((candidate) => candidate.id === id)?.cost));
+        return { id, provider: entry.provider, eligible: true, selected: selectedIds[0] === id,
+          ...(fit === undefined ? {} : { fit }), ...(cost === undefined ? {} : { cost }) };
+      });
+      return { id: input.id, memberIds, treatmentDimensions, decisionReason: 'comparison_treatment_dimensions_locked',
+        selected: displayCandidates.find(({ id: candidateId }) => candidateId === selectedIds[0])!, candidates: displayCandidates, members: chosenGroup.selections };
+    }
+    return { id: input.id, memberIds, treatmentDimensions, decisionReason: 'comparison_treatment_ineligible', candidates: [],
+      members: input.members.map((member) => ({ unitId: member.unitId, selection: { candidates: [], decisionReason: 'no_common_comparison_lock' } })) };
+  }
+  const pins = [...new Set(input.members.map((member) => member.unitOverride ?? member.unitOverrides?.[member.unitId]).filter((id): id is string => id !== undefined))];
+  if (pins.length > 1) return { id: input.id, memberIds, treatmentDimensions, decisionReason: 'binding_comparison_pins_conflict', candidates: [] };
+  const first = input.members[0]!;
+  const catalogue = first.catalogue;
+  const requiredCapabilities = [...new Set(input.members.flatMap(({ requiredCapabilities: required }) => required))];
+  const questionTypes = [...new Set(input.members.map(({ questionType }) => questionType))];
+  const candidates = catalogue.entries.map((entry) => {
+    const memberSelections = input.members.map((member) => selectProvider({ ...member, unitOverride: entry.id }));
+    const eligibleForAll = memberSelections.every((selection) => selection.selected?.id === entry.id) &&
+      input.members.every(({ catalogue: memberCatalogue }) => memberCatalogue.revision === catalogue.revision &&
+        JSON.stringify(memberCatalogue.entries) === JSON.stringify(catalogue.entries));
+    const fits = memberSelections.map(({ selected }) => selected?.fit);
+    const rejectedFit = memberSelections.map(({ candidates: memberCandidates }) => memberCandidates.find(({ id }) => id === entry.id)?.fit).find((fit) => fit?.status !== 'fits');
+    const fit = eligibleForAll && fits.every((value): value is ProviderContextFit => value?.status === 'fits')
+      ? { ...fits[0]!, tokens: fits.reduce((sum, value) => sum + value.tokens, 0), details: { lockMembers: fits.length, totalInputTokens: fits.reduce((sum, value) => sum + value.tokens, 0) } }
+      : rejectedFit && rejectedFit.status !== 'fits' ? rejectedFit : undefined;
+    const plans = input.members.map((member) => member.candidates.find(({ id }) => id === entry.id));
+    const plannedCalls = plans.every((plan) => plan !== undefined) ? plans.reduce((sum, plan) => sum + plan!.plannedCalls, 0) : 0;
+    const cost = aggregateCandidateCost(plans.map((plan) => plan?.cost));
+    const ready = eligibleForAll ? true : memberSelections.every((selection) => selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== 'provider_unavailable' &&
+      selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== 'provider_readiness_unverified');
+    return { id: entry.id, ready, ...(fit === undefined ? {} : { fit }), plannedCalls, ...(cost === undefined ? {} : { cost }) };
+  });
+  const remainingCalls = Math.min(...input.members.map(({ remainingCalls: remaining }) => remaining));
+  const selectionInput: ProviderSelectionInput = { ...first, requiredCapabilities, questionType: questionTypes[0]!, remainingCalls, candidates };
+  delete selectionInput.unitOverride;
+  delete selectionInput.unitOverrides;
+  if (pins[0]) selectionInput.unitOverride = pins[0];
+  const result = selectProvider(selectionInput);
+  return { id: input.id, memberIds, treatmentDimensions, decisionReason: result.decisionReason,
+    ...(result.selected === undefined ? {} : { selected: result.selected }), candidates: result.candidates };
+}
+
+function aggregateCandidateCost(costs: Array<CandidateCost | undefined>): CandidateCost | undefined {
+  if (costs.some((cost) => cost === undefined)) return undefined;
+  if (costs.every((cost) => cost?.kind === 'no-provider-invoice')) return { kind: 'no-provider-invoice', basis: 'provider pricing contract' };
+  const estimates = costs.filter((cost): cost is Extract<CandidateCost, { kind: 'estimate' }> => cost?.kind === 'estimate');
+  if (estimates.length === costs.length && new Set(estimates.map(({ currency }) => currency)).size === 1) {
+    const first = estimates[0]!;
+    return { ...first, amount: estimates.reduce((sum, { amount }) => sum + amount, 0), basis: 'published-rate estimate' };
+  }
+  return { kind: 'unknown', basis: new Set(estimates.map(({ currency }) => currency)).size > 1 ? 'incomparable currency' : 'unverified' };
 }

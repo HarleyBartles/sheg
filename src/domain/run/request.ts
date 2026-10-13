@@ -19,8 +19,8 @@ const providerSelectionSchema = z.object({
   unitOverrides: z.record(z.string().min(1), z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
   comparisonLocks: z.array(z.object({
     id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-    members: z.array(z.string().min(1)).min(2),
-    equality: z.object({ provider: z.enum(['same', 'vary']), model: z.enum(['same', 'vary']) }).strict(),
+    members: z.array(z.object({ respondentId: z.string().min(1), questionId: z.string().min(1), branchId: z.string().min(1).optional() }).strict()).min(2),
+    equality: z.object({ provider: z.enum(['same', 'vary']).default('same'), model: z.enum(['same', 'vary']).default('same') }).strict().default({ provider: 'same', model: 'same' }),
   }).strict()).optional(),
   batching: z.enum(['automatic', 'singleton']).optional(),
 }).strict().superRefine((selection, context) => {
@@ -28,10 +28,17 @@ const providerSelectionSchema = z.object({
   if (selection.requiredCapabilities && new Set(selection.requiredCapabilities).size !== selection.requiredCapabilities.length) context.addIssue({ code: 'custom', path: ['requiredCapabilities'], message: 'Required capabilities must be unique.' });
   if (selection.comparisonLocks) {
     const ids = new Set<string>();
+    const assignedMembers = new Map<string, string>();
     for (const [index, lock] of selection.comparisonLocks.entries()) {
       if (ids.has(lock.id)) context.addIssue({ code: 'custom', path: ['comparisonLocks', index, 'id'], message: `Duplicate comparison identity ${lock.id}.` });
       ids.add(lock.id);
-      if (new Set(lock.members).size !== lock.members.length) context.addIssue({ code: 'custom', path: ['comparisonLocks', index, 'members'], message: 'Comparison members must be unique.' });
+      const memberKeys = lock.members.map((member) => JSON.stringify([member.respondentId, member.questionId, member.branchId ?? null]));
+      if (new Set(memberKeys).size !== lock.members.length) context.addIssue({ code: 'custom', path: ['comparisonLocks', index, 'members'], message: 'Comparison members must be unique.' });
+      memberKeys.forEach((key, memberIndex) => {
+        const previousLock = assignedMembers.get(key);
+        if (previousLock) context.addIssue({ code: 'custom', path: ['comparisonLocks', index, 'members', memberIndex], message: `A comparison member cannot belong to both ${previousLock} and ${lock.id}.` });
+        else assignedMembers.set(key, lock.id);
+      });
     }
   }
 });
@@ -43,6 +50,17 @@ const runProviderSelectionShape = {
 };
 function requireProviderChoice<T extends { provider?: unknown; providerSelection?: unknown }>(request: T, context: z.RefinementCtx): void {
   if ((request.provider === undefined) === (request.providerSelection === undefined)) context.addIssue({ code: 'custom', path: ['providerSelection'], message: 'Specify either an explicit provider or automatic provider selection.' });
+}
+
+function validateComparisonMembers(request: { providerSelection?: z.infer<typeof providerSelectionSchema> | undefined; respondents: Array<{ id: string }>; questionIds: string[] }, context: z.RefinementCtx): void {
+  const respondentIds = new Set(request.respondents.map(({ id }) => id));
+  const questionIds = new Set(request.questionIds);
+  for (const [lockIndex, lock] of (request.providerSelection?.comparisonLocks ?? []).entries()) {
+    lock.members.forEach((member, memberIndex) => {
+      if (!respondentIds.has(member.respondentId)) context.addIssue({ code: 'custom', path: ['providerSelection', 'comparisonLocks', lockIndex, 'members', memberIndex, 'respondentId'], message: `Comparison member respondent ${member.respondentId} is not part of this request.` });
+      if (!questionIds.has(member.questionId)) context.addIssue({ code: 'custom', path: ['providerSelection', 'comparisonLocks', lockIndex, 'members', memberIndex, 'questionId'], message: `Comparison member question ${member.questionId} is not part of this request.` });
+    });
+  }
 }
 
 function validateMaterialChoices(questions: readonly { type?: string | undefined; id: string; options?: Record<string, string> | undefined; materialOptions?: Record<string, string> | undefined }[], material: readonly z.infer<typeof materialItemSchema>[], context: z.RefinementCtx): void {
@@ -98,6 +116,7 @@ export const inlineRunRequestSchema = z.object({
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
+  validateComparisonMembers({ ...request, questionIds: request.questions.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });
@@ -128,6 +147,7 @@ export const inlineJourneyRequestSchema = z.object({
   maxCalls: z.number().int().positive(),
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
+  validateComparisonMembers({ ...request, questionIds: request.journey.tasks.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: 'custom', path: ['respondents'], message: 'Respondent IDs must be unique within a run.' });

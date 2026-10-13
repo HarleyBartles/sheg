@@ -87,11 +87,12 @@ test('provider catalogue rejects unknown capabilities and invalid price evidence
 test('automatic direct requests use catalogue references and retain per-unit, comparison, and batching controls', () => {
   const request = {
     ...autoPoll(),
+    respondents: [respondent(), { ...respondent(), id: 'reader-b' }],
     providerSelection: {
       preferredOrder: ['local-reader', 'hosted-text'],
       requiredCapabilities: ['text'],
       unitOverrides: { continue: 'local-reader' },
-      comparisonLocks: [{ id: 'opening-response', members: ['reader-a/continue', 'reader-b/continue'], equality: { provider: 'same', model: 'same' } }],
+      comparisonLocks: [{ id: 'opening-response', members: [{ respondentId: 'reader-a', questionId: 'continue' }, { respondentId: 'reader-b', questionId: 'continue' }], equality: { provider: 'same', model: 'same' } }],
       batching: 'singleton',
     },
     expectedSelectionFingerprint: 'f'.repeat(64),

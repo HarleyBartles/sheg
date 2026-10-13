@@ -566,14 +566,37 @@
                     "minItems": 2,
                     "type": "array",
                     "items": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "object",
+                      "properties": {
+                        "respondentId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "questionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "branchId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "respondentId",
+                        "questionId"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "equality": {
+                    "default": {
+                      "provider": "same",
+                      "model": "same"
+                    },
                     "type": "object",
                     "properties": {
                       "provider": {
+                        "default": "same",
                         "type": "string",
                         "enum": [
                           "same",
@@ -581,6 +604,7 @@
                         ]
                       },
                       "model": {
+                        "default": "same",
                         "type": "string",
                         "enum": [
                           "same",
@@ -588,17 +612,12 @@
                         ]
                       }
                     },
-                    "required": [
-                      "provider",
-                      "model"
-                    ],
                     "additionalProperties": false
                   }
                 },
                 "required": [
                   "id",
-                  "members",
-                  "equality"
+                  "members"
                 ],
                 "additionalProperties": false
               }
@@ -1519,14 +1538,37 @@
                     "minItems": 2,
                     "type": "array",
                     "items": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "object",
+                      "properties": {
+                        "respondentId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "questionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "branchId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "respondentId",
+                        "questionId"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "equality": {
+                    "default": {
+                      "provider": "same",
+                      "model": "same"
+                    },
                     "type": "object",
                     "properties": {
                       "provider": {
+                        "default": "same",
                         "type": "string",
                         "enum": [
                           "same",
@@ -1534,6 +1576,7 @@
                         ]
                       },
                       "model": {
+                        "default": "same",
                         "type": "string",
                         "enum": [
                           "same",
@@ -1541,17 +1584,12 @@
                         ]
                       }
                     },
-                    "required": [
-                      "provider",
-                      "model"
-                    ],
                     "additionalProperties": false
                   }
                 },
                 "required": [
                   "id",
-                  "members",
-                  "equality"
+                  "members"
                 ],
                 "additionalProperties": false
               }
@@ -2279,14 +2317,37 @@
                     "minItems": 2,
                     "type": "array",
                     "items": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "object",
+                      "properties": {
+                        "respondentId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "questionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "branchId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "respondentId",
+                        "questionId"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "equality": {
+                    "default": {
+                      "provider": "same",
+                      "model": "same"
+                    },
                     "type": "object",
                     "properties": {
                       "provider": {
+                        "default": "same",
                         "type": "string",
                         "enum": [
                           "same",
@@ -2294,6 +2355,7 @@
                         ]
                       },
                       "model": {
+                        "default": "same",
                         "type": "string",
                         "enum": [
                           "same",
@@ -2301,17 +2363,12 @@
                         ]
                       }
                     },
-                    "required": [
-                      "provider",
-                      "model"
-                    ],
                     "additionalProperties": false
                   }
                 },
                 "required": [
                   "id",
-                  "members",
-                  "equality"
+                  "members"
                 ],
                 "additionalProperties": false
               }

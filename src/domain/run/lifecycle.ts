@@ -9,6 +9,16 @@ import type { DecisionRequest } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
 import { providerCatalogueEntrySchema, providerPreferenceSchema } from '../../providers/config.js';
 
+export const providerSelectionInitialChoiceSchema = z.object({
+  respondentId: z.string().min(1),
+  questionId: z.string().min(1),
+  branchId: z.string().min(1).optional(),
+  providerId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  modelIdentity: z.string().min(1),
+  comparisonLockId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
+  decisionReason: z.string().min(1),
+}).strict();
+
 export const providerSelectionPolicySnapshotSchema = z.object({
   version: z.literal(1),
   catalogueRevision: z.number().int().nonnegative(),
@@ -17,7 +27,16 @@ export const providerSelectionPolicySnapshotSchema = z.object({
   }).strict(),
   preferences: providerPreferenceSchema,
   policy: z.object({ batching: z.enum(['automatic', 'singleton']) }).strict(),
-}).strict();
+  initialChoices: z.array(providerSelectionInitialChoiceSchema).optional(),
+}).strict().superRefine((snapshot, context) => {
+  const units = new Set<string>();
+  for (const [index, choice] of (snapshot.initialChoices ?? []).entries()) {
+    const key = JSON.stringify([choice.respondentId, choice.questionId, choice.branchId ?? null]);
+    if (units.has(key)) context.addIssue({ code: 'custom', path: ['initialChoices', index], message: 'Initial provider choices must have unique authored evaluation references.' });
+    units.add(key);
+    if (!snapshot.catalogue.entries.some(({ id }) => id === choice.providerId)) context.addIssue({ code: 'custom', path: ['initialChoices', index, 'providerId'], message: `Selected provider ${choice.providerId} is absent from the frozen catalogue.` });
+  }
+});
 export type ProviderSelectionPolicySnapshot = z.infer<typeof providerSelectionPolicySnapshotSchema>;
 
 export const runStatuses = ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] as const;

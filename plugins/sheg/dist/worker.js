@@ -20785,6 +20785,15 @@ function validateResponseIntervals(edges, type, maximum, context, nodeIndex) {
 }
 
 // src/domain/run/lifecycle.ts
+var providerSelectionInitialChoiceSchema = external_exports.object({
+  respondentId: external_exports.string().min(1),
+  questionId: external_exports.string().min(1),
+  branchId: external_exports.string().min(1).optional(),
+  providerId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  modelIdentity: external_exports.string().min(1),
+  comparisonLockId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
+  decisionReason: external_exports.string().min(1)
+}).strict();
 var providerSelectionPolicySnapshotSchema = external_exports.object({
   version: external_exports.literal(1),
   catalogueRevision: external_exports.number().int().nonnegative(),
@@ -20792,8 +20801,17 @@ var providerSelectionPolicySnapshotSchema = external_exports.object({
     entries: external_exports.array(providerCatalogueEntrySchema)
   }).strict(),
   preferences: providerPreferenceSchema,
-  policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict()
-}).strict();
+  policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict(),
+  initialChoices: external_exports.array(providerSelectionInitialChoiceSchema).optional()
+}).strict().superRefine((snapshot, context) => {
+  const units = /* @__PURE__ */ new Set();
+  for (const [index2, choice] of (snapshot.initialChoices ?? []).entries()) {
+    const key = JSON.stringify([choice.respondentId, choice.questionId, choice.branchId ?? null]);
+    if (units.has(key)) context.addIssue({ code: "custom", path: ["initialChoices", index2], message: "Initial provider choices must have unique authored evaluation references." });
+    units.add(key);
+    if (!snapshot.catalogue.entries.some(({ id }) => id === choice.providerId)) context.addIssue({ code: "custom", path: ["initialChoices", index2, "providerId"], message: `Selected provider ${choice.providerId} is absent from the frozen catalogue.` });
+  }
+});
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
 var runStatusSchema = external_exports.enum(runStatuses);
 var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
@@ -20858,8 +20876,8 @@ var providerSelectionSchema = external_exports.object({
   unitOverrides: external_exports.record(external_exports.string().min(1), external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
   comparisonLocks: external_exports.array(external_exports.object({
     id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-    members: external_exports.array(external_exports.string().min(1)).min(2),
-    equality: external_exports.object({ provider: external_exports.enum(["same", "vary"]), model: external_exports.enum(["same", "vary"]) }).strict()
+    members: external_exports.array(external_exports.object({ respondentId: external_exports.string().min(1), questionId: external_exports.string().min(1), branchId: external_exports.string().min(1).optional() }).strict()).min(2),
+    equality: external_exports.object({ provider: external_exports.enum(["same", "vary"]).default("same"), model: external_exports.enum(["same", "vary"]).default("same") }).strict().default({ provider: "same", model: "same" })
   }).strict()).optional(),
   batching: external_exports.enum(["automatic", "singleton"]).optional()
 }).strict().superRefine((selection, context) => {
@@ -20867,10 +20885,17 @@ var providerSelectionSchema = external_exports.object({
   if (selection.requiredCapabilities && new Set(selection.requiredCapabilities).size !== selection.requiredCapabilities.length) context.addIssue({ code: "custom", path: ["requiredCapabilities"], message: "Required capabilities must be unique." });
   if (selection.comparisonLocks) {
     const ids = /* @__PURE__ */ new Set();
+    const assignedMembers = /* @__PURE__ */ new Map();
     for (const [index2, lock] of selection.comparisonLocks.entries()) {
       if (ids.has(lock.id)) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "id"], message: `Duplicate comparison identity ${lock.id}.` });
       ids.add(lock.id);
-      if (new Set(lock.members).size !== lock.members.length) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "members"], message: "Comparison members must be unique." });
+      const memberKeys = lock.members.map((member) => JSON.stringify([member.respondentId, member.questionId, member.branchId ?? null]));
+      if (new Set(memberKeys).size !== lock.members.length) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "members"], message: "Comparison members must be unique." });
+      memberKeys.forEach((key, memberIndex) => {
+        const previousLock = assignedMembers.get(key);
+        if (previousLock) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "members", memberIndex], message: `A comparison member cannot belong to both ${previousLock} and ${lock.id}.` });
+        else assignedMembers.set(key, lock.id);
+      });
     }
   }
 });
@@ -20882,6 +20907,16 @@ var runProviderSelectionShape = {
 };
 function requireProviderChoice(request, context) {
   if (request.provider === void 0 === (request.providerSelection === void 0)) context.addIssue({ code: "custom", path: ["providerSelection"], message: "Specify either an explicit provider or automatic provider selection." });
+}
+function validateComparisonMembers(request, context) {
+  const respondentIds = new Set(request.respondents.map(({ id }) => id));
+  const questionIds = new Set(request.questionIds);
+  for (const [lockIndex, lock] of (request.providerSelection?.comparisonLocks ?? []).entries()) {
+    lock.members.forEach((member, memberIndex) => {
+      if (!respondentIds.has(member.respondentId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex, "respondentId"], message: `Comparison member respondent ${member.respondentId} is not part of this request.` });
+      if (!questionIds.has(member.questionId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex, "questionId"], message: `Comparison member question ${member.questionId} is not part of this request.` });
+    });
+  }
 }
 function validateMaterialChoices(questions, material, context) {
   const materials = new Map(material.map((item) => [item.id, item]));
@@ -20934,6 +20969,7 @@ var inlineRunRequestSchema = external_exports.object({
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
+  validateComparisonMembers({ ...request, questionIds: request.questions.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
@@ -20961,6 +20997,7 @@ var inlineJourneyRequestSchema = external_exports.object({
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
   requireProviderChoice(request, context);
+  validateComparisonMembers({ ...request, questionIds: request.journey.tasks.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
