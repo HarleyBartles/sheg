@@ -21,6 +21,7 @@ import type { SqliteRepositoryContext } from './repository-context.js';
 import { PREPARED_LAUNCH_WINDOW_MS } from './work-policy.js';
 import { validateRunIds } from './run-ids.js';
 import { validatePrepared } from './commands/prepared-validation.js';
+import { readProviderSettings } from './provider-settings.js';
 
 type CursorPayload = { kind: 'runs'; createdMs: number; runId: string; filtersFingerprint: string };
 type AnswerCursorPayload = { kind: 'answers'; runId: string; ordinal: number };
@@ -29,6 +30,7 @@ const answerCursorSchema = z.object({ kind: z.literal('answers'), runId: z.strin
 
 export function createSqliteReadRepository(context: SqliteRepositoryContext): RunReadRepository {
   return {
+    getProviderSettings() { return readProviderSettings(context); },
     findSubmission(submissionId, requestFingerprint) {
       context.ensureOpen();
       return context.readSnapshot(() => {

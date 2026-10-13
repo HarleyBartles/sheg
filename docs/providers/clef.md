@@ -1,6 +1,6 @@
 # Native Cloudflare Clef
 
-Sheg's native Clef provider sends typed study questions and saved image bytes directly to Cloudflare Workers AI. Select it explicitly for questions that require pixel inspection. Sheg does not route Clef calls through OpenRouter, switch providers automatically, or fall back to Jev or Laya when a Clef call fails.
+Sheg's native Clef provider sends typed study questions and saved image bytes directly to Cloudflare Workers AI. Pin Clef explicitly when the whole study should use one provider, or let automatic routing select it for questions that require pixel inspection. Configure the enabled provider catalogue and study controls as described in [Provider selection](routing.md). Sheg does not route Clef calls through OpenRouter or fall back to another provider after a Clef failure.
 
 For the installed agent workflow, see [Native Cloudflare Clef](../../skills/stimulus-response-polling/references/native-clef.md).
 
@@ -41,7 +41,7 @@ Sheg supports the model selectors `clef` and `clef-flash`, corresponding to Clou
 
 Import an image with `image_import` or `image-import`, then use its saved asset metadata in an image material. Provide factual `altText` and the exact authored `caption`; Sheg does not inspect an image to write these fields. Bind images to a question with `visual.mode: "pixels"` when the model must inspect pixels. Use `visual.mode: "described"` when the supplied description and caption are enough; that mode sends text and does not claim pixel inspection.
 
-Bind only the images the question needs. Clef accepts at most four images in one provider call and at most 64 questions. Sheg orders attachments by the material order frozen in the study request. A choice question with portrait options should set `materialOptions` so each stable option ID explicitly identifies its image material. Sheg includes those option-to-image mappings in the provider prompt.
+Bind only the images the question needs. Clef accepts at most four images in one provider call and at most 64 questions. Sheg orders attachments by the material order frozen in the study request. A pixel Choice question may set `materialOptions` so each stable option ID explicitly identifies its image material; each mapped image must also appear in that question's pixel binding. Sheg includes those option-to-image mappings in the provider prompt. An image answer does not become text `selectedMaterial` evidence for follow-on reuse.
 
 For an article journey, bind an image only on the stage where it is shown. Later text stages receive a compact record of the supplied description, caption, typed response, provider, model, and material identity. They do not receive image bytes again unless a later task explicitly binds that image. Agents can use the same rule to ask a separate question about a deliberate repeat exposure.
 

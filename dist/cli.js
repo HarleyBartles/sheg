@@ -23054,7 +23054,8 @@ function prepareFollowOnPacket(input2) {
     respondentProfile: source.state.respondent.profile,
     encounteredItems: source.state.encounteredItems,
     trajectory: source.state.trajectory,
-    question
+    question,
+    ...input2.visualMaterials === void 0 ? {} : { visualMaterials: [...input2.visualMaterials] }
   });
   const material = input2.material ? input2.material.map(({ id, text: text2 }) => ({ id, text: text2 })) : [];
   let state;
@@ -23074,7 +23075,13 @@ function prepareFollowOnPacket(input2) {
       trajectory: emptyTrajectory()
     };
   }
-  return compileDecisionRequest({ respondentProfile: state.respondent.profile, encounteredItems: state.encounteredItems, trajectory: state.trajectory, question });
+  return compileDecisionRequest({
+    respondentProfile: state.respondent.profile,
+    encounteredItems: state.encounteredItems,
+    trajectory: state.trajectory,
+    question,
+    ...input2.visualMaterials === void 0 ? {} : { visualMaterials: [...input2.visualMaterials] }
+  });
 }
 function compactTrajectory(arm, history) {
   const exposureIds = [];
@@ -23466,7 +23473,9 @@ function validateJourneyDefinition(arm, context) {
         continue;
       }
       if (isImageMaterial(item)) {
-        context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can only link to text material.` });
+        if (task.visual?.mode !== "pixels" || !task.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: "custom", path: ["tasks", taskIndex, "materialOptions", optionId], message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (item.sourceId === void 0 || item.sourceSha256 === void 0) {
@@ -25444,6 +25453,64 @@ var providerConfigSchema = external_exports.union([
   layaConfigSchema,
   clefConfigSchema
 ]);
+var providerCapabilitySchema = external_exports.enum(["text", "pixels"]);
+var providerQuestionTypeSchema = external_exports.enum(["choice", "score", "noul"]);
+var providerPriceSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("no-provider-invoice") }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("published-rate"),
+    currency: external_exports.string().regex(/^[A-Z]{3}$/),
+    unit: external_exports.literal("million-input-tokens"),
+    amount: external_exports.number().finite().nonnegative(),
+    source: external_exports.string().url(),
+    observedAt: external_exports.string().date()
+  }).strict(),
+  external_exports.object({ kind: external_exports.literal("unknown") }).strict()
+]);
+var providerCatalogueEntrySchema = external_exports.object({
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  enabled: external_exports.boolean(),
+  provider: providerConfigSchema,
+  execution: external_exports.enum(["local", "hosted"]),
+  capabilities: external_exports.array(providerCapabilitySchema).min(1),
+  questionTypes: external_exports.array(providerQuestionTypeSchema).min(1),
+  pricing: providerPriceSchema
+}).strict().superRefine((entry, context) => {
+  if (new Set(entry.capabilities).size !== entry.capabilities.length) context.addIssue({ code: "custom", path: ["capabilities"], message: "Provider capabilities must be unique." });
+  if (new Set(entry.questionTypes).size !== entry.questionTypes.length) context.addIssue({ code: "custom", path: ["questionTypes"], message: "Provider question types must be unique." });
+  if (entry.provider.kind === "laya" !== (entry.execution === "local")) context.addIssue({ code: "custom", path: ["execution"], message: "Execution mode must match the provider configuration." });
+  if (entry.provider.kind === "clef" !== entry.capabilities.includes("pixels")) context.addIssue({ code: "custom", path: ["capabilities"], message: "Pixel capability must match the Clef provider configuration." });
+  if (entry.execution === "local" && entry.pricing.kind !== "no-provider-invoice") context.addIssue({ code: "custom", path: ["pricing"], message: "Local providers must declare that no provider invoice applies." });
+  if (entry.execution === "hosted" && entry.pricing.kind === "no-provider-invoice") context.addIssue({ code: "custom", path: ["pricing"], message: "Hosted providers require published or unknown price evidence." });
+});
+var providerCatalogueSchema = external_exports.object({
+  revision: external_exports.number().int().nonnegative(),
+  entries: external_exports.array(providerCatalogueEntrySchema)
+}).strict().superRefine((catalogue, context) => {
+  const ids = /* @__PURE__ */ new Set();
+  const configs = /* @__PURE__ */ new Set();
+  catalogue.entries.forEach((entry, index2) => {
+    if (ids.has(entry.id)) context.addIssue({ code: "custom", path: ["entries", index2, "id"], message: `Duplicate provider identity ${entry.id}.` });
+    ids.add(entry.id);
+    const canonicalConfig = JSON.stringify(entry.provider, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
+    if (configs.has(canonicalConfig)) context.addIssue({ code: "custom", path: ["entries", index2, "provider"], message: "Provider configuration is already present under another identity." });
+    configs.add(canonicalConfig);
+  });
+});
+var providerPreferenceSchema = external_exports.object({
+  preferredOrder: external_exports.array(external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/))
+}).strict().superRefine((preferences, context) => {
+  if (new Set(preferences.preferredOrder).size !== preferences.preferredOrder.length) context.addIssue({ code: "custom", path: ["preferredOrder"], message: "Provider preference identities must be unique." });
+});
+function providerModelIdentity(provider) {
+  return provider.kind === "laya" ? provider.checkpoint : provider.model;
+}
+function providerConfigurationIdentity(provider) {
+  const configuration = { ...provider };
+  delete configuration.model;
+  delete configuration.checkpoint;
+  return JSON.stringify(configuration);
+}
 
 // src/infrastructure/identity.ts
 import { createHash as createHash6 } from "node:crypto";
@@ -25602,6 +25669,52 @@ function packetRef(packet) {
 }
 
 // src/domain/run/lifecycle.ts
+var providerSelectionCostSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("no-provider-invoice"), basis: external_exports.literal("provider pricing contract") }).strict(),
+  external_exports.object({ kind: external_exports.literal("estimate"), amount: external_exports.number().finite().nonnegative(), currency: external_exports.string().regex(/^[A-Z]{3}$/), basis: external_exports.literal("published-rate estimate"), source: external_exports.string().url(), observedAt: external_exports.string().date() }).strict(),
+  external_exports.object({ kind: external_exports.literal("unknown"), basis: external_exports.enum(["unverified", "incomparable currency"]) }).strict()
+]);
+var providerSelectionCandidateSchema = external_exports.object({
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  eligible: external_exports.boolean(),
+  selected: external_exports.boolean(),
+  fit: providerContextFitSchema.optional(),
+  cost: providerSelectionCostSchema.optional(),
+  exclusion: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1) }).strict().optional(),
+  preferenceRank: external_exports.object({ source: external_exports.enum(["request", "saved"]), index: external_exports.number().int().nonnegative() }).strict().optional()
+}).strict();
+var providerSelectionInitialChoiceSchema = external_exports.object({
+  respondentId: external_exports.string().min(1),
+  questionId: external_exports.string().min(1),
+  branchId: external_exports.string().min(1).optional(),
+  providerId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  modelIdentity: external_exports.string().min(1),
+  comparisonLockId: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
+  decisionReason: external_exports.string().min(1),
+  candidates: external_exports.array(providerSelectionCandidateSchema).min(1)
+}).strict().superRefine((choice, context) => {
+  const selected = choice.candidates.filter(({ selected: isSelected }) => isSelected);
+  if (selected.length !== 1 || selected[0]?.id !== choice.providerId) context.addIssue({ code: "custom", path: ["candidates"], message: "Exactly one candidate must be selected and it must match providerId." });
+  if (new Set(choice.candidates.map(({ id }) => id)).size !== choice.candidates.length) context.addIssue({ code: "custom", path: ["candidates"], message: "Initial choice candidate identities must be unique." });
+});
+var providerSelectionPolicySnapshotSchema = external_exports.object({
+  version: external_exports.literal(1),
+  catalogueRevision: external_exports.number().int().nonnegative(),
+  catalogue: external_exports.object({
+    entries: external_exports.array(providerCatalogueEntrySchema)
+  }).strict(),
+  preferences: providerPreferenceSchema,
+  policy: external_exports.object({ batching: external_exports.enum(["automatic", "singleton"]) }).strict(),
+  initialChoices: external_exports.array(providerSelectionInitialChoiceSchema).optional()
+}).strict().superRefine((snapshot, context) => {
+  const units = /* @__PURE__ */ new Set();
+  for (const [index2, choice] of (snapshot.initialChoices ?? []).entries()) {
+    const key = JSON.stringify([choice.respondentId, choice.questionId, choice.branchId ?? null]);
+    if (units.has(key)) context.addIssue({ code: "custom", path: ["initialChoices", index2], message: "Initial provider choices must have unique authored evaluation references." });
+    units.add(key);
+    if (!snapshot.catalogue.entries.some(({ id }) => id === choice.providerId)) context.addIssue({ code: "custom", path: ["initialChoices", index2, "providerId"], message: `Selected provider ${choice.providerId} is absent from the frozen catalogue.` });
+  }
+});
 var runStatuses = ["prepared", "running", "completed", "partial", "failed", "cancelled", "interrupted"];
 var runStatusSchema = external_exports.enum(runStatuses);
 var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
@@ -25660,6 +25773,63 @@ var journeyEventsSchema = external_exports.array(promptHistoryEventSchema);
 var journeyRouteSchema = external_exports.array(journeyRouteEntrySchema);
 
 // src/domain/run/request.ts
+var providerSelectionSchema = external_exports.object({
+  preferredOrder: external_exports.array(external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  requiredCapabilities: external_exports.array(external_exports.enum(["text", "pixels"])).min(1).optional(),
+  unitOverrides: external_exports.record(external_exports.string().min(1), external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).optional(),
+  comparisonLocks: external_exports.array(external_exports.object({
+    id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+    members: external_exports.array(external_exports.object({ respondentId: external_exports.string().min(1), questionId: external_exports.string().min(1), branchId: external_exports.string().min(1).optional() }).strict()).min(2),
+    equality: external_exports.object({ provider: external_exports.enum(["same", "vary"]).default("same"), model: external_exports.enum(["same", "vary"]).default("same") }).strict().default({ provider: "same", model: "same" })
+  }).strict()).optional(),
+  batching: external_exports.enum(["automatic", "singleton"]).optional()
+}).strict().superRefine((selection, context) => {
+  if (selection.preferredOrder && new Set(selection.preferredOrder).size !== selection.preferredOrder.length) context.addIssue({ code: "custom", path: ["preferredOrder"], message: "Provider preference identities must be unique." });
+  if (selection.requiredCapabilities && new Set(selection.requiredCapabilities).size !== selection.requiredCapabilities.length) context.addIssue({ code: "custom", path: ["requiredCapabilities"], message: "Required capabilities must be unique." });
+  if (selection.comparisonLocks) {
+    const ids = /* @__PURE__ */ new Set();
+    const assignedMembers = /* @__PURE__ */ new Map();
+    for (const [index2, lock] of selection.comparisonLocks.entries()) {
+      if (ids.has(lock.id)) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "id"], message: `Duplicate comparison identity ${lock.id}.` });
+      ids.add(lock.id);
+      const memberKeys = lock.members.map((member) => JSON.stringify([member.respondentId, member.questionId, member.branchId ?? null]));
+      if (new Set(memberKeys).size !== lock.members.length) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "members"], message: "Comparison members must be unique." });
+      memberKeys.forEach((key, memberIndex) => {
+        const previousLock = assignedMembers.get(key);
+        if (previousLock) context.addIssue({ code: "custom", path: ["comparisonLocks", index2, "members", memberIndex], message: `A comparison member cannot belong to both ${previousLock} and ${lock.id}.` });
+        else assignedMembers.set(key, lock.id);
+      });
+    }
+  }
+});
+var selectionFingerprintSchema = external_exports.string().regex(/^(?:[a-f\d]{64}|r\d+-[a-f\d]{64})$/i);
+var runProviderSelectionShape = {
+  provider: providerConfigSchema.optional(),
+  providerSelection: providerSelectionSchema.optional(),
+  expectedSelectionFingerprint: selectionFingerprintSchema.optional()
+};
+function requireProviderChoice(request, context) {
+  if (request.provider === void 0 === (request.providerSelection === void 0)) context.addIssue({ code: "custom", path: ["providerSelection"], message: "Specify either an explicit provider or automatic provider selection." });
+}
+function validateComparisonMembers(request, context) {
+  const respondentIds = new Set(request.respondents.map(({ id }) => id));
+  const questionIds = new Set(request.questionIds);
+  const assignedPollRespondents = /* @__PURE__ */ new Map();
+  for (const [lockIndex, lock] of (request.providerSelection?.comparisonLocks ?? []).entries()) {
+    const pollRespondents = /* @__PURE__ */ new Set();
+    lock.members.forEach((member, memberIndex) => {
+      if (!respondentIds.has(member.respondentId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex, "respondentId"], message: `Comparison member respondent ${member.respondentId} is not part of this request.` });
+      if (!questionIds.has(member.questionId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex, "questionId"], message: `Comparison member question ${member.questionId} is not part of this request.` });
+      if (request.kind === "poll" && pollRespondents.has(member.respondentId)) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex], message: "Poll comparison members must identify distinct respondent question groups." });
+      pollRespondents.add(member.respondentId);
+      if (request.kind === "poll") {
+        const previousLock = assignedPollRespondents.get(member.respondentId);
+        if (previousLock && previousLock !== lock.id) context.addIssue({ code: "custom", path: ["providerSelection", "comparisonLocks", lockIndex, "members", memberIndex], message: `A poll respondent group cannot belong to both ${previousLock} and ${lock.id}.` });
+        else assignedPollRespondents.set(member.respondentId, lock.id);
+      }
+    });
+  }
+}
 function validateMaterialChoices(questions, material, context) {
   const materials = new Map(material.map((item) => [item.id, item]));
   questions.forEach((question, questionIndex) => {
@@ -25672,7 +25842,9 @@ function validateMaterialChoices(questions, material, context) {
         continue;
       }
       if (isImageMaterial(candidate)) {
-        context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can only link to text material.` });
+        if (question.visual?.mode !== "pixels" || !question.visual.materialIds.includes(materialId)) {
+          context.addIssue({ code: "custom", path: issuePath, message: `Choice option ${optionId} can link to image material only when that exact image is bound to this pixel question.` });
+        }
         continue;
       }
       if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) {
@@ -25684,12 +25856,16 @@ function validateMaterialChoices(questions, material, context) {
     }
   });
 }
-function validateVisualBindings(questions, material, context, path16) {
+function validateVisualBindings(questions, material, context, path16, allowedSourceMaterialIds = /* @__PURE__ */ new Set()) {
   const byId = new Map(material.map((item) => [item.id, item]));
   const bound = /* @__PURE__ */ new Set();
   questions.forEach((question, questionIndex) => {
     for (const materialId of question.visual?.materialIds ?? []) {
       const candidate = byId.get(materialId);
+      if (!candidate && allowedSourceMaterialIds.has(materialId)) {
+        bound.add(materialId);
+        continue;
+      }
       if (!candidate || !isImageMaterial(candidate)) {
         context.addIssue({ code: "custom", path: [path16, questionIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
         continue;
@@ -25707,9 +25883,11 @@ var inlineRunRequestSchema = external_exports.object({
   respondents: external_exports.array(respondentProfileSchema).min(1),
   material: external_exports.array(materialItemSchema).min(1),
   questions: external_exports.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
+  validateComparisonMembers({ ...request, kind: "poll", questionIds: request.questions.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
@@ -25724,7 +25902,7 @@ var inlineRunRequestSchema = external_exports.object({
   }
   validateMaterialChoices(request.questions, request.material, context);
   validateVisualBindings(request.questions, request.material, context, "questions");
-  if (request.questions.some((question) => question.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
+  if (request.questions.some((question) => question.visual?.mode === "pixels") && request.provider && String(request.provider.kind) !== "clef") {
     context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
   }
 });
@@ -25733,15 +25911,17 @@ var inlineJourneyRequestSchema = external_exports.object({
   label: external_exports.string().min(1).max(120).optional(),
   respondents: external_exports.array(respondentProfileSchema).min(1),
   journey: journeyDefinitionSchema,
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
+  validateComparisonMembers({ ...request, kind: "journey", questionIds: request.journey.tasks.map(({ id }) => id) }, context);
   const respondentIds = request.respondents.map(({ id }) => id);
   if (new Set(respondentIds).size !== respondentIds.length) {
     context.addIssue({ code: "custom", path: ["respondents"], message: "Respondent IDs must be unique within a run." });
   }
   const visualTasks = request.journey.tasks.filter((task) => task.visual !== void 0);
-  if (visualTasks.some((task) => task.visual?.mode === "pixels") && String(request.provider.kind) !== "clef") {
+  if (visualTasks.some((task) => task.visual?.mode === "pixels") && request.provider && String(request.provider.kind) !== "clef") {
     context.addIssue({ code: "custom", path: ["provider"], message: "Pixel-inspection questions require the explicit Clef provider." });
   }
 });
@@ -25790,9 +25970,10 @@ var followOnRunRequestSchema = external_exports.object({
   context: followOnContextSchema,
   material: external_exports.array(materialItemSchema).min(1).optional(),
   questions: external_exports.array(decisionQuestionSchema).min(1),
-  provider: providerConfigSchema,
+  ...runProviderSelectionShape,
   maxCalls: external_exports.number().int().positive()
 }).strict().superRefine((request, context) => {
+  requireProviderChoice(request, context);
   const questionIds = request.questions.map(({ id }) => id);
   if (new Set(questionIds).size !== questionIds.length) {
     context.addIssue({ code: "custom", path: ["questions"], message: "Question IDs must be unique within a run." });
@@ -25812,10 +25993,8 @@ var followOnRunRequestSchema = external_exports.object({
   if (request.material && new Set(request.material.map(({ id }) => id)).size !== request.material.length) {
     context.addIssue({ code: "custom", path: ["material"], message: "Material IDs must be unique within a follow-on request." });
   }
-  if (request.material) {
-    if (request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs is not supported in this slice." });
-    validateVisualBindings(request.questions, request.material, context, "questions");
-  }
+  if (request.material && request.material.some(isImageMaterial)) context.addIssue({ code: "custom", path: ["material"], message: "Image material in follow-on runs must be referenced from the selected source context." });
+  validateVisualBindings(request.questions, request.material ?? [], context, "questions", new Set(request.context.materialIds ?? []));
   if (request.material && request.context.materialIds && request.material.some(({ id }) => request.context.materialIds?.includes(id))) {
     context.addIssue({ code: "custom", path: ["material"], message: "Inline material IDs must not duplicate selected source material IDs." });
   }
@@ -25938,6 +26117,10 @@ var runEvidencePageSchema = external_exports.object({
   nextCursor: external_exports.string().min(1).optional()
 }).strict();
 var runRequestSchema = external_exports.union([inlineRunRequestSchema, inlineJourneyRequestSchema, followOnRunRequestSchema]);
+function requireExplicitProvider(request) {
+  if (!request.provider) throw new Error("Automatic provider selection has been accepted as a request contract but is not yet available in this execution path.");
+  return providerConfigSchema.parse(request.provider);
+}
 
 // src/application/run-operations.ts
 var resetConfirmation = "RESET SHEG DATASTORE";
@@ -26037,6 +26220,423 @@ function graphDecisionRange(arm) {
   return visit2(graph.entryNodeId);
 }
 
+// src/application/provider-selection.ts
+function estimateCost(entry, fit) {
+  if (entry.pricing.kind === "no-provider-invoice") return { kind: "no-provider-invoice", basis: "provider pricing contract" };
+  if (entry.pricing.kind === "published-rate" && fit && fit.status === "fits") {
+    return {
+      kind: "estimate",
+      amount: entry.pricing.amount * fit.tokens / 1e6,
+      currency: entry.pricing.currency,
+      basis: "published-rate estimate",
+      source: entry.pricing.source,
+      observedAt: entry.pricing.observedAt
+    };
+  }
+  return { kind: "unknown", basis: "unverified" };
+}
+function exclude(candidate, code, message) {
+  candidate.eligible = false;
+  candidate.exclusion = { code, message };
+}
+function selectProvider(input2) {
+  const entries = new Map(input2.catalogue.entries.map((entry) => [entry.id, entry]));
+  const candidates = input2.candidates.map((assessment) => {
+    const entry = entries.get(assessment.id);
+    if (!entry) return {
+      id: assessment.id,
+      eligible: false,
+      selected: false,
+      exclusion: { code: "unknown_provider", message: "The candidate is absent from the frozen provider catalogue." }
+    };
+    const candidate = {
+      id: entry.id,
+      provider: entry.provider,
+      eligible: true,
+      selected: false,
+      ...assessment.fit === void 0 ? {} : { fit: assessment.fit },
+      cost: assessment.cost ?? estimateCost(entry, assessment.fit)
+    };
+    if (!entry.enabled) exclude(candidate, "provider_disabled", "The provider is not explicitly enabled in the frozen catalogue.");
+    else if (input2.requiredCapabilities.some((capability) => !entry.capabilities.includes(capability))) exclude(candidate, "missing_capability", "The provider does not support every required capability.");
+    else if ((input2.questionTypes ?? [input2.questionType]).some((questionType) => !entry.questionTypes.includes(questionType))) {
+      const unsupported = (input2.questionTypes ?? [input2.questionType]).find((questionType) => !entry.questionTypes.includes(questionType));
+      exclude(candidate, "unsupported_question_type", `The provider does not support ${unsupported} questions.`);
+    } else if (assessment.ready === false) exclude(candidate, "provider_unavailable", "The configured provider is not currently ready.");
+    else if (assessment.ready !== true) exclude(candidate, "provider_readiness_unverified", "Current provider readiness was not established.");
+    else if (!assessment.fit || assessment.fit.status === "unavailable") exclude(candidate, "fit_unavailable", assessment.fit?.reason ?? "Provider fit could not be measured.");
+    else if (assessment.fit.status === "overflow") exclude(candidate, "provider_overflow", assessment.fit.reason ?? "The complete packet exceeds this provider\u2019s context limit.");
+    else if (!Number.isSafeInteger(assessment.plannedCalls) || assessment.plannedCalls < 1) exclude(candidate, "call_plan_invalid", "The candidate call plan is invalid.");
+    else if (assessment.plannedCalls > input2.remainingCalls) exclude(candidate, "call_allowance_exceeded", "The candidate plan exceeds the remaining study call allowance.");
+    return candidate;
+  });
+  const eligible = candidates.filter(({ eligible: fits }) => fits);
+  const unitOverride = input2.unitOverride ?? input2.unitOverrides?.[input2.unitId];
+  if (unitOverride) {
+    const pinned = eligible.find(({ id }) => id === unitOverride);
+    if (!pinned) return { candidates, decisionReason: "binding_unit_override_ineligible" };
+    pinned.selected = true;
+    return { selected: pinned, candidates, decisionReason: "binding_unit_override" };
+  }
+  if (eligible.length === 0) return { candidates, decisionReason: "no_eligible_provider" };
+  const requestOrder = input2.preferredOrder ?? [];
+  const savedOrder = input2.preferences.preferredOrder;
+  const requestMatch = requestOrder.map((id, index2) => ({ candidate: eligible.find((value) => value.id === id), index: index2 })).find(({ candidate }) => candidate);
+  const savedMatch = savedOrder.map((id, index2) => ({ candidate: eligible.find((value) => value.id === id), index: index2 })).find(({ candidate }) => candidate);
+  if (requestMatch?.candidate) {
+    requestMatch.candidate.preferenceRank = { source: "request", index: requestMatch.index };
+    requestMatch.candidate.selected = true;
+    return { selected: requestMatch.candidate, candidates, decisionReason: "request_preference" };
+  }
+  if (savedMatch?.candidate) {
+    savedMatch.candidate.preferenceRank = { source: "saved", index: savedMatch.index };
+    savedMatch.candidate.selected = true;
+    return { selected: savedMatch.candidate, candidates, decisionReason: "saved_user_preference" };
+  }
+  const local = eligible.find((candidate) => candidate.cost?.kind === "no-provider-invoice");
+  if (local) {
+    local.selected = true;
+    return { selected: local, candidates, decisionReason: "local_execution_without_provider_invoice" };
+  }
+  const hosted = eligible.filter((candidate) => candidate.cost?.kind !== "no-provider-invoice");
+  const currencies = new Set(hosted.filter((candidate) => candidate.cost?.kind === "estimate").map((candidate) => candidate.cost.currency));
+  let orderedHosted;
+  if (hosted.length && hosted.every((candidate) => candidate.cost?.kind === "estimate") && currencies.size === 1) {
+    orderedHosted = [...hosted].sort((left, right) => left.cost.amount - right.cost.amount || input2.catalogue.entries.findIndex(({ id }) => id === left.id) - input2.catalogue.entries.findIndex(({ id }) => id === right.id));
+    for (const candidate of orderedHosted) if (candidate.cost?.kind === "estimate") candidate.cost.basis = "published-rate estimate";
+  } else {
+    if (currencies.size > 1) for (const candidate of hosted) candidate.cost = { kind: "unknown", basis: "incomparable currency" };
+    orderedHosted = [...hosted].sort((left, right) => input2.catalogue.entries.findIndex(({ id }) => id === left.id) - input2.catalogue.entries.findIndex(({ id }) => id === right.id));
+  }
+  const selected = orderedHosted[0];
+  selected.selected = true;
+  return { selected, candidates, decisionReason: selected.cost?.kind === "estimate" ? "lowest_comparable_published_rate_estimate" : "stable_catalogue_order_cost_unverified" };
+}
+function selectProviderComparisonLock(input2) {
+  const memberIds = input2.members.map(({ unitId }) => unitId);
+  const treatmentDimensions = [
+    ...input2.equality.provider === "vary" ? ["provider"] : [],
+    ...input2.equality.model === "vary" ? ["model"] : []
+  ];
+  if (input2.members.length < 2 || new Set(memberIds).size !== memberIds.length) {
+    return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "comparison_members_invalid", candidates: [] };
+  }
+  if (treatmentDimensions.length) {
+    const dimensions = (entry) => ({ provider: providerConfigurationIdentity(entry.provider), model: providerModelIdentity(entry.provider) });
+    const shared = ["provider", "model"].filter((dimension) => input2.equality[dimension] === "same");
+    const first2 = input2.members[0];
+    const keys = [...new Set(first2.catalogue.entries.map((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension]))))];
+    const viableGroups = [];
+    for (const key of keys) {
+      const groupEntries = first2.catalogue.entries.filter((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension])) === key);
+      const selections = input2.members.map((member) => {
+        if (member.catalogue.revision !== first2.catalogue.revision || JSON.stringify(member.catalogue.entries) !== JSON.stringify(first2.catalogue.entries)) {
+          return { unitId: member.unitId, selection: { candidates: [], decisionReason: "comparison_catalogue_mismatch" } };
+        }
+        const candidateIds = new Set(groupEntries.map(({ id }) => id));
+        return { unitId: member.unitId, selection: selectProvider({ ...member, candidates: member.candidates.filter(({ id }) => candidateIds.has(id)) }) };
+      });
+      if (selections.every(({ selection }) => selection.selected)) {
+        const preferencePenalty = selections.reduce((sum2, { selection }) => sum2 + (selection.decisionReason === "request_preference" ? 0 : selection.decisionReason === "saved_user_preference" ? 1 : 2), 0);
+        const variedProviderCount = input2.equality.provider === "vary" ? new Set(selections.map(({ selection }) => {
+          const selected = first2.catalogue.entries.find(({ id }) => id === selection.selected.id);
+          return dimensions(selected).provider;
+        })).size : 0;
+        const variedModelCount = input2.equality.model === "vary" ? new Set(selections.map(({ selection }) => {
+          const selected = first2.catalogue.entries.find(({ id }) => id === selection.selected.id);
+          return dimensions(selected).model;
+        })).size : 0;
+        viableGroups.push({ selections, key, rank: [preferencePenalty, -(variedProviderCount + variedModelCount)] });
+      }
+    }
+    viableGroups.sort((left, right) => left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || keys.indexOf(left.key) - keys.indexOf(right.key));
+    const chosenGroup = viableGroups[0];
+    if (chosenGroup) {
+      const selectedIds = chosenGroup.selections.map(({ selection }) => selection.selected.id);
+      const plannedCalls = input2.members.reduce((sum2, member, index2) => sum2 + (member.candidates.find(({ id }) => id === selectedIds[index2])?.plannedCalls ?? 0), 0);
+      const remainingCalls2 = Math.min(...input2.members.map(({ remainingCalls: remaining }) => remaining));
+      if (plannedCalls > remainingCalls2) return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "comparison_call_allowance_exceeded", candidates: [], members: chosenGroup.selections };
+      const displayCandidates = [...new Set(selectedIds)].map((id) => {
+        const entry = first2.catalogue.entries.find((candidate) => candidate.id === id);
+        const fit = chosenGroup.selections.find(({ selection }) => selection.selected?.id === id)?.selection.selected?.fit;
+        const cost = aggregateCandidateCost(input2.members.map((member) => member.candidates.find((candidate) => candidate.id === id)?.cost));
+        return {
+          id,
+          provider: entry.provider,
+          eligible: true,
+          selected: selectedIds[0] === id,
+          ...fit === void 0 ? {} : { fit },
+          ...cost === void 0 ? {} : { cost }
+        };
+      });
+      return {
+        id: input2.id,
+        memberIds,
+        treatmentDimensions,
+        decisionReason: "comparison_treatment_dimensions_locked",
+        selected: displayCandidates.find(({ id: candidateId }) => candidateId === selectedIds[0]),
+        candidates: displayCandidates,
+        members: chosenGroup.selections
+      };
+    }
+    return {
+      id: input2.id,
+      memberIds,
+      treatmentDimensions,
+      decisionReason: "comparison_treatment_ineligible",
+      candidates: [],
+      members: input2.members.map((member) => ({ unitId: member.unitId, selection: { candidates: [], decisionReason: "no_common_comparison_lock" } }))
+    };
+  }
+  const pins = [...new Set(input2.members.map((member) => member.unitOverride ?? member.unitOverrides?.[member.unitId]).filter((id) => id !== void 0))];
+  if (pins.length > 1) return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "binding_comparison_pins_conflict", candidates: [] };
+  const first = input2.members[0];
+  const catalogue = first.catalogue;
+  const requiredCapabilities = [...new Set(input2.members.flatMap(({ requiredCapabilities: required3 }) => required3))];
+  const questionTypes = [...new Set(input2.members.flatMap(({ questionTypes: types, questionType }) => types ?? [questionType]))];
+  const candidates = catalogue.entries.map((entry) => {
+    const memberSelections = input2.members.map((member) => selectProvider({ ...member, unitOverride: entry.id }));
+    const eligibleForAll = memberSelections.every((selection) => selection.selected?.id === entry.id) && input2.members.every(({ catalogue: memberCatalogue }) => memberCatalogue.revision === catalogue.revision && JSON.stringify(memberCatalogue.entries) === JSON.stringify(catalogue.entries));
+    const fits = memberSelections.map(({ selected }) => selected?.fit);
+    const rejectedFit = memberSelections.map(({ candidates: memberCandidates }) => memberCandidates.find(({ id }) => id === entry.id)?.fit).find((fit2) => fit2?.status !== "fits");
+    const fit = eligibleForAll && fits.every((value) => value?.status === "fits") ? { ...fits[0], tokens: fits.reduce((sum2, value) => sum2 + value.tokens, 0), details: { lockMembers: fits.length, totalInputTokens: fits.reduce((sum2, value) => sum2 + value.tokens, 0) } } : rejectedFit && rejectedFit.status !== "fits" ? rejectedFit : void 0;
+    const plans = input2.members.map((member) => member.candidates.find(({ id }) => id === entry.id));
+    const plannedCalls = plans.every((plan) => plan !== void 0) ? plans.reduce((sum2, plan) => sum2 + plan.plannedCalls, 0) : 0;
+    const cost = aggregateCandidateCost(plans.map((plan) => plan?.cost));
+    const ready = eligibleForAll ? true : memberSelections.every((selection) => selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== "provider_unavailable" && selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== "provider_readiness_unverified");
+    return { id: entry.id, ready, ...fit === void 0 ? {} : { fit }, plannedCalls, ...cost === void 0 ? {} : { cost } };
+  });
+  const remainingCalls = Math.min(...input2.members.map(({ remainingCalls: remaining }) => remaining));
+  const selectionInput = { ...first, requiredCapabilities, questionType: questionTypes[0], questionTypes, remainingCalls, candidates };
+  delete selectionInput.unitOverride;
+  delete selectionInput.unitOverrides;
+  if (pins[0]) selectionInput.unitOverride = pins[0];
+  const result = selectProvider(selectionInput);
+  return {
+    id: input2.id,
+    memberIds,
+    treatmentDimensions,
+    decisionReason: result.decisionReason,
+    ...result.selected === void 0 ? {} : { selected: result.selected },
+    candidates: result.candidates
+  };
+}
+function aggregateCandidateCost(costs) {
+  if (costs.some((cost) => cost === void 0)) return void 0;
+  if (costs.every((cost) => cost?.kind === "no-provider-invoice")) return { kind: "no-provider-invoice", basis: "provider pricing contract" };
+  const estimates = costs.filter((cost) => cost?.kind === "estimate");
+  if (estimates.length === costs.length && new Set(estimates.map(({ currency }) => currency)).size === 1) {
+    const first = estimates[0];
+    return { ...first, amount: estimates.reduce((sum2, { amount }) => sum2 + amount, 0), basis: "published-rate estimate" };
+  }
+  return { kind: "unknown", basis: new Set(estimates.map(({ currency }) => currency)).size > 1 ? "incomparable currency" : "unverified" };
+}
+
+// src/application/provider-batch-planning.ts
+function missingFit(provider, kind, modelIdentity) {
+  return {
+    provider: kind,
+    status: "unavailable",
+    method: "unavailable",
+    modelIdentity,
+    tokenCount: "estimated",
+    tokens: 0,
+    contextLimit: null,
+    headroomTokens: null,
+    effectiveLimit: null,
+    details: {},
+    reason: provider.measure || provider.measureBatch ? "provider-measurement-failed" : "provider-measurement-unavailable"
+  };
+}
+function fitProblem(respondentId, fit) {
+  if (fit.status === "fits") return void 0;
+  return {
+    code: fit.status === "overflow" ? "context_overflow" : "context_unverified",
+    respondentId,
+    message: fit.reason ?? `Provider context ${fit.status}.`
+  };
+}
+async function assessProviderBatchPlan(input2) {
+  const { group, provider, providerKind, modelIdentity } = input2;
+  const { groupId, contextId, respondentId, state, questions, packets } = group;
+  void groupId;
+  void contextId;
+  if (questions.length !== packets.length || questions.some((question, index2) => question.id !== packets[index2]?.question.id)) {
+    throw new Error("Provider batch questions must match the ordered frozen packets.");
+  }
+  const materialsByQuestion = new Map(packets.map((packet) => [packet.question.id, packet.visualMaterials ?? []]));
+  const visualFor = (batchQuestions) => {
+    const byId = /* @__PURE__ */ new Map();
+    for (const question of batchQuestions) for (const material of materialsByQuestion.get(question.id) ?? []) byId.set(material.id, material);
+    return [...byId.values()];
+  };
+  const batchRequest = (selected) => {
+    const visualMaterials = visualFor(selected);
+    return { state, questions: [...selected], ...visualMaterials.length ? { visualMaterials } : {} };
+  };
+  const batches = [];
+  const fits = [];
+  const problems = [];
+  const record2 = (ids, fit) => {
+    fits.push({ questionIds: ids, fit });
+    const problem = fitProblem(respondentId, fit);
+    if (problem) problems.push(problem);
+  };
+  const measureOne = async (index2) => {
+    if (!provider.measure) return missingFit(provider, providerKind, modelIdentity);
+    try {
+      return await provider.measure(packets[index2]);
+    } catch {
+      return { ...missingFit(provider, providerKind, modelIdentity), reason: "provider-measurement-failed" };
+    }
+  };
+  const singleton = input2.batching === "singleton" || !provider.measureBatch || !provider.decideBatch;
+  if (singleton) {
+    for (let index2 = 0; index2 < questions.length; index2 += 1) {
+      const question = questions[index2];
+      const measured = await measureOne(index2);
+      record2([question.id], measured);
+      batches.push(batchRequest([question]));
+    }
+  } else {
+    const measureBatch = async (batchQuestions) => {
+      try {
+        return await provider.measureBatch(batchRequest(batchQuestions));
+      } catch {
+        return { ...missingFit(provider, providerKind, modelIdentity), reason: "provider-measurement-failed" };
+      }
+    };
+    let start = 0;
+    while (start < questions.length) {
+      let end = start + 1;
+      let lastFit;
+      while (end <= questions.length) {
+        const candidate = questions.slice(start, end);
+        const measured = await measureBatch(candidate);
+        if (measured.status === "unavailable") {
+          record2(candidate.map(({ id }) => id), measured);
+          return finish();
+        }
+        if (measured.status === "overflow") {
+          if (!lastFit) record2(candidate.map(({ id }) => id), measured);
+          break;
+        }
+        lastFit = { end, fit: measured };
+        end += 1;
+      }
+      if (!lastFit) return finish();
+      const selected = questions.slice(start, lastFit.end);
+      batches.push(batchRequest(selected));
+      record2(selected.map(({ id }) => id), lastFit.fit);
+      start = lastFit.end;
+    }
+  }
+  return finish();
+  function finish() {
+    const tokens = fits.filter(({ fit: measured }) => measured.status === "fits").map(({ fit: measured }) => measured.tokens);
+    const repeatedInputTokens = tokens.length === batches.length ? tokens.reduce((sum2, value) => sum2 + value, 0) : null;
+    const pricing = input2.pricing;
+    let cost;
+    if (pricing?.kind === "no-provider-invoice") cost = { kind: "no-provider-invoice", basis: "provider pricing contract" };
+    else if (pricing?.kind === "published-rate" && repeatedInputTokens !== null) {
+      cost = {
+        kind: "estimate",
+        amount: pricing.amount * repeatedInputTokens / 1e6,
+        currency: pricing.currency,
+        basis: "published-rate estimate",
+        source: pricing.source,
+        observedAt: pricing.observedAt
+      };
+    } else cost = { kind: "unknown", basis: "unverified" };
+    const minimumCalls = batches.length;
+    const remaining = input2.remainingCalls ?? Number.MAX_SAFE_INTEGER;
+    return {
+      batches,
+      questionIdsByBatch: batches.map(({ questions: selected }) => selected.map(({ id }) => id)),
+      fits,
+      problems,
+      minimumCalls,
+      repeatedInputTokens,
+      cost,
+      exceedsRemainingCalls: minimumCalls > remaining
+    };
+  }
+}
+async function assessAndSelectProviderBatches(input2) {
+  const plans = Object.fromEntries(await Promise.all(input2.candidates.map(async (candidate) => {
+    if (!candidate.ready) return [candidate.id, {
+      batches: [],
+      questionIdsByBatch: [],
+      fits: [],
+      problems: [],
+      minimumCalls: 1,
+      repeatedInputTokens: null,
+      cost: { kind: "unknown", basis: "unverified" },
+      exceedsRemainingCalls: false
+    }];
+    const entry = input2.catalogue.entries.find(({ id }) => id === candidate.id);
+    const plan = await assessProviderBatchPlan({
+      group: input2.group,
+      provider: candidate.provider,
+      providerKind: candidate.providerKind,
+      modelIdentity: candidate.modelIdentity,
+      batching: input2.batching,
+      remainingCalls: input2.remainingCalls,
+      ...entry ? { pricing: entry.pricing } : {}
+    });
+    return [candidate.id, plan];
+  })));
+  const candidates = input2.candidates.map((candidate) => {
+    const plan = plans[candidate.id];
+    const fit = aggregateFit(input2.group, plan, candidate.providerKind, candidate.modelIdentity);
+    return { id: candidate.id, ready: candidate.ready, fit, plannedCalls: plan.minimumCalls, cost: plan.cost };
+  });
+  const assessed = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const completeCandidates = input2.catalogue.entries.map((entry) => assessed.get(entry.id) ?? { id: entry.id, ready: false, plannedCalls: 1 });
+  const selectionInput = {
+    catalogue: input2.catalogue,
+    preferences: input2.preferences,
+    unitId: input2.unitId,
+    requiredCapabilities: input2.requiredCapabilities,
+    questionType: input2.questionType,
+    ...input2.questionTypes === void 0 ? {} : { questionTypes: input2.questionTypes },
+    remainingCalls: input2.remainingCalls,
+    ...input2.preferredOrder === void 0 ? {} : { preferredOrder: input2.preferredOrder },
+    ...input2.unitOverride === void 0 ? {} : { unitOverride: input2.unitOverride },
+    ...input2.unitOverrides === void 0 ? {} : { unitOverrides: input2.unitOverrides }
+  };
+  return { selection: selectProvider({ ...selectionInput, candidates: completeCandidates }), plans };
+}
+function aggregateFit(group, plan, provider, modelIdentity) {
+  const selectedFits = plan.questionIdsByBatch.map((ids) => plan.fits.find(({ questionIds }) => questionIds.length === ids.length && questionIds.every((id, index2) => id === ids[index2]))?.fit);
+  const covered = plan.questionIdsByBatch.flat();
+  const complete = covered.length === group.questions.length && group.questions.every((question, index2) => covered[index2] === question.id);
+  if (complete && selectedFits.length > 0 && selectedFits.every((fit) => fit?.status === "fits")) {
+    const measured = selectedFits;
+    const first = measured[0];
+    return {
+      ...first,
+      tokens: plan.repeatedInputTokens ?? measured.reduce((sum2, fit) => sum2 + fit.tokens, 0),
+      details: { plannedCalls: plan.minimumCalls, perBatchTokens: measured.map(({ tokens }) => tokens).join(",") }
+    };
+  }
+  const rejected = plan.fits.find(({ fit }) => fit.status !== "fits")?.fit;
+  if (rejected) return rejected;
+  return {
+    provider,
+    status: "unavailable",
+    method: "unavailable",
+    modelIdentity,
+    tokenCount: "estimated",
+    tokens: 0,
+    contextLimit: null,
+    headroomTokens: null,
+    effectiveLimit: null,
+    details: {},
+    reason: "provider-batch-plan-incomplete"
+  };
+}
+
 // src/application/run-inspection.ts
 function mergeMaterials(...collections) {
   const merged = /* @__PURE__ */ new Map();
@@ -26056,12 +26656,17 @@ function validateFollowOnMaterialChoices(request, materials, evaluationId) {
     for (const [optionId, materialId] of Object.entries(question.materialOptions)) {
       const candidate = byId.get(materialId);
       if (!candidate) throw new RunProblemError("follow_on_material_not_found", `Material ${materialId} is not available in evaluation ${evaluationId}.`);
+      if (isImageMaterial(candidate)) {
+        if (question.visual?.mode !== "pixels" || !question.visual.materialIds.includes(materialId)) throw new RunProblemError("follow_on_material_mismatch", `Image material ${materialId} must be bound to the follow-on pixel question in evaluation ${evaluationId}.`);
+        continue;
+      }
       if (candidate.sourceId === void 0 || candidate.sourceSha256 === void 0) throw new RunProblemError("follow_on_material_unprovenanced", `Material ${materialId} has no source identity and digest in evaluation ${evaluationId}.`);
       if (question.options[optionId] !== candidate.text) throw new RunProblemError("follow_on_material_mismatch", `Choice option ${optionId} does not exactly match material ${materialId} in evaluation ${evaluationId}.`);
     }
   }
 }
 async function prepareFollowOnRun(request, source, provider) {
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   const fits = [];
   const problems = [];
@@ -26102,12 +26707,20 @@ async function prepareFollowOnRun(request, source, provider) {
     const sourceMaterials = mergeMaterials(turn.materials ?? [], turn.packet.state.encounteredItems);
     const catalog = mergeMaterials(sourceMaterials, request.material ?? []);
     validateFollowOnMaterialChoices(request, catalog, turn.evaluationId);
+    const visualMaterialsFor = (question) => (question.visual?.materialIds ?? []).map((id) => {
+      const item = catalog.find((candidate) => candidate.id === id);
+      if (!item) throw new RunProblemError("follow_on_material_not_found", `Visual image ${id} is not available in evaluation ${turn.evaluationId}.`);
+      if (!isImageMaterial(item)) throw new RunProblemError("follow_on_material_mismatch", `Visual binding ${id} is not an image in evaluation ${turn.evaluationId}.`);
+      return { id: item.id, altText: item.altText, asset: item.asset, ...item.caption === void 0 ? {} : { caption: item.caption } };
+    });
     if (request.context.materialIds) {
       const referencedMaterial = [];
       for (const id of request.context.materialIds) {
         const item = catalog.find((candidate) => candidate.id === id);
         if (!item) throw new RunProblemError("follow_on_material_not_found", `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
-        referencedMaterial.push(item);
+        if (isImageMaterial(item)) {
+          if (!request.questions.some((question) => question.visual?.materialIds.includes(id))) throw new RunProblemError("follow_on_material_mismatch", `Image material ${id} must be bound to a follow-on visual question in evaluation ${turn.evaluationId}.`);
+        } else referencedMaterial.push(item);
       }
       selectedMaterial = [...referencedMaterial, ...selectedMaterial];
     }
@@ -26123,16 +26736,17 @@ async function prepareFollowOnRun(request, source, provider) {
           mode: request.context.mode,
           question,
           ...request.context.mode === "recorded" ? {} : { material: selectedMaterial },
+          visualMaterials: visualMaterialsFor(question),
           ...rawResult ? { result: rawResult } : {}
         }));
       }
     } catch (error62) {
       throw new RunProblemError("follow_on_context_invalid", error62 instanceof Error ? error62.message : "Follow-on context could not be prepared.");
     }
-    const modelIdentity = request.provider.kind === "jev" || request.provider.kind === "clef" ? request.provider.model : request.provider.checkpoint;
+    const modelIdentity = configured.kind === "jev" || configured.kind === "clef" ? configured.model : configured.checkpoint;
     const contextId = randomUUID();
     const groupId = randomUUID();
-    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, request.provider.kind, modelIdentity);
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, configured.kind, modelIdentity, request.providerSelection?.batching ?? "automatic");
     minimumCalls += planned.batches.length;
     fits.push(...planned.fits);
     problems.push(...planned.problems);
@@ -26149,7 +26763,7 @@ async function prepareFollowOnRun(request, source, provider) {
       evaluations2.push(evaluation);
       return evaluation;
     });
-    const linkedMaterialIds = new Set(request.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
+    const linkedMaterialIds = new Set(request.questions.flatMap((question) => [...question.visual?.materialIds ?? [], ...question.type === "choice" ? Object.values(question.materialOptions ?? []) : []]));
     const linkedMaterials = [...linkedMaterialIds].map((id) => {
       const item = catalog.find((candidate) => candidate.id === id);
       if (!item) throw new RunProblemError("follow_on_material_not_found", `Material ${id} is not available in evaluation ${turn.evaluationId}.`);
@@ -26325,14 +26939,15 @@ async function prepareRun(input2, provider) {
       fits: []
     } };
   }
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   const evaluations2 = [];
   const preparedGroups = [];
   const fits = [];
   const problems = [];
   let minimumCalls = 0;
-  const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
+  const kind = configured.kind;
+  const modelIdentity = kind === "jev" || kind === "clef" ? configured.model : configured.checkpoint;
   for (const respondent of request.respondents) {
     const respondentProfile = {
       intent: respondent.intent,
@@ -26357,7 +26972,7 @@ async function prepareRun(input2, provider) {
     const contextId = randomUUID();
     const groupId = randomUUID();
     preparedGroups.push({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questionIds: request.questions.map(({ id }) => id) });
-    const planned = await planQuestionBatches({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questions: request.questions, packets }, provider, kind, modelIdentity);
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questions: request.questions, packets }, provider, kind, modelIdentity, request.providerSelection?.batching ?? "automatic");
     minimumCalls += planned.batches.length;
     fits.push(...planned.fits);
     problems.push(...planned.problems);
@@ -26393,80 +27008,429 @@ async function prepareRun(input2, provider) {
   };
   return { inspection, prepared };
 }
-async function planQuestionBatches(group, provider, kind, modelIdentity) {
-  const { groupId, contextId, respondentId, state, questions, packets } = group;
-  const batches = [];
-  const fits = [];
+async function prepareAutomaticallySelectedPoll(request, settings, providerCandidates) {
+  const compilerFingerprint = promptContractHash();
+  const batching = request.providerSelection?.batching ?? "automatic";
+  const groups = [];
+  const evaluations2 = [];
+  const preparedGroups = [];
   const problems = [];
-  const materialsByQuestion = new Map(packets.map((packet) => [packet.question.id, packet.visualMaterials ?? []]));
-  const batchVisualMaterials = (batchQuestions) => {
-    const byId = /* @__PURE__ */ new Map();
-    for (const question of batchQuestions) for (const material of materialsByQuestion.get(question.id) ?? []) byId.set(material.id, material);
-    return [...byId.values()];
-  };
-  const measureOne = async (index2) => {
-    if (!provider.measure) return missingMeasureFit2(provider, kind, modelIdentity);
-    try {
-      return await provider.measure(packets[index2]);
-    } catch {
-      return { ...missingMeasureFit2(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
-    }
-  };
-  const measureBatch = async (batchQuestions) => {
-    if (!provider.measureBatch) return missingMeasureFit2(provider, kind, modelIdentity);
-    try {
-      const visualMaterials = batchVisualMaterials(batchQuestions);
-      return await provider.measureBatch({ state, questions: [...batchQuestions], ...visualMaterials.length ? { visualMaterials } : {} });
-    } catch {
-      return { ...missingMeasureFit2(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
-    }
-  };
-  const recordFit = (questionIds, fit) => {
-    fits.push({ respondentId, groupId, contextId, questionIds, fit });
-    const problem = problemForFit(respondentId, fit);
-    if (problem) problems.push(problem);
-  };
-  if (!provider.measureBatch || !provider.decideBatch) {
-    for (let index2 = 0; index2 < questions.length; index2 += 1) {
-      const question = questions[index2];
-      const fit = await measureOne(index2);
-      recordFit([question.id], fit);
-      const visualMaterials = batchVisualMaterials([question]);
-      batches.push({ state, questions: [question], ...visualMaterials.length ? { visualMaterials } : {} });
-    }
-    return { batches, fits, problems };
+  for (const respondent of request.respondents) {
+    const respondentProfile = {
+      intent: respondent.intent,
+      context: respondent.context,
+      desired_outcome: respondent.desired_outcome,
+      engagement_cues: respondent.engagement_cues,
+      friction_cues: respondent.friction_cues
+    };
+    const materialOrder = request.material.map(({ id }) => id);
+    const packets = request.questions.map((question) => {
+      const bound = new Set(question.visual?.materialIds ?? []);
+      const visualMaterials = request.material.flatMap((item) => isImageMaterial(item) && bound.has(item.id) ? [{ id: item.id, asset: item.asset, altText: item.altText, ...item.caption === void 0 ? {} : { caption: item.caption } }] : []);
+      return compileDecisionRequest({
+        respondentProfile,
+        encounteredItems: request.material.filter((item) => !isImageMaterial(item)).map(({ id, text: text2 }) => ({ id, text: text2 })),
+        materialOrder,
+        visualMaterials,
+        trajectory: emptyTrajectory(),
+        question
+      });
+    });
+    const groupId = randomUUID();
+    const contextId = randomUUID();
+    const questionIds = request.questions.map(({ id }) => id);
+    const unitId = `${respondent.id}/${questionIds.join("+")}`;
+    const group = { groupId, contextId, respondentId: respondent.id, state: packets[0].state, questions: request.questions, packets };
+    const requiredCapabilities = [.../* @__PURE__ */ new Set([
+      "text",
+      ...request.providerSelection?.requiredCapabilities ?? [],
+      ...packets.some(({ visualMaterials: visual }) => (visual?.length ?? 0) > 0) ? ["pixels"] : []
+    ])];
+    const explicitPins = [...new Set([request.providerSelection?.unitOverrides?.[unitId], ...questionIds.flatMap((questionId) => [request.providerSelection?.unitOverrides?.[`${respondent.id}/${questionId}`], request.providerSelection?.unitOverrides?.[questionId]])].filter((id) => id !== void 0))];
+    if (explicitPins.length > 1) problems.push({ code: "comparison_unit_pins_conflict", respondentId: respondent.id, message: `Questions in shared respondent group ${unitId} have conflicting provider pins.` });
+    const preferredOrder = request.providerSelection?.preferredOrder;
+    const assessed = await assessAndSelectProviderBatches({
+      catalogue: settings.catalogue,
+      preferences: settings.preferences,
+      unitId,
+      requiredCapabilities,
+      questionType: request.questions[0].type,
+      questionTypes: [...new Set(request.questions.map(({ type }) => type))],
+      remainingCalls: request.maxCalls,
+      group,
+      candidates: providerCandidates,
+      batching,
+      ...preferredOrder === void 0 ? {} : { preferredOrder },
+      ...explicitPins[0] === void 0 ? {} : { unitOverride: explicitPins[0] }
+    });
+    const inputCandidates = assessed.selection.candidates.map((candidate) => ({
+      id: candidate.id,
+      ready: providerCandidates.some((provider) => provider.id === candidate.id && provider.ready),
+      ...candidate.fit === void 0 ? {} : { fit: candidate.fit },
+      plannedCalls: assessed.plans[candidate.id]?.minimumCalls ?? 1,
+      ...assessed.plans[candidate.id] === void 0 ? {} : { cost: assessed.plans[candidate.id].cost }
+    }));
+    const input2 = {
+      catalogue: settings.catalogue,
+      preferences: settings.preferences,
+      unitId,
+      requiredCapabilities,
+      questionType: request.questions[0].type,
+      questionTypes: [...new Set(request.questions.map(({ type }) => type))],
+      candidates: inputCandidates,
+      remainingCalls: request.maxCalls,
+      ...preferredOrder === void 0 ? {} : { preferredOrder },
+      ...explicitPins[0] === void 0 ? {} : { unitOverride: explicitPins[0] }
+    };
+    groups.push({ ...group, unitId, input: input2, plans: assessed.plans });
+    preparedGroups.push({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questionIds });
+    for (const packet of packets) evaluations2.push({
+      groupId,
+      evaluationId: randomUUID(),
+      contextId,
+      respondentId: respondent.id,
+      questionId: packet.question.id,
+      packet,
+      packetFingerprint: hashCanonical({ packet, compilerFingerprint })
+    });
   }
-  let start = 0;
-  while (start < questions.length) {
-    let end = start + 1;
-    let lastFit;
-    while (end <= questions.length) {
-      const candidate = questions.slice(start, end);
-      const fit = await measureBatch(candidate);
-      if (fit.status === "unavailable") {
-        recordFit(candidate.map(({ id }) => id), fit);
-        return { batches, fits, problems };
+  const selectionByGroup = /* @__PURE__ */ new Map();
+  const comparisonLocks = request.providerSelection?.comparisonLocks ?? [];
+  const lockByGroup = /* @__PURE__ */ new Map();
+  const groupFor = (respondentId, questionId) => groups.find((group) => group.respondentId === respondentId && group.questions.some((question) => question.id === questionId));
+  for (const lock of comparisonLocks) for (const member of lock.members) {
+    if (member.branchId) continue;
+    const group = groupFor(member.respondentId, member.questionId);
+    if (!group) continue;
+    if (lockByGroup.has(group.groupId) && lockByGroup.get(group.groupId)?.id !== lock.id) {
+      problems.push({ code: "comparison_unit_in_multiple_locks", respondentId: member.respondentId, message: `Respondent group ${group.unitId} belongs to more than one provider comparison.` });
+    } else lockByGroup.set(group.groupId, lock);
+  }
+  const fits = [];
+  let remainingCalls = request.maxCalls;
+  for (const group of groups) {
+    if (selectionByGroup.has(group.groupId)) continue;
+    const lock = lockByGroup.get(group.groupId);
+    const lockGroups = lock ? [...new Set(lock.members.flatMap((member) => member.branchId ? [] : [groupFor(member.respondentId, member.questionId)?.groupId]).filter((id) => id !== void 0))].map((id) => groups.find((candidate) => candidate.groupId === id)).filter(Boolean) : [];
+    if (lock && lockGroups.length > 1) {
+      const lockResult = selectProviderComparisonLock({
+        id: lock.id,
+        equality: lock.equality,
+        members: lockGroups.map((member) => ({ ...member.input, remainingCalls }))
+      });
+      const allMemberSelections = lockGroups.map((member) => {
+        const planned = lockResult.members?.find(({ unitId: selectedUnit }) => selectedUnit === member.unitId)?.selection;
+        return { member, result: planned ?? (lockResult.selected ? selectProvider({ ...member.input, remainingCalls, unitOverride: lockResult.selected.id }) : void 0) };
+      });
+      if (allMemberSelections.every(({ result }) => result?.selected)) {
+        const selectedCalls = allMemberSelections.reduce((sum2, { member, result }) => sum2 + (member.plans[result.selected.id]?.minimumCalls ?? 0), 0);
+        if (selectedCalls > remainingCalls) {
+          problems.push({ code: "comparison_call_allowance_exceeded", message: `Comparison ${lock.id} exceeds the remaining study-call allowance.` });
+          for (const { member, result } of allMemberSelections) selectionByGroup.set(member.groupId, { result, lockId: lock.id });
+          continue;
+        }
+        for (const { member, result } of allMemberSelections) {
+          selectionByGroup.set(member.groupId, { result, lockId: lock.id });
+          const plan2 = member.plans[result.selected.id];
+          remainingCalls -= plan2.minimumCalls;
+          for (const measured of plan2.fits) fits.push({
+            respondentId: member.respondentId,
+            groupId: member.groupId,
+            contextId: member.contextId,
+            questionIds: measured.questionIds,
+            fit: measured.fit
+          });
+        }
+        continue;
       }
-      if (fit.status === "overflow") {
-        if (!lastFit) recordFit(candidate.map(({ id }) => id), fit);
-        break;
+      if (!lockResult.selected && !lockResult.members?.some(({ selection }) => selection.selected)) {
+        problems.push({ code: lockResult.decisionReason, message: `No common eligible provider satisfies comparison ${lock.id}.` });
+        for (const member of lockGroups) selectionByGroup.set(member.groupId, { result: { candidates: lockResult.candidates, decisionReason: lockResult.decisionReason }, lockId: lock.id });
+      } else if (!allMemberSelections.every(({ result }) => result?.selected)) {
+        problems.push({ code: lockResult.decisionReason, message: `No common eligible provider satisfies every known member of comparison ${lock.id}.` });
+        for (const { member, result } of allMemberSelections) selectionByGroup.set(member.groupId, { result: result ?? { candidates: [], decisionReason: lockResult.decisionReason }, lockId: lock.id });
       }
-      lastFit = { end, fit };
-      end += 1;
+    } else {
+      const result = selectProvider({ ...group.input, remainingCalls });
+      selectionByGroup.set(group.groupId, { result, ...lock === void 0 ? {} : { lockId: lock.id } });
     }
-    if (lastFit) {
-      const selected = questions.slice(start, lastFit.end);
-      const visualMaterials = batchVisualMaterials(selected);
-      batches.push({ state, questions: [...selected], ...visualMaterials.length ? { visualMaterials } : {} });
-      recordFit(selected.map(({ id }) => id), lastFit.fit);
-      start = lastFit.end;
+    const resolved = selectionByGroup.get(group.groupId);
+    const selected = resolved?.result.selected;
+    if (!selected) {
+      const reasons = (resolved?.result.candidates ?? []).filter(({ exclusion }) => exclusion).map(({ id, exclusion }) => `${id}: ${exclusion.code}`).join(", ");
+      if (!problems.some((problem) => problem.respondentId === group.respondentId && problem.code === (resolved?.result.decisionReason ?? "no_eligible_provider"))) {
+        problems.push({
+          code: resolved?.result.decisionReason ?? "no_eligible_provider",
+          respondentId: group.respondentId,
+          message: `No provider is eligible for ${group.unitId}.${reasons ? ` ${reasons}` : ""}`
+        });
+      }
       continue;
     }
-    return { batches, fits, problems };
+    const plan = group.plans[selected.id];
+    if (!plan || plan.minimumCalls > remainingCalls) {
+      problems.push({ code: "insufficient_call_limit", respondentId: group.respondentId, message: `Selected provider plan for ${group.unitId} exceeds the remaining study-call allowance.` });
+      continue;
+    }
+    remainingCalls -= plan.minimumCalls;
+    for (const measured of plan.fits) fits.push({
+      respondentId: group.respondentId,
+      groupId: group.groupId,
+      contextId: group.contextId,
+      questionIds: measured.questionIds,
+      fit: measured.fit
+    });
   }
-  return { batches, fits, problems };
+  const minimumCalls = request.maxCalls - remainingCalls;
+  if (problems.length === 0 && groups.length !== selectionByGroup.size) problems.push({ code: "provider_selection_incomplete", message: "One or more known respondent groups did not receive an initial provider choice." });
+  const initialChoices = groups.flatMap((group) => {
+    const resolved = selectionByGroup.get(group.groupId);
+    const selected = resolved?.result.selected;
+    if (!selected) return [];
+    const entry = settings.catalogue.entries.find(({ id }) => id === selected.id);
+    if (!entry) return [];
+    const candidateEvidence = resolved.result.candidates.map((candidate) => ({
+      id: candidate.id,
+      eligible: candidate.eligible,
+      selected: candidate.selected,
+      ...candidate.fit === void 0 ? {} : { fit: candidate.fit },
+      ...candidate.cost === void 0 ? {} : { cost: candidate.cost },
+      ...candidate.exclusion === void 0 ? {} : { exclusion: candidate.exclusion },
+      ...candidate.preferenceRank === void 0 ? {} : { preferenceRank: candidate.preferenceRank }
+    }));
+    return group.questions.map((question) => ({
+      respondentId: group.respondentId,
+      questionId: question.id,
+      providerId: selected.id,
+      modelIdentity: providerModelIdentity(entry.provider),
+      ...resolved?.lockId === void 0 ? {} : { comparisonLockId: resolved.lockId },
+      decisionReason: resolved.result.decisionReason,
+      candidates: candidateEvidence
+    }));
+  });
+  const inspection = { valid: problems.length === 0, respondentCount: request.respondents.length, minimumCalls, problems, fits, initialChoices };
+  if (!inspection.valid) return { inspection };
+  return { inspection, prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations: evaluations2, groups: preparedGroups } };
+}
+async function prepareAutomaticallySelectedJourney(request, settings, providerCandidates) {
+  const compilerFingerprint = promptContractHash();
+  let callBounds;
+  try {
+    callBounds = estimateRunDecisionCalls([request.journey], request.respondents);
+  } catch (error62) {
+    return { inspection: {
+      valid: false,
+      respondentCount: request.respondents.length,
+      minimumCalls: 0,
+      problems: [{ code: "invalid_journey", message: error62 instanceof Error ? error62.message : "Journey routes are invalid." }],
+      fits: []
+    } };
+  }
+  const problems = [];
+  const warnings = [];
+  if (request.maxCalls < callBounds.minimumDecisionCalls) problems.push({ code: "insufficient_call_limit", message: `maxCalls (${request.maxCalls}) is below the journey minimum (${callBounds.minimumDecisionCalls}).` });
+  else if (request.maxCalls < callBounds.maximumDecisionCalls) warnings.push({ code: "call_limit_may_stop_journey", message: `maxCalls (${request.maxCalls}) is below the journey maximum (${callBounds.maximumDecisionCalls}); some respondents may not reach a terminal node.` });
+  let initialPath;
+  try {
+    initialPath = initialJourneyPath(request.journey);
+  } catch (error62) {
+    return { inspection: {
+      valid: false,
+      respondentCount: request.respondents.length,
+      minimumCalls: callBounds.minimumDecisionCalls,
+      maximumCalls: callBounds.maximumDecisionCalls,
+      problems: [...problems, { code: "invalid_journey", message: error62 instanceof Error ? error62.message : "Journey has no initial ask packet." }],
+      ...warnings.length === 0 ? {} : { warnings },
+      fits: []
+    } };
+  }
+  if (!request.journey.tasks.some(({ id }) => id === initialPath.taskId)) return { inspection: {
+    valid: false,
+    respondentCount: request.respondents.length,
+    minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    problems: [...problems, { code: "invalid_journey", message: `Initial ask references unknown task ${initialPath.taskId}.` }],
+    ...warnings.length === 0 ? {} : { warnings },
+    fits: []
+  } };
+  const packets = request.respondents.map((respondent) => {
+    const packetRequest = compileDecisionPacket(request.journey, respondent, initialPath.taskId, initialPath.events);
+    const identity = JSON.stringify([respondent.id, request.journey.id, "root", 1, initialPath.nodeId]);
+    return {
+      packetId: `packet-${createHash7("sha256").update(identity).digest("hex")}`,
+      respondentId: respondent.id,
+      armId: request.journey.id,
+      pathId: "root",
+      decisionIndex: 1,
+      nodeId: initialPath.nodeId,
+      request: packetRequest
+    };
+  });
+  const selectionInputs = [];
+  for (const packet of packets) {
+    const unitId = `${packet.respondentId}/${packet.request.question.id}`;
+    const requiredCapabilities = [.../* @__PURE__ */ new Set([
+      "text",
+      ...request.providerSelection?.requiredCapabilities ?? [],
+      ...packet.request.visualMaterials?.length ? ["pixels"] : []
+    ])];
+    const pins = [...new Set([request.providerSelection?.unitOverrides?.[unitId], request.providerSelection?.unitOverrides?.[packet.request.question.id]].filter((id) => id !== void 0))];
+    if (pins.length > 1) problems.push({ code: "comparison_unit_pins_conflict", respondentId: packet.respondentId, message: `Journey initial ask ${unitId} has conflicting provider pins.` });
+    const assessments = await Promise.all(settings.catalogue.entries.map(async (entry) => {
+      const candidate = providerCandidates.find(({ id }) => id === entry.id);
+      const ready = entry.enabled && candidate?.ready === true;
+      if (!ready || !candidate) return { id: entry.id, ready: false, plannedCalls: 1 };
+      let fit;
+      try {
+        fit = candidate.provider.measure ? await candidate.provider.measure(packet.request) : missingMeasureFit2(candidate.provider, candidate.providerKind, candidate.modelIdentity);
+      } catch {
+        fit = { ...missingMeasureFit2(candidate.provider, candidate.providerKind, candidate.modelIdentity), reason: "provider-measurement-failed" };
+      }
+      return { id: entry.id, ready, fit, plannedCalls: 1 };
+    }));
+    selectionInputs.push({
+      catalogue: settings.catalogue,
+      preferences: settings.preferences,
+      unitId,
+      requiredCapabilities,
+      questionType: packet.request.question.type,
+      candidates: assessments,
+      remainingCalls: request.maxCalls,
+      ...request.providerSelection?.preferredOrder === void 0 ? {} : { preferredOrder: request.providerSelection.preferredOrder },
+      ...pins[0] === void 0 ? {} : { unitOverride: pins[0] }
+    });
+  }
+  const locks = request.providerSelection?.comparisonLocks ?? [];
+  const groupIndexFor = (respondentId, questionId) => packets.findIndex(({ respondentId: id, request: packet }) => id === respondentId && packet.question.id === questionId);
+  const lockIndexByUnit = /* @__PURE__ */ new Map();
+  for (const lock of locks) for (const member of lock.members) {
+    if (member.branchId) continue;
+    const index2 = groupIndexFor(member.respondentId, member.questionId);
+    if (index2 < 0) continue;
+    if (lockIndexByUnit.has(index2) && lockIndexByUnit.get(index2)?.id !== lock.id) problems.push({
+      code: "comparison_unit_in_multiple_locks",
+      respondentId: member.respondentId,
+      message: `Journey initial ask ${selectionInputs[index2].unitId} belongs to more than one provider comparison.`
+    });
+    else lockIndexByUnit.set(index2, lock);
+  }
+  const selections = /* @__PURE__ */ new Map();
+  const fits = [];
+  let remainingCalls = request.maxCalls;
+  for (let index2 = 0; index2 < packets.length; index2 += 1) {
+    if (selections.has(index2)) continue;
+    const lock = lockIndexByUnit.get(index2);
+    const lockIndices = lock ? [...new Set(lock.members.flatMap((member) => member.branchId ? [] : [groupIndexFor(member.respondentId, member.questionId)]).filter((memberIndex) => memberIndex >= 0))] : [];
+    if (lock && lockIndices.length > 1) {
+      const lockResult = selectProviderComparisonLock({ id: lock.id, equality: lock.equality, members: lockIndices.map((memberIndex) => ({ ...selectionInputs[memberIndex], remainingCalls })) });
+      const memberResults = lockIndices.map((memberIndex) => {
+        const planned = lockResult.members?.find(({ unitId }) => unitId === selectionInputs[memberIndex].unitId)?.selection;
+        return { memberIndex, result: planned ?? (lockResult.selected ? selectProvider({ ...selectionInputs[memberIndex], remainingCalls, unitOverride: lockResult.selected.id }) : void 0) };
+      });
+      if (memberResults.every(({ result: result2 }) => result2?.selected)) {
+        const calls = memberResults.length;
+        const canAdmit = calls <= remainingCalls;
+        if (!canAdmit) problems.push({ code: "comparison_call_allowance_exceeded", message: `Comparison ${lock.id} exceeds the remaining study-call allowance.` });
+        for (const { memberIndex, result: result2 } of memberResults) {
+          selections.set(memberIndex, { result: result2, lockId: lock.id });
+          if (canAdmit) {
+            remainingCalls -= 1;
+            const packet = packets[memberIndex];
+            const selectedFit = result2.selected.fit;
+            if (selectedFit) fits.push({ respondentId: packet.respondentId, nodeId: packet.nodeId, pathId: packet.pathId, packetId: packet.packetId, fit: selectedFit });
+          }
+        }
+      } else {
+        problems.push({ code: lockResult.decisionReason, message: `No common eligible provider satisfies every known member of comparison ${lock.id}.` });
+        for (const { memberIndex, result: result2 } of memberResults) selections.set(memberIndex, { result: result2 ?? { candidates: [], decisionReason: lockResult.decisionReason }, lockId: lock.id });
+      }
+      continue;
+    }
+    const result = selectProvider({ ...selectionInputs[index2], remainingCalls });
+    selections.set(index2, { result, ...lock === void 0 ? {} : { lockId: lock.id } });
+    if (!result.selected) {
+      const reasons = result.candidates.filter(({ exclusion }) => exclusion).map(({ id, exclusion }) => `${id}: ${exclusion.code}`).join(", ");
+      problems.push({ code: result.decisionReason, respondentId: packets[index2].respondentId, message: `No provider is eligible for journey initial ask ${selectionInputs[index2].unitId}.${reasons ? ` ${reasons}` : ""}` });
+      continue;
+    }
+    if (remainingCalls < 1) {
+      problems.push({ code: "insufficient_call_limit", respondentId: packets[index2].respondentId, message: "The journey initial provider request exceeds the remaining study-call allowance." });
+      continue;
+    }
+    remainingCalls -= 1;
+    const fit = result.selected.fit;
+    if (fit) fits.push({ respondentId: packets[index2].respondentId, nodeId: packets[index2].nodeId, pathId: packets[index2].pathId, packetId: packets[index2].packetId, fit });
+  }
+  const initialChoices = packets.flatMap((packet, index2) => {
+    const resolved = selections.get(index2);
+    const selected = resolved?.result.selected;
+    const entry = selected && settings.catalogue.entries.find(({ id }) => id === selected.id);
+    if (!selected || !entry) return [];
+    const candidates = resolved.result.candidates.map((candidate) => ({
+      id: candidate.id,
+      eligible: candidate.eligible,
+      selected: candidate.selected,
+      ...candidate.fit === void 0 ? {} : { fit: candidate.fit },
+      ...candidate.cost === void 0 ? {} : { cost: candidate.cost },
+      ...candidate.exclusion === void 0 ? {} : { exclusion: candidate.exclusion },
+      ...candidate.preferenceRank === void 0 ? {} : { preferenceRank: candidate.preferenceRank }
+    }));
+    return [{
+      respondentId: packet.respondentId,
+      questionId: packet.request.question.id,
+      providerId: selected.id,
+      modelIdentity: providerModelIdentity(entry.provider),
+      ...resolved?.lockId === void 0 ? {} : { comparisonLockId: resolved.lockId },
+      decisionReason: resolved.result.decisionReason,
+      candidates
+    }];
+  });
+  const graph = journeyTopology(request.journey);
+  const futureAskNodes = graph.nodes.filter((node2) => node2.kind === "ask" && node2.id !== initialPath.nodeId);
+  const unresolvedFutureJourneyUnits = request.respondents.flatMap((respondent) => futureAskNodes.map((node2) => ({
+    respondentId: respondent.id,
+    nodeId: node2.id,
+    questionId: node2.taskId,
+    unitId: `${respondent.id}/${node2.taskId}`,
+    reason: "reached-context-not-yet-known"
+  })));
+  if (callBounds.maximumDecisionCalls > request.respondents.length) warnings.push({ code: "reached_turn_fit_check", message: `${fits.length === request.respondents.length ? "Initial packets passed fit checks." : "One or more initial packets failed fit checks."} Each later reached turn is checked against the selected provider immediately before inference; an unfit reached turn stops that respondent and may leave the run partial.` });
+  const inspection = {
+    valid: problems.length === 0,
+    respondentCount: request.respondents.length,
+    minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    problems,
+    ...warnings.length === 0 ? {} : { warnings },
+    fits,
+    initialChoices,
+    unresolvedFutureJourneyUnits
+  };
+  if (!inspection.valid) return { inspection };
+  return { inspection, journey: {
+    request,
+    requestFingerprint: hashCanonical({ request, compilerFingerprint }),
+    compilerFingerprint,
+    minimumCalls: callBounds.minimumDecisionCalls,
+    maximumCalls: callBounds.maximumDecisionCalls,
+    packets
+  } };
+}
+async function planQuestionBatches(group, provider, kind, modelIdentity, batching = "automatic") {
+  const planned = await assessProviderBatchPlan({ group, provider, providerKind: kind, modelIdentity, batching });
+  const fits = planned.fits.map(({ questionIds, fit }) => ({
+    respondentId: group.respondentId,
+    groupId: group.groupId,
+    contextId: group.contextId,
+    questionIds,
+    fit
+  }));
+  const problems = planned.problems.map(({ code, respondentId, message }) => ({ code, respondentId, message }));
+  if (planned.exceedsRemainingCalls) problems.push({ code: "insufficient_call_limit", message: "The physical request plan exceeds the remaining call limit." });
+  return { batches: planned.batches, fits, problems };
 }
 async function prepareJourneyAdmission(request, provider) {
+  const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   let callBounds;
   try {
@@ -26520,8 +27484,8 @@ async function prepareJourneyAdmission(request, provider) {
       request: packetRequest
     });
   }
-  const kind = request.provider.kind;
-  const modelIdentity = kind === "jev" || kind === "clef" ? request.provider.model : request.provider.checkpoint;
+  const kind = configured.kind;
+  const modelIdentity = kind === "jev" || kind === "clef" ? configured.model : configured.checkpoint;
   const measuredByInput = /* @__PURE__ */ new Map();
   for (const packet of packets) {
     const inputFingerprint = hashCanonical(packet.request);
@@ -26568,6 +27532,28 @@ async function prepareJourneyAdmission(request, provider) {
   };
 }
 
+// src/application/provider-selection-fingerprint.ts
+function providerSelectionFingerprint(request, snapshot) {
+  const requestInputs = { ...request };
+  delete requestInputs.expectedSelectionFingerprint;
+  return `r${snapshot.catalogueRevision}-${hashCanonical({ policyVersion: snapshot.version, request: requestInputs, snapshot })}`;
+}
+function providerSelectionFingerprintRevision(fingerprint) {
+  const match = /^r(\d+)-[a-f\d]{64}$/i.exec(fingerprint);
+  return match ? Number(match[1]) : void 0;
+}
+
+// src/application/provider-settings.ts
+var providerSettingsWriteSchema = external_exports.object({
+  expectedRevision: external_exports.number().int().nonnegative(),
+  catalogue: external_exports.object({ entries: external_exports.array(providerCatalogueEntrySchema) }).strict(),
+  preferences: providerPreferenceSchema
+}).strict();
+var providerSettingsOperationSchema = external_exports.discriminatedUnion("operation", [
+  external_exports.object({ operation: external_exports.literal("get") }).strict(),
+  external_exports.object({ operation: external_exports.literal("set"), ...providerSettingsWriteSchema.shape }).strict()
+]);
+
 // src/application/run-service.ts
 var RunServiceError = class extends Error {
   constructor(code, message, options2) {
@@ -26580,13 +27566,24 @@ var RunServiceError = class extends Error {
 function normalizeRequest(input2) {
   const parsed = runRequestSchema.safeParse(input2);
   if (!parsed.success) throw new RunServiceError("invalid_request", parsed.error.issues.map((issue2) => `${issue2.path.join(".")}: ${issue2.message}`).join("; "));
-  if (parsed.data.provider.kind === "laya") {
+  if (parsed.data.provider?.kind === "laya") {
     return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path4.resolve(parsed.data.provider.tokenizerJsonPath) } };
   }
   return parsed.data;
 }
 function createRunService(persistence, dataRoot, providerFactory, launcher, options2 = {}) {
   const { reads, commands } = persistence;
+  function selectionSnapshot(request, initialChoices) {
+    const settings = reads.getProviderSettings();
+    return {
+      version: 1,
+      catalogueRevision: settings.catalogue.revision,
+      catalogue: { entries: settings.catalogue.entries },
+      preferences: settings.preferences,
+      policy: { batching: request.providerSelection?.batching ?? "automatic" },
+      ...initialChoices === void 0 ? {} : { initialChoices }
+    };
+  }
   async function assertReady(provider) {
     try {
       await options2.assertProviderReady?.(provider);
@@ -26600,6 +27597,41 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
       throw new RunServiceError("provider_credential_unavailable", "Provider credential is unavailable.", { cause: error62 });
     }
   }
+  async function automaticCandidates(snapshot) {
+    const candidates = [];
+    for (const entry of snapshot.catalogue.entries) {
+      if (!entry.enabled) continue;
+      let ready = true;
+      try {
+        await assertReady(entry.provider);
+      } catch {
+        ready = false;
+      }
+      try {
+        candidates.push({
+          id: entry.id,
+          provider: providerFactory(entry.provider),
+          providerKind: entry.provider.kind,
+          modelIdentity: providerModelIdentity(entry.provider),
+          ready
+        });
+      } catch {
+      }
+    }
+    return candidates;
+  }
+  async function inspectAutomaticPoll(request, snapshot) {
+    const candidates = await automaticCandidates(snapshot);
+    const admission = await prepareAutomaticallySelectedPoll(request, { catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }, preferences: snapshot.preferences }, candidates);
+    const frozenSnapshot = selectionSnapshot(request, admission.inspection.initialChoices);
+    return { ...admission, snapshot: frozenSnapshot, fingerprint: providerSelectionFingerprint(request, frozenSnapshot) };
+  }
+  async function inspectAutomaticJourney(request, snapshot) {
+    const candidates = await automaticCandidates(snapshot);
+    const admission = await prepareAutomaticallySelectedJourney(request, { catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }, preferences: snapshot.preferences }, candidates);
+    const frozenSnapshot = selectionSnapshot(request, admission.inspection.initialChoices);
+    return { ...admission, snapshot: frozenSnapshot, fingerprint: providerSelectionFingerprint(request, frozenSnapshot) };
+  }
   async function inspect(input2) {
     let request;
     try {
@@ -26607,17 +27639,37 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
     } catch (error62) {
       return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: "invalid_request", message: error62 instanceof Error ? error62.message : "Request is invalid." }], fits: [] };
     }
+    const snapshot = request.providerSelection ? selectionSnapshot(request) : void 0;
     if (request.kind === "follow-on") {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
+        const inspection2 = (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
+        return { ...inspection2, ...snapshot ? { selectionFingerprint: providerSelectionFingerprint(request, snapshot) } : {} };
       } catch (error62) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error62 instanceof Error && "code" in error62 ? String(error62.code) : "follow_on_resolution_failed", message: error62 instanceof Error ? error62.message : "Follow-on request could not be resolved." }], fits: [] };
       }
     }
-    return (await prepareRun(request, providerFactory(request.provider))).inspection;
+    if (!request.provider && snapshot && request.kind === "poll") {
+      const admission = await inspectAutomaticPoll(request, snapshot);
+      return { ...admission.inspection, selectionFingerprint: admission.fingerprint };
+    }
+    if (!request.provider && snapshot && request.kind === "journey") {
+      const admission = await inspectAutomaticJourney(request, snapshot);
+      return { ...admission.inspection, selectionFingerprint: admission.fingerprint };
+    }
+    const selectionFingerprint = snapshot ? providerSelectionFingerprint(request, snapshot) : void 0;
+    if (!request.provider && snapshot) return {
+      valid: false,
+      respondentCount: request.kind === "journey" ? request.respondents.length : 0,
+      minimumCalls: 0,
+      problems: [{ code: "provider_selection_not_ready", message: "Automatic provider selection is not yet available for this request kind." }],
+      fits: [],
+      ...selectionFingerprint ? { selectionFingerprint } : {}
+    };
+    const inspection = (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
+    return { ...inspection, ...selectionFingerprint ? { selectionFingerprint } : {} };
   }
   async function start(submissionId, input2) {
     if (typeof submissionId !== "string" || !submissionId.trim()) throw new RunServiceError("invalid_submission_id", "A submission ID is required.");
@@ -26629,14 +27681,49 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
       commands.reconcile(prior.runId, Date.now());
       return reads.getStatus(prior.runId);
     }
-    await assertReady(request.provider);
+    const baseSnapshot = request.providerSelection ? selectionSnapshot(request) : void 0;
+    const expectedRevision = request.expectedSelectionFingerprint ? providerSelectionFingerprintRevision(request.expectedSelectionFingerprint) : void 0;
+    if (request.expectedSelectionFingerprint && (!baseSnapshot || expectedRevision === void 0 || expectedRevision !== baseSnapshot.catalogueRevision)) {
+      throw new RunServiceError("provider_selection_fingerprint_stale", "Provider selection settings changed after inspection. Inspect the request again before starting it.");
+    }
+    let automaticAdmission;
+    let automaticJourneyAdmission;
+    if (!request.provider && baseSnapshot && request.kind === "poll") {
+      automaticAdmission = await inspectAutomaticPoll(request, baseSnapshot);
+      if (request.expectedSelectionFingerprint && automaticAdmission.fingerprint !== request.expectedSelectionFingerprint) {
+        throw new RunServiceError("provider_selection_fingerprint_stale", "Provider selection inputs or initial choices changed after inspection. Inspect the request again before starting it.");
+      }
+      if (!automaticAdmission.inspection.valid || !automaticAdmission.prepared) {
+        throw new RunServiceError("admission_failed", automaticAdmission.inspection.problems.map(({ message }) => message).join("; ") || "Automatic provider admission failed.");
+      }
+      const selectedProviderIds = [...new Set((automaticAdmission.snapshot.initialChoices ?? []).map(({ providerId }) => providerId))];
+      for (const providerId of selectedProviderIds) {
+        const entry = automaticAdmission.snapshot.catalogue.entries.find(({ id }) => id === providerId);
+        if (entry) await assertReady(entry.provider);
+      }
+    } else if (!request.provider && baseSnapshot && request.kind === "journey") {
+      automaticJourneyAdmission = await inspectAutomaticJourney(request, baseSnapshot);
+      if (request.expectedSelectionFingerprint && automaticJourneyAdmission.fingerprint !== request.expectedSelectionFingerprint) {
+        throw new RunServiceError("provider_selection_fingerprint_stale", "Provider selection inputs or initial choices changed after inspection. Inspect the request again before starting it.");
+      }
+      if (!automaticJourneyAdmission.inspection.valid || !automaticJourneyAdmission.journey) {
+        throw new RunServiceError("admission_failed", automaticJourneyAdmission.inspection.problems.map(({ message }) => message).join("; ") || "Automatic journey provider admission failed.");
+      }
+      const selectedProviderIds = [...new Set((automaticJourneyAdmission.snapshot.initialChoices ?? []).map(({ providerId }) => providerId))];
+      for (const providerId of selectedProviderIds) {
+        const entry = automaticJourneyAdmission.snapshot.catalogue.entries.find(({ id }) => id === providerId);
+        if (entry) await assertReady(entry.provider);
+      }
+    } else if (!request.provider && baseSnapshot) {
+      throw new RunServiceError("provider_selection_not_ready", "Automatic provider selection is not yet available for this request kind.");
+    } else if (request.provider) await assertReady(request.provider);
     let accepted;
     if (request.kind === "follow-on") {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
+        const admission = await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)));
         if (!admission.inspection.valid) throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
         accepted = commands.accept(submissionId, admission.prepared);
       } catch (error62) {
@@ -26645,11 +27732,17 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
         throw new RunServiceError("follow_on_resolution_failed", error62 instanceof Error ? error62.message : "Follow-on request could not be resolved.", { cause: error62 });
       }
     } else {
-      const admission = await prepareRun(request, providerFactory(request.provider));
-      if (!admission.prepared && !admission.journey || !admission.inspection.valid) {
-        throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
+      if (automaticAdmission?.prepared) {
+        accepted = commands.accept(submissionId, { ...automaticAdmission.prepared, providerSelectionSnapshot: automaticAdmission.snapshot });
+      } else if (automaticJourneyAdmission?.journey) {
+        accepted = commands.acceptJourney(submissionId, { ...materializeJourneyRun(automaticJourneyAdmission.journey), providerSelectionSnapshot: automaticJourneyAdmission.snapshot });
+      } else {
+        const admission = await prepareRun(request, providerFactory(requireExplicitProvider(request)));
+        if (!admission.prepared && !admission.journey || !admission.inspection.valid) {
+          throw new RunServiceError("admission_failed", admission.inspection.problems.map(({ message }) => message).join("; ") || "Request did not pass provider fit admission.");
+        }
+        accepted = admission.prepared ? commands.accept(submissionId, admission.prepared) : commands.acceptJourney(submissionId, materializeJourneyRun(admission.journey));
       }
-      accepted = admission.prepared ? commands.accept(submissionId, admission.prepared) : commands.acceptJourney(submissionId, materializeJourneyRun(admission.journey));
     }
     if (!accepted.created) return accepted.run;
     try {
@@ -26666,8 +27759,23 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
     if (!current.lifecycle.resume.eligible) {
       throw new RunServiceError("run_not_resumable", resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    const frozenProvider = reads.getRequestKind(runId) === "journey" ? reads.getJourneyRun(runId).request.provider : reads.getRequest(runId).request.provider;
-    await assertReady(frozenProvider);
+    const journey = reads.getRequestKind(runId) === "journey" ? reads.getJourneyRun(runId) : void 0;
+    const prepared = journey ? void 0 : reads.getRequest(runId);
+    const request = journey?.request ?? prepared.request;
+    if (request.provider) await assertReady(requireExplicitProvider(request));
+    else {
+      const snapshot = journey?.providerSelectionSnapshot ?? prepared?.providerSelectionSnapshot;
+      if (!snapshot) throw new RunServiceError("provider_selection_snapshot_missing", "The accepted automatic run has no frozen provider catalogue.");
+      const unresolved = journey?.evaluations ?? prepared?.evaluations ?? [];
+      const used = /* @__PURE__ */ new Map();
+      for (const evaluation of unresolved) {
+        if ("status" in evaluation && evaluation.status !== "pending" && evaluation.status !== "failed") continue;
+        const choice = evaluation.providerSelection ?? snapshot.initialChoices?.find(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId);
+        const config2 = snapshot.catalogue.entries.find(({ id }) => id === choice?.providerId)?.provider;
+        if (config2) used.set(JSON.stringify(config2), config2);
+      }
+      for (const config2 of used.values()) await assertReady(config2);
+    }
     const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {
       try {
@@ -26679,6 +27787,12 @@ function createRunService(persistence, dataRoot, providerFactory, launcher, opti
     return reads.getStatus(runId);
   }
   return {
+    providerSettings: (input2) => {
+      const parsed = providerSettingsOperationSchema.safeParse(input2);
+      if (!parsed.success) throw new RunServiceError("invalid_provider_settings", "Provider settings operation is invalid.");
+      if (parsed.data.operation === "get") return reads.getProviderSettings();
+      return commands.setProviderSettings({ catalogue: parsed.data.catalogue, preferences: parsed.data.preferences }, parsed.data.expectedRevision);
+    },
     inspect,
     start,
     resume,
@@ -31958,6 +33072,16 @@ var runs = sqliteTable("runs", {
   index("runs_created_identity").on(table.createdMs, table.runId),
   index("runs_expired_lease").on(table.leaseExpiresMs, table.runId)
 ]);
+var providerSettings = sqliteTable("provider_settings", {
+  singletonId: integer2("singleton_id").notNull(),
+  revision: integer2("revision").notNull(),
+  catalogueJson: text("catalogue_json").notNull(),
+  preferencesJson: text("preferences_json").notNull()
+}, (table) => [
+  primaryKey({ name: "provider_settings_pk", columns: [table.singletonId] }),
+  check2("provider_settings_singleton_ck", sql`${table.singletonId} = 1`),
+  check2("provider_settings_revision_ck", sql`${table.revision} >= 0`)
+]);
 var questionGroups = sqliteTable("question_groups", {
   groupId: text("group_id").notNull(),
   runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
@@ -31986,6 +33110,7 @@ var evaluations = sqliteTable("evaluations", {
   occurrence: integer2("occurrence"),
   packetJson: text("packet_json").notNull(),
   packetFingerprint: text("packet_fingerprint").notNull(),
+  providerSelectionJson: text("provider_selection_json"),
   status: text("status", { enum: evaluationStatuses }).notNull(),
   resultJson: text("result_json"),
   failureCode: text("failure_code"),
@@ -32122,6 +33247,7 @@ var runVisualAssets = sqliteTable("run_visual_assets", {
 ]);
 var sqliteTables = {
   runs,
+  providerSettings,
   questionGroups,
   evaluations,
   journeyRespondents,
@@ -32141,10 +33267,12 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 11;
+var SCHEMA_VERSION = 13;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
+var PROVIDER_SELECTION_MIGRATION_ID = "provider-selection-v12";
+var EVALUATION_PROVIDER_SELECTION_MIGRATION_ID = "evaluation-provider-selection-v13";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -32183,8 +33311,26 @@ function runVisualAssetsMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 11 run visual asset migration is missing from this Sheg installation.");
   return { id: RUN_VISUAL_ASSETS_MIGRATION_ID, fromVersion: 10, toVersion: 11, sql: readFileSync(match, "utf8") };
 }
+function providerSelectionMigration() {
+  const candidates = [
+    fileURLToPath2(new URL("../../../migrations/0003_provider_selection/migration.sql", import.meta.url)),
+    fileURLToPath2(new URL("./migrations/0003_provider_selection/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync2);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 12 provider selection migration is missing from this Sheg installation.");
+  return { id: PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 11, toVersion: 12, sql: readFileSync(match, "utf8") };
+}
+function evaluationProviderSelectionMigration() {
+  const candidates = [
+    fileURLToPath2(new URL("../../../migrations/0004_evaluation_provider_selection/migration.sql", import.meta.url)),
+    fileURLToPath2(new URL("./migrations/0004_evaluation_provider_selection/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync2);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 13 evaluation provider selection migration is missing from this Sheg installation.");
+  return { id: EVALUATION_PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 12, toVersion: 13, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration()];
 }
 function migrationChecksum(migration) {
   return createHash8("sha256").update(migration.sql).digest("hex");
@@ -33072,7 +34218,8 @@ function loadPreparedEvaluations(database, runId) {
     respondentId: evaluations.respondentId,
     questionId: evaluations.questionId,
     packetJson: evaluations.packetJson,
-    packetFingerprint: evaluations.packetFingerprint
+    packetFingerprint: evaluations.packetFingerprint,
+    providerSelectionJson: evaluations.providerSelectionJson
   }).from(evaluations).where(eq(evaluations.runId, runId)).orderBy(asc(evaluations.ordinal)).all();
 }
 function loadQuestionGroups(database, runId) {
@@ -33092,6 +34239,7 @@ function isJourneyAskNode(journey, nodeId, questionId) {
   return node2?.kind === "ask" && node2.taskId === questionId;
 }
 function validatePrepared(prepared) {
+  if (prepared.providerSelectionSnapshot !== void 0 && !providerSelectionPolicySnapshotSchema.safeParse(prepared.providerSelectionSnapshot).success) throw new RunStoreError("invalid_prepared_run", "Prepared provider selection snapshot is invalid.");
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError("invalid_prepared_run", "Prepared run request or fingerprint is invalid.");
@@ -33139,6 +34287,7 @@ function validatePrepared(prepared) {
         const catalog = materialCatalogForRequest(parsedRequest.data, lineage, evaluation.contextId, evaluation.respondentId, encounteredMaterialsFromState(packet.data.state));
         for (const [optionId, materialId] of Object.entries(packet.data.question.materialOptions)) {
           const item = catalog.find(({ id }) => id === materialId);
+          if (item && "type" in item && item.type === "image" && packet.data.question.visual?.mode === "pixels" && packet.data.question.visual.materialIds.includes(materialId)) continue;
           if (!item || !item.sourceId || !item.sourceSha256 || packet.data.question.options[optionId] !== item.text) {
             throw new RunStoreError("invalid_prepared_run", `Prepared Choice link for material ${materialId} has no matching frozen source evidence.`);
           }
@@ -33197,6 +34346,7 @@ function validatePrepared(prepared) {
   return { ...prepared, request: parsedRequest.data };
 }
 function validatePreparedJourney(prepared) {
+  if (prepared.providerSelectionSnapshot !== void 0 && !providerSelectionPolicySnapshotSchema.safeParse(prepared.providerSelectionSnapshot).success) throw new RunStoreError("invalid_prepared_run", "Prepared provider selection snapshot is invalid.");
   const parsedRequest = runRequestSchema.safeParse(prepared.request);
   if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || prepared.compilerFingerprint.length === 0 || hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError("invalid_prepared_run", "Prepared journey request or fingerprint is invalid.");
@@ -33264,6 +34414,8 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
       context.reconcileInside(runId2, context.now());
       return { created: false, run: context.statusInside(runId2) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
     if (prepared.request.kind === "follow-on") {
       const lineage = prepared.lineage;
       if (!lineage) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on lineage is missing.");
@@ -33279,7 +34431,7 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
         throw new RunStoreError("source_changed_during_acceptance", "A selected source evaluation changed after follow-on inspection. Inspect the request again.");
       }
     }
-    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations, prepared.lineage);
     const runId = randomUUID4();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
@@ -33301,6 +34453,8 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
       context.reconcileInside(runId2, context.now());
       return { created: false, run: context.statusInside(runId2) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID4();
     const nowMs = context.now();
@@ -33310,7 +34464,51 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
     return { created: true, run: context.statusInside(runId) };
   });
 }
-function requestedImageMaterials(request) {
+function assertProviderSettingsSnapshot(database, snapshot, request) {
+  if (!snapshot) return;
+  const row = database.prepare("SELECT revision, catalogue_json, preferences_json FROM provider_settings WHERE singleton_id = 1").get();
+  if (!row || asNumber(row.revision, "provider settings revision") !== snapshot.catalogueRevision || asText(row.catalogue_json, "provider catalogue") !== JSON.stringify({ revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }) || asText(row.preferences_json, "provider preferences") !== JSON.stringify(snapshot.preferences)) {
+    throw new RunStoreError("provider_settings_revision_conflict", "Provider settings changed after inspection. Inspect the request again before accepting it.");
+  }
+  if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
+    throw new RunStoreError("provider_selection_fingerprint_stale", "Provider selection inputs changed after inspection. Inspect the request again before accepting it.");
+  }
+}
+function validateInitialProviderChoices(snapshot, request, evaluations2) {
+  const choices = snapshot?.initialChoices;
+  if (request.providerSelection && (request.kind === "poll" || request.kind === "journey") && choices === void 0) {
+    throw new RunStoreError("invalid_prepared_run", "Automatic run acceptance requires the inspected initial provider choices.");
+  }
+  if (!choices) return;
+  const unitKey = (unit) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? null]);
+  const expected = new Set(evaluations2.map(({ respondentId, questionId }) => unitKey({ respondentId, questionId })));
+  if (expected.size !== choices.length || choices.some((choice) => !expected.has(unitKey(choice)))) {
+    throw new RunStoreError("invalid_prepared_run", "Initial provider choices must cover exactly the accepted evaluations.");
+  }
+  for (const choice of choices) {
+    const entry = snapshot.catalogue.entries.find(({ id }) => id === choice.providerId);
+    if (!entry?.enabled) throw new RunStoreError("invalid_prepared_run", `Initial provider choice ${choice.providerId} is absent or disabled in the frozen catalogue.`);
+    const configuredModel = providerModelIdentity(entry.provider);
+    if (configuredModel !== choice.modelIdentity) throw new RunStoreError("invalid_prepared_run", `Initial provider choice ${choice.providerId} does not match its frozen model identity.`);
+  }
+  for (const lock of request.providerSelection?.comparisonLocks ?? []) {
+    const memberChoices = lock.members.flatMap((member) => {
+      if (member.branchId) return [];
+      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId);
+      return choice ? [choice] : [];
+    });
+    if (lock.members.some((member) => member.branchId === void 0 && expected.has(unitKey(member)) && !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId))) {
+      throw new RunStoreError("invalid_prepared_run", `Initial provider choices omit a known member of comparison ${lock.id}.`);
+    }
+    if (memberChoices.length < 2) continue;
+    const providers = new Set(memberChoices.map(({ providerId }) => providerConfigurationIdentity(snapshot.catalogue.entries.find((entry) => entry.id === providerId).provider)));
+    const models = new Set(memberChoices.map(({ modelIdentity }) => modelIdentity));
+    if (lock.equality.provider === "same" && providers.size !== 1) throw new RunStoreError("invalid_prepared_run", `Initial provider choices violate provider equality for comparison ${lock.id}.`);
+    if (lock.equality.model === "same" && models.size !== 1) throw new RunStoreError("invalid_prepared_run", `Initial provider choices violate model equality for comparison ${lock.id}.`);
+    if (memberChoices.some(({ comparisonLockId }) => comparisonLockId !== lock.id)) throw new RunStoreError("invalid_prepared_run", `Initial provider choices do not retain comparison identity ${lock.id}.`);
+  }
+}
+function requestedImageMaterials(request, lineage) {
   if (request.kind === "poll") {
     const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
     return request.material.filter((item) => isImageMaterial(item) && bound.has(item.id));
@@ -33319,10 +34517,15 @@ function requestedImageMaterials(request) {
     const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
     return request.journey.items.filter((item) => isImageMaterial(item) && bound.has(item.id));
   }
+  if (request.kind === "follow-on") {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item) => isImageMaterial(item) && bound.has(item.id));
+    return [...new Map(linked.map((material) => [material.id, material])).values()];
+  }
   return [];
 }
-function verifyFrozenVisualAssets(database, request, frozenEvaluations) {
-  const requested = requestedImageMaterials(request);
+function verifyFrozenVisualAssets(database, request, frozenEvaluations, lineage) {
+  const requested = requestedImageMaterials(request, lineage);
   const materialsById = new Map(requested.map((material) => [material.id, material]));
   for (const evaluation of frozenEvaluations) {
     const packetMaterials = evaluation.packet.visualMaterials ?? [];
@@ -33375,6 +34578,7 @@ function insertAcceptedRun(database, identity, prepared) {
       request: prepared.request,
       requestFingerprint: prepared.requestFingerprint,
       compilerFingerprint: prepared.compilerFingerprint,
+      ...prepared.providerSelectionSnapshot ? { providerSelectionSnapshot: prepared.providerSelectionSnapshot } : {},
       ..."lineage" in prepared && prepared.lineage ? { lineage: prepared.lineage } : {}
     }),
     evaluationCount: prepared.evaluations.length,
@@ -33403,6 +34607,7 @@ function insertPreparedRunData(database, runId, prepared) {
     groupId: evaluation.groupId,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -33432,6 +34637,7 @@ function insertPreparedJourneyData(database, runId, prepared) {
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -33574,6 +34780,33 @@ function validateRunIds(runIds) {
   }
 }
 
+// src/infrastructure/sqlite/provider-settings.ts
+function readProviderSettings(context) {
+  context.ensureOpen();
+  const row = context.database.prepare("SELECT revision, catalogue_json, preferences_json FROM provider_settings WHERE singleton_id = 1").get();
+  if (!row) throw new RunStoreError("data_integrity_error", "Provider settings are missing from the Sheg datastore.");
+  const revision = asNumber(row.revision, "provider settings revision");
+  const catalogue = providerCatalogueSchema.safeParse(parseJson(row.catalogue_json, "provider catalogue"));
+  const preferences = providerPreferenceSchema.safeParse(parseJson(row.preferences_json, "provider preferences"));
+  if (!catalogue.success || catalogue.data.revision !== revision || !preferences.success) throw new RunStoreError("data_integrity_error", "Stored provider settings do not match their schema or revision.");
+  return { catalogue: catalogue.data, preferences: preferences.data };
+}
+function writeProviderSettings(context, input2, expectedRevision) {
+  context.ensureOpen();
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new RunStoreError("invalid_provider_settings_revision", "Expected provider settings revision must be a nonnegative safe integer.");
+  return context.transaction(() => {
+    const current = readProviderSettings(context);
+    if (current.catalogue.revision !== expectedRevision) throw new RunStoreError("provider_settings_revision_conflict", "Provider settings changed after they were read. Read the current settings and try again.");
+    const catalogue = providerCatalogueSchema.safeParse({ ...input2.catalogue, revision: current.catalogue.revision + 1 });
+    const preferences = providerPreferenceSchema.safeParse(input2.preferences);
+    if (!catalogue.success || !preferences.success) throw new RunStoreError("invalid_provider_settings", "Provider catalogue or preferences do not match the supported contract.");
+    const ids = new Set(catalogue.data.entries.map(({ id }) => id));
+    if (preferences.data.preferredOrder.some((id) => !ids.has(id))) throw new RunStoreError("invalid_provider_settings", "Provider preferences must reference identities in the saved catalogue.");
+    context.database.prepare("UPDATE provider_settings SET revision = ?, catalogue_json = ?, preferences_json = ? WHERE singleton_id = 1").run(catalogue.data.revision, JSON.stringify(catalogue.data), JSON.stringify(preferences.data));
+    return { catalogue: catalogue.data, preferences: preferences.data };
+  });
+}
+
 // src/infrastructure/sqlite/command-repository.ts
 function createSqliteCommandRepository(context, storageInfo) {
   function optimizeStorage() {
@@ -33599,6 +34832,9 @@ function createSqliteCommandRepository(context, storageInfo) {
     }, runIds);
   }
   return {
+    setProviderSettings(settings, expectedRevision) {
+      return writeProviderSettings(context, settings, expectedRevision);
+    },
     accept(submissionId, preparedInput) {
       context.ensureOpen();
       return acceptPreparedRun(acceptanceContext(context), submissionId, preparedInput);
@@ -33682,13 +34918,23 @@ function createSqliteCommandRepository(context, storageInfo) {
       context.ensureOpen();
       return context.transaction(() => refreshWorkerLease(context.connection.orm, claim2, nowMs, WORKER_LEASE_DURATION_MS));
     },
-    reserveNext(claim2, nowMs) {
+    reserveNext(claim2, nowMs, expected) {
       context.ensureOpen();
       return context.transaction(() => {
         const run = context.ownedRun(claim2, nowMs);
         if (asNumber(run.cancel_requested, "cancel flag") === 1 || asNumber(run.reserved_calls, "reserved calls") !== 0 || asNumber(run.used_calls, "used calls") + asNumber(run.reserved_calls, "reserved calls") >= asNumber(run.max_calls, "maximum calls")) return null;
         const row = context.database.prepare("SELECT * FROM evaluations WHERE run_id = ? AND status = 'pending' ORDER BY ordinal LIMIT 1").get(claim2.runId);
         if (!row) return null;
+        if (expected && (asText(row.evaluation_id, "evaluation ID") !== expected.evaluationId || asText(row.packet_fingerprint, "packet fingerprint") !== expected.packetFingerprint)) {
+          throw new RunStoreError("evaluation_changed_before_reservation", "The reached evaluation changed after provider selection. Resolve the current evaluation again before dispatch.");
+        }
+        if (expected?.providerSelection) {
+          if (row.provider_selection_json !== null && row.provider_selection_json !== void 0 && asText(row.provider_selection_json, "provider selection") !== JSON.stringify(expected.providerSelection)) {
+            throw new RunStoreError("provider_selection_changed_before_reservation", "A frozen provider choice changed before reservation.");
+          }
+          context.connection.orm.update(evaluations).set({ providerSelectionJson: JSON.stringify(expected.providerSelection) }).where(eq(evaluations.evaluationId, expected.evaluationId)).run();
+          row.provider_selection_json = JSON.stringify(expected.providerSelection);
+        }
         const attemptId = randomUUID5();
         const evaluationId = asText(row.evaluation_id, "evaluation ID");
         reservePhysicalAttempt(context.connection.orm, {
@@ -33702,6 +34948,22 @@ function createSqliteCommandRepository(context, storageInfo) {
           evaluationIds: [evaluationId]
         });
         return { attemptId, evaluation: context.evaluationFromRow(row) };
+      });
+    },
+    failPendingJourneyEvaluation(claim2, evaluationId, packetFingerprint, failure2, nowMs) {
+      context.ensureOpen();
+      context.transaction(() => {
+        const run = context.ownedRun(claim2, nowMs);
+        if (asNumber(run.reserved_calls, "reserved calls") !== 0) throw new RunStoreError("attempt_unresolved", "A zero-attempt failure cannot be recorded while a provider call is reserved.");
+        const row = context.database.prepare("SELECT respondent_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim2.runId, evaluationId);
+        if (!row || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || row.turn_id === null) {
+          throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
+        }
+        const respondentId = asText(row.respondent_id, "respondent ID");
+        const updated = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").run(failure2.code, failure2.message, claim2.runId, evaluationId);
+        if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
+        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND status = 'active'").run(claim2.runId, respondentId);
+        if (Number(respondent.changes) !== 1) throw new RunStoreError("journey_checkpoint_changed", "The reached respondent checkpoint changed before its failure could be recorded.");
       });
     },
     reserveBatch(claim2, groupId, evaluationIds, nowMs) {
@@ -34128,8 +35390,9 @@ function queryEvidencePage(context, input2) {
         WHERE e.run_id = ? AND e.evaluation_id IN (${pageIds.map(() => "?").join(", ")}) ORDER BY e.ordinal`).all(query.sourceRunId, ...pageIds);
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const endpoint = parsedRequest.data.provider.kind === "jev" ? parsedRequest.data.provider.endpoint : parsedRequest.data.provider.kind === "laya" ? parsedRequest.data.provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${parsedRequest.data.provider.accountId}/ai/run/@cf/cloudflare/${parsedRequest.data.provider.model}`;
-    const model = parsedRequest.data.provider.kind === "jev" || parsedRequest.data.provider.kind === "clef" ? parsedRequest.data.provider.model : parsedRequest.data.provider.checkpoint;
+    const provider = requireExplicitProvider(parsedRequest.data);
+    const endpoint = provider.kind === "jev" ? provider.endpoint : provider.kind === "laya" ? provider.baseUrl : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
+    const model = provider.kind === "jev" || provider.kind === "clef" ? provider.model : provider.checkpoint;
     const items = pageRows.map((row) => {
       const contextId = asText(row.context_id, "context ID");
       const respondentId = asText(row.respondent_id, "respondent ID");
@@ -34141,14 +35404,17 @@ function queryEvidencePage(context, input2) {
         const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
         if (materialId) {
           const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-          if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-          selectedMaterial = {
-            materialId,
-            text: candidate.text,
-            sourceId: candidate.sourceId,
-            sourceSha256: candidate.sourceSha256,
-            textSha256: createHash11("sha256").update(candidate.text, "utf8").digest("hex")
-          };
+          if (!candidate) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+          if (!isImageMaterial(candidate)) {
+            if (!candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            selectedMaterial = {
+              materialId,
+              text: candidate.text,
+              sourceId: candidate.sourceId,
+              sourceSha256: candidate.sourceSha256,
+              textSha256: createHash11("sha256").update(candidate.text, "utf8").digest("hex")
+            };
+          }
         }
       }
       return {
@@ -34167,7 +35433,7 @@ function queryEvidencePage(context, input2) {
         ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
         ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
         provenance: {
-          provider: parsedRequest.data.provider.kind,
+          provider: provider.kind,
           model,
           endpoint,
           compilerFingerprint,
@@ -34261,6 +35527,7 @@ var journeyTurnRowSchema = external_exports.object({
   status: external_exports.string(),
   respondent_status: external_exports.string(),
   respondent_current_node_id: external_exports.string().nullable(),
+  provider_selection_json: external_exports.string().nullable(),
   respondent_current_turn_id: external_exports.string().nullable(),
   respondent_current_context_id: external_exports.string().nullable(),
   respondent_revision: sqliteInteger,
@@ -34294,7 +35561,8 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
     pathId: asText(first.path_id, "path ID"),
     occurrence: asNumber(first.occurrence, "turn occurrence"),
     ordinal: asNumber(first.ordinal, "evaluation ordinal"),
-    status: parseStored(evaluationStatusSchema, asText(first.status, "evaluation status"), "evaluation status")
+    status: parseStored(evaluationStatusSchema, asText(first.status, "evaluation status"), "evaluation status"),
+    ...first.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(first.provider_selection_json, "provider selection"), "provider selection") }
   };
   if (evaluation.status !== "pending" || evaluation.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {
     throw new RunStoreError("data_integrity_error", "The reserved journey packet does not match its pending turn identity.");
@@ -34375,14 +35643,14 @@ function loadFollowOnSources(database, input2, notFound) {
     const materials = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems);
     const selectedMaterialId = result?.type === "choice" && packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
     const selectedMaterial = selectedMaterialId ? materials.find(({ id }) => id === selectedMaterialId) : void 0;
-    const selectedSource = selectedMaterial?.sourceId && selectedMaterial.sourceSha256 ? {
+    const selectedSource = selectedMaterial && !isImageMaterial(selectedMaterial) && selectedMaterial.sourceId && selectedMaterial.sourceSha256 ? {
       materialId: selectedMaterial.id,
       text: selectedMaterial.text,
       sourceId: selectedMaterial.sourceId,
       sourceSha256: selectedMaterial.sourceSha256,
       textSha256: createHash12("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
-    if (selectedMaterialId && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
+    if (selectedMaterialId && (!selectedMaterial || !isImageMaterial(selectedMaterial)) && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
       evaluationId: asText(row.evaluation_id, "evaluation ID"),
       contextId,
@@ -34408,6 +35676,7 @@ var preparedRunRecordSchema = external_exports.object({
   request: external_exports.union([inlineRunRequestSchema, followOnRunRequestSchema]),
   requestFingerprint: external_exports.string().min(1),
   compilerFingerprint: external_exports.string().min(1),
+  providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.optional(),
   lineage: followOnLineageSchema.optional()
 });
 function readRunKind(database, runId, notFound) {
@@ -34422,10 +35691,10 @@ function readPreparedRun(database, runId, options2) {
   const row = loadAcceptedRequest(database, runId);
   if (!row) throw options2.notFound();
   const stored = parseStored(preparedRunRecordSchema, parseJson(row.requestJson, "request"), "run request");
-  const { lineage, ...storedBase } = stored;
+  const { lineage, providerSelectionSnapshot, ...storedBase } = stored;
   const evaluations2 = loadPreparedEvaluations(database, runId);
   const groups = loadQuestionGroups(database, runId);
-  const parsed = options2.validate({ ...storedBase, ...lineage === void 0 ? {} : { lineage }, groups: groups.map((group) => ({
+  const parsed = options2.validate({ ...storedBase, ...providerSelectionSnapshot === void 0 ? {} : { providerSelectionSnapshot }, ...lineage === void 0 ? {} : { lineage }, groups: groups.map((group) => ({
     groupId: group.groupId,
     contextId: group.contextId,
     respondentId: group.respondentId,
@@ -34438,7 +35707,8 @@ function readPreparedRun(database, runId, options2) {
     respondentId: evaluation.respondentId,
     questionId: evaluation.questionId,
     packet: parseStored(decisionRequestSchema, parseJson(evaluation.packetJson, "frozen packet"), "frozen packet"),
-    packetFingerprint: evaluation.packetFingerprint
+    packetFingerprint: evaluation.packetFingerprint,
+    ...evaluation.providerSelectionJson === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.providerSelectionJson, "provider selection"), "provider selection") }
   })) });
   if (parsed.requestFingerprint !== row.requestFingerprint) throw new RunStoreError("data_integrity_error", "Stored run and request fingerprints do not match.");
   if (parsed.request.kind === "follow-on" && parsed.lineage) {
@@ -34476,7 +35746,8 @@ function readJourneyRun(database, runId, notFound) {
       pathId: asText(evaluation.path_id, "path ID"),
       occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
       ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
-      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status")
+      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status"),
+      ...evaluation.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.provider_selection_json, "provider selection"), "provider selection") }
     };
     if (base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
       throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
@@ -34509,7 +35780,14 @@ function readJourneyRun(database, runId, notFound) {
   if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some(({ respondentId }) => !respondentIds.has(respondentId)) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) || respondents.some((state) => state.status !== "active" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
     throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
   }
-  return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint, evaluations: evaluations2, respondents };
+  return {
+    request: parsedRequest.data,
+    requestFingerprint: stored.requestFingerprint,
+    compilerFingerprint: stored.compilerFingerprint,
+    ...stored.providerSelectionSnapshot === void 0 ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) },
+    evaluations: evaluations2,
+    respondents
+  };
 }
 
 // src/infrastructure/sqlite/reads/contexts.ts
@@ -34543,6 +35821,9 @@ var runCursorSchema = external_exports.object({ kind: external_exports.literal("
 var answerCursorSchema = external_exports.object({ kind: external_exports.literal("answers"), runId: external_exports.string().min(1), ordinal: external_exports.number().int().nonnegative() }).strict();
 function createSqliteReadRepository(context) {
   return {
+    getProviderSettings() {
+      return readProviderSettings(context);
+    },
     findSubmission(submissionId, requestFingerprint) {
       context.ensureOpen();
       return context.readSnapshot(() => {
@@ -34861,7 +36142,8 @@ function createSqliteRepositoryContext(connection, databasePath, now) {
       respondentId: asText(row.respondent_id, "respondent ID"),
       questionId: asText(row.question_id, "question ID"),
       packet: decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")),
-      packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint")
+      packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint"),
+      ...row.provider_selection_json === null || row.provider_selection_json === void 0 ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(row.provider_selection_json, "provider selection"), "provider selection") }
     };
   }
   function ownedRun(claim2, nowMs) {
@@ -40807,6 +42089,7 @@ function unavailableRunService() {
     throw recoveryRequiredError();
   };
   return {
+    providerSettings: () => unavailable3(),
     inspect: async () => unavailable3(),
     start: async () => unavailable3(),
     resume: async () => unavailable3(),
@@ -40902,6 +42185,9 @@ var CliInputError = class extends Error {
 };
 async function durableOperation(command, options2, runtime) {
   const { service, storage } = runtime;
+  if (command === "provider-settings") {
+    return service.providerSettings(await readJson(required2(options2, "request")));
+  }
   if (command === "inspect") return service.inspect(await readRequest(options2));
   if (command === "start") return service.start(uuid3(required2(options2, "submission-id")), await readRequest(options2));
   if (command === "list") return service.list(runListQuerySchema.parse(await readJson(required2(options2, "query"))));
@@ -41007,7 +42293,8 @@ function validateOptions(command, options2) {
     "image-import": ["request", "data-root"],
     "image-scale": ["request", "data-root"],
     "image-get": ["request", "data-root"],
-    "provider-credential": ["route", "operation"]
+    "provider-credential": ["route", "operation"],
+    "provider-settings": ["request", "data-root"]
   };
   const allowed = commands[command ?? ""];
   if (!allowed) throw new CliInputError(`Unknown command: ${command ?? ""}`);
@@ -41047,6 +42334,7 @@ Commands:
   image-scale --request <json-file>               Create a proportional image candidate
   image-get --request <json-file>                 Read metadata or explicitly export a preview
   provider-credential --route clef --operation status|setup|remove  Manage a provider key in Windows Credential Manager
+  provider-settings --request <json-file>          Read or revision-check provider catalogue and preferences
   trace --manifest <json> --cohort <json> --arm <id> --respondent <id> (--choices <a,b> | --responses <json>)
   preflight --manifest <json> [--cohort <json>] --providers <json-file> [--mode frozen-cohort|maximum-profile]
   CLI and MCP share the platform's Sheg data directory by default.

@@ -1,7 +1,10 @@
 import type { ProviderFailureEvidence } from '../domain/decision/provider-failure.js';
 import type { DecisionFailureDetail, DecisionResult, DecisionBatchResult } from '../domain/decision/decision.js';
-import type { AnswerRow, AttemptReservation, JourneyEvaluation, JourneyRespondentState, JourneyRunRecord, JourneyWorkerTurn, Page, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
+import type { AnswerRow, AttemptReservation, JourneyEvaluation, JourneyRespondentState, JourneyRunRecord, JourneyWorkerTurn, Page, ProviderSelectionInitialChoice, RunAttempt, RunContextDetail, RunEvidencePage, RunEvidenceQuery, RunStatus, RunStatusView, WorkerClaim } from '../domain/run/lifecycle.js';
 import type { FollowOnSourceSet, FrozenEvaluation, ParsedFollowOnRunRequest, PreparedJourneyRun, PreparedRun, RunListQueryInput } from '../domain/run/request.js';
+import type { ProviderCatalogue, ProviderPreference } from '../providers/config.js';
+
+export type ProviderSettings = { catalogue: ProviderCatalogue; preferences: ProviderPreference };
 
 export type AttemptOutcome =
   | { kind: 'answered'; result: DecisionResult }
@@ -27,6 +30,7 @@ export class RunStoreError extends Error {
 }
 
 export interface RunReadRepository {
+  getProviderSettings(): ProviderSettings;
   findSubmission(submissionId: string, requestFingerprint: string): RunStatusView | null;
   getStatus(runId: string): RunStatusView;
   evaluationStatuses(runId: string): Array<{ evaluationId: string; status: AnswerRow['status'] }>;
@@ -46,6 +50,7 @@ export interface RunReadRepository {
 }
 
 export interface RunCommandRepository {
+  setProviderSettings(settings: { catalogue: Omit<ProviderCatalogue, 'revision'>; preferences: ProviderPreference }, expectedRevision: number): ProviderSettings;
   accept(submissionId: string, prepared: PreparedRun): { created: boolean; run: RunStatusView };
   acceptJourney(submissionId: string, prepared: PreparedJourneyRun): { created: boolean; run: RunStatusView };
   requestCancel(runId: string): RunStatusView;
@@ -54,7 +59,8 @@ export interface RunCommandRepository {
   optimizeStorage(): void;
   claim(runId: string, nowMs: number, workerPid: number): WorkerClaim | null;
   heartbeat(claim: WorkerClaim, nowMs: number): boolean;
-  reserveNext(claim: WorkerClaim, nowMs: number): AttemptReservation | null;
+  reserveNext(claim: WorkerClaim, nowMs: number, expected?: { evaluationId: string; packetFingerprint: string; providerSelection?: ProviderSelectionInitialChoice }): AttemptReservation | null;
+  failPendingJourneyEvaluation(claim: WorkerClaim, evaluationId: string, packetFingerprint: string, failure: { code: string; message: string }, nowMs: number): void;
   reserveBatch(claim: WorkerClaim, groupId: string, evaluationIds: string[], nowMs: number): { attemptId: string; evaluations: FrozenEvaluation[] } | null;
   settleBatch(claim: WorkerClaim, attemptId: string, outcome: { kind: 'answered'; result: DecisionBatchResult } | Extract<AttemptOutcome, { kind: 'failed' }>): BatchEvaluationOutcome[];
   settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void;

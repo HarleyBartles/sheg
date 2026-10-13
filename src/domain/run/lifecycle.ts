@@ -7,6 +7,59 @@ import { promptHistoryEventSchema, type PromptHistoryEvent } from '../decision/p
 import type { PromptState } from '../decision/prompt.js';
 import type { DecisionRequest } from '../decision/decision.js';
 import type { RespondentProfile } from '../respondents/profile.js';
+import { providerCatalogueEntrySchema, providerPreferenceSchema } from '../../providers/config.js';
+import { providerContextFitSchema } from '../decision/provider-failure.js';
+
+const providerSelectionCostSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('no-provider-invoice'), basis: z.literal('provider pricing contract') }).strict(),
+  z.object({ kind: z.literal('estimate'), amount: z.number().finite().nonnegative(), currency: z.string().regex(/^[A-Z]{3}$/), basis: z.literal('published-rate estimate'), source: z.string().url(), observedAt: z.string().date() }).strict(),
+  z.object({ kind: z.literal('unknown'), basis: z.enum(['unverified', 'incomparable currency']) }).strict(),
+]);
+const providerSelectionCandidateSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  eligible: z.boolean(),
+  selected: z.boolean(),
+  fit: providerContextFitSchema.optional(),
+  cost: providerSelectionCostSchema.optional(),
+  exclusion: z.object({ code: z.string().min(1), message: z.string().min(1) }).strict().optional(),
+  preferenceRank: z.object({ source: z.enum(['request', 'saved']), index: z.number().int().nonnegative() }).strict().optional(),
+}).strict();
+
+export const providerSelectionInitialChoiceSchema = z.object({
+  respondentId: z.string().min(1),
+  questionId: z.string().min(1),
+  branchId: z.string().min(1).optional(),
+  providerId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  modelIdentity: z.string().min(1),
+  comparisonLockId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional(),
+  decisionReason: z.string().min(1),
+  candidates: z.array(providerSelectionCandidateSchema).min(1),
+}).strict().superRefine((choice, context) => {
+  const selected = choice.candidates.filter(({ selected: isSelected }) => isSelected);
+  if (selected.length !== 1 || selected[0]?.id !== choice.providerId) context.addIssue({ code: 'custom', path: ['candidates'], message: 'Exactly one candidate must be selected and it must match providerId.' });
+  if (new Set(choice.candidates.map(({ id }) => id)).size !== choice.candidates.length) context.addIssue({ code: 'custom', path: ['candidates'], message: 'Initial choice candidate identities must be unique.' });
+});
+export type ProviderSelectionInitialChoice = z.infer<typeof providerSelectionInitialChoiceSchema>;
+
+export const providerSelectionPolicySnapshotSchema = z.object({
+  version: z.literal(1),
+  catalogueRevision: z.number().int().nonnegative(),
+  catalogue: z.object({
+    entries: z.array(providerCatalogueEntrySchema),
+  }).strict(),
+  preferences: providerPreferenceSchema,
+  policy: z.object({ batching: z.enum(['automatic', 'singleton']) }).strict(),
+  initialChoices: z.array(providerSelectionInitialChoiceSchema).optional(),
+}).strict().superRefine((snapshot, context) => {
+  const units = new Set<string>();
+  for (const [index, choice] of (snapshot.initialChoices ?? []).entries()) {
+    const key = JSON.stringify([choice.respondentId, choice.questionId, choice.branchId ?? null]);
+    if (units.has(key)) context.addIssue({ code: 'custom', path: ['initialChoices', index], message: 'Initial provider choices must have unique authored evaluation references.' });
+    units.add(key);
+    if (!snapshot.catalogue.entries.some(({ id }) => id === choice.providerId)) context.addIssue({ code: 'custom', path: ['initialChoices', index, 'providerId'], message: `Selected provider ${choice.providerId} is absent from the frozen catalogue.` });
+  }
+});
+export type ProviderSelectionPolicySnapshot = z.infer<typeof providerSelectionPolicySnapshotSchema>;
 
 export const runStatuses = ['prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'] as const;
 export const runStatusSchema = z.enum(runStatuses);
@@ -118,6 +171,7 @@ export type JourneyRunRecord = {
   request: import('./request.js').ParsedInlineJourneyRequest;
   requestFingerprint: string;
   compilerFingerprint: string;
+  providerSelectionSnapshot?: ProviderSelectionPolicySnapshot;
   evaluations: JourneyEvaluationRecord[];
   respondents: JourneyRespondentState[];
 };
@@ -139,6 +193,9 @@ export type Inspection = {
   problems: RunProblem[];
   warnings?: RunProblem[];
   fits: Array<{ respondentId: string; groupId?: string; contextId?: string; questionIds?: string[]; nodeId?: string; pathId?: string; packetId?: string; fit: ProviderContextFit }>;
+  initialChoices?: ProviderSelectionInitialChoice[];
+  unresolvedFutureJourneyUnits?: Array<{ respondentId: string; nodeId: string; questionId: string; unitId: string; reason: 'reached-context-not-yet-known' }>;
+  selectionFingerprint?: string;
 };
 
 export type RunStatusView = {

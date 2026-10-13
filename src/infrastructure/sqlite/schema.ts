@@ -10,11 +10,13 @@ import { sqliteTables } from './tables.js';
 import { PREPARED_LAUNCH_WINDOW_MS } from './work-policy.js';
 
 export const BASELINE_SCHEMA_VERSION = 9;
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 13;
 export const BASELINE_MIGRATION_ID = 'baseline-v9';
 export const IMAGE_ASSET_MIGRATION_ID = 'image-assets-v10';
 export const RUN_VISUAL_ASSETS_MIGRATION_ID = 'run-visual-assets-v11';
-export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets', '0002_run_visual_assets'] as const;
+export const PROVIDER_SELECTION_MIGRATION_ID = 'provider-selection-v12';
+export const EVALUATION_PROVIDER_SELECTION_MIGRATION_ID = 'evaluation-provider-selection-v13';
+export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets', '0002_run_visual_assets', '0003_provider_selection', '0004_evaluation_provider_selection'] as const;
 const MIGRATION_BACKUP_RETRIES = 3;
 const SQLITE_TRANSIENT_LOCK_CODES = new Set([5, 6]);
 const SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -65,8 +67,28 @@ function runVisualAssetsMigration(): SqliteMigration {
   return { id: RUN_VISUAL_ASSETS_MIGRATION_ID, fromVersion: 10, toVersion: 11, sql: readFileSync(match, 'utf8') };
 }
 
+function providerSelectionMigration(): SqliteMigration {
+  const candidates = [
+    fileURLToPath(new URL('../../../migrations/0003_provider_selection/migration.sql', import.meta.url)),
+    fileURLToPath(new URL('./migrations/0003_provider_selection/migration.sql', import.meta.url)),
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError('datastore_schema_invalid', 'The schema 12 provider selection migration is missing from this Sheg installation.');
+  return { id: PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 11, toVersion: 12, sql: readFileSync(match, 'utf8') };
+}
+
+function evaluationProviderSelectionMigration(): SqliteMigration {
+  const candidates = [
+    fileURLToPath(new URL('../../../migrations/0004_evaluation_provider_selection/migration.sql', import.meta.url)),
+    fileURLToPath(new URL('./migrations/0004_evaluation_provider_selection/migration.sql', import.meta.url)),
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError('datastore_schema_invalid', 'The schema 13 evaluation provider selection migration is missing from this Sheg installation.');
+  return { id: EVALUATION_PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 12, toVersion: 13, sql: readFileSync(match, 'utf8') };
+}
+
 export function registeredMigrations(): SqliteMigration[] {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration()];
 }
 
 function migrationChecksum(migration: SqliteMigration): string {

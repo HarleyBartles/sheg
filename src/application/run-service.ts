@@ -1,12 +1,16 @@
 import path from 'node:path';
 import type { DecisionProvider } from '../domain/decision/provider.js';
-import type { AnswerRow, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunStatusView } from '../domain/run/lifecycle.js';
+import type { AnswerRow, JourneyRunRecord, Page, RunAttempt, RunContextDetail, RunStatusView, ProviderSelectionPolicySnapshot } from '../domain/run/lifecycle.js';
 import { resumeRefusalMessage } from '../domain/run/lifecycle.js';
-import type { PreparedRun, RunRequest } from '../domain/run/request.js';
-import { followOnRunRequestSchema, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
+import type { ParsedRunRequest, PreparedRun, RunRequest } from '../domain/run/request.js';
+import { followOnRunRequestSchema, requireExplicitProvider, runEvidenceQuerySchema, runRequestSchema } from '../domain/run/request.js';
 import type { ProviderConfigInput, ProviderFactoryOptions } from '../providers/config.js';
-import type { DeletePreview, DeleteResult, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
-import { fingerprintRunRequest, materializeJourneyRun, prepareFollowOnRun, prepareRun } from './run-inspection.js';
+import type { DeletePreview, DeleteResult, ProviderSettings, RunCommandRepository, RunListQuery, RunPersistence, StorageInfo } from './run-store.js';
+import { fingerprintRunRequest, materializeJourneyRun, prepareAutomaticallySelectedJourney, prepareAutomaticallySelectedPoll, prepareFollowOnRun, prepareRun } from './run-inspection.js';
+import { providerSelectionFingerprint, providerSelectionFingerprintRevision } from './provider-selection-fingerprint.js';
+import { providerModelIdentity } from '../providers/config.js';
+import type { ProviderBatchCandidate } from './provider-batch-planning.js';
+import { providerSettingsOperationSchema } from './provider-settings.js';
 
 export class RunServiceError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -20,6 +24,7 @@ export type ProviderFactory = (config: ProviderConfigInput, options?: ProviderFa
 export type RunServiceOptions = { assertProviderReady?: (config: ProviderConfigInput) => Promise<void> };
 
 export interface RunService {
+  providerSettings(operation: unknown): ProviderSettings;
   inspect(input: unknown): Promise<Awaited<ReturnType<typeof prepareRun>>['inspection']>;
   start(submissionId: string, input: RunRequest): Promise<RunStatusView>;
   resume(runId: string): Promise<RunStatusView>;
@@ -38,10 +43,10 @@ export interface RunService {
   cancel(runId: string): RunStatusView;
 }
 
-function normalizeRequest(input: unknown): RunRequest {
+function normalizeRequest(input: unknown): ParsedRunRequest {
   const parsed = runRequestSchema.safeParse(input);
   if (!parsed.success) throw new RunServiceError('invalid_request', parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
-  if (parsed.data.provider.kind === 'laya') {
+  if (parsed.data.provider?.kind === 'laya') {
     return { ...parsed.data, provider: { ...parsed.data.provider, tokenizerJsonPath: path.resolve(parsed.data.provider.tokenizerJsonPath) } };
   }
   return parsed.data;
@@ -55,6 +60,12 @@ export function createRunService(
   options: RunServiceOptions = {},
 ): RunService {
   const { reads, commands } = persistence;
+  function selectionSnapshot(request: ParsedRunRequest, initialChoices?: ProviderSelectionPolicySnapshot['initialChoices']): ProviderSelectionPolicySnapshot {
+    const settings = reads.getProviderSettings();
+    return { version: 1, catalogueRevision: settings.catalogue.revision, catalogue: { entries: settings.catalogue.entries },
+      preferences: settings.preferences, policy: { batching: request.providerSelection?.batching ?? 'automatic' },
+      ...(initialChoices === undefined ? {} : { initialChoices }) };
+  }
   async function assertReady(provider: ProviderConfigInput): Promise<void> {
     try { await options.assertProviderReady?.(provider); }
     catch (error) {
@@ -68,23 +79,66 @@ export function createRunService(
     }
   }
 
+  async function automaticCandidates(snapshot: ProviderSelectionPolicySnapshot): Promise<ProviderBatchCandidate[]> {
+    const candidates: ProviderBatchCandidate[] = [];
+    for (const entry of snapshot.catalogue.entries) {
+      if (!entry.enabled) continue;
+      let ready = true;
+      try { await assertReady(entry.provider); } catch { ready = false; }
+      try {
+        candidates.push({ id: entry.id, provider: providerFactory(entry.provider), providerKind: entry.provider.kind,
+          modelIdentity: providerModelIdentity(entry.provider), ready });
+      } catch { /* An enabled but unconstructable adapter remains an ineligible catalogue candidate. */ }
+    }
+    return candidates;
+  }
+
+  async function inspectAutomaticPoll(request: Extract<ParsedRunRequest, { kind: 'poll' }>, snapshot: ProviderSelectionPolicySnapshot) {
+    const candidates = await automaticCandidates(snapshot);
+    const admission = await prepareAutomaticallySelectedPoll(request, { catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }, preferences: snapshot.preferences }, candidates);
+    const frozenSnapshot = selectionSnapshot(request, admission.inspection.initialChoices);
+    return { ...admission, snapshot: frozenSnapshot, fingerprint: providerSelectionFingerprint(request, frozenSnapshot) };
+  }
+
+  async function inspectAutomaticJourney(request: Extract<ParsedRunRequest, { kind: 'journey' }>, snapshot: ProviderSelectionPolicySnapshot) {
+    const candidates = await automaticCandidates(snapshot);
+    const admission = await prepareAutomaticallySelectedJourney(request, { catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }, preferences: snapshot.preferences }, candidates);
+    const frozenSnapshot = selectionSnapshot(request, admission.inspection.initialChoices);
+    return { ...admission, snapshot: frozenSnapshot, fingerprint: providerSelectionFingerprint(request, frozenSnapshot) };
+  }
+
   async function inspect(input: unknown) {
-    let request: RunRequest;
+    let request: ParsedRunRequest;
     try { request = normalizeRequest(input); }
     catch (error) {
       return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: 'invalid_request', message: error instanceof Error ? error.message : 'Request is invalid.' }], fits: [] };
     }
+    const snapshot = request.providerSelection ? selectionSnapshot(request) : undefined;
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        return (await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider))).inspection;
+        const inspection = (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
+        return { ...inspection, ...(snapshot ? { selectionFingerprint: providerSelectionFingerprint(request, snapshot) } : {}) };
       } catch (error) {
         return { valid: false, respondentCount: 0, minimumCalls: 0, problems: [{ code: error instanceof Error && 'code' in error ? String(error.code) : 'follow_on_resolution_failed', message: error instanceof Error ? error.message : 'Follow-on request could not be resolved.' }], fits: [] };
       }
     }
-    return (await prepareRun(request, providerFactory(request.provider))).inspection;
+    if (!request.provider && snapshot && request.kind === 'poll') {
+      const admission = await inspectAutomaticPoll(request, snapshot);
+      return { ...admission.inspection, selectionFingerprint: admission.fingerprint };
+    }
+    if (!request.provider && snapshot && request.kind === 'journey') {
+      const admission = await inspectAutomaticJourney(request, snapshot);
+      return { ...admission.inspection, selectionFingerprint: admission.fingerprint };
+    }
+    const selectionFingerprint = snapshot ? providerSelectionFingerprint(request, snapshot) : undefined;
+    if (!request.provider && snapshot) return { valid: false, respondentCount: request.kind === 'journey' ? request.respondents.length : 0, minimumCalls: 0,
+      problems: [{ code: 'provider_selection_not_ready', message: 'Automatic provider selection is not yet available for this request kind.' }], fits: [],
+      ...(selectionFingerprint ? { selectionFingerprint } : {}) };
+    const inspection = (await prepareRun(request, providerFactory(requireExplicitProvider(request)))).inspection;
+    return { ...inspection, ...(selectionFingerprint ? { selectionFingerprint } : {}) };
   }
 
   async function start(submissionId: string, input: RunRequest): Promise<RunStatusView> {
@@ -95,14 +149,49 @@ export function createRunService(
     const prior = reads.findSubmission(submissionId, requestFingerprint);
     if (prior) { commands.reconcile(prior.runId, Date.now()); return reads.getStatus(prior.runId); }
 
-    await assertReady(request.provider);
+    const baseSnapshot = request.providerSelection ? selectionSnapshot(request) : undefined;
+    const expectedRevision = request.expectedSelectionFingerprint ? providerSelectionFingerprintRevision(request.expectedSelectionFingerprint) : undefined;
+    if (request.expectedSelectionFingerprint && (!baseSnapshot || expectedRevision === undefined || expectedRevision !== baseSnapshot.catalogueRevision)) {
+      throw new RunServiceError('provider_selection_fingerprint_stale', 'Provider selection settings changed after inspection. Inspect the request again before starting it.');
+    }
+    let automaticAdmission: Awaited<ReturnType<typeof inspectAutomaticPoll>> | undefined;
+    let automaticJourneyAdmission: Awaited<ReturnType<typeof inspectAutomaticJourney>> | undefined;
+    if (!request.provider && baseSnapshot && request.kind === 'poll') {
+      automaticAdmission = await inspectAutomaticPoll(request, baseSnapshot);
+      if (request.expectedSelectionFingerprint && automaticAdmission.fingerprint !== request.expectedSelectionFingerprint) {
+        throw new RunServiceError('provider_selection_fingerprint_stale', 'Provider selection inputs or initial choices changed after inspection. Inspect the request again before starting it.');
+      }
+      if (!automaticAdmission.inspection.valid || !automaticAdmission.prepared) {
+        throw new RunServiceError('admission_failed', automaticAdmission.inspection.problems.map(({ message }) => message).join('; ') || 'Automatic provider admission failed.');
+      }
+      const selectedProviderIds = [...new Set((automaticAdmission.snapshot.initialChoices ?? []).map(({ providerId }) => providerId))];
+      for (const providerId of selectedProviderIds) {
+        const entry = automaticAdmission.snapshot.catalogue.entries.find(({ id }) => id === providerId);
+        if (entry) await assertReady(entry.provider);
+      }
+    } else if (!request.provider && baseSnapshot && request.kind === 'journey') {
+      automaticJourneyAdmission = await inspectAutomaticJourney(request, baseSnapshot);
+      if (request.expectedSelectionFingerprint && automaticJourneyAdmission.fingerprint !== request.expectedSelectionFingerprint) {
+        throw new RunServiceError('provider_selection_fingerprint_stale', 'Provider selection inputs or initial choices changed after inspection. Inspect the request again before starting it.');
+      }
+      if (!automaticJourneyAdmission.inspection.valid || !automaticJourneyAdmission.journey) {
+        throw new RunServiceError('admission_failed', automaticJourneyAdmission.inspection.problems.map(({ message }) => message).join('; ') || 'Automatic journey provider admission failed.');
+      }
+      const selectedProviderIds = [...new Set((automaticJourneyAdmission.snapshot.initialChoices ?? []).map(({ providerId }) => providerId))];
+      for (const providerId of selectedProviderIds) {
+        const entry = automaticJourneyAdmission.snapshot.catalogue.entries.find(({ id }) => id === providerId);
+        if (entry) await assertReady(entry.provider);
+      }
+    } else if (!request.provider && baseSnapshot) {
+      throw new RunServiceError('provider_selection_not_ready', 'Automatic provider selection is not yet available for this request kind.');
+    } else if (request.provider) await assertReady(request.provider);
     let accepted: ReturnType<RunCommandRepository['accept']>;
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
-        const admission = await prepareFollowOnRun(followOn, source, providerFactory(followOn.provider));
+        const admission = await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)));
         if (!admission.inspection.valid) throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
         accepted = commands.accept(submissionId, admission.prepared);
       } catch (error) {
@@ -111,13 +200,19 @@ export function createRunService(
         throw new RunServiceError('follow_on_resolution_failed', error instanceof Error ? error.message : 'Follow-on request could not be resolved.', { cause: error });
       }
     } else {
-      const admission = await prepareRun(request, providerFactory(request.provider));
-      if ((!admission.prepared && !admission.journey) || !admission.inspection.valid) {
-        throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
+      if (automaticAdmission?.prepared) {
+        accepted = commands.accept(submissionId, { ...automaticAdmission.prepared, providerSelectionSnapshot: automaticAdmission.snapshot });
+      } else if (automaticJourneyAdmission?.journey) {
+        accepted = commands.acceptJourney(submissionId, { ...materializeJourneyRun(automaticJourneyAdmission.journey), providerSelectionSnapshot: automaticJourneyAdmission.snapshot });
+      } else {
+        const admission = await prepareRun(request, providerFactory(requireExplicitProvider(request)));
+        if ((!admission.prepared && !admission.journey) || !admission.inspection.valid) {
+          throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
+        }
+        accepted = admission.prepared
+          ? commands.accept(submissionId, admission.prepared)
+          : commands.acceptJourney(submissionId, materializeJourneyRun(admission.journey!));
       }
-      accepted = admission.prepared
-        ? commands.accept(submissionId, admission.prepared)
-        : commands.acceptJourney(submissionId, materializeJourneyRun(admission.journey!));
     }
     if (!accepted.created) return accepted.run;
     try { await launcher.launch(dataRoot, accepted.run.runId); }
@@ -132,10 +227,23 @@ export function createRunService(
     if (!current.lifecycle.resume.eligible) {
       throw new RunServiceError('run_not_resumable', resumeRefusalMessage(current.lifecycle.resume.reason));
     }
-    const frozenProvider = reads.getRequestKind(runId) === 'journey'
-      ? reads.getJourneyRun(runId).request.provider
-      : reads.getRequest(runId).request.provider;
-    await assertReady(frozenProvider);
+    const journey = reads.getRequestKind(runId) === 'journey' ? reads.getJourneyRun(runId) : undefined;
+    const prepared = journey ? undefined : reads.getRequest(runId);
+    const request = journey?.request ?? prepared!.request;
+    if (request.provider) await assertReady(requireExplicitProvider(request));
+    else {
+      const snapshot = journey?.providerSelectionSnapshot ?? prepared?.providerSelectionSnapshot;
+      if (!snapshot) throw new RunServiceError('provider_selection_snapshot_missing', 'The accepted automatic run has no frozen provider catalogue.');
+      const unresolved = journey?.evaluations ?? prepared?.evaluations ?? [];
+      const used = new Map<string, ProviderConfigInput>();
+      for (const evaluation of unresolved) {
+        if ('status' in evaluation && evaluation.status !== 'pending' && evaluation.status !== 'failed') continue;
+        const choice = evaluation.providerSelection ?? snapshot.initialChoices?.find(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId);
+        const config = snapshot.catalogue.entries.find(({ id }) => id === choice?.providerId)?.provider;
+        if (config) used.set(JSON.stringify(config), config);
+      }
+      for (const config of used.values()) await assertReady(config);
+    }
     const resumed = commands.resume(runId, Date.now());
     if (resumed.started) {
       try { await launcher.launch(dataRoot, runId); }
@@ -145,6 +253,12 @@ export function createRunService(
   }
 
   return {
+    providerSettings: (input) => {
+      const parsed = providerSettingsOperationSchema.safeParse(input);
+      if (!parsed.success) throw new RunServiceError('invalid_provider_settings', 'Provider settings operation is invalid.');
+      if (parsed.data.operation === 'get') return reads.getProviderSettings();
+      return commands.setProviderSettings({ catalogue: parsed.data.catalogue, preferences: parsed.data.preferences }, parsed.data.expectedRevision);
+    },
     inspect,
     start,
     resume,

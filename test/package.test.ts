@@ -128,7 +128,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), false);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
   const initialized = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { readOnly: true });
-  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 11); }
+  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 13); }
   finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
@@ -932,6 +932,223 @@ test('a copied MCP splits local independent questions and resumes without replay
       await waitForPidExit(resumedWorkerPid);
     }
     await killMcpConnection(clientA, transportA);
+  }
+});
+
+test('a copied plugin freezes and retries mixed automatic routing using isolated credential and network mocks', { skip: process.platform !== 'win32' }, async (t) => {
+  const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-installed-automatic-routing-'));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const plugin = path.join(sandbox, 'installed', 'sheg');
+  await mkdir(path.dirname(plugin), { recursive: true });
+  await cp(pluginPackageSource(), plugin, { recursive: true });
+  assert.equal(await exists(path.join(plugin, 'node_modules')), false);
+
+  const inputImage = path.join(sandbox, 'portrait.png');
+  await copyFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url), inputImage);
+  const imageBytes = await readFile(inputImage);
+  const imageSha256 = createHash('sha256').update(imageBytes).digest('hex');
+  const tokenizerPath = path.join(sandbox, 'laya-tokenizer.json');
+  await cp(path.resolve('test/fixtures/laya-tokenizer.json'), tokenizerPath);
+  const tokenizerSha256 = createHash('sha256').update(await readFile(tokenizerPath)).digest('hex');
+  const arrivalPath = path.join(sandbox, 'laya-arrived');
+  const releasePath = path.join(sandbox, 'release-laya');
+  const failedClefPath = path.join(sandbox, 'failed-clef-once');
+  const callsPath = path.join(sandbox, 'provider-calls.jsonl');
+  const preloadPath = path.join(sandbox, 'offline-provider-mocks.mjs');
+  await writeFile(preloadPath, `
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
+const originalSpawn = childProcess.spawn.bind(childProcess);
+childProcess.spawn = (command, args, options) => {
+  if (String(command).toLowerCase() !== 'powershell.exe') return originalSpawn(command, args, options);
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.kill = () => true;
+  const operation = args[args.indexOf('-Operation') + 1];
+  setTimeout(() => child.stdout.end(operation === 'Status' ? 'AVAILABLE' : 'offline-fixture-token', () => child.emit('close', 0)), 0);
+  return child;
+};
+syncBuiltinESMExports();
+const log = (kind, url, body, hasFixtureCredential) => appendFileSync(process.env.SHEG_ROUTING_MOCK_LOG, JSON.stringify({ kind, url, body, ...(hasFixtureCredential === undefined ? {} : { hasFixtureCredential }) }) + '\\n');
+let localCalls = 0;
+globalThis.fetch = async (input, init) => {
+  const url = String(input);
+  const body = JSON.parse(String(init?.body ?? '{}'));
+  if (url.endsWith('/v1/systemone')) {
+    log('laya', url, body);
+    localCalls += 1;
+    if (localCalls === 1) {
+      writeFileSync(process.env.SHEG_ROUTING_MOCK_ARRIVAL, 'ready');
+      const deadline = Date.now() + 20_000;
+      while (!existsSync(process.env.SHEG_ROUTING_MOCK_RELEASE) && Date.now() < deadline) await delay(10);
+      if (!existsSync(process.env.SHEG_ROUTING_MOCK_RELEASE)) throw new Error('offline fixture release timed out');
+    }
+    const answers = Object.fromEntries(Object.entries(body.questions).map(([id, question]) => {
+      const choices = Object.keys(question.criteria ?? {});
+      const choice = id === 'continue-reading' ? 'continue' : choices[0];
+      return [id, { type: 'choice', choice, probabilities: Object.fromEntries(choices.map((option, index) => [option, index === 0 ? 0.9 : 0.1])) }];
+    }));
+    return Response.json({ model: body.model, routing: { model: body.model }, answers, usage: { input_tokens: 80, output_tokens: 4 } });
+  }
+  if (url.includes('/ai/run/@cf/cloudflare/')) {
+    const hasFixtureCredential = new Headers(init?.headers).get('authorization') === 'Bearer offline-fixture-token';
+    log('clef', url, body, hasFixtureCredential);
+    if (!hasFixtureCredential) return Response.json({ success: false }, { status: 401 });
+    if (!existsSync(process.env.SHEG_ROUTING_MOCK_FAILED_CLEF)) {
+      writeFileSync(process.env.SHEG_ROUTING_MOCK_FAILED_CLEF, 'failed once');
+      return Response.json({ success: false }, { status: 503 });
+    }
+    const answers = Object.fromEntries(Object.entries(body.questions).map(([id, question]) => {
+      const choices = Object.keys(question.criteria ?? {});
+      return [id, { type: 'choice', choice: choices[0], probabilities: Object.fromEntries(choices.map((option, index) => [option, index === 0 ? 0.9 : 0.1])) }];
+    }));
+    return Response.json({ success: true, result: { model: 'clef', answers, usage: { input_tokens: 120, output_tokens: 6 } }, errors: [], messages: [] });
+  }
+  throw new Error('The copied runtime attempted an unapproved network request.');
+};
+`);
+  const { env } = isolatedDefaultStorage(sandbox);
+  env.PLUGIN_ROOT = plugin;
+  env.SHEG_ROUTING_MOCK_LOG = callsPath;
+  env.SHEG_ROUTING_MOCK_ARRIVAL = arrivalPath;
+  env.SHEG_ROUTING_MOCK_RELEASE = releasePath;
+  env.SHEG_ROUTING_MOCK_FAILED_CLEF = failedClefPath;
+  env.NODE_OPTIONS = [env.NODE_OPTIONS, `--import=${pathToFileURL(preloadPath).href}`].filter(Boolean).join(' ');
+  const client = new Client({ name: 'sheg-installed-automatic-routing-test', version: '1.0.0' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
+  try {
+    await client.connect(transport);
+    const imported = await client.callTool({ name: 'image_import', arguments: { source: { path: inputImage, sha256: imageSha256 } } });
+    assert.equal(imported.isError ?? false, false, JSON.stringify(imported.structuredContent));
+    await rm(inputImage);
+    const image = imported.structuredContent as { assetId: string; sha256: string; format: 'png' | 'jpeg' | 'webp'; width: number; height: number; bytes: number };
+    const initialSettings = await client.callTool({ name: 'provider_settings', arguments: { operation: 'get' } });
+    assert.equal(initialSettings.isError ?? false, false, JSON.stringify(initialSettings.structuredContent));
+    const initialRevision = (initialSettings.structuredContent as { catalogue: { revision: number } }).catalogue.revision;
+    const settings = await client.callTool({ name: 'provider_settings', arguments: { operation: 'set', expectedRevision: initialRevision,
+      catalogue: { entries: [
+        { id: 'local-reader', enabled: true, provider: { kind: 'laya', baseUrl: 'http://mock-provider.invalid', checkpoint: 'local-reader-v1', contextLimit: 16_000, headLimit: 4_000, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 }, execution: 'local', capabilities: ['text'], questionTypes: ['choice'], pricing: { kind: 'no-provider-invoice' } },
+        { id: 'vision', enabled: true, provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef', timeoutMs: 10_000 }, execution: 'hosted', capabilities: ['text', 'pixels'], questionTypes: ['choice'], pricing: { kind: 'unknown' } },
+        { id: 'disabled-vision', enabled: false, provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef-flash', timeoutMs: 10_000 }, execution: 'hosted', capabilities: ['text', 'pixels'], questionTypes: ['choice'], pricing: { kind: 'unknown' } },
+      ] }, preferences: { preferredOrder: ['local-reader', 'vision'] } } });
+    assert.equal(settings.isError ?? false, false, JSON.stringify(settings.structuredContent));
+
+    const request = {
+      kind: 'journey',
+      respondents: [
+        { id: 'reader-a', intent: 'Understand the section', context: 'A curious reader', desired_outcome: 'Decide whether to continue', engagement_cues: 'Concrete details', friction_cues: 'Distraction' },
+        { id: 'reader-b', intent: 'Understand the section', context: 'A time-pressed reader', desired_outcome: 'Decide whether to continue', engagement_cues: 'Clear structure', friction_cues: 'Wasted time' },
+      ],
+      journey: { id: 'article', label: 'Text then image', items: [
+        { id: 'section-three', text: 'Section three explains the evidence behind the recommendation.' },
+        { id: 'visual-sample', type: 'image', text: '', altText: 'A transparent image with red, green, blue, and yellow squares at its corners.', caption: 'Four-color corner test image.', asset: image },
+      ], tasks: [
+        { id: 'continue-reading', type: 'choice', instructions: 'Would you continue from section three?', options: { continue: 'Continue', leave: 'Leave' } },
+        { id: 'image-fit', type: 'choice', instructions: 'Does this image support section four?', options: { supports: 'Supports it', distracts: 'Distracts from it' }, visual: { mode: 'pixels', materialIds: ['visual-sample'] } },
+      ], presentation: { kind: 'graph', entryNodeId: 'expose-three', maxDecisions: 2, nodes: [
+        { id: 'expose-three', kind: 'expose', itemId: 'section-three' },
+        { id: 'ask-three', kind: 'ask', taskId: 'continue-reading' },
+        { id: 'expose-visual-sample', kind: 'expose', itemId: 'visual-sample' },
+        { id: 'ask-image', kind: 'ask', taskId: 'image-fit' },
+        { id: 'complete', kind: 'terminal', outcome: 'complete' },
+        { id: 'leave', kind: 'terminal', outcome: 'leave' },
+      ], transitions: [
+        { fromNodeId: 'expose-three', toNodeId: 'ask-three' },
+        { fromNodeId: 'ask-three', optionId: 'continue', toNodeId: 'expose-visual-sample' },
+        { fromNodeId: 'ask-three', optionId: 'leave', toNodeId: 'leave' },
+        { fromNodeId: 'expose-visual-sample', toNodeId: 'ask-image' },
+        { fromNodeId: 'ask-image', optionId: 'supports', toNodeId: 'complete' },
+        { fromNodeId: 'ask-image', optionId: 'distracts', toNodeId: 'complete' },
+      ] } },
+      providerSelection: { preferredOrder: ['local-reader', 'vision'], comparisonLocks: [{ id: 'same-image-model', members: [
+        { respondentId: 'reader-a', questionId: 'image-fit' }, { respondentId: 'reader-b', questionId: 'image-fit' },
+      ], equality: { provider: 'same', model: 'same' } }] },
+      maxCalls: 5,
+    };
+    const inspected = await client.callTool({ name: 'run_inspect', arguments: { request } });
+    assert.equal(inspected.isError ?? false, false, JSON.stringify(inspected.structuredContent));
+    const inspection = inspected.structuredContent as { valid: boolean; initialChoices: Array<{ respondentId: string; questionId: string; providerId: string; candidates: Array<{ id: string; eligible: boolean }> }>; unresolvedFutureJourneyUnits: Array<{ questionId: string }> };
+    assert.equal(inspection.valid, true, JSON.stringify(inspection));
+    assert.deepEqual(inspection.initialChoices.map(({ respondentId, questionId, providerId }) => [respondentId, questionId, providerId]), [
+      ['reader-a', 'continue-reading', 'local-reader'], ['reader-b', 'continue-reading', 'local-reader'],
+    ]);
+    assert.equal(inspection.initialChoices[0]?.candidates.find(({ id }) => id === 'disabled-vision')?.eligible, false);
+    assert.deepEqual([...new Set(inspection.unresolvedFutureJourneyUnits.map(({ questionId }) => questionId))], ['image-fit']);
+
+    const started = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: { ...request, expectedSelectionFingerprint: (inspection as unknown as { selectionFingerprint: string }).selectionFingerprint } } });
+    assert.equal(started.isError ?? false, false, JSON.stringify(started.structuredContent));
+    const runId = (started.structuredContent as { runId: string }).runId;
+    const waitForFile = async (file: string) => {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        if (await exists(file)) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.fail(`Timed out waiting for ${path.basename(file)}.`);
+    };
+    const waitForStatus = async (expected: 'partial' | 'completed') => {
+      const deadline = Date.now() + 30_000;
+      let actual = 'unknown';
+      while (Date.now() < deadline) {
+        const result = await client.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+        actual = String((result.structuredContent as { status?: string }).status);
+        if (actual === expected) return;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      const journey = await client.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+      const attempts = await client.callTool({ name: 'run_get', arguments: { runId, view: 'attempts' } });
+      const mockCalls = await readFile(callsPath, 'utf8').catch(() => '');
+      const evaluations = (journey.structuredContent as { evaluations?: Array<{ respondentId: string; questionId: string; status: string; providerSelection?: { providerId: string } }> }).evaluations ?? [];
+      const attemptItems = (attempts.structuredContent as { items?: Array<{ status: string; failure?: { code: string } }> }).items ?? [];
+      assert.equal(actual, expected, `Timed out waiting for run status ${expected}. ${JSON.stringify({ evaluations: evaluations.map(({ respondentId, questionId, status, providerSelection }) => ({ respondentId, questionId, status, providerId: providerSelection?.providerId })), attempts: attemptItems.map(({ status, failure }) => ({ status, failureCode: failure?.code })), mockedCallCount: mockCalls.trim() ? mockCalls.trim().split(/\r?\n/).length : 0 })}`);
+    };
+    await waitForFile(arrivalPath);
+    const changed = await client.callTool({ name: 'provider_settings', arguments: { operation: 'set', expectedRevision: initialRevision + 1,
+      catalogue: { entries: [
+        { id: 'local-reader', enabled: true, provider: { kind: 'laya', baseUrl: 'http://mock-provider.invalid', checkpoint: 'local-reader-v1', contextLimit: 16_000, headLimit: 4_000, tokenizerJsonPath: tokenizerPath, tokenizerSha256, timeoutMs: 10_000 }, execution: 'local', capabilities: ['text'], questionTypes: ['choice'], pricing: { kind: 'no-provider-invoice' } },
+        { id: 'vision', enabled: false, provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef', timeoutMs: 10_000 }, execution: 'hosted', capabilities: ['text', 'pixels'], questionTypes: ['choice'], pricing: { kind: 'unknown' } },
+        { id: 'disabled-vision', enabled: false, provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef-flash', timeoutMs: 10_000 }, execution: 'hosted', capabilities: ['text', 'pixels'], questionTypes: ['choice'], pricing: { kind: 'unknown' } },
+      ] }, preferences: { preferredOrder: ['local-reader'] } } });
+    assert.equal(changed.isError ?? false, false, JSON.stringify(changed.structuredContent));
+    await writeFile(releasePath, 'continue');
+    await waitForStatus('partial');
+    const beforeRetry = await client.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+    const partial = beforeRetry.structuredContent as { providerSelectionSnapshot: { catalogueRevision: number; catalogue: { entries: Array<{ id: string; enabled: boolean }> } }; evaluations: Array<{ respondentId: string; questionId: string; status: string; providerSelection?: { providerId: string; modelIdentity: string; comparisonLockId?: string } }> };
+    assert.equal(partial.providerSelectionSnapshot.catalogueRevision, initialRevision + 1);
+    assert.equal(partial.providerSelectionSnapshot.catalogue.entries.find(({ id }) => id === 'vision')?.enabled, true);
+    assert.equal(partial.evaluations.find(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'image-fit')?.providerSelection?.providerId, 'vision', JSON.stringify(partial));
+    const resumed = await client.callTool({ name: 'run_resume', arguments: { runId } });
+    assert.equal(resumed.isError ?? false, false, JSON.stringify(resumed.structuredContent));
+    assert.ok(['prepared', 'running'].includes((resumed.structuredContent as { status: string }).status), 'Explicit resume must restart the same installed journey with its saved provider choice.');
+    await waitForStatus('completed');
+
+    const finalResult = await client.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+    assert.equal(finalResult.isError ?? false, false, JSON.stringify(finalResult.structuredContent));
+    const completed = finalResult.structuredContent as typeof partial;
+    assert.deepEqual(completed.evaluations.map(({ respondentId, questionId, status, providerSelection }) => [respondentId, questionId, status, providerSelection?.providerId]), [
+      ['reader-a', 'continue-reading', 'answered', 'local-reader'], ['reader-b', 'continue-reading', 'answered', 'local-reader'],
+      ['reader-a', 'image-fit', 'answered', 'vision'], ['reader-b', 'image-fit', 'answered', 'vision'],
+    ]);
+    const visualChoices = completed.evaluations.filter(({ questionId }) => questionId === 'image-fit').map(({ providerSelection }) => providerSelection);
+    assert.ok(visualChoices.every((choice) => choice?.modelIdentity === 'clef' && choice.comparisonLockId === 'same-image-model'));
+    const records = (await readFile(callsPath, 'utf8')).trim().split(/\r?\n/).map((line) => JSON.parse(line) as { kind: string; url: string; body: { model: string; state: unknown; questions: Record<string, unknown>; images?: string[] }; hasFixtureCredential?: boolean });
+    const layaCalls = records.filter(({ kind }) => kind === 'laya');
+    const clefCalls = records.filter(({ kind }) => kind === 'clef');
+    assert.equal(layaCalls.length, 2);
+    assert.equal(clefCalls.length, 3);
+    assert.ok(layaCalls.every(({ body }) => body.model === 'local-reader-v1'));
+    assert.ok(clefCalls.every(({ body, url }) => body.model === 'clef' && url.endsWith('/ai/run/@cf/cloudflare/clef') && body.images?.length === 1));
+    assert.ok(clefCalls.every(({ hasFixtureCredential }) => hasFixtureCredential === true), 'The installed Clef provider must read and send the isolated fixture credential.');
+    assert.deepEqual(clefCalls[0]?.body, clefCalls[2]?.body, 'Resuming a failed reached image unit must reuse the exact packet and provider payload.');
+    assert.equal(records.some(({ url }) => url.includes('openrouter') || url.includes('clef-flash')), false);
+    assert.doesNotMatch(JSON.stringify(records), /offline-fixture-token/i, 'The mock credential must not appear in provider URLs or request bodies.');
+  } finally {
+    await client.close().catch(() => undefined);
+    await transport.close().catch(() => undefined);
   }
 });
 

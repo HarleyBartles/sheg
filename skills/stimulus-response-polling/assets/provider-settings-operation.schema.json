@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "get"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "set"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "catalogue": {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "provider": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "jev"
+                          },
+                          "route": {
+                            "type": "string",
+                            "enum": [
+                              "openrouter",
+                              "typesafe"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "endpoint": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "timeoutMs": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "laya"
+                          },
+                          "baseUrl": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "checkpoint": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "contextLimit": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "headLimit": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "tokenizerJsonPath": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "tokenizerSha256": {
+                            "type": "string",
+                            "pattern": "^[a-f\\d]{64}$"
+                          },
+                          "precision": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "timeoutMs": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "baseUrl",
+                          "checkpoint",
+                          "contextLimit",
+                          "headLimit",
+                          "tokenizerJsonPath",
+                          "tokenizerSha256",
+                          "timeoutMs"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "clef"
+                          },
+                          "accountId": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{32}$"
+                          },
+                          "model": {
+                            "default": "clef",
+                            "type": "string",
+                            "enum": [
+                              "clef",
+                              "clef-flash"
+                            ]
+                          },
+                          "timeoutMs": {
+                            "default": 30000,
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "accountId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "execution": {
+                    "type": "string",
+                    "enum": [
+                      "local",
+                      "hosted"
+                    ]
+                  },
+                  "capabilities": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "pixels"
+                      ]
+                    }
+                  },
+                  "questionTypes": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "choice",
+                        "score",
+                        "noul"
+                      ]
+                    }
+                  },
+                  "pricing": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "no-provider-invoice"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "published-rate"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$"
+                          },
+                          "unit": {
+                            "type": "string",
+                            "const": "million-input-tokens"
+                          },
+                          "amount": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "source": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "observedAt": {
+                            "type": "string",
+                            "format": "date",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "currency",
+                          "unit",
+                          "amount",
+                          "source",
+                          "observedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "unknown"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "enabled",
+                  "provider",
+                  "execution",
+                  "capabilities",
+                  "questionTypes",
+                  "pricing"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "entries"
+          ],
+          "additionalProperties": false
+        },
+        "preferences": {
+          "type": "object",
+          "properties": {
+            "preferredOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            }
+          },
+          "required": [
+            "preferredOrder"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "operation",
+        "expectedRevision",
+        "catalogue",
+        "preferences"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$id": "urn:sheg:schema:provider-settings-operation.schema.json",
+  "title": "Sheg provider settings operation",
+  "x-validation-rules": [
+    "Settings operations read or replace enabled provider configurations and preference order under optimistic revision control.",
+    "Provider API keys are not accepted or returned; use provider-credential for secure credential operations."
+  ]
+}

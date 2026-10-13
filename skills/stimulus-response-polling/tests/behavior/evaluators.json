@@ -215,5 +215,23 @@
       "Resume happens automatically during a read.",
       "A new route branch is chosen before the failed turn succeeds."
     ]
+  },
+  {
+    "scenarioId": "automatic-provider-routing-visual-journey",
+    "version": 1,
+    "criteria": [
+      { "id": "single-study-provider-policy", "condition": "Uses one journey with providerSelection: {} so Sheg can choose an eligible provider per reached unit; does not split the design into separate runs solely because text and pixels need different capabilities." },
+      { "id": "economy-and-user-controls", "condition": "Explains that Sheg honors unit pins and request or saved user preferences before its economical eligible-provider fallback, and identifies the provider catalogue as the source of availability." },
+      { "id": "matched-image-treatment", "condition": "Recommends holding provider and model constant across image and no-image conditions when the image is the intended changing variable, using an appropriate same-provider/model comparison lock so both conditions use Clef." },
+      { "id": "initial-and-future-evidence", "condition": "Distinguishes the inspected initial provider choice from unresolved future journey units, which Sheg selects after each actual history and exposure state is known." },
+      { "id": "sheg-managed-batching", "condition": "Explains that Sheg plans and splits provider calls; singleton batching is an explicit control when separate physical calls are part of the design." },
+      { "id": "evidence-limits", "condition": "Describes Clef responses as model evidence and does not present them as human cohort results or validated predictions of real reading behavior." }
+    ],
+    "prohibitedClaims": [
+      "Having a credential alone makes a provider eligible or automatically selected.",
+      "The agent must manually switch providers between stages of an automatically routed study.",
+      "The no-image branch should use Laya while the image branch uses Clef when the study intends to isolate image presence.",
+      "The provider choice demonstrates what human readers will do."
+    ]
   }
 ]

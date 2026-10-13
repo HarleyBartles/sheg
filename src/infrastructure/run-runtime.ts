@@ -104,6 +104,7 @@ function createDefaultRunService(dataRoot: string, providerFactory: typeof creat
 function unavailableRunService(): RunService {
   const unavailable = (): never => { throw recoveryRequiredError(); };
   return {
+    providerSettings: () => unavailable(),
     inspect: async () => unavailable(),
     start: async () => unavailable(),
     resume: async () => unavailable(),

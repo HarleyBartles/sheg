@@ -8,9 +8,11 @@ import { asNumber, asText, type DatabaseRow } from '../rows.js';
 import { hasAllFollowOnSelections } from '../run-identity-queries.js';
 import { validatePrepared, validatePreparedJourney } from './prepared-validation.js';
 import { hashCanonical } from '../../identity.js';
+import { providerSelectionFingerprint } from '../../../application/provider-selection-fingerprint.js';
 import { isImageMaterial } from '../../../domain/study/stimulus.js';
 import type { ParsedRunRequest, RunMaterialItem } from '../../../domain/run/request.js';
 import { evaluations, journeyRespondents, questionGroups, runVisualAssets, runs } from '../tables.js';
+import { providerConfigurationIdentity, providerModelIdentity } from '../../../providers/config.js';
 
 const SQLITE_INSERT_BATCH_SIZE = 250;
 
@@ -45,6 +47,8 @@ export function acceptPreparedRun(context: AcceptanceContext, submissionId: stri
       context.reconcileInside(runId, context.now());
       return { created: false, run: context.statusInside(runId) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
 
     if (prepared.request.kind === 'follow-on') {
       const lineage = prepared.lineage;
@@ -63,7 +67,7 @@ export function acceptPreparedRun(context: AcceptanceContext, submissionId: stri
       }
     }
 
-    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
+    const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations, prepared.lineage);
 
     const runId = randomUUID();
     const nowMs = context.now();
@@ -87,6 +91,8 @@ export function acceptPreparedJourney(context: AcceptanceContext, submissionId: 
       context.reconcileInside(runId, context.now());
       return { created: false, run: context.statusInside(runId) };
     }
+    assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
+    validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
     const runId = randomUUID();
     const nowMs = context.now();
@@ -97,7 +103,60 @@ export function acceptPreparedJourney(context: AcceptanceContext, submissionId: 
   });
 }
 
-function requestedImageMaterials(request: ParsedRunRequest): Extract<RunMaterialItem, { type: 'image' }>[] {
+function assertProviderSettingsSnapshot(database: DatabaseSync, snapshot: PreparedRun['providerSelectionSnapshot'] | PreparedJourneyRun['providerSelectionSnapshot'], request: ParsedRunRequest): void {
+  if (!snapshot) return;
+  const row = database.prepare('SELECT revision, catalogue_json, preferences_json FROM provider_settings WHERE singleton_id = 1').get() as DatabaseRow | undefined;
+  if (!row || asNumber(row.revision, 'provider settings revision') !== snapshot.catalogueRevision ||
+      asText(row.catalogue_json, 'provider catalogue') !== JSON.stringify({ revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }) ||
+      asText(row.preferences_json, 'provider preferences') !== JSON.stringify(snapshot.preferences)) {
+    throw new RunStoreError('provider_settings_revision_conflict', 'Provider settings changed after inspection. Inspect the request again before accepting it.');
+  }
+  if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
+    throw new RunStoreError('provider_selection_fingerprint_stale', 'Provider selection inputs changed after inspection. Inspect the request again before accepting it.');
+  }
+}
+
+function validateInitialProviderChoices(
+  snapshot: PreparedRun['providerSelectionSnapshot'] | PreparedJourneyRun['providerSelectionSnapshot'],
+  request: ParsedRunRequest,
+  evaluations: PreparedRun['evaluations'] | PreparedJourneyRun['evaluations'],
+): void {
+  const choices = snapshot?.initialChoices;
+  if (request.providerSelection && (request.kind === 'poll' || request.kind === 'journey') && choices === undefined) {
+    throw new RunStoreError('invalid_prepared_run', 'Automatic run acceptance requires the inspected initial provider choices.');
+  }
+  if (!choices) return;
+  const unitKey = (unit: { respondentId: string; questionId: string; branchId?: string | undefined }) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? null]);
+  const expected = new Set(evaluations.map(({ respondentId, questionId }) => unitKey({ respondentId, questionId })));
+  if (expected.size !== choices.length || choices.some((choice) => !expected.has(unitKey(choice)))) {
+    throw new RunStoreError('invalid_prepared_run', 'Initial provider choices must cover exactly the accepted evaluations.');
+  }
+  for (const choice of choices) {
+    const entry = snapshot!.catalogue.entries.find(({ id }) => id === choice.providerId);
+    if (!entry?.enabled) throw new RunStoreError('invalid_prepared_run', `Initial provider choice ${choice.providerId} is absent or disabled in the frozen catalogue.`);
+    const configuredModel = providerModelIdentity(entry.provider);
+    if (configuredModel !== choice.modelIdentity) throw new RunStoreError('invalid_prepared_run', `Initial provider choice ${choice.providerId} does not match its frozen model identity.`);
+  }
+  for (const lock of request.providerSelection?.comparisonLocks ?? []) {
+    const memberChoices = lock.members.flatMap((member) => {
+      if (member.branchId) return [];
+      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId);
+      return choice ? [choice] : [];
+    });
+    if (lock.members.some((member) => member.branchId === undefined && expected.has(unitKey(member)) &&
+      !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId))) {
+      throw new RunStoreError('invalid_prepared_run', `Initial provider choices omit a known member of comparison ${lock.id}.`);
+    }
+    if (memberChoices.length < 2) continue;
+    const providers = new Set(memberChoices.map(({ providerId }) => providerConfigurationIdentity(snapshot!.catalogue.entries.find((entry) => entry.id === providerId)!.provider)));
+    const models = new Set(memberChoices.map(({ modelIdentity }) => modelIdentity));
+    if (lock.equality.provider === 'same' && providers.size !== 1) throw new RunStoreError('invalid_prepared_run', `Initial provider choices violate provider equality for comparison ${lock.id}.`);
+    if (lock.equality.model === 'same' && models.size !== 1) throw new RunStoreError('invalid_prepared_run', `Initial provider choices violate model equality for comparison ${lock.id}.`);
+    if (memberChoices.some(({ comparisonLockId }) => comparisonLockId !== lock.id)) throw new RunStoreError('invalid_prepared_run', `Initial provider choices do not retain comparison identity ${lock.id}.`);
+  }
+}
+
+function requestedImageMaterials(request: ParsedRunRequest, lineage?: PreparedRun['lineage']): Extract<RunMaterialItem, { type: 'image' }>[] {
   if (request.kind === 'poll') {
     const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
     return request.material.filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
@@ -106,11 +165,16 @@ function requestedImageMaterials(request: ParsedRunRequest): Extract<RunMaterial
     const bound = new Set(request.journey.tasks.flatMap((task) => task.visual?.materialIds ?? []));
     return request.journey.items.filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
   }
+  if (request.kind === 'follow-on') {
+    const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
+    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
+    return [...new Map(linked.map((material) => [material.id, material])).values()];
+  }
   return [];
 }
 
-function verifyFrozenVisualAssets(database: DatabaseSync, request: ParsedRunRequest, frozenEvaluations: PreparedRun['evaluations'] | PreparedJourneyRun['evaluations']) {
-  const requested = requestedImageMaterials(request);
+function verifyFrozenVisualAssets(database: DatabaseSync, request: ParsedRunRequest, frozenEvaluations: PreparedRun['evaluations'] | PreparedJourneyRun['evaluations'], lineage?: PreparedRun['lineage']) {
+  const requested = requestedImageMaterials(request, lineage);
   const materialsById = new Map(requested.map((material) => [material.id, material]));
   for (const evaluation of frozenEvaluations) {
     const packetMaterials = evaluation.packet.visualMaterials ?? [];
@@ -163,6 +227,7 @@ export function insertAcceptedRun(database: NodeSQLiteDatabase, identity: Accept
       request: prepared.request,
       requestFingerprint: prepared.requestFingerprint,
       compilerFingerprint: prepared.compilerFingerprint,
+      ...(prepared.providerSelectionSnapshot ? { providerSelectionSnapshot: prepared.providerSelectionSnapshot } : {}),
       ...('lineage' in prepared && prepared.lineage ? { lineage: prepared.lineage } : {}),
     }),
     evaluationCount: prepared.evaluations.length,
@@ -187,6 +252,7 @@ export function insertPreparedRunData(database: NodeSQLiteDatabase, runId: strin
     groupId: evaluation.groupId!,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: 'pending' as const,
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
@@ -217,6 +283,7 @@ export function insertPreparedJourneyData(database: NodeSQLiteDatabase, runId: s
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: 'pending' as const,
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();

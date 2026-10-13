@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { materializeJourneyRun, prepareRun } from '../src/application/run-inspection.js';
+import { materializeJourneyRun, prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import { ClefProvider } from '../src/providers/clef.js';
 import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
 import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
@@ -14,6 +14,7 @@ import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
 import { compileDecisionPacketForCompiler } from '../src/domain/decision/prompt.js';
+import { followOnRunRequestSchema } from '../src/domain/run/request.js';
 
 const bytesPromise = readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
 const config = { kind: 'clef' as const, accountId: '3327878972ea82e6b454069bba62f3d9', model: 'clef' as const, timeoutMs: 1000 };
@@ -96,6 +97,84 @@ test('worker sends the accepted frozen pixels through Clef and settles the answe
     assert.equal(attempts.length, 1);
     assert.equal(attempts[0]?.execution?.provider, 'clef');
     assert.equal(attempts[0]?.execution?.model, 'clef');
+  } finally { await fixture.close(); }
+});
+
+test('pixel Choice image mappings identify options without creating text selected-material evidence', async () => {
+  const fixture = await setup();
+  try {
+    const base = request(fixture.metadata);
+    const sourceRequest = { ...base, questions: [{ ...base.questions[0]!, materialOptions: { yes: 'portrait' } }] };
+    const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
+    const admitted = await prepareRun(sourceRequest, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(admitted.prepared, JSON.stringify(admitted.inspection.problems));
+    const accepted = fixture.store.accept(randomUUID(), admitted.prepared);
+    const fetchRequest = (async () => Response.json({ success: true, result: { model: 'clef', answers: {
+      'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
+    }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] })) as typeof fetch;
+    await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, (_providerConfig, options) => new ClefProvider(config, fetchRequest,
+      { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
+    const evidence = fixture.store.queryEvidence({ sourceRunId: accepted.run.runId,
+      criteria: { questionId: 'image-fit', answer: { type: 'choice', choiceId: 'yes' } } });
+    assert.equal(evidence.items[0]?.selectedMaterial, undefined);
+
+    const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
+      selection: { criteria: { questionId: 'image-fit' } }, context: { mode: 'fresh-material', includeSelectedMaterial: true },
+      questions: [{ type: 'noul', id: 'image-follow-up', instructions: 'Does the image still fit the next section?' }], provider: config, maxCalls: 1 });
+    const sources = fixture.store.resolveFollowOnSources(followOn);
+    assert.equal(sources.turns[0]?.status, 'answered');
+    assert.equal(sources.turns[0]?.selectedMaterial, undefined);
+  } finally { await fixture.close(); }
+});
+
+test('follow-on pixel Choice can reuse exact source image bytes without treating the image as text context', async () => {
+  const fixture = await setup();
+  try {
+    const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
+    const sourceRequest = { ...request(fixture.metadata), questions: [{ ...request(fixture.metadata).questions[0]!, materialOptions: { yes: 'portrait' } }] };
+    const admitted = await prepareRun(sourceRequest, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(admitted.prepared, JSON.stringify(admitted.inspection.problems));
+    const accepted = fixture.store.accept(randomUUID(), admitted.prepared);
+    const sourceFetch = (async () => Response.json({ success: true, result: { model: 'clef', answers: {
+      'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
+    }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] })) as typeof fetch;
+    await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, (_providerConfig, options) => new ClefProvider(config, sourceFetch,
+      { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
+
+    const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
+      selection: { criteria: { questionId: 'image-fit' } }, context: { mode: 'fresh-material', materialIds: ['portrait', 'section-three'] },
+      material: [{ id: 'section-four', text: 'The article explains the recommendation.' }],
+      questions: [{ type: 'choice', id: 'image-follow-up', instructions: 'Does the image support this next section?',
+        options: { image: 'The image supports the section', text: 'The image distracts from it' }, materialOptions: { image: 'portrait' },
+        visual: { mode: 'pixels', materialIds: ['portrait'] } }], provider: config, maxCalls: 1 });
+    const sources = fixture.store.resolveFollowOnSources(followOn);
+    const prepared = await prepareFollowOnRun(followOn, sources, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(prepared.prepared, JSON.stringify(prepared.inspection.problems));
+    const packet = prepared.prepared.evaluations[0]!.packet;
+    assert.deepEqual(packet.visualMaterials?.map(({ id, altText, asset }) => ({ id, altText, asset })), [
+      { id: 'portrait', altText: 'Approved specialist portrait.', asset: fixture.metadata },
+    ]);
+    assert.deepEqual(((packet.state as { encounteredItems: Array<{ id: string }> }).encounteredItems).map(({ id }) => id), ['section-three', 'section-four']);
+    const followOnAccepted = fixture.store.accept(randomUUID(), prepared.prepared);
+    const followOnFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { images: string[]; state: { encounteredItems: Array<{ id: string }> } };
+      assert.deepEqual(body.images, [`data:image/png;base64,${Buffer.from(fixture.bytes).toString('base64')}`]);
+      assert.deepEqual(body.state.encounteredItems.map(({ id }) => id), ['section-three', 'section-four']);
+      return Response.json({ success: true, result: { model: 'clef', answers: {
+        'image-follow-up': { type: 'choice', choice: 'image', probabilities: { image: 0.9, text: 0.1 } },
+      }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] });
+    }) as typeof fetch;
+    await executeQuestionRun(splitRunStore(fixture.store), followOnAccepted.run.runId, (_providerConfig, options) => new ClefProvider(config, followOnFetch,
+      { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
+    const evidence = fixture.store.queryEvidence({ sourceRunId: followOnAccepted.run.runId,
+      criteria: { questionId: 'image-follow-up', answer: { type: 'choice', choiceId: 'image' } } });
+    assert.equal(evidence.items[0]?.selectedMaterial, undefined);
+    const db = new DatabaseSync(path.join(fixture.root, 'runs.sqlite'));
+    try {
+      assert.deepEqual(db.prepare('SELECT material_id, asset_id FROM run_visual_assets WHERE run_id = ?').all(followOnAccepted.run.runId).map((row) => ({ ...row })), [
+        { material_id: 'portrait', asset_id: fixture.metadata.assetId },
+      ]);
+    } finally { db.close(); }
   } finally { await fixture.close(); }
 });
 

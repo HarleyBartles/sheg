@@ -521,6 +521,121 @@
             }
           ]
         },
+        "providerSelection": {
+          "type": "object",
+          "properties": {
+            "preferredOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "requiredCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "pixels"
+                ]
+              }
+            },
+            "unitOverrides": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "comparisonLocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "members": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "respondentId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "questionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "branchId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "respondentId",
+                        "questionId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "equality": {
+                    "default": {
+                      "provider": "same",
+                      "model": "same"
+                    },
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "default": "same",
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      },
+                      "model": {
+                        "default": "same",
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "members"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "batching": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "singleton"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "expectedSelectionFingerprint": {
+          "type": "string",
+          "pattern": "^(?:[a-f\\d]{64}|r\\d+-[a-f\\d]{64})$"
+        },
         "maxCalls": {
           "type": "integer",
           "exclusiveMinimum": 0,
@@ -532,7 +647,6 @@
         "respondents",
         "material",
         "questions",
-        "provider",
         "maxCalls"
       ],
       "additionalProperties": false
@@ -1379,6 +1493,121 @@
             }
           ]
         },
+        "providerSelection": {
+          "type": "object",
+          "properties": {
+            "preferredOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "requiredCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "pixels"
+                ]
+              }
+            },
+            "unitOverrides": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "comparisonLocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "members": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "respondentId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "questionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "branchId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "respondentId",
+                        "questionId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "equality": {
+                    "default": {
+                      "provider": "same",
+                      "model": "same"
+                    },
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "default": "same",
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      },
+                      "model": {
+                        "default": "same",
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "members"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "batching": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "singleton"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "expectedSelectionFingerprint": {
+          "type": "string",
+          "pattern": "^(?:[a-f\\d]{64}|r\\d+-[a-f\\d]{64})$"
+        },
         "maxCalls": {
           "type": "integer",
           "exclusiveMinimum": 0,
@@ -1389,7 +1618,6 @@
         "kind",
         "respondents",
         "journey",
-        "provider",
         "maxCalls"
       ],
       "additionalProperties": false
@@ -2044,6 +2272,121 @@
             }
           ]
         },
+        "providerSelection": {
+          "type": "object",
+          "properties": {
+            "preferredOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "requiredCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "pixels"
+                ]
+              }
+            },
+            "unitOverrides": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              }
+            },
+            "comparisonLocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "members": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "respondentId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "questionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "branchId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "respondentId",
+                        "questionId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "equality": {
+                    "default": {
+                      "provider": "same",
+                      "model": "same"
+                    },
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "default": "same",
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      },
+                      "model": {
+                        "default": "same",
+                        "type": "string",
+                        "enum": [
+                          "same",
+                          "vary"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "members"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "batching": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "singleton"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "expectedSelectionFingerprint": {
+          "type": "string",
+          "pattern": "^(?:[a-f\\d]{64}|r\\d+-[a-f\\d]{64})$"
+        },
         "maxCalls": {
           "type": "integer",
           "exclusiveMinimum": 0,
@@ -2056,7 +2399,6 @@
         "selection",
         "context",
         "questions",
-        "provider",
         "maxCalls"
       ],
       "additionalProperties": false
@@ -2071,6 +2413,8 @@
     "Material text is preserved exactly as authored.",
     "A follow-on selects one source run by explicit evidence criteria or exact evaluation/context references.",
     "Fresh-material and omit-history follow-ons require explicit material; omit-history removes prior trajectory and exposure-order metadata.",
-    "Continue requires a selected completed answer and retains it in the next respondent trajectory."
+    "Continue requires a selected completed answer and retains it in the next respondent trajectory.",
+    "Automatic routing requires providerSelection: {} and at least one enabled compatible entry in Sheg provider settings; otherwise use an explicit provider configuration. Preferences, unit overrides, comparison locks, and batching are per-study controls.",
+    "A Choice option may map to an image only when that exact image is bound to the question for pixel input; image mappings guide visual option identity and do not produce text selectedMaterial evidence."
   ]
 }

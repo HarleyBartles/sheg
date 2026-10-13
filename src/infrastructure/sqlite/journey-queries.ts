@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { decisionPacketSchema } from '../../domain/decision/prompt.js';
-import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyWorkerTurn } from '../../domain/run/lifecycle.js';
+import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, providerSelectionInitialChoiceSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyWorkerTurn } from '../../domain/run/lifecycle.js';
 import { RunStoreError } from '../../application/run-store.js';
 import { hashCanonical } from '../identity.js';
 import { asNullableText, asNumber, asText, parseJson, parseStored } from './rows.js';
@@ -14,6 +14,7 @@ const journeyTurnRowSchema = z.object({
   respondent_id: z.string(), question_id: z.string(), packet_json: z.string(), packet_fingerprint: z.string(),
   turn_id: z.string(), node_id: z.string(), path_id: z.string(), occurrence: sqliteInteger, ordinal: sqliteInteger,
   status: z.string(), respondent_status: z.string(), respondent_current_node_id: z.string().nullable(),
+  provider_selection_json: z.string().nullable(),
   respondent_current_turn_id: z.string().nullable(), respondent_current_context_id: z.string().nullable(),
   respondent_revision: sqliteInteger, respondent_events_json: z.string(), respondent_route_json: z.string(),
   respondent_outcome: z.string().nullable(), next_ordinal: sqliteInteger,
@@ -46,6 +47,7 @@ export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, eva
     occurrence: asNumber(first.occurrence, 'turn occurrence'),
     ordinal: asNumber(first.ordinal, 'evaluation ordinal'),
     status: parseStored(evaluationStatusSchema, asText(first.status, 'evaluation status'), 'evaluation status'),
+    ...(first.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(first.provider_selection_json, 'provider selection'), 'provider selection') }),
   };
   if (evaluation.status !== 'pending' || evaluation.questionId !== packet.question.id ||
       hashCanonical({ packet, compilerFingerprint: identity.compilerFingerprint }) !== evaluation.packetFingerprint) {

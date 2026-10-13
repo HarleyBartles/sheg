@@ -160,6 +160,7 @@ export function prepareFollowOnPacket(input: {
   mode: 'recorded' | 'fresh-material' | 'omit-history' | 'continue';
   question: DecisionRequest['question'];
   material?: readonly { id: string; text: string }[];
+  visualMaterials?: readonly DecisionVisualMaterial[];
   result?: DecisionValue;
 }): DecisionRequest & { state: PromptState } {
   const { source, mode, question } = input;
@@ -168,6 +169,7 @@ export function prepareFollowOnPacket(input: {
     encounteredItems: source.state.encounteredItems,
     trajectory: source.state.trajectory,
     question,
+    ...(input.visualMaterials === undefined ? {} : { visualMaterials: [...input.visualMaterials] }),
   }) as DecisionRequest & { state: PromptState };
   const material = input.material ? input.material.map(({ id, text }) => ({ id, text })) : [];
   let state: PromptState;
@@ -187,7 +189,8 @@ export function prepareFollowOnPacket(input: {
       trajectory: emptyTrajectory(),
     };
   }
-  return compileDecisionRequest({ respondentProfile: state.respondent.profile, encounteredItems: state.encounteredItems, trajectory: state.trajectory, question }) as DecisionRequest & { state: PromptState };
+  return compileDecisionRequest({ respondentProfile: state.respondent.profile, encounteredItems: state.encounteredItems, trajectory: state.trajectory, question,
+    ...(input.visualMaterials === undefined ? {} : { visualMaterials: [...input.visualMaterials] }) }) as DecisionRequest & { state: PromptState };
 }
 
 function compactTrajectory(arm: JourneyDefinition, history: readonly PromptHistoryEvent[]): TrajectorySummary {

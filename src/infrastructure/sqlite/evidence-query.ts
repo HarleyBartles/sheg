@@ -8,11 +8,13 @@ import { providerExecutionEvidenceSchema } from '../../domain/decision/decision.
 import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { hashCanonical } from '../identity.js';
 import { runStatusSchema, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView } from '../../domain/run/lifecycle.js';
+import { requireExplicitProvider } from '../../domain/run/request.js';
 import { followOnLineageSchema, runEvidenceQuerySchema, runLifecycleSchema, runRequestSchema, type FollowOnLineage } from '../../domain/run/request.js';
 import { decisionValueSchema } from '../../domain/decision/decision.js';
 import { decodeStoredPayload } from './payload-codecs.js';
 import { z } from 'zod';
 import { evaluationCriteriaSql } from './evaluation-criteria.js';
+import { isImageMaterial } from '../../domain/study/stimulus.js';
 
 type EvidenceCursorPayload = {
   kind: 'evidence';
@@ -167,14 +169,15 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         .all(query.sourceRunId, ...pageIds) as DatabaseRow[];
       const hasMore = rows.length > limit;
       const pageRows = rows.slice(0, limit);
-      const endpoint = parsedRequest.data.provider.kind === 'jev'
-        ? parsedRequest.data.provider.endpoint
-        : parsedRequest.data.provider.kind === 'laya'
-          ? parsedRequest.data.provider.baseUrl
-          : `https://api.cloudflare.com/client/v4/accounts/${parsedRequest.data.provider.accountId}/ai/run/@cf/cloudflare/${parsedRequest.data.provider.model}`;
-      const model = parsedRequest.data.provider.kind === 'jev' || parsedRequest.data.provider.kind === 'clef'
-        ? parsedRequest.data.provider.model
-        : parsedRequest.data.provider.checkpoint;
+      const provider = requireExplicitProvider(parsedRequest.data);
+      const endpoint = provider.kind === 'jev'
+        ? provider.endpoint
+        : provider.kind === 'laya'
+          ? provider.baseUrl
+          : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
+      const model = provider.kind === 'jev' || provider.kind === 'clef'
+        ? provider.model
+        : provider.checkpoint;
       const items: RunEvidencePage['items'] = pageRows.map((row) => {
         const contextId = asText(row.context_id, 'context ID');
         const respondentId = asText(row.respondent_id, 'respondent ID');
@@ -186,9 +189,12 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
           const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
           if (materialId) {
             const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
-            if (!candidate || !candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
-            selectedMaterial = { materialId, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
-              textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') };
+            if (!candidate) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            if (!isImageMaterial(candidate)) {
+              if (!candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+              selectedMaterial = { materialId, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
+                textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') };
+            }
           }
         }
         return {
@@ -207,7 +213,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
           ...(row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, 'turn occurrence') }),
           ...(row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, 'route outcome') }),
           provenance: {
-            provider: parsedRequest.data.provider.kind,
+            provider: provider.kind,
             model,
             endpoint,
             compilerFingerprint,

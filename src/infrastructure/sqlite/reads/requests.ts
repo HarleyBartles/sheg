@@ -5,11 +5,13 @@ import { decisionRequestSchema } from '../../../domain/decision/decision.js';
 import { RunStoreError } from '../../../application/run-store.js';
 import { parseJson, parseJsonRecord, parseStored } from '../rows.js';
 import { loadAcceptedRequest, loadPreparedEvaluations, loadQuestionGroups, runExists } from '../run-identity-queries.js';
+import { providerSelectionInitialChoiceSchema, providerSelectionPolicySnapshotSchema } from '../../../domain/run/lifecycle.js';
 
 const preparedRunRecordSchema = z.object({
   request: z.union([inlineRunRequestSchema, followOnRunRequestSchema]),
   requestFingerprint: z.string().min(1),
   compilerFingerprint: z.string().min(1),
+  providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.optional(),
   lineage: followOnLineageSchema.optional(),
 });
 
@@ -30,10 +32,10 @@ export function readPreparedRun(
   const row = loadAcceptedRequest(database, runId);
   if (!row) throw options.notFound();
   const stored = parseStored(preparedRunRecordSchema, parseJson(row.requestJson, 'request'), 'run request');
-  const { lineage, ...storedBase } = stored;
+  const { lineage, providerSelectionSnapshot, ...storedBase } = stored;
   const evaluations = loadPreparedEvaluations(database, runId);
   const groups = loadQuestionGroups(database, runId);
-  const parsed = options.validate({ ...storedBase, ...(lineage === undefined ? {} : { lineage }), groups: groups.map((group) => ({
+  const parsed = options.validate({ ...storedBase, ...(providerSelectionSnapshot === undefined ? {} : { providerSelectionSnapshot }), ...(lineage === undefined ? {} : { lineage }), groups: groups.map((group) => ({
     groupId: group.groupId, contextId: group.contextId, respondentId: group.respondentId,
     state: parseStored(z.record(z.string(), z.unknown()), parseJson(group.stateJson, 'group state'), 'group state'),
     questionIds: parseStored(z.array(z.string().min(1)), parseJson(group.questionIdsJson, 'group question IDs'), 'group question IDs'),
@@ -45,6 +47,7 @@ export function readPreparedRun(
     questionId: evaluation.questionId,
     packet: parseStored(decisionRequestSchema, parseJson(evaluation.packetJson, 'frozen packet'), 'frozen packet'),
     packetFingerprint: evaluation.packetFingerprint,
+    ...(evaluation.providerSelectionJson === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.providerSelectionJson, 'provider selection'), 'provider selection') }),
   })) });
   if (parsed.requestFingerprint !== row.requestFingerprint) throw new RunStoreError('data_integrity_error', 'Stored run and request fingerprints do not match.');
   if (parsed.request.kind === 'follow-on' && parsed.lineage) {

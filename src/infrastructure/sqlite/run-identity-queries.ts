@@ -42,6 +42,7 @@ export function loadPreparedEvaluations(database: NodeSQLiteDatabase, runId: str
     questionId: evaluations.questionId,
     packetJson: evaluations.packetJson,
     packetFingerprint: evaluations.packetFingerprint,
+    providerSelectionJson: evaluations.providerSelectionJson,
   }).from(evaluations).where(eq(evaluations.runId, runId)).orderBy(asc(evaluations.ordinal)).all();
 }
 
