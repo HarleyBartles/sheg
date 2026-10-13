@@ -45,6 +45,7 @@ This directory records durable decisions for Sheg: the context in which each dec
 | [0037](0037-adopt-gitflow-and-semver-cadence.md) | Adopt Gitflow and SemVer with integration checkpoints | Accepted |
 | [0038](0038-store-and-scale-image-assets-locally.md) | Store and scale image assets locally | Accepted |
 | [0039](0039-run-visual-polls-through-native-clef.md) | Run visual polls through native Cloudflare Clef | Accepted |
+| [0040](0040-preserve-distinct-visual-comparison-shapes.md) | Preserve distinct four-way and pairwise visual comparisons | Accepted |
 
 ## Writing and changing decisions
 

@@ -49,14 +49,14 @@ test('native Clef compiles the fixed REST route, image order, typed questions, a
   assert.equal(result.usage.inputTokens, 200);
 });
 
-test('Clef names the image index represented by each visual choice option', async () => {
+test('Clef preserves singleton visual order while naming each mapped choice image', async () => {
   let body: Record<string, unknown> | undefined;
   const second = { ...image, id: 'reference' };
   const request: DecisionBatchRequest = {
     state: { materialOrder: ['patch', 'reference'] }, visualMaterials: [image, second], questions: [{
       type: 'choice', id: 'match', instructions: 'Which portrait best matches the brief?',
       options: { patch: 'Portrait A', reference: 'Portrait B' }, materialOptions: { patch: 'patch', reference: 'reference' },
-      visual: { mode: 'pixels', materialIds: ['patch', 'reference'] },
+      visual: { mode: 'pixels', materialIds: ['reference', 'patch'] },
     }],
   };
   const resolver: ClefImageResolver = { resolve() { return { metadata: image.asset, bytes: imageBytes }; } };
@@ -65,9 +65,13 @@ test('Clef names the image index represented by each visual choice option', asyn
     return Response.json({ success: true, result: { model: 'clef', answers: { match: { type: 'choice', choice: 'patch', probabilities: { patch: 0.8, reference: 0.2 } } }, usage: { input_tokens: 20 } } });
   }) as typeof fetch, { credentialStore: credentials, imageResolver: resolver });
   await provider.decideBatch(request, 1);
+  const bodyImages = body?.images as string[];
+  const wireMaterials = (body?.state as { visualMaterials: Array<{ materialId: string; imageIndex: number }> }).visualMaterials;
+  assert.equal(bodyImages.length, 2);
+  assert.deepEqual(wireMaterials.map(({ materialId, imageIndex }) => [materialId, imageIndex]), [['reference', 0], ['patch', 1]]);
   const wireQuestions = body?.questions as Record<string, { instructions: string }>;
-  assert.match(wireQuestions.match!.instructions, /option .*patch.*image index 0/i);
-  assert.match(wireQuestions.match!.instructions, /option .*reference.*image index 1/i);
+  assert.match(wireQuestions.match!.instructions, /option .*patch.*image index 1/i);
+  assert.match(wireQuestions.match!.instructions, /option .*reference.*image index 0/i);
 });
 
 test('one malformed Clef answer remains local to that question while a valid sibling survives', async () => {

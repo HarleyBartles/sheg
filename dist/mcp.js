@@ -51183,7 +51183,8 @@ function compileClefRequest(input2, configInput, imageResolver) {
   }
   const metadataById = new Map((request.visualMaterials ?? []).map((material) => [material.id, material]));
   const materialOrder = Array.isArray(request.state.materialOrder) ? request.state.materialOrder : [];
-  const orderedMaterials = [...modeByMaterial.keys()].sort((left, right) => {
+  const singleQuestionOrder = request.questions.length === 1 ? request.questions[0].visual?.materialIds : void 0;
+  const orderedMaterials = singleQuestionOrder ? [...singleQuestionOrder] : [...modeByMaterial.keys()].sort((left, right) => {
     const leftIndex = materialOrder.indexOf(left);
     const rightIndex = materialOrder.indexOf(right);
     if (leftIndex < 0 && rightIndex < 0) return left.localeCompare(right);
@@ -51555,17 +51556,7 @@ function scaledDimensions(image, request, factor = 1) {
     request.maxHeight === void 0 ? 1 : request.maxHeight / image.height,
     factor
   );
-  let width = Math.max(1, Math.floor(image.width * fit));
-  let height = Math.max(1, Math.floor(image.height * fit));
-  for (let attempt = 0; attempt < 32; attempt += 1) {
-    const proportional = Math.min(width / image.width, height / image.height);
-    const nextWidth = Math.max(1, Math.floor(image.width * proportional));
-    const nextHeight = Math.max(1, Math.floor(image.height * proportional));
-    if (nextWidth === width && nextHeight === height) break;
-    width = nextWidth;
-    height = nextHeight;
-  }
-  return { width, height };
+  return { width: Math.max(1, Math.floor(image.width * fit)), height: Math.max(1, Math.floor(image.height * fit)) };
 }
 function createImagePreparationService(repository, codec2, exportRoot) {
   async function verifiedBytes(source) {
@@ -56953,10 +56944,9 @@ function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec
     },
     async scale(image, width, height) {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions.");
-      const factor = Math.min(width / image.width, height / image.height);
-      const expectedWidth = Math.max(1, Math.floor(image.width * factor));
-      const expectedHeight = Math.max(1, Math.floor(image.height * factor));
-      if (factor > 1 || width !== expectedWidth || height !== expectedHeight) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions or enlarging the source.");
+      const minimumFactor = Math.max((width - 1) / image.width, (height - 1) / image.height);
+      const maximumFactor = Math.min(1, (width + 1) / image.width, (height + 1) / image.height);
+      if (width > image.width || height > image.height || minimumFactor > maximumFactor) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions or enlarging the source.");
       await initialize2();
       const scaled = await resize4({ data: image.data, width: image.width, height: image.height }, { width, height, method: "lanczos3", fitMethod: "stretch" });
       const result = view(scaled);
@@ -57245,7 +57235,7 @@ function assertNever2(value) {
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.4.0-dev.8",
+  version: "0.4.0-dev.9",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',

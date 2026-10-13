@@ -4,7 +4,7 @@ Sheg can validate, store, scale, and export static image files for inspection. T
 
 ## Supported images and limits
 
-Sheg accepts static PNG, JPEG, and WebP images up to 16 MiB and 16 megapixels. It rejects animated images, malformed files, and unsupported formats. A scale operation preserves the source format and full image, keeps its proportions, and never enlarges it. It does not crop, tune image quality, or promise that small text and details remain legible.
+Sheg accepts static PNG, JPEG, and WebP images up to 16 MiB and 16 megapixels. It rejects animated images, malformed files, and unsupported formats. A scale operation preserves the source format and full image, keeps proportions within one-pixel integer rounding per axis, and never enlarges it. It does not crop, tune image quality, or promise that small text and details remain legible.
 
 `maxWidth` and `maxHeight` limit pixel dimensions. `maxBytes` limits only the encoded image file, not the complete model request or its context fit. Sheg may report `image_scale_target_unreachable` when the fixed encoder cannot meet the target without changing the image format or quality.
 

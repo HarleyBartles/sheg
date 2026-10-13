@@ -74,7 +74,7 @@
   },
   {
     "id": "matched-article-image-fork",
-    "version": 1,
+    "version": 2,
     "ownerSkill": "study-design",
     "tags": ["journey", "matched-comparison", "visual"],
     "referencePaths": ["references/primitives-and-tools.md"],
@@ -83,9 +83,25 @@
       "sharedPrefix": "Sections one through three, read once before the image insertion point.",
       "conditionA": "Section four with the user-supplied illustration and factual alt text.",
       "conditionB": "The exact same section four without the illustration.",
-      "question": "Would you continue reading after section four?",
+      "question": "After reading section four with or without the illustration, would you continue into section five?",
       "respondentPerspectives": ["new reader", "returning reader", "reader focused on the topic"],
       "task": "Design only; do not start a live run.",
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "whole-article-image-placement-hypotheses",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "tags": ["visual", "image-placement", "hypothetical-exposure"],
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "I have a five-section article and one illustration. I want to compare putting it between sections one and two, between three and four, or between four and five. Can Sheg show the full article and ask whether a reader profile would want to continue from each insertion point? Explain what the model sees and what this result can tell me.",
+    "controlledEvidence": {
+      "sections": ["Section one introduces the issue.", "Section two explains the stakes.", "Section three presents a case.", "Section four explains the response.", "Section five concludes."],
+      "image": {"id": "illustration", "altText": "A small yellow flower in an orange pot.", "caption": "A flower in a pot."},
+      "insertionPoints": {"A": "between sections one and two", "B": "between sections three and four", "C": "between sections four and five"},
+      "question": "Given the entire article and image at this hypothetical point, would this reader want to continue into the next section?",
+      "exposure": "All five sections are supplied in every hypothetical placement question.",
       "mockOnly": true
     }
   }

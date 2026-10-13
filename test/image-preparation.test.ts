@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createImagePreparationService } from '../src/application/image-preparation.js';
-import { createStaticImageCodec } from '../src/infrastructure/images/codecs.js';
+import { createStaticImageCodec, type DecodedImage } from '../src/infrastructure/images/codecs.js';
 import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
 
 const fixturePath = new URL('./fixtures/images/four-corners-transparent.png', import.meta.url);
@@ -40,13 +40,62 @@ test('imports exact verified bytes, scales proportionally, and retains source af
   } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
 });
 
-test('rounds bounded dimensions inward until the codec can preserve the source aspect ratio', async () => {
+test('scales to the integer dimensions from one proportional fit factor', async () => {
   const state = await setup();
   try {
     const bytes = await readFile(state.sourcePath);
     const result = await state.service.scale({ source: { path: state.sourcePath, sha256: createHash('sha256').update(bytes).digest('hex') }, maxWidth: 37 });
-    assert.deepEqual([result.candidate.width, result.candidate.height], [36, 18]);
-    assert.equal(result.candidate.width / result.candidate.height, 2);
+    assert.deepEqual([result.candidate.width, result.candidate.height], [37, 18]);
+    assert.ok(result.candidate.width <= 37 && result.candidate.height <= 40);
+  } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
+});
+
+test('service keeps rounded proportional dimensions when the fit bound is nearly a full pixel away', async () => {
+  const state = await setup();
+  try {
+    const width = 192;
+    const height = 108;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+      data.set([x < width / 2 ? 255 : 0, y < height / 2 ? 255 : 0, 80, 255], (y * width + x) * 4);
+    }
+    const sourceBytes = await codec.encode({ data, width, height, format: 'png', orientation: 1 } satisfies DecodedImage);
+    await writeFile(state.sourcePath, sourceBytes);
+    const source = await state.service.import({ path: state.sourcePath, sha256: createHash('sha256').update(sourceBytes).digest('hex') });
+    const result = await state.service.scale({ source: { assetId: source.assetId }, maxWidth: 37 });
+    const candidate = await codec.decode(state.repository.bytes(result.candidate.assetId));
+    assert.deepEqual([candidate.width, candidate.height], [37, 20]);
+    assert.notEqual(result.candidate.assetId, source.assetId);
+    assert.deepEqual(Buffer.from(state.repository.bytes(source.assetId)), Buffer.from(sourceBytes));
+  } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
+});
+
+test('scales a non-integer aspect ratio to the largest bounded candidate and retains the full frame', async () => {
+  const state = await setup();
+  try {
+    const width = 41;
+    const height = 29;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+      const color = x < width / 2 ? (y < height / 2 ? [255, 0, 0, 255] : [0, 0, 255, 255])
+        : (y < height / 2 ? [0, 255, 0, 255] : [255, 255, 0, 255]);
+      data.set(color, (y * width + x) * 4);
+    }
+    const sourceBytes = await codec.encode({ data, width, height, format: 'png', orientation: 1 } satisfies DecodedImage);
+    await writeFile(state.sourcePath, sourceBytes);
+    const source = await state.service.import({ path: state.sourcePath, sha256: createHash('sha256').update(sourceBytes).digest('hex') });
+    const result = await state.service.scale({ source: { assetId: source.assetId }, maxWidth: 20 });
+    const candidateBytes = state.repository.bytes(result.candidate.assetId);
+    const candidate = await codec.decode(candidateBytes);
+
+    assert.deepEqual([candidate.width, candidate.height], [20, 14]);
+    assert.ok(candidate.width <= 20 && candidate.height <= height);
+    assert.notEqual(result.candidate.assetId, source.assetId);
+    assert.deepEqual(Buffer.from(state.repository.bytes(source.assetId)), Buffer.from(sourceBytes));
+    for (const [x, y, expected] of [[2, 2, [255, 0, 0]], [17, 2, [0, 255, 0]], [2, 11, [0, 0, 255]], [17, 11, [255, 255, 0]]] as const) {
+      const offset = (y * candidate.width + x) * 4;
+      for (let channel = 0; channel < 3; channel += 1) assert.ok(Math.abs(candidate.data[offset + channel]! - expected[channel]!) < 30);
+    }
   } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
 });
 

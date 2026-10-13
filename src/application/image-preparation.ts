@@ -47,17 +47,7 @@ function readTarget(source: ImageSource): Promise<Uint8Array> {
 function scaledDimensions(image: DecodedImage, request: ScaleRequest, factor = 1): { width: number; height: number } {
   const fit = Math.min(1, request.maxWidth === undefined ? 1 : request.maxWidth / image.width,
     request.maxHeight === undefined ? 1 : request.maxHeight / image.height, factor);
-  let width = Math.max(1, Math.floor(image.width * fit));
-  let height = Math.max(1, Math.floor(image.height * fit));
-  for (let attempt = 0; attempt < 32; attempt += 1) {
-    const proportional = Math.min(width / image.width, height / image.height);
-    const nextWidth = Math.max(1, Math.floor(image.width * proportional));
-    const nextHeight = Math.max(1, Math.floor(image.height * proportional));
-    if (nextWidth === width && nextHeight === height) break;
-    width = nextWidth;
-    height = nextHeight;
-  }
-  return { width, height };
+  return { width: Math.max(1, Math.floor(image.width * fit)), height: Math.max(1, Math.floor(image.height * fit)) };
 }
 
 export function createImagePreparationService(repository: ImageAssetRepository, codec: StaticImageCodec, exportRoot: string): ImagePreparationService {

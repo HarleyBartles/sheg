@@ -253,5 +253,64 @@
       "An incomplete pair is a tie or supports a preference.",
       "Model judgments establish human preference."
     ]
+  },
+  {
+    "scenarioId": "rendered-layout-image-treatment",
+    "version": 1,
+    "criteria": [
+      {"id":"treatment-boundary","condition":"Notes that the example changes image position, typeface, and size together; either treats these as a deliberate bundle or recommends changing one at a time or a design that separates the factors."},
+      {"id":"adequacy-and-preference-distinct","condition":"Separates independent readability/fit judgments for each version from a direct A/B preference question and does not treat preference as proof either version is adequate."},
+      {"id":"no-text-bypass","condition":"Does not include the exact screenshot copy in the packet when judging visual text readability; proposes a separate content-comprehension question if the supplied text is needed."},
+      {"id":"capture-provenance","condition":"Records viewport, capture bounds, render scale, font identity/load status, and other supplied capture notes; marks unknown facts unknown rather than inventing them."},
+      {"id":"scaled-image-check","condition":"Requires inspection of the exact scaled candidate and confirmation that the questioned visual difference and small text remain legible before using it."},
+      {"id":"model-evidence-limit","condition":"Does not claim eye tracking, actual readership, conversion, objective typographic expertise, or human preference from modeled responses."}
+    ],
+    "prohibitedClaims": ["Plaintext duplicate article copy preserves a screenshot readability test.", "A direct preference establishes that a treatment is independently readable or causes real readers to continue.", "Unknown capture or font provenance can be safely guessed."]
+  },
+  {
+    "scenarioId": "character-sketch-unprompted-traits",
+    "version": 1,
+    "criteria": [
+      {"id":"brief-held-out","condition":"Keeps the target character brief and target-trait language out of the unprompted context and separates this from a later prompted-fit context."},
+      {"id":"typed-trait-measure","condition":"Uses a small set of authored typed trait questions or dimensions and explains that Sheg records those bounded answers, not an open-ended image interpretation or automatic trait extraction."},
+      {"id":"pixel-evidence","condition":"Binds the exact portrait in pixel mode when judging the image itself and does not mistake agent-authored alt text for a model-generated image description."},
+      {"id":"interpretation-limit","condition":"Reports the result as a model response to authored dimensions, not a discovered canonical personality or human audience consensus."}
+    ],
+    "prohibitedClaims": ["Sheg or Clef automatically writes a free-form list of traits from the image.", "A later character brief may be included in the unprompted context without priming it.", "The typed responses establish what human viewers will infer."]
+  },
+  {
+    "scenarioId": "character-sketch-brief-fit",
+    "version": 1,
+    "criteria": [
+      {"id":"bounded-four-candidate-scope","condition":"States that this v0.4 recipe can compare at most four designs and asks the author to select four or defer the five-design comparison; does not send five images, use a contact sheet, split them into multiple calls, or merge subset winners into a ranking."},
+      {"id":"separate-trait-dimensions","condition":"Treats heroic and intelligent as separately authored typed dimensions, so a design may express one without the other, and keeps the prompted brief-fit context separate from any unprompted trait context."},
+      {"id":"choice-shape-tradeoff","condition":"Explains that one four-way question returns a direct best-of-four choice, while pair questions return explicit head-to-head outcomes; ties/weak edges are preserved and no automatic total rank is inferred."},
+      {"id":"no-freeform-explanation","condition":"Does not promise generated free-form reasoning or an objective character-design winner from typed Clef answers."},
+      {"id":"model-evidence-limit","condition":"Describes the output as model evidence against the supplied brief and not human audience validation."}
+    ],
+    "prohibitedClaims": ["Five designs fit into one Clef call.", "Three four-way subset winners constitute an overall five-design ranking.", "The model objectively proves which design is heroic or intelligent."]
+  },
+  {
+    "scenarioId": "script-named-character-design-match",
+    "version": 1,
+    "criteria": [
+      {"id":"named-target","condition":"Explicitly identifies Mara as the target and does not switch to Tomas or Leena because of prominence or salient plot actions."},
+      {"id":"bounded-script-evidence","condition":"Uses only supplied scenes relevant to Mara's behavior, dialogue, relationships, role, and tone as the authored fit basis."},
+      {"id":"four-design-limit","condition":"Keeps the direct image set within four, uses neutral stable option-to-image mappings, and preserves a tie or no-fit option where appropriate."},
+      {"id":"typed-diagnostics","condition":"Uses separate authored typed dimensions for concrete design-fit evidence and does not promise free-form explanations."},
+      {"id":"fit-not-popularity","condition":"Frames the result as modeled visual fit to Mara's supplied characterization, not a popularity vote or objective truth."}
+    ],
+    "prohibitedClaims": ["The most prominent character is automatically the target character.", "The sketch most resembling Mara is guaranteed to be popular with people.", "Unselected sibling sketches or answers may influence an isolated pair question."]
+  },
+  {
+    "scenarioId": "script-protagonist-prominence",
+    "version": 1,
+    "criteria": [
+      {"id":"narrative-prominence-construct","condition":"Uses the supplied scene recurrence, plan initiation, and conflict resolution evidence to ask which design is most likely to represent the story's protagonist."},
+      {"id":"not-character-brief-fit","condition":"Explicitly distinguishes protagonist prominence from matching a named character's appearance or a heroic/intelligent design brief; no visual brief is invented."},
+      {"id":"four-design-limit","condition":"Does not compare all five designs in v0.4: asks the author to select up to four or defer the five-design comparison, with no contact sheet or cross-call aggregate ranking."},
+      {"id":"bounded-model-evidence","condition":"Uses only the supplied narrative evidence and reports a model judgment, not certainty about author intent, reader recognition, or real audience response."}
+    ],
+    "prohibitedClaims": ["A character that looks heroic must be the protagonist.", "Five candidate designs can be fully ranked inside this v0.4 recipe.", "The modeled choice proves human readers will recognize the protagonist."]
   }
 ]

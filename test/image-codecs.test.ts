@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { createStaticImageCodec } from '../src/infrastructure/images/codecs.js';
+import { createStaticImageCodec, type DecodedImage } from '../src/infrastructure/images/codecs.js';
 
 const fixture = (name: string) => readFile(new URL(`./fixtures/images/${name}`, import.meta.url));
 const codec = async () => {
@@ -41,6 +41,41 @@ test('decodes, proportionally scales and re-encodes PNG while retaining every co
   const candidate = await local.codec.decode(await local.codec.encode(scaled));
   assert.equal(candidate.format, 'png');
   assertCornerColors(candidate.data, candidate.width, candidate.height);
+  await local.dispose();
+});
+
+test('accepts integer-quantized proportional dimensions for non-integer aspect ratios', async () => {
+  const local = await codec();
+  const width = 41;
+  const height = 29;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const color = x < width / 2 ? (y < height / 2 ? [255, 0, 0, 255] : [0, 0, 255, 255])
+      : (y < height / 2 ? [0, 255, 0, 255] : [255, 255, 0, 255]);
+    data.set(color, (y * width + x) * 4);
+  }
+  const scaled = await local.codec.scale({ data, width, height, format: 'png', orientation: 1 } satisfies DecodedImage, 20, 14);
+  assert.deepEqual([scaled.width, scaled.height], [20, 14]);
+  for (const [x, y, expected] of [[2, 2, [255, 0, 0]], [17, 2, [0, 255, 0]], [2, 11, [0, 0, 255]], [17, 11, [255, 255, 0]]] as const) {
+    const offset = (y * scaled.width + x) * 4;
+    for (let channel = 0; channel < 3; channel += 1) assert.ok(Math.abs(scaled.data[offset + channel]! - expected[channel]!) < 30);
+  }
+  await assert.rejects(local.codec.scale({ data, width, height, format: 'png', orientation: 1 }, 20, 12), { code: 'image_scale_target_unreachable' });
+  await local.dispose();
+});
+
+test('accepts dimensions floored from one fit factor when the next bound is nearly a full pixel', async () => {
+  const local = await codec();
+  const width = 192;
+  const height = 108;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    data.set([x < width / 2 ? 255 : 0, y < height / 2 ? 255 : 0, 80, 255], (y * width + x) * 4);
+  }
+  const scaled = await local.codec.scale({ data, width, height, format: 'png', orientation: 1 } satisfies DecodedImage, 37, 20);
+  assert.deepEqual([scaled.width, scaled.height], [37, 20]);
+  const smaller = { data: new Uint8ClampedArray(41 * 29 * 4), width: 41, height: 29, format: 'png' as const, orientation: 1 as const } satisfies DecodedImage;
+  await assert.rejects(local.codec.scale(smaller, 42, 29), { code: 'image_scale_target_unreachable' });
   await local.dispose();
 });
 
