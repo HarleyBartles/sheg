@@ -9,6 +9,7 @@ import { evaluationStatusSchema, runLifecycleStateSchema, runStatusSchema, resum
 import { decisionResultSchema } from '../decision/decision.js';
 import { providerExecutionEvidenceSchema } from '../decision/decision.js';
 import { isImageMaterial, materialItemSchema, stimulusItemSchema } from '../study/stimulus.js';
+import { ImageMetadataSchema } from '../assets/image.js';
 
 export { materialItemSchema };
 export type RunMaterialItem = z.infer<typeof materialItemSchema>;
@@ -304,6 +305,12 @@ const selectedMaterialEvidenceSchema = z.object({
   sourceSha256: z.string().regex(/^[a-f\d]{64}$/i),
   textSha256: z.string().regex(/^[a-f\d]{64}$/i),
 }).strict();
+const selectedVisualMaterialEvidenceSchema = z.object({
+  materialId: stimulusItemSchema.shape.id,
+  altText: z.string().min(1),
+  caption: z.string().min(1).optional(),
+  asset: ImageMetadataSchema,
+}).strict();
 
 export const followOnLineageSchema = z.object({
   sourceRunId: z.string().uuid(),
@@ -316,6 +323,7 @@ export const followOnLineageSchema = z.object({
   excludedSelections: z.array(followOnExclusionSchema).default([]),
   selections: z.array(z.object({ sourceEvaluationId: z.string().uuid(), sourceContextId: z.string().uuid(), respondentId: z.string().min(1), evaluationId: z.string().uuid(), contextId: z.string().uuid(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+    selectedVisualMaterial: selectedVisualMaterialEvidenceSchema.optional(),
   }).strict()),
   materialSnapshots: z.array(z.object({ contextId: z.string().uuid(), respondentId: z.string().min(1), materials: z.array(materialItemSchema) }).strict()).default([]),
 }).strict();
@@ -351,6 +359,7 @@ export const runEvidenceItemSchema = z.object({
     result: decisionResultSchema.optional(),
     failure: z.object({ code: z.string().min(1), message: z.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+    selectedVisualMaterial: selectedVisualMaterialEvidenceSchema.optional(),
     execution: providerExecutionEvidenceSchema.optional(),
     branchId: z.string().min(1).optional(),
     turnId: z.string().min(1).optional(),
@@ -385,6 +394,8 @@ export const runEvidencePageSchema = z.object({
     evaluations: z.object({ total: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), answered: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), unreached: z.number().int().nonnegative() }).strict(),
     representedRespondents: z.number().int().nonnegative(),
     selectedMaterials: z.object({ evaluations: z.number().int().nonnegative(), respondents: z.number().int().nonnegative(), distinctMaterials: z.number().int().nonnegative() }).strict(),
+    selectedTextMaterials: z.object({ evaluations: z.number().int().nonnegative(), respondents: z.number().int().nonnegative(), distinctMaterials: z.number().int().nonnegative() }).strict().default({ evaluations: 0, respondents: 0, distinctMaterials: 0 }),
+    selectedVisualMaterials: z.object({ evaluations: z.number().int().nonnegative(), respondents: z.number().int().nonnegative(), distinctMaterials: z.number().int().nonnegative() }).strict().default({ evaluations: 0, respondents: 0, distinctMaterials: 0 }),
   }).strict(),
   nextCursor: z.string().min(1).optional(),
 }).strict();
@@ -451,6 +462,7 @@ export type FollowOnSourceTurn = {
   result?: import('../decision/decision.js').DecisionResult;
   materials?: RunMaterialItem[];
   selectedMaterial?: RunEvidenceItem['selectedMaterial'];
+  selectedVisualMaterial?: RunEvidenceItem['selectedVisualMaterial'];
 };
 export type FollowOnSourceSet = {
   sourceRunId: string;

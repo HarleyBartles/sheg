@@ -8,7 +8,7 @@ import test from 'node:test';
 import { materializeJourneyRun, prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import { ClefProvider } from '../src/providers/clef.js';
 import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
-import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
+import { openRunStore, RunStoreError, splitRunStore } from '../src/infrastructure/run-store.js';
 import { createRunRuntime } from '../src/infrastructure/run-runtime.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { DecisionProvider } from '../src/domain/decision/provider.js';
@@ -117,6 +117,8 @@ test('pixel Choice image mappings identify options without creating text selecte
     const evidence = fixture.store.queryEvidence({ sourceRunId: accepted.run.runId,
       criteria: { questionId: 'image-fit', answer: { type: 'choice', choiceId: 'yes' } } });
     assert.equal(evidence.items[0]?.selectedMaterial, undefined);
+    assert.deepEqual(evidence.items[0]?.selectedVisualMaterial, { materialId: 'portrait', altText: 'Approved specialist portrait.', caption: 'Writ at the ledger desk.', asset: fixture.metadata });
+    assert.deepEqual(evidence.matchedCoverage.selectedVisualMaterials, { evaluations: 1, respondents: 1, distinctMaterials: 1 });
 
     const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
       selection: { criteria: { questionId: 'image-fit' } }, context: { mode: 'fresh-material', includeSelectedMaterial: true },
@@ -124,10 +126,16 @@ test('pixel Choice image mappings identify options without creating text selecte
     const sources = fixture.store.resolveFollowOnSources(followOn);
     assert.equal(sources.turns[0]?.status, 'answered');
     assert.equal(sources.turns[0]?.selectedMaterial, undefined);
+    assert.deepEqual(sources.turns[0]?.selectedVisualMaterial, evidence.items[0]?.selectedVisualMaterial);
+    const database = new DatabaseSync(path.join(fixture.root, 'runs.sqlite'));
+    try { database.prepare('DELETE FROM run_visual_assets WHERE run_id = ? AND material_id = ?').run(accepted.run.runId, 'portrait'); }
+    finally { database.close(); }
+    assert.throws(() => fixture.store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'image-fit' } }),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
   } finally { await fixture.close(); }
 });
 
-test('follow-on pixel Choice can reuse exact source image bytes without treating the image as text context', async () => {
+test('mapped image Choice evidence remains visual and can seed an explicitly pixel-bound follow-on after source-file removal', async () => {
   const fixture = await setup();
   try {
     const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
@@ -142,32 +150,38 @@ test('follow-on pixel Choice can reuse exact source image bytes without treating
       { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
 
     const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
-      selection: { criteria: { questionId: 'image-fit' } }, context: { mode: 'fresh-material', materialIds: ['portrait', 'section-three'] },
+      selection: { criteria: { questionId: 'image-fit' } }, context: { mode: 'fresh-material', includeSelectedMaterial: true, materialIds: ['portrait', 'section-three'] },
       material: [{ id: 'section-four', text: 'The article explains the recommendation.' }],
-      questions: [{ type: 'choice', id: 'image-follow-up', instructions: 'Does the image support this next section?',
-        options: { image: 'The image supports the section', text: 'The image distracts from it' }, materialOptions: { image: 'portrait' },
+      questions: [{ type: 'noul', id: 'image-follow-up', instructions: 'How much does this image support the next section?',
         visual: { mode: 'pixels', materialIds: ['portrait'] } }], provider: config, maxCalls: 1 });
     const sources = fixture.store.resolveFollowOnSources(followOn);
+    assert.deepEqual(sources.turns[0]?.selectedVisualMaterial, { materialId: 'portrait', altText: 'Approved specialist portrait.', caption: 'Writ at the ledger desk.', asset: fixture.metadata });
     const prepared = await prepareFollowOnRun(followOn, sources, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
     assert.ok(prepared.prepared, JSON.stringify(prepared.inspection.problems));
+    const altered = structuredClone(prepared.prepared);
+    altered.lineage!.selections[0]!.selectedVisualMaterial!.asset.width += 1;
+    assert.throws(() => fixture.store.accept(randomUUID(), altered), /frozen visual packet differs|Selected-material lineage does not match/);
     const packet = prepared.prepared.evaluations[0]!.packet;
     assert.deepEqual(packet.visualMaterials?.map(({ id, altText, asset }) => ({ id, altText, asset })), [
       { id: 'portrait', altText: 'Approved specialist portrait.', asset: fixture.metadata },
     ]);
     assert.deepEqual(((packet.state as { encounteredItems: Array<{ id: string }> }).encounteredItems).map(({ id }) => id), ['section-three', 'section-four']);
     const followOnAccepted = fixture.store.accept(randomUUID(), prepared.prepared);
+    const frozenFollowOn = fixture.store.getRequest(followOnAccepted.run.runId);
+    assert.deepEqual(frozenFollowOn.lineage?.selections[0]?.selectedVisualMaterial, sources.turns[0]?.selectedVisualMaterial);
+    assert.deepEqual(frozenFollowOn.lineage?.materialSnapshots[0]?.materials.find(({ id }) => id === 'portrait'), request(fixture.metadata).material[1]);
+    assert.equal(fixture.store.deleteRuns([accepted.run.runId]).deletedRunIds[0], accepted.run.runId);
     const followOnFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { images: string[]; state: { encounteredItems: Array<{ id: string }> } };
       assert.deepEqual(body.images, [`data:image/png;base64,${Buffer.from(fixture.bytes).toString('base64')}`]);
       assert.deepEqual(body.state.encounteredItems.map(({ id }) => id), ['section-three', 'section-four']);
       return Response.json({ success: true, result: { model: 'clef', answers: {
-        'image-follow-up': { type: 'choice', choice: 'image', probabilities: { image: 0.9, text: 0.1 } },
+        'image-follow-up': { type: 'noul', noul: 0.8 },
       }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] });
     }) as typeof fetch;
     await executeQuestionRun(splitRunStore(fixture.store), followOnAccepted.run.runId, (_providerConfig, options) => new ClefProvider(config, followOnFetch,
       { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
-    const evidence = fixture.store.queryEvidence({ sourceRunId: followOnAccepted.run.runId,
-      criteria: { questionId: 'image-follow-up', answer: { type: 'choice', choiceId: 'image' } } });
+    const evidence = fixture.store.queryEvidence({ sourceRunId: followOnAccepted.run.runId, criteria: { questionId: 'image-follow-up' } });
     assert.equal(evidence.items[0]?.selectedMaterial, undefined);
     const db = new DatabaseSync(path.join(fixture.root, 'runs.sqlite'));
     try {

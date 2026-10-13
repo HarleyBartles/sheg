@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
-import type { DecisionProvider } from '../src/domain/decision/provider.js';
+import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
+import { prepareRun } from '../src/application/run-inspection.js';
 import type { InlineRunRequest } from '../src/domain/run/request.js';
 import { createRunServiceForStore as createRunService } from './helpers/run-service.js';
 import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
@@ -467,6 +468,35 @@ test('MCP queries typed evidence and starts a context-preserving follow-on', asy
     assert.equal(data.lineage.selections.length, 1);
     assert.equal(data.lineage.selections[0]?.sourceContextId, evidence.items[0]?.contextId);
   } finally { await f.close(); }
+});
+
+test('MCP query exposes mapped image Choice evidence as metadata without pixel bytes', async () => {
+  const f = await connectedFixture();
+  const imageRepository = openImageAssetRepository(f.root);
+  try {
+    const bytes = await readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const image = imageRepository.saveSource(bytes, { assetId: `sha256:${sha256}`, sha256, format: 'png', width: 80, height: 40, bytes: bytes.byteLength });
+    const material = { id: 'portrait', type: 'image' as const, text: '', altText: 'A patient archivist checking a record.', caption: 'At the ledger desk.', asset: image };
+    const clef = { kind: 'clef' as const, accountId: '3327878972ea82e6b454069bba62f3d9', model: 'clef' as const, timeoutMs: 1000 };
+    const sourceRequest = { ...request(), provider: clef, material: [material], questions: [{ type: 'choice' as const, id: 'portrait-fit', instructions: 'Does this portrait fit the description?',
+      options: { fits: 'Fits the described character', other: 'Does not fit' }, materialOptions: { fits: 'portrait' }, visual: { mode: 'pixels' as const, materialIds: ['portrait'] } }] };
+    const fit: ProviderContextFit = { provider: 'clef', status: 'fits', method: 'test', modelIdentity: 'clef', tokenCount: 'estimated', tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
+    const prepared = await prepareRun(sourceRequest, { measure: () => fit, async decide() { throw new Error('Not used.'); } } satisfies DecisionProvider);
+    assert.ok(prepared.prepared);
+    const sourceRunId = f.store.accept(randomUUID(), prepared.prepared).run.runId;
+    const claim = f.store.claim(sourceRunId, Date.now(), 1234); assert.ok(claim);
+    const attempt = f.store.reserveNext(claim, Date.now()); assert.ok(attempt);
+    f.store.settle(claim, attempt.attemptId, { kind: 'answered', result: { type: 'choice', choice: 'fits', probabilities: { fits: 0.9, other: 0.1 },
+      attempts: 1, provider: 'clef', model: 'clef', latencyMs: 1, usage: {} } });
+    f.store.finish(claim);
+    const queried = await f.client.callTool({ name: 'run_query', arguments: { sourceRunId, criteria: { answer: { type: 'choice', choiceId: 'fits' } } } });
+    assert.equal(queried.isError ?? false, false);
+    const page = queried.structuredContent as { items: Array<{ selectedMaterial?: unknown; selectedVisualMaterial?: unknown }>; matchedCoverage: { selectedVisualMaterials: unknown } };
+    assert.equal(page.items[0]?.selectedMaterial, undefined);
+    assert.deepEqual(page.items[0]?.selectedVisualMaterial, { materialId: 'portrait', altText: material.altText, caption: material.caption, asset: image });
+    assert.deepEqual(page.matchedCoverage.selectedVisualMaterials, { evaluations: 1, respondents: 1, distinctMaterials: 1 });
+  } finally { imageRepository.close(); await f.close(); }
 });
 
 test('MCP exposes mixed independent question groups and lets an agent continue from one explicitly selected answer', async () => {

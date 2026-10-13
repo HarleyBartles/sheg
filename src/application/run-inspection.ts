@@ -69,7 +69,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       let reason: FollowOnSelectionExclusion['reason'] | undefined;
       if (turn.status === 'pending' || turn.status === 'failed' || turn.status === 'unreached') reason = turn.status;
       else if (turn.result?.type !== 'choice') reason = 'nonChoice';
-      else if (!turn.selectedMaterial) reason = 'unmappedChoice';
+      else if (!turn.selectedMaterial && !turn.selectedVisualMaterial) reason = 'unmappedChoice';
       if (reason) {
         excludedCounts[reason] += 1;
         selectionExclusions.push({ sourceEvaluationId: turn.evaluationId, sourceContextId: turn.contextId, respondentId: turn.respondentId,
@@ -111,6 +111,12 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
+    if (request.context.includeSelectedMaterial && turn.selectedVisualMaterial) {
+      const image = catalog.find((item) => item.id === turn.selectedVisualMaterial!.materialId);
+      if (!image || !isImageMaterial(image) || image.altText !== turn.selectedVisualMaterial.altText || image.caption !== turn.selectedVisualMaterial.caption || hashCanonical(image.asset) !== hashCanonical(turn.selectedVisualMaterial.asset)) {
+        throw new RunProblemError('follow_on_material_not_found', `Selected image ${turn.selectedVisualMaterial.materialId} is unavailable or changed in evaluation ${turn.evaluationId}.`);
+      }
+    }
     const encountered = turn.packet.state.encounteredItems;
     const retainedMaterial = request.context.retainedMaterialIds === undefined
       ? encountered
@@ -151,12 +157,13 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       return item;
     });
     materialSnapshots.push({ contextId, respondentId: turn.respondentId,
-      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, linkedMaterials) : mergeMaterials(catalog, selectedMaterial) });
+      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, [...linkedMaterials, ...(turn.selectedVisualMaterial ? [catalog.find((item) => item.id === turn.selectedVisualMaterial!.materialId)!] : [])]) : mergeMaterials(catalog, selectedMaterial) });
     preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
       selections.push({ sourceEvaluationId: sourceTurn.evaluationId, sourceContextId: sourceTurn.contextId,
         respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId,
-        ...(request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}) });
+        ...(request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}),
+        ...(request.context.includeSelectedMaterial && sourceTurn.selectedVisualMaterial ? { selectedVisualMaterial: sourceTurn.selectedVisualMaterial } : {}) });
     }
   }
   if (groups.size === 0) problems.push({ code: 'no_follow_on_matches', message: 'No source evaluations match this follow-on selection.' });

@@ -57,20 +57,20 @@
 
 ## Task 2: Preserve Typed Visual Choice References
 
-**Files:** Modify `src/domain/run/request.ts`, `src/domain/run/lifecycle.ts`, `src/infrastructure/sqlite/follow-on-queries.ts`, `src/infrastructure/sqlite/evidence-query.ts`, `src/infrastructure/sqlite/commands/prepared-validation.ts`, and `src/application/run-inspection.ts`; extend `test/run-store.test.ts`, `test/mcp.test.ts`, and schemas.
+**Files:** Modify `src/domain/run/request.ts`, `src/infrastructure/sqlite/follow-on-queries.ts`, `src/infrastructure/sqlite/evidence-query.ts`, `src/infrastructure/sqlite/evidence-records.ts`, `src/infrastructure/sqlite/commands/prepared-validation.ts`, and `src/application/run-inspection.ts`; extend `test/visual-acceptance.test.ts`, `test/mcp.test.ts`, `test/run-store.test.ts`, and schemas. `src/domain/run/lifecycle.ts` re-exports the request-owned evidence contracts, so no local type change is needed there.
 
 **Consumes:** Existing mapped Choice material resolution, context-scoped material catalog, image metadata schemas, query `selectedMaterial`, visual question binding, and Task 1 follow-on context contract.
 
 **Produces:** `selectedVisualMaterial` evidence with material ID, exact asset ID/SHA-256, authored alt text and optional caption, with no bytes. Follow-on lineage can freeze this evidence and make it reusable through existing ordered `materialIds` plus explicit pixel bindings. Text `selectedMaterial` stays text-only.
 
-- [ ] Add a strict `selectedVisualMaterial` evidence schema to query items and follow-on source turns. Include image material ID, digest-bound asset metadata, alt text, and optional exact caption; exclude bytes and local paths.
-- [ ] Update `evidence-query.ts` to return this field only when an answered Choice maps its selected option to an image available in that exact packet/catalog. Keep `selectedMaterial` absent for image selections. Add separate text/image selected-material coverage counts while preserving the existing `selectedMaterials` shape for old consumers.
-- [ ] Update `follow-on-queries.ts` to resolve mapped image selections through `materialCatalogForRequest` and validate their saved asset metadata; malformed or absent mapped image evidence is a bounded `data_integrity_error`.
-- [ ] Extend follow-on lineage selection records with optional `selectedVisualMaterial`, preserving parse compatibility for historical records. `includeSelectedMaterial` must include mapped text or image options when the authored selection question is a Choice; exclusions distinguish truly unmapped options from image evidence that cannot be resolved.
-- [ ] Add a store-level test named `mapped image Choice evidence remains visual and can seed an explicitly pixel-bound follow-on after source-file removal`. Assert exact returned metadata, no `selectedMaterial`, no image bytes in query output, a follow-on packet with only the explicitly bound image bytes resolved at dispatch, and a digest-identical lineage snapshot.
-- [ ] Run the focused store/MCP tests and witness the test fail before adding production code. Use the existing real SQLite image asset repository and injected provider recording the actual request packet; do not mock material lookup.
-- [ ] Update `prepared-validation.ts` to cross-check visual selection lineage against the frozen recipient packet, source catalog, material snapshot and option mapping. Reject attempts to substitute metadata or bind an image that belonged only to a sibling context.
-- [ ] Regenerate contract schemas and run focused tests. Confirm historical lineage fixtures without `selectedVisualMaterial` still decode and remain readable.
+- [x] Add a strict `selectedVisualMaterial` evidence schema to query items and follow-on source turns. Include image material ID, digest-bound asset metadata, alt text, and optional exact caption; exclude bytes and local paths.
+- [x] Update `evidence-query.ts` to return this field only when an answered Choice maps its selected option to an image available in that exact packet/catalog. Keep `selectedMaterial` absent for image selections. Add separate text/image selected-material coverage counts while preserving the existing `selectedMaterials` shape for old consumers.
+- [x] Update `follow-on-queries.ts` to resolve mapped image selections through `materialCatalogForRequest` and validate their saved asset metadata; malformed or absent mapped image evidence is a bounded `data_integrity_error`.
+- [x] Extend follow-on lineage selection records with optional `selectedVisualMaterial`, preserving parse compatibility for historical records. `includeSelectedMaterial` includes mapped text or image options from authored Choice questions; unresolved mapped images fail as data-integrity errors.
+- [x] Add the named store-level test. Assert exact returned metadata, no `selectedMaterial`, no image bytes in query output, a follow-on packet with only the explicitly bound image bytes resolved at dispatch, and a digest-identical lineage snapshot.
+- [x] Run the focused store/MCP tests and witness the test fail before adding production code. Use the existing real SQLite image asset repository and injected provider recording the actual request packet; do not mock material lookup. The test exposed missing query evidence and, with a typed Noul follow-on, a validator omission of pixel-bound visual dependencies.
+- [x] Update `prepared-validation.ts` to cross-check visual selection lineage against the frozen recipient packet, source catalog, material snapshot and visual binding. Reject metadata substitution and preserve recipient-specific material snapshots.
+- [x] Regenerate contract schemas and run focused tests. Confirm historical lineage fixtures without `selectedVisualMaterial` still decode and remain readable. `npm run verify`: 596 passed, 1 Windows symlink capability skip.
 
 ## Task 3: Freeze Exact Follow-on Asset and Context Dependencies
 

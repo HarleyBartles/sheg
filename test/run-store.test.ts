@@ -1545,7 +1545,8 @@ test('evidence query matches typed answers and material while preserving distrib
     assert.equal(query.sourceComplete, true);
     assert.deepEqual(query.lifecycle, { state: 'complete', resume: { eligible: false, reason: 'already_completed' } });
     assert.deepEqual(query.matchedCoverage, { evaluations: { total: 1, pending: 0, answered: 1, failed: 0, unreached: 0 },
-      representedRespondents: 1, selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
+      representedRespondents: 1, selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 },
+      selectedTextMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 }, selectedVisualMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
     assert.deepEqual(query.coverage, { totalEvaluations: 2, completedEvaluations: 2, failedEvaluations: 0,
       respondents: { total: 2, active: 0, completed: 2, failed: 0, unreached: 0 } });
     assert.equal(query.items[0]!.respondentId, 'reader-b');
@@ -1596,6 +1597,8 @@ test('evidence query resolves a mapped Choice answer to exact source-linked mate
       materialId: candidate.id, text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
       textSha256: createHash('sha256').update(text, 'utf8').digest('hex'),
     });
+    assert.deepEqual(query.matchedCoverage.selectedTextMaterials, { evaluations: 2, respondents: 2, distinctMaterials: 1 });
+    assert.deepEqual(query.matchedCoverage.selectedVisualMaterials, { evaluations: 0, respondents: 0, distinctMaterials: 0 });
     const followOnRequest = followOnRunRequestSchema.parse({
       kind: 'follow-on', sourceRunId: runId,
       selection: { criteria: { questionId: 'which-section' } },

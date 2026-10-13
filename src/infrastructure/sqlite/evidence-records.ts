@@ -8,6 +8,8 @@ import type { DecisionResult } from '../../domain/decision/decision.js';
 import type { EvaluationFailure } from '../../domain/run/lifecycle.js';
 import { decodeStoredPayload, encodeStoredPayload } from './payload-codecs.js';
 import { z } from 'zod';
+import { DatabaseSync } from 'node:sqlite';
+import { isImageMaterial } from '../../domain/study/stimulus.js';
 
 const evaluationFailureEvidenceSchema = z.object({
   detail: decisionFailureDetailSchema.optional(),
@@ -22,7 +24,9 @@ function mergeMaterialCatalog(...collections: readonly (readonly RunMaterialItem
   const merged = new Map<string, RunMaterialItem>();
   for (const collection of collections) for (const item of collection) {
     const previous = merged.get(item.id);
-    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256)) {
+    const imageConflict = previous && 'type' in previous && previous.type === 'image' && 'type' in item && item.type === 'image' &&
+      (previous.altText !== item.altText || previous.caption !== item.caption || JSON.stringify(previous.asset) !== JSON.stringify(item.asset));
+    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256 || imageConflict)) {
       throw new RunStoreError('data_integrity_error', `Stored material ${item.id} has conflicting text or source provenance.`);
     }
     merged.set(item.id, previous ? { ...previous, ...(item.sourceId === undefined ? {} : { sourceId: item.sourceId }), ...(item.sourceSha256 === undefined ? {} : { sourceSha256: item.sourceSha256 }) } : { ...item });
@@ -36,6 +40,17 @@ export function materialCatalogForRequest(request: ParsedRunRequest, lineage: Fo
     ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? []
     : [];
   return mergeMaterialCatalog(source, inherited, encountered);
+}
+
+export function assertRetainedImageAsset(database: DatabaseSync, runId: string, material: RunMaterialItem): void {
+  if (!isImageMaterial(material)) return;
+  const row = database.prepare(`SELECT ia.asset_id, ia.sha256, ia.format, ia.width, ia.height, ia.byte_length
+    FROM run_visual_assets AS rva JOIN image_assets AS ia ON ia.asset_id = rva.asset_id
+    WHERE rva.run_id = ? AND rva.material_id = ?`).get(runId, material.id) as DatabaseRow | undefined;
+  if (!row || row.asset_id !== material.asset.assetId || row.sha256 !== material.asset.sha256 || row.format !== material.asset.format ||
+      row.width !== material.asset.width || row.height !== material.asset.height || row.byte_length !== material.asset.bytes) {
+    throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained image asset matching ${material.id}.`);
+  }
 }
 
 export function encounteredMaterialsFromState(state: Record<string, unknown>): Array<{ id: string; text: string }> {

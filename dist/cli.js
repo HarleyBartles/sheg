@@ -26195,6 +26195,12 @@ var selectedMaterialEvidenceSchema = external_exports.object({
   sourceSha256: external_exports.string().regex(/^[a-f\d]{64}$/i),
   textSha256: external_exports.string().regex(/^[a-f\d]{64}$/i)
 }).strict();
+var selectedVisualMaterialEvidenceSchema = external_exports.object({
+  materialId: stimulusItemSchema.shape.id,
+  altText: external_exports.string().min(1),
+  caption: external_exports.string().min(1).optional(),
+  asset: ImageMetadataSchema
+}).strict();
 var followOnLineageSchema = external_exports.object({
   sourceRunId: external_exports.string().uuid(),
   sourceStatusAtAcceptance: runStatusSchema,
@@ -26210,7 +26216,8 @@ var followOnLineageSchema = external_exports.object({
     respondentId: external_exports.string().min(1),
     evaluationId: external_exports.string().uuid(),
     contextId: external_exports.string().uuid(),
-    selectedMaterial: selectedMaterialEvidenceSchema.optional()
+    selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+    selectedVisualMaterial: selectedVisualMaterialEvidenceSchema.optional()
   }).strict()),
   materialSnapshots: external_exports.array(external_exports.object({ contextId: external_exports.string().uuid(), respondentId: external_exports.string().min(1), materials: external_exports.array(materialItemSchema) }).strict()).default([])
 }).strict();
@@ -26243,6 +26250,7 @@ var runEvidenceItemSchema = external_exports.object({
   result: decisionResultSchema.optional(),
   failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
   selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+  selectedVisualMaterial: selectedVisualMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
   branchId: external_exports.string().min(1).optional(),
   turnId: external_exports.string().min(1).optional(),
@@ -26274,7 +26282,9 @@ var runEvidencePageSchema = external_exports.object({
   matchedCoverage: external_exports.object({
     evaluations: external_exports.object({ total: external_exports.number().int().nonnegative(), pending: external_exports.number().int().nonnegative(), answered: external_exports.number().int().nonnegative(), failed: external_exports.number().int().nonnegative(), unreached: external_exports.number().int().nonnegative() }).strict(),
     representedRespondents: external_exports.number().int().nonnegative(),
-    selectedMaterials: external_exports.object({ evaluations: external_exports.number().int().nonnegative(), respondents: external_exports.number().int().nonnegative(), distinctMaterials: external_exports.number().int().nonnegative() }).strict()
+    selectedMaterials: external_exports.object({ evaluations: external_exports.number().int().nonnegative(), respondents: external_exports.number().int().nonnegative(), distinctMaterials: external_exports.number().int().nonnegative() }).strict(),
+    selectedTextMaterials: external_exports.object({ evaluations: external_exports.number().int().nonnegative(), respondents: external_exports.number().int().nonnegative(), distinctMaterials: external_exports.number().int().nonnegative() }).strict().default({ evaluations: 0, respondents: 0, distinctMaterials: 0 }),
+    selectedVisualMaterials: external_exports.object({ evaluations: external_exports.number().int().nonnegative(), respondents: external_exports.number().int().nonnegative(), distinctMaterials: external_exports.number().int().nonnegative() }).strict().default({ evaluations: 0, respondents: 0, distinctMaterials: 0 })
   }).strict(),
   nextCursor: external_exports.string().min(1).optional()
 }).strict();
@@ -26852,7 +26862,7 @@ async function prepareFollowOnRun(request, source, provider) {
       let reason;
       if (turn.status === "pending" || turn.status === "failed" || turn.status === "unreached") reason = turn.status;
       else if (turn.result?.type !== "choice") reason = "nonChoice";
-      else if (!turn.selectedMaterial) reason = "unmappedChoice";
+      else if (!turn.selectedMaterial && !turn.selectedVisualMaterial) reason = "unmappedChoice";
       if (reason) {
         excludedCounts[reason] += 1;
         selectionExclusions.push({
@@ -26898,6 +26908,12 @@ async function prepareFollowOnRun(request, source, provider) {
     }
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
+    }
+    if (request.context.includeSelectedMaterial && turn.selectedVisualMaterial) {
+      const image = catalog.find((item) => item.id === turn.selectedVisualMaterial.materialId);
+      if (!image || !isImageMaterial(image) || image.altText !== turn.selectedVisualMaterial.altText || image.caption !== turn.selectedVisualMaterial.caption || hashCanonical(image.asset) !== hashCanonical(turn.selectedVisualMaterial.asset)) {
+        throw new RunProblemError("follow_on_material_not_found", `Selected image ${turn.selectedVisualMaterial.materialId} is unavailable or changed in evaluation ${turn.evaluationId}.`);
+      }
     }
     const encountered = turn.packet.state.encounteredItems;
     const retainedMaterial = request.context.retainedMaterialIds === void 0 ? encountered : (() => {
@@ -26952,7 +26968,7 @@ async function prepareFollowOnRun(request, source, provider) {
     materialSnapshots.push({
       contextId,
       respondentId: turn.respondentId,
-      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, linkedMaterials) : mergeMaterials(catalog, selectedMaterial)
+      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, [...linkedMaterials, ...turn.selectedVisualMaterial ? [catalog.find((item) => item.id === turn.selectedVisualMaterial.materialId)] : []]) : mergeMaterials(catalog, selectedMaterial)
     });
     preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
@@ -26962,7 +26978,8 @@ async function prepareFollowOnRun(request, source, provider) {
         respondentId: sourceTurn.respondentId,
         evaluationId: evaluation.evaluationId,
         contextId: evaluation.contextId,
-        ...request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}
+        ...request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {},
+        ...request.context.includeSelectedMaterial && sourceTurn.selectedVisualMaterial ? { selectedVisualMaterial: sourceTurn.selectedVisualMaterial } : {}
       });
     }
   }
@@ -34009,7 +34026,8 @@ function mergeMaterialCatalog(...collections) {
   const merged = /* @__PURE__ */ new Map();
   for (const collection of collections) for (const item of collection) {
     const previous = merged.get(item.id);
-    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256)) {
+    const imageConflict = previous && "type" in previous && previous.type === "image" && "type" in item && item.type === "image" && (previous.altText !== item.altText || previous.caption !== item.caption || JSON.stringify(previous.asset) !== JSON.stringify(item.asset));
+    if (previous && (previous.text !== item.text || previous.sourceId && item.sourceId && previous.sourceId !== item.sourceId || previous.sourceSha256 && item.sourceSha256 && previous.sourceSha256 !== item.sourceSha256 || imageConflict)) {
       throw new RunStoreError("data_integrity_error", `Stored material ${item.id} has conflicting text or source provenance.`);
     }
     merged.set(item.id, previous ? { ...previous, ...item.sourceId === void 0 ? {} : { sourceId: item.sourceId }, ...item.sourceSha256 === void 0 ? {} : { sourceSha256: item.sourceSha256 } } : { ...item });
@@ -34020,6 +34038,15 @@ function materialCatalogForRequest(request, lineage, contextId, respondentId, en
   const source = request.kind === "poll" ? request.material : request.kind === "journey" ? request.journey.items : request.material ?? [];
   const inherited = request.kind === "follow-on" ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? [] : [];
   return mergeMaterialCatalog(source, inherited, encountered);
+}
+function assertRetainedImageAsset(database, runId, material) {
+  if (!isImageMaterial(material)) return;
+  const row = database.prepare(`SELECT ia.asset_id, ia.sha256, ia.format, ia.width, ia.height, ia.byte_length
+    FROM run_visual_assets AS rva JOIN image_assets AS ia ON ia.asset_id = rva.asset_id
+    WHERE rva.run_id = ? AND rva.material_id = ?`).get(runId, material.id);
+  if (!row || row.asset_id !== material.asset.assetId || row.sha256 !== material.asset.sha256 || row.format !== material.asset.format || row.width !== material.asset.width || row.height !== material.asset.height || row.byte_length !== material.asset.bytes) {
+    throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained image asset matching ${material.id}.`);
+  }
 }
 function encounteredMaterialsFromState(state) {
   if (!Array.isArray(state.encounteredItems)) return [];
@@ -35040,10 +35067,10 @@ function validatePrepared(prepared) {
       const coverage = lineage.selectionCoverage;
       const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
       const eligibleIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
-      if (!coverage || coverage.eligible !== eligibleIds.size || coverage.matched !== coverage.eligible + lineage.excludedSelections.length || [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial }) => !selectedMaterial)) {
+      if (!coverage || coverage.eligible !== eligibleIds.size || coverage.matched !== coverage.eligible + lineage.excludedSelections.length || [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial, selectedVisualMaterial }) => Boolean(selectedMaterial) === Boolean(selectedVisualMaterial))) {
         throw new RunStoreError("invalid_prepared_run", "Selected-material coverage and source lineage are inconsistent.");
       }
-    } else if (lineage.selectionCoverage !== void 0 || lineage.selections.some(({ selectedMaterial }) => selectedMaterial !== void 0)) {
+    } else if (lineage.selectionCoverage !== void 0 || lineage.selections.some(({ selectedMaterial, selectedVisualMaterial }) => selectedMaterial !== void 0 || selectedVisualMaterial !== void 0)) {
       throw new RunStoreError("invalid_prepared_run", "Selected-material lineage cannot be attached to a request without the resolver flag.");
     }
     const requestedQuestionIds2 = parsedRequest.data.questions.map(({ id }) => id);
@@ -35083,10 +35110,13 @@ function validatePrepared(prepared) {
       if (includesSelectedMaterial) {
         const mappings = lineage.selections.filter(({ evaluationId }) => evaluationId === evaluation.evaluationId);
         const selected = mappings[0]?.selectedMaterial;
+        const selectedVisual = mappings[0]?.selectedVisualMaterial;
         const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
+        const snapshotVisual = selectedVisual && snapshot?.materials.find(({ id }) => id === selectedVisual.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text: text2 }) => id === selected.materialId && text2 === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed || selected.textSha256 !== createHash9("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+        const boundVisual = selectedVisual && packet.data.visualMaterials?.some(({ id, altText, caption, asset }) => id === selectedVisual.materialId && altText === selectedVisual.altText && caption === selectedVisual.caption && hashCanonical(asset) === hashCanonical(selectedVisual.asset));
+        if (mappings.length !== 1 || Boolean(selected) === Boolean(selectedVisual) || Boolean(selected && (!snapshotItem || !exposed || selected.textSha256 !== createHash9("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256)) || Boolean(selectedVisual && (!snapshotVisual || !("type" in snapshotVisual) || snapshotVisual.type !== "image" || !boundVisual || snapshotVisual.altText !== selectedVisual.altText || snapshotVisual.caption !== selectedVisual.caption || hashCanonical(snapshotVisual.asset) !== hashCanonical(selectedVisual.asset)))) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
         }
       }
@@ -35097,7 +35127,10 @@ function validatePrepared(prepared) {
     }
     if (!prepared.groups || prepared.groups.length === 0 || lineage.selections.some((selection) => !evaluationIds2.has(selection.evaluationId)) || prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds2) || JSON.stringify(questionIdsByGroup2.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError("invalid_prepared_run", "Prepared follow-on group lineage is inconsistent.");
     if (includesSelectedMaterial) {
-      const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => question.type === "choice" ? Object.values(question.materialOptions ?? {}) : []));
+      const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => [
+        ...question.type === "choice" ? Object.values(question.materialOptions ?? {}) : [],
+        ...question.visual?.materialIds ?? []
+      ]));
       for (const group of prepared.groups) {
         const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
         const expectedIds = /* @__PURE__ */ new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
@@ -36201,7 +36234,7 @@ function queryEvidencePage(context, input2) {
     const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
     const lifecycle = currentLifecycle;
     const matched = (() => {
-      const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id,
+      const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id, e.context_id, e.packet_json,
           json_extract(e.packet_json, '$.question') AS question_json, e.result_json
           FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters);
       const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
@@ -36209,6 +36242,12 @@ function queryEvidencePage(context, input2) {
       const selectedMaterialIds = /* @__PURE__ */ new Set();
       const selectedMaterialRespondents = /* @__PURE__ */ new Set();
       let selectedMaterialEvaluations = 0;
+      const textIds = /* @__PURE__ */ new Set();
+      const textRespondents = /* @__PURE__ */ new Set();
+      let textEvaluations = 0;
+      const visualIds = /* @__PURE__ */ new Set();
+      const visualRespondents = /* @__PURE__ */ new Set();
+      let visualEvaluations = 0;
       for (const row of matchedRows) {
         const status = asText(row.status, "matched evaluation status");
         if (!Object.hasOwn(counts, status)) throw new RunStoreError("data_integrity_error", "A matched evaluation has an unsupported status.");
@@ -36227,6 +36266,20 @@ function queryEvidencePage(context, input2) {
           selectedMaterialEvaluations += 1;
           selectedMaterialIds.add(materialId);
           selectedMaterialRespondents.add(respondentId);
+          const packet = decisionPacketSchema.parse(parseJson(row.packet_json, "matched packet"));
+          const catalog = materialCatalogForRequest(parsedRequest.data, lineage, asText(row.context_id, "matched context ID"), respondentId, encounteredMaterialsFromState(packet.state));
+          const selected = catalog.find(({ id }) => id === materialId);
+          if (!selected) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+          assertRetainedImageAsset(context.database, query.sourceRunId, selected);
+          if (selected && isImageMaterial(selected)) {
+            visualEvaluations += 1;
+            visualIds.add(materialId);
+            visualRespondents.add(respondentId);
+          } else if (selected) {
+            textEvaluations += 1;
+            textIds.add(materialId);
+            textRespondents.add(respondentId);
+          }
         }
       }
       return {
@@ -36237,11 +36290,19 @@ function queryEvidencePage(context, input2) {
         selectedMaterialRespondents,
         selectedMaterialEvaluations,
         selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size },
+        selectedTextMaterials: { evaluations: textEvaluations, respondents: textRespondents.size, distinctMaterials: textIds.size },
+        selectedVisualMaterials: { evaluations: visualEvaluations, respondents: visualRespondents.size, distinctMaterials: visualIds.size },
         ordinals: matchedRows.map((row) => asNumber(row.ordinal, "matched evaluation ordinal")),
         evaluationIds: matchedRows.map((row) => asText(row.evaluation_id, "matched evaluation ID"))
       };
     })();
-    const matchedCoverage = { evaluations: matched.evaluations, representedRespondents: matched.representedRespondents, selectedMaterials: matched.selectedMaterials };
+    const matchedCoverage = {
+      evaluations: matched.evaluations,
+      representedRespondents: matched.representedRespondents,
+      selectedMaterials: matched.selectedMaterials,
+      selectedTextMaterials: matched.selectedTextMaterials,
+      selectedVisualMaterials: matched.selectedVisualMaterials
+    };
     const matchingOrdinalPairs = matched.ordinals.map((ordinal, index2) => ({ ordinal, evaluationId: matched.evaluationIds[index2] })).filter(({ ordinal }) => !cursor || ordinal > cursor.lastOrdinal);
     const pageIds = matchingOrdinalPairs.slice(0, limit + 1).map(({ evaluationId }) => evaluationId);
     const rows = pageIds.length === 0 ? [] : context.database.prepare(`SELECT e.*, jr.outcome AS route_outcome,
@@ -36261,11 +36322,13 @@ function queryEvidencePage(context, input2) {
       const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "decision result"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "provider execution"));
       const failure2 = storedEvaluationFailure(row);
       let selectedMaterial;
+      let selectedVisualMaterial;
       if (result?.type === "choice") {
         const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
         if (materialId) {
           const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
           if (!candidate) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+          assertRetainedImageAsset(context.database, query.sourceRunId, candidate);
           if (!isImageMaterial(candidate)) {
             if (!candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
             selectedMaterial = {
@@ -36275,6 +36338,8 @@ function queryEvidencePage(context, input2) {
               sourceSha256: candidate.sourceSha256,
               textSha256: createHash11("sha256").update(candidate.text, "utf8").digest("hex")
             };
+          } else {
+            selectedVisualMaterial = { materialId, altText: candidate.altText, ...candidate.caption === void 0 ? {} : { caption: candidate.caption }, asset: candidate.asset };
           }
         }
       }
@@ -36288,6 +36353,7 @@ function queryEvidencePage(context, input2) {
         ...result === void 0 ? {} : { result },
         ...failure2 === void 0 ? {} : { failure: failure2 },
         ...selectedMaterial === void 0 ? {} : { selectedMaterial },
+        ...selectedVisualMaterial === void 0 ? {} : { selectedVisualMaterial },
         ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
         ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
         ...row.turn_id === null ? {} : { branchId: asText(row.branch_id, "branch ID") },
@@ -36509,6 +36575,7 @@ function loadFollowOnSources(database, input2, notFound) {
     const materials = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems);
     const selectedMaterialId = result?.type === "choice" && packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
     const selectedMaterial = selectedMaterialId ? materials.find(({ id }) => id === selectedMaterialId) : void 0;
+    if (selectedMaterial && isImageMaterial(selectedMaterial)) assertRetainedImageAsset(database, request.sourceRunId, selectedMaterial);
     const selectedSource = selectedMaterial && !isImageMaterial(selectedMaterial) && selectedMaterial.sourceId && selectedMaterial.sourceSha256 ? {
       materialId: selectedMaterial.id,
       text: selectedMaterial.text,
@@ -36516,7 +36583,13 @@ function loadFollowOnSources(database, input2, notFound) {
       sourceSha256: selectedMaterial.sourceSha256,
       textSha256: createHash12("sha256").update(selectedMaterial.text, "utf8").digest("hex")
     } : void 0;
-    if (selectedMaterialId && (!selectedMaterial || !isImageMaterial(selectedMaterial)) && !selectedSource) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
+    const selectedVisualMaterial = selectedMaterial && isImageMaterial(selectedMaterial) ? {
+      materialId: selectedMaterial.id,
+      altText: selectedMaterial.altText,
+      ...selectedMaterial.caption === void 0 ? {} : { caption: selectedMaterial.caption },
+      asset: selectedMaterial.asset
+    } : void 0;
+    if (selectedMaterialId && !selectedSource && !selectedVisualMaterial) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
       evaluationId: asText(row.evaluation_id, "evaluation ID"),
       contextId,
@@ -36525,7 +36598,8 @@ function loadFollowOnSources(database, input2, notFound) {
       packet,
       ...result ? { result } : {},
       materials,
-      ...selectedSource ? { selectedMaterial: selectedSource } : {}
+      ...selectedSource ? { selectedMaterial: selectedSource } : {},
+      ...selectedVisualMaterial ? { selectedVisualMaterial } : {}
     };
   });
   return {
