@@ -20541,7 +20541,7 @@ var runStatuses = ["prepared", "running", "completed", "partial", "failed", "can
 var runStatusSchema = external_exports.enum(runStatuses);
 var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
 var evaluationStatusSchema = external_exports.enum(evaluationStatuses);
-var journeyRespondentStatuses = ["active", "completed", "failed", "unreached"];
+var journeyRespondentStatuses = ["active", "waiting-fork", "branched", "completed", "failed", "unreached"];
 var journeyRespondentStatusSchema = external_exports.enum(journeyRespondentStatuses);
 var attemptStatuses = ["reserved", "answered", "failed", "uncertain"];
 var attemptStatusSchema = external_exports.enum(attemptStatuses);
@@ -26944,6 +26944,7 @@ var evaluations = sqliteTable("evaluations", {
   ordinal: integer2("ordinal").notNull(),
   contextId: text("context_id").notNull(),
   respondentId: text("respondent_id").notNull(),
+  branchId: text("branch_id").notNull().default("root"),
   questionId: text("question_id").notNull(),
   groupId: text("group_id").notNull(),
   turnId: text("turn_id"),
@@ -26966,7 +26967,8 @@ var evaluations = sqliteTable("evaluations", {
   unique("evaluations_run_eval_uq").on(table.runId, table.evaluationId),
   unique("evaluations_run_eval_group_uq").on(table.runId, table.evaluationId, table.groupId),
   unique("evaluations_run_turn_uq").on(table.runId, table.turnId),
-  unique("evaluations_run_respondent_node_occurrence_uq").on(table.runId, table.respondentId, table.nodeId, table.occurrence),
+  unique("evaluations_run_respondent_branch_node_occurrence_uq").on(table.runId, table.respondentId, table.branchId, table.nodeId, table.occurrence),
+  unique("evaluations_run_eval_respondent_branch_uq").on(table.runId, table.evaluationId, table.respondentId, table.branchId),
   check2("evaluations_status_ck", sql`${table.status} IN ('pending', 'answered', 'failed', 'unreached')`),
   check2("evaluations_ordinal_ck", sql`${table.ordinal} >= 0`),
   check2("evaluations_journey_identity_ck", sql`(${table.turnId} IS NULL AND ${table.nodeId} IS NULL AND ${table.pathId} IS NULL AND ${table.occurrence} IS NULL) OR (${table.turnId} IS NOT NULL AND ${table.nodeId} IS NOT NULL AND ${table.pathId} IS NOT NULL AND ${table.occurrence} >= 1)`),
@@ -26976,6 +26978,7 @@ var evaluations = sqliteTable("evaluations", {
 var journeyRespondents = sqliteTable("journey_respondents", {
   runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
   respondentId: text("respondent_id").notNull(),
+  branchId: text("branch_id").notNull().default("root"),
   status: text("status", { enum: journeyRespondentStatuses }).notNull(),
   currentNodeId: text("current_node_id"),
   currentTurnId: text("current_turn_id"),
@@ -26985,10 +26988,48 @@ var journeyRespondents = sqliteTable("journey_respondents", {
   routeJson: text("route_json").notNull(),
   outcome: text("outcome")
 }, (table) => [
-  primaryKey({ name: "journey_respondents_pk", columns: [table.runId, table.respondentId] }),
-  check2("journey_respondents_status_ck", sql`${table.status} IN ('active', 'completed', 'failed', 'unreached')`),
+  primaryKey({ name: "journey_respondents_pk", columns: [table.runId, table.respondentId, table.branchId] }),
+  check2("journey_respondents_status_ck", sql`${table.status} IN ('active', 'waiting-fork', 'branched', 'completed', 'failed', 'unreached')`),
   check2("journey_respondents_revision_ck", sql`${table.revision} >= 0`),
-  check2("journey_respondents_checkpoint_ck", sql`(${table.status} = 'active' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NOT NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} <> 'active' AND ${table.currentNodeId} IS NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NULL)`)
+  check2("journey_respondents_checkpoint_ck", sql`(${table.status} = 'active' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NOT NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} = 'waiting-fork' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} IN ('branched', 'completed', 'failed', 'unreached') AND ${table.currentNodeId} IS NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NULL)`)
+]);
+var journeyForks = sqliteTable("journey_forks", {
+  runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
+  forkNodeId: text("fork_node_id").notNull(),
+  parentBranchId: text("parent_branch_id").notNull(),
+  status: text("status", { enum: ["open", "closed"] }).notNull(),
+  cohortCount: integer2("cohort_count").notNull(),
+  openedMs: integer2("opened_ms").notNull(),
+  closedMs: integer2("closed_ms"),
+  revision: integer2("revision").notNull()
+}, (table) => [
+  primaryKey({ name: "journey_forks_pk", columns: [table.runId, table.forkNodeId, table.parentBranchId] }),
+  check2("journey_forks_status_ck", sql`(${table.status} = 'open' AND ${table.closedMs} IS NULL) OR (${table.status} = 'closed' AND ${table.closedMs} >= ${table.openedMs})`),
+  check2("journey_forks_counts_ck", sql`${table.cohortCount} >= 0 AND ${table.openedMs} >= 0 AND ${table.revision} >= 0`)
+]);
+var journeyForkMembers = sqliteTable("journey_fork_members", {
+  runId: text("run_id").notNull(),
+  forkNodeId: text("fork_node_id").notNull(),
+  parentBranchId: text("parent_branch_id").notNull(),
+  respondentId: text("respondent_id").notNull(),
+  conditionOrdinal: integer2("condition_ordinal").notNull(),
+  conditionId: text("condition_id").notNull(),
+  childBranchId: text("child_branch_id").notNull(),
+  sourceContextId: text("source_context_id").notNull(),
+  childContextId: text("child_context_id").notNull(),
+  childTurnId: text("child_turn_id").notNull(),
+  childEvaluationId: text("child_evaluation_id").notNull()
+}, (table) => [
+  primaryKey({ name: "journey_fork_members_pk", columns: [table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.conditionId] }),
+  foreignKey({ name: "journey_fork_members_fork_fk", columns: [table.runId, table.forkNodeId, table.parentBranchId], foreignColumns: [journeyForks.runId, journeyForks.forkNodeId, journeyForks.parentBranchId] }).onDelete("cascade"),
+  foreignKey({ name: "journey_fork_members_parent_fk", columns: [table.runId, table.respondentId, table.parentBranchId], foreignColumns: [journeyRespondents.runId, journeyRespondents.respondentId, journeyRespondents.branchId] }).onDelete("cascade"),
+  foreignKey({ name: "journey_fork_members_child_evaluation_fk", columns: [table.runId, table.childEvaluationId, table.respondentId, table.childBranchId], foreignColumns: [evaluations.runId, evaluations.evaluationId, evaluations.respondentId, evaluations.branchId] }).onDelete("cascade"),
+  unique("journey_fork_members_ordinal_uq").on(table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.conditionOrdinal),
+  unique("journey_fork_members_child_branch_uq").on(table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.childBranchId),
+  unique("journey_fork_members_child_context_uq").on(table.runId, table.childContextId),
+  unique("journey_fork_members_child_turn_uq").on(table.runId, table.childTurnId),
+  unique("journey_fork_members_child_evaluation_uq").on(table.runId, table.childEvaluationId),
+  check2("journey_fork_members_ordinal_ck", sql`${table.conditionOrdinal} >= 0`)
 ]);
 var attempts = sqliteTable("attempts", {
   attemptSequence: integer2("attempt_sequence").primaryKey({ autoIncrement: true }),
@@ -27093,6 +27134,8 @@ var sqliteTables = {
   questionGroups,
   evaluations,
   journeyRespondents,
+  journeyForks,
+  journeyForkMembers,
   attempts,
   attemptEvaluations,
   evaluationAnswerAttempts,
@@ -27109,12 +27152,13 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 13;
+var SCHEMA_VERSION = 14;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
 var PROVIDER_SELECTION_MIGRATION_ID = "provider-selection-v12";
 var EVALUATION_PROVIDER_SELECTION_MIGRATION_ID = "evaluation-provider-selection-v13";
+var MATCHED_FORKS_MIGRATION_ID = "matched-forks-v14";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -27171,8 +27215,17 @@ function evaluationProviderSelectionMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 13 evaluation provider selection migration is missing from this Sheg installation.");
   return { id: EVALUATION_PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 12, toVersion: 13, sql: readFileSync(match, "utf8") };
 }
+function matchedForksMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0005_matched_forks/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0005_matched_forks/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 14 matched fork migration is missing from this Sheg installation.");
+  return { id: MATCHED_FORKS_MIGRATION_ID, fromVersion: 13, toVersion: 14, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration(), matchedForksMigration()];
 }
 function migrationChecksum(migration) {
   return createHash3("sha256").update(migration.sql).digest("hex");

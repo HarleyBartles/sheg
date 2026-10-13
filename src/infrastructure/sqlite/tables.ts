@@ -69,6 +69,7 @@ export const evaluations = sqliteTable('evaluations', {
   ordinal: integer('ordinal').notNull(),
   contextId: text('context_id').notNull(),
   respondentId: text('respondent_id').notNull(),
+  branchId: text('branch_id').notNull().default('root'),
   questionId: text('question_id').notNull(),
   groupId: text('group_id').notNull(),
   turnId: text('turn_id'),
@@ -91,7 +92,8 @@ export const evaluations = sqliteTable('evaluations', {
   unique('evaluations_run_eval_uq').on(table.runId, table.evaluationId),
   unique('evaluations_run_eval_group_uq').on(table.runId, table.evaluationId, table.groupId),
   unique('evaluations_run_turn_uq').on(table.runId, table.turnId),
-  unique('evaluations_run_respondent_node_occurrence_uq').on(table.runId, table.respondentId, table.nodeId, table.occurrence),
+  unique('evaluations_run_respondent_branch_node_occurrence_uq').on(table.runId, table.respondentId, table.branchId, table.nodeId, table.occurrence),
+  unique('evaluations_run_eval_respondent_branch_uq').on(table.runId, table.evaluationId, table.respondentId, table.branchId),
   check('evaluations_status_ck', sql`${table.status} IN ('pending', 'answered', 'failed', 'unreached')`),
   check('evaluations_ordinal_ck', sql`${table.ordinal} >= 0`),
   check('evaluations_journey_identity_ck', sql`(${table.turnId} IS NULL AND ${table.nodeId} IS NULL AND ${table.pathId} IS NULL AND ${table.occurrence} IS NULL) OR (${table.turnId} IS NOT NULL AND ${table.nodeId} IS NOT NULL AND ${table.pathId} IS NOT NULL AND ${table.occurrence} >= 1)`),
@@ -102,6 +104,7 @@ export const evaluations = sqliteTable('evaluations', {
 export const journeyRespondents = sqliteTable('journey_respondents', {
   runId: text('run_id').notNull().references(() => runs.runId, { onDelete: 'cascade' }),
   respondentId: text('respondent_id').notNull(),
+  branchId: text('branch_id').notNull().default('root'),
   status: text('status', { enum: journeyRespondentStatuses }).notNull(),
   currentNodeId: text('current_node_id'),
   currentTurnId: text('current_turn_id'),
@@ -111,10 +114,50 @@ export const journeyRespondents = sqliteTable('journey_respondents', {
   routeJson: text('route_json').notNull(),
   outcome: text('outcome'),
 }, (table) => [
-  primaryKey({ name: 'journey_respondents_pk', columns: [table.runId, table.respondentId] }),
-  check('journey_respondents_status_ck', sql`${table.status} IN ('active', 'completed', 'failed', 'unreached')`),
+  primaryKey({ name: 'journey_respondents_pk', columns: [table.runId, table.respondentId, table.branchId] }),
+  check('journey_respondents_status_ck', sql`${table.status} IN ('active', 'waiting-fork', 'branched', 'completed', 'failed', 'unreached')`),
   check('journey_respondents_revision_ck', sql`${table.revision} >= 0`),
-  check('journey_respondents_checkpoint_ck', sql`(${table.status} = 'active' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NOT NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} <> 'active' AND ${table.currentNodeId} IS NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NULL)`),
+  check('journey_respondents_checkpoint_ck', sql`(${table.status} = 'active' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NOT NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} = 'waiting-fork' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} IN ('branched', 'completed', 'failed', 'unreached') AND ${table.currentNodeId} IS NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NULL)`),
+]);
+
+export const journeyForks = sqliteTable('journey_forks', {
+  runId: text('run_id').notNull().references(() => runs.runId, { onDelete: 'cascade' }),
+  forkNodeId: text('fork_node_id').notNull(),
+  parentBranchId: text('parent_branch_id').notNull(),
+  status: text('status', { enum: ['open', 'closed'] }).notNull(),
+  cohortCount: integer('cohort_count').notNull(),
+  openedMs: integer('opened_ms').notNull(),
+  closedMs: integer('closed_ms'),
+  revision: integer('revision').notNull(),
+}, (table) => [
+  primaryKey({ name: 'journey_forks_pk', columns: [table.runId, table.forkNodeId, table.parentBranchId] }),
+  check('journey_forks_status_ck', sql`(${table.status} = 'open' AND ${table.closedMs} IS NULL) OR (${table.status} = 'closed' AND ${table.closedMs} >= ${table.openedMs})`),
+  check('journey_forks_counts_ck', sql`${table.cohortCount} >= 0 AND ${table.openedMs} >= 0 AND ${table.revision} >= 0`),
+]);
+
+export const journeyForkMembers = sqliteTable('journey_fork_members', {
+  runId: text('run_id').notNull(),
+  forkNodeId: text('fork_node_id').notNull(),
+  parentBranchId: text('parent_branch_id').notNull(),
+  respondentId: text('respondent_id').notNull(),
+  conditionOrdinal: integer('condition_ordinal').notNull(),
+  conditionId: text('condition_id').notNull(),
+  childBranchId: text('child_branch_id').notNull(),
+  sourceContextId: text('source_context_id').notNull(),
+  childContextId: text('child_context_id').notNull(),
+  childTurnId: text('child_turn_id').notNull(),
+  childEvaluationId: text('child_evaluation_id').notNull(),
+}, (table) => [
+  primaryKey({ name: 'journey_fork_members_pk', columns: [table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.conditionId] }),
+  foreignKey({ name: 'journey_fork_members_fork_fk', columns: [table.runId, table.forkNodeId, table.parentBranchId], foreignColumns: [journeyForks.runId, journeyForks.forkNodeId, journeyForks.parentBranchId] }).onDelete('cascade'),
+  foreignKey({ name: 'journey_fork_members_parent_fk', columns: [table.runId, table.respondentId, table.parentBranchId], foreignColumns: [journeyRespondents.runId, journeyRespondents.respondentId, journeyRespondents.branchId] }).onDelete('cascade'),
+  foreignKey({ name: 'journey_fork_members_child_evaluation_fk', columns: [table.runId, table.childEvaluationId, table.respondentId, table.childBranchId], foreignColumns: [evaluations.runId, evaluations.evaluationId, evaluations.respondentId, evaluations.branchId] }).onDelete('cascade'),
+  unique('journey_fork_members_ordinal_uq').on(table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.conditionOrdinal),
+  unique('journey_fork_members_child_branch_uq').on(table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.childBranchId),
+  unique('journey_fork_members_child_context_uq').on(table.runId, table.childContextId),
+  unique('journey_fork_members_child_turn_uq').on(table.runId, table.childTurnId),
+  unique('journey_fork_members_child_evaluation_uq').on(table.runId, table.childEvaluationId),
+  check('journey_fork_members_ordinal_ck', sql`${table.conditionOrdinal} >= 0`),
 ]);
 
 export const attempts = sqliteTable('attempts', {
@@ -222,7 +265,7 @@ export const runVisualAssets = sqliteTable('run_visual_assets', {
 ]);
 
 export const sqliteTables = {
-  runs, providerSettings, questionGroups, evaluations, journeyRespondents, attempts,
+  runs, providerSettings, questionGroups, evaluations, journeyRespondents, journeyForks, journeyForkMembers, attempts,
   attemptEvaluations, evaluationAnswerAttempts, schemaMigrations, imageAssets, imageDerivations, runVisualAssets,
 } as const;
 

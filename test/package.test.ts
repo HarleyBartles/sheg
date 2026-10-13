@@ -128,7 +128,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), false);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
   const initialized = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { readOnly: true });
-  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 13); }
+  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 14); }
   finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
