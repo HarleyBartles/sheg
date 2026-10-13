@@ -13,6 +13,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { createStaticImageCodec } from '../src/infrastructure/images/codecs.js';
+import { seedReleasedV030Store } from './helpers/released-v0.3.0-store.js';
 
 function closeTestServer(server: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -1055,7 +1056,8 @@ globalThis.fetch = async (input, init) => {
   throw new Error('The copied runtime attempted an unapproved network request.');
 };
 `);
-  const { env } = isolatedDefaultStorage(sandbox);
+  const { env, dataRoot } = isolatedDefaultStorage(sandbox);
+  await seedReleasedV030Store(dataRoot);
   env.PLUGIN_ROOT = plugin;
   env.SHEG_ROUTING_MOCK_LOG = callsPath;
   env.SHEG_ROUTING_MOCK_ARRIVAL = arrivalPath;
@@ -1066,6 +1068,11 @@ globalThis.fetch = async (input, init) => {
   const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
   try {
     await client.connect(transport);
+    const releasedRun = await client.callTool({ name: 'run_get', arguments: { runId: '8f57346d-b9ea-46e8-8547-bfd1289f0567', view: 'request' } });
+    assert.equal(releasedRun.isError ?? false, false, JSON.stringify(releasedRun.structuredContent));
+    assert.equal((releasedRun.structuredContent as { request: { label: string } }).request.label, 'v0.3.0 released article read');
+    const releasedAnswers = await client.callTool({ name: 'run_get', arguments: { runId: '8f57346d-b9ea-46e8-8547-bfd1289f0567', view: 'answers' } });
+    assert.equal((releasedAnswers.structuredContent as { items: Array<{ result?: { choice?: string } }> }).items[0]?.result?.choice, 'continue');
     const imported = await client.callTool({ name: 'image_import', arguments: { source: { path: inputImage, sha256: imageSha256 } } });
     assert.equal(imported.isError ?? false, false, JSON.stringify(imported.structuredContent));
     await rm(inputImage);
@@ -1249,6 +1256,42 @@ globalThis.fetch = async (input, init) => {
     assert.match(layaText, /article-image/, 'Compact visual history retains stable material identity.');
     assert.match(layaText, /"choiceMeaning":"Continue"/, 'Compact visual history retains the exact authored meaning of the typed response.');
     assert.match(layaText, /"visualEvidence"/, 'Onward text receives structured visual exposure evidence without pixel payloads.');
+    const visualJourney = await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+    const visualEvaluations = (visualJourney.structuredContent as { evaluations: Array<{ evaluationId: string; contextId: string; respondentId: string; questionId: string }> }).evaluations;
+    const selectedImage = visualEvaluations.find(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'image-fit')!;
+    const followOn = { kind: 'follow-on', sourceRunId: runId,
+      selection: { references: [{ evaluationId: selectedImage.evaluationId, contextId: selectedImage.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: ['section-three', 'section-four'], includeSelectedAnswer: true, materialIds: ['article-image'] },
+      questions: [{ type: 'choice', id: 'next-section-interest', instructions: 'Would you continue into the next section after seeing this image?', options: { continue: 'Continue', leave: 'Leave' }, visual: { mode: 'pixels', materialIds: ['article-image'] } }],
+      provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef', timeoutMs: 10_000 }, maxCalls: 1 };
+    const followOnInspection = await resumedClient.callTool({ name: 'run_inspect', arguments: { request: followOn } });
+    assert.equal((followOnInspection.structuredContent as { valid: boolean }).valid, true, JSON.stringify(followOnInspection.structuredContent));
+    const childAccepted = await resumedClient.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: followOn } });
+    assert.equal(childAccepted.isError ?? false, false, JSON.stringify(childAccepted.structuredContent));
+    const childRunId = (childAccepted.structuredContent as { runId: string }).runId;
+    await waitForCompleted(dataRoot, childRunId);
+    const childRequest = await resumedClient.callTool({ name: 'run_get', arguments: { runId: childRunId, view: 'request' } });
+    assert.equal(childRequest.isError ?? false, false, JSON.stringify(childRequest.structuredContent));
+    const child = childRequest.structuredContent as FollowOnRequestTestShape;
+    assert.equal(child.lineage.sourceAvailable, true);
+    assert.equal(child.evaluations[0]?.packet.visualMaterials?.[0]?.asset.assetId, image.assetId);
+    assert.equal(child.evaluations[0]?.packet.state.trajectory.responses.length, 2);
+    assert.equal(child.evaluations[0]?.packet.state.trajectory.responses.some((response) => JSON.stringify(response).includes(imageBytes.toString('base64'))), false);
+    const sourceDeleted = await resumedClient.callTool({ name: 'run_delete', arguments: { runIds: [runId] } });
+    assert.equal(sourceDeleted.isError ?? false, false, JSON.stringify(sourceDeleted.structuredContent));
+    const retainedImage = await resumedClient.callTool({ name: 'image_get', arguments: { assetId: image.assetId, export: true } });
+    assert.equal(retainedImage.isError ?? false, false, JSON.stringify(retainedImage.structuredContent));
+    const retainedImageExport = retainedImage.structuredContent as { asset: { sha256: string }; path: string };
+    assert.equal(createHash('sha256').update(await readFile(retainedImageExport.path)).digest('hex'), image.sha256);
+    const childAfterDelete = await resumedClient.callTool({ name: 'run_get', arguments: { runId: childRunId, view: 'request' } });
+    const retainedChild = childAfterDelete.structuredContent as FollowOnRequestTestShape;
+    assert.equal(retainedChild.lineage.sourceAvailable, false);
+    assert.equal(retainedChild.evaluations[0]?.packet.visualMaterials?.[0]?.asset.assetId, image.assetId);
+    const callsAfterFollowOn = (await readFile(callsPath, 'utf8')).trim().split(/\r?\n/).map((line) => JSON.parse(line) as { kind: string; body: { images?: string[] } });
+    const finalLayaCalls = callsAfterFollowOn.filter(({ kind }) => kind === 'laya');
+    assert.equal(finalLayaCalls.length, 6);
+    assert.ok(finalLayaCalls.every(({ body }) => body.images === undefined), 'The onward and follow-on text turns must carry descriptions and evidence without resending pixels.');
+    assert.equal(callsAfterFollowOn.filter(({ kind }) => kind === 'clef').length, 6);
     } finally { await killMcpConnection(resumedClient, resumedTransport); }
   } finally {
     await client.close().catch(() => undefined);
