@@ -42841,10 +42841,9 @@ function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec
     },
     async scale(image, width, height) {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions.");
-      const factor = Math.min(width / image.width, height / image.height);
-      const expectedWidth = Math.max(1, Math.floor(image.width * factor));
-      const expectedHeight = Math.max(1, Math.floor(image.height * factor));
-      if (factor > 1 || Math.abs(width - expectedWidth) > 1 || Math.abs(height - expectedHeight) > 1) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions or enlarging the source.");
+      const minimumFactor = Math.max((width - 1) / image.width, (height - 1) / image.height);
+      const maximumFactor = Math.min(1, (width + 1) / image.width, (height + 1) / image.height);
+      if (width > image.width || height > image.height || minimumFactor > maximumFactor) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions or enlarging the source.");
       await initialize2();
       const scaled = await resize4({ data: image.data, width: image.width, height: image.height }, { width, height, method: "lanczos3", fitMethod: "stretch" });
       const result = view(scaled);

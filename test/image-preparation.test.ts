@@ -50,6 +50,26 @@ test('scales to the integer dimensions from one proportional fit factor', async 
   } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
 });
 
+test('service keeps rounded proportional dimensions when the fit bound is nearly a full pixel away', async () => {
+  const state = await setup();
+  try {
+    const width = 192;
+    const height = 108;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+      data.set([x < width / 2 ? 255 : 0, y < height / 2 ? 255 : 0, 80, 255], (y * width + x) * 4);
+    }
+    const sourceBytes = await codec.encode({ data, width, height, format: 'png', orientation: 1 } satisfies DecodedImage);
+    await writeFile(state.sourcePath, sourceBytes);
+    const source = await state.service.import({ path: state.sourcePath, sha256: createHash('sha256').update(sourceBytes).digest('hex') });
+    const result = await state.service.scale({ source: { assetId: source.assetId }, maxWidth: 37 });
+    const candidate = await codec.decode(state.repository.bytes(result.candidate.assetId));
+    assert.deepEqual([candidate.width, candidate.height], [37, 20]);
+    assert.notEqual(result.candidate.assetId, source.assetId);
+    assert.deepEqual(Buffer.from(state.repository.bytes(source.assetId)), Buffer.from(sourceBytes));
+  } finally { state.repository.close(); await rm(state.root, { recursive: true, force: true }); }
+});
+
 test('scales a non-integer aspect ratio to the largest bounded candidate and retains the full frame', async () => {
   const state = await setup();
   try {
