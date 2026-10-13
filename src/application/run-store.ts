@@ -22,6 +22,7 @@ export type DeleteResult = {
 export type StorageInfo = { integrity: 'ok' | 'failed'; databaseBytes: number; runCount: number; evaluationCount: number; attemptCount: number; activeRunCount: number };
 export type JourneyTransition = { respondentId: string; expectedRevision: number; state: JourneyRespondentState; nextEvaluation?: JourneyEvaluation };
 export type ForkAdvanceResult = { status: 'waiting' | 'closed'; createdEvaluationIds: string[]; createdEvaluations: JourneyEvaluationRecord[]; parentRespondents: JourneyRespondentState[]; childRespondents: JourneyRespondentState[] };
+export type JourneyProviderChoiceWrite = { evaluationId: string; packetFingerprint: string; choice: ProviderSelectionInitialChoice };
 
 export class RunStoreError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -67,6 +68,8 @@ export interface RunCommandRepository {
   settle(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome): void;
   settleJourney(claim: WorkerClaim, attemptId: string, outcome: AttemptOutcome, transition: JourneyTransition): void;
   advanceJourneyFork(claim: WorkerClaim, forkNodeId: string, parentBranchId: string): ForkAdvanceResult;
+  persistJourneyProviderChoices(claim: WorkerClaim, comparisonLockId: string, writes: JourneyProviderChoiceWrite[]): void;
+  failJourneyProviderComparison(claim: WorkerClaim, writes: Array<{ evaluationId: string; packetFingerprint: string }>, failure: { code: string; message: string }): void;
   finish(claim: WorkerClaim): RunStatusView;
   failLaunch(runId: string, code: string): void;
   failRun(claim: WorkerClaim, code: string, message: string): void;

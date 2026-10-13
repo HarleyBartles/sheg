@@ -13,6 +13,7 @@ SELECT r.*,
         e.turn_id IS NULL OR length(trim(e.turn_id)) = 0 OR e.node_id IS NULL OR length(trim(e.node_id)) = 0 OR
         e.path_id IS NULL OR length(trim(e.path_id)) = 0 OR e.occurrence IS NULL OR e.occurrence < 1 OR
         length(trim(e.packet_json)) = 0 OR length(trim(e.packet_fingerprint)) = 0)) AND
+   NOT EXISTS (SELECT 1 FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed' AND e.failure_code = 'comparison_provider_unavailable') AND
    NOT EXISTS (SELECT e.respondent_id FROM evaluations e WHERE e.run_id = r.run_id AND e.status = 'failed'
       GROUP BY e.respondent_id, e.branch_id HAVING COUNT(*) <> 1) AND
    NOT EXISTS (SELECT 1 FROM journey_respondents jr WHERE jr.run_id = r.run_id AND jr.status = 'failed' AND

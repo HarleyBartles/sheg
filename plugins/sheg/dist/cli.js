@@ -34696,7 +34696,7 @@ function reopenFailedQuestions(database, runId) {
   database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId), eq(evaluations.status, "failed"))).run();
 }
 function reopenJourneyEvaluation(database, runId, evaluationId, respondentId, branchId) {
-  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, "failed"))).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
+  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, "failed"), sql`${evaluations.failureCode} <> 'comparison_provider_unavailable'`)).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
 }
 function restoreFailedJourneyRespondent(database, runId, respondentId, branchId, currentNodeId, currentTurnId, currentContextId) {
   return database.update(journeyRespondents).set({
@@ -35624,6 +35624,50 @@ function createSqliteCommandRepository(context, storageInfo) {
         now: context.now,
         ownedRun: context.ownedRun
       }, claim2, forkNodeId, parentBranchId));
+    },
+    persistJourneyProviderChoices(claim2, comparisonLockId, writes) {
+      context.ensureOpen();
+      context.transaction(() => {
+        context.ownedRun(claim2, context.now());
+        if (!writes.length || new Set(writes.map(({ evaluationId }) => evaluationId)).size !== writes.length) {
+          throw new RunStoreError("invalid_provider_selection", "A fork comparison must persist one unique choice for each ready member.");
+        }
+        for (const { evaluationId, packetFingerprint, choice: rawChoice } of writes) {
+          const choice = providerSelectionInitialChoiceSchema.parse(rawChoice);
+          if (choice.comparisonLockId !== comparisonLockId) throw new RunStoreError("invalid_provider_selection", "A fork comparison choice has a different comparison identity.");
+          const row = context.database.prepare("SELECT respondent_id, branch_id, question_id, packet_fingerprint, status, provider_selection_json FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(claim2.runId, evaluationId);
+          if (!row || row.status !== "pending" || row.provider_selection_json !== null || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || asText(row.respondent_id, "respondent ID") !== choice.respondentId || asText(row.question_id, "question ID") !== choice.questionId || asText(row.branch_id, "branch ID") !== (choice.branchId ?? "root")) {
+            throw new RunStoreError("evaluation_changed_before_selection", "A ready fork comparison member changed before its common provider selection could be persisted.");
+          }
+          const updated = context.database.prepare("UPDATE evaluations SET provider_selection_json = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending' AND provider_selection_json IS NULL AND packet_fingerprint = ?").run(JSON.stringify(choice), claim2.runId, evaluationId, packetFingerprint);
+          if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_selection", "A ready fork comparison member changed while its common provider selection was being persisted.");
+        }
+      });
+    },
+    failJourneyProviderComparison(claim2, writes, failure2) {
+      context.ensureOpen();
+      context.transaction(() => {
+        context.ownedRun(claim2, context.now());
+        if (writes.length < 2 || new Set(writes.map(({ evaluationId }) => evaluationId)).size !== writes.length) {
+          throw new RunStoreError("invalid_provider_selection", "A matched comparison failure must cover every unique ready member.");
+        }
+        const rows = writes.map(({ evaluationId, packetFingerprint }) => {
+          const row = context.database.prepare("SELECT respondent_id, branch_id, packet_fingerprint, turn_id, status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(claim2.runId, evaluationId);
+          if (!row || row.status !== "pending" || row.turn_id === null || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint) {
+            throw new RunStoreError("evaluation_changed_before_failure", "A matched comparison member changed before its zero-call failure could be committed.");
+          }
+          return { evaluationId, respondentId: asText(row.respondent_id, "respondent ID"), branchId: asText(row.branch_id, "branch ID"), turnId: asText(row.turn_id, "turn ID"), packetFingerprint };
+        });
+        const stateKeys = rows.map(({ respondentId, branchId }) => JSON.stringify([respondentId, branchId]));
+        if (new Set(stateKeys).size !== rows.length) throw new RunStoreError("invalid_provider_selection", "A matched comparison cannot fail two ready questions from the same branch turn.");
+        for (const row of rows) {
+          const updatedEvaluation = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending' AND packet_fingerprint = ?").run(failure2.code, failure2.message, claim2.runId, row.evaluationId, row.packetFingerprint);
+          const updatedRespondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND branch_id = ? AND status = 'active' AND current_turn_id = ?").run(claim2.runId, row.respondentId, row.branchId, row.turnId);
+          if (Number(updatedEvaluation.changes) !== 1 || Number(updatedRespondent.changes) !== 1) {
+            throw new RunStoreError("journey_checkpoint_changed", "A matched comparison branch changed before its zero-call failure could be committed.");
+          }
+        }
+      });
     },
     finish(claim2) {
       context.ensureOpen();

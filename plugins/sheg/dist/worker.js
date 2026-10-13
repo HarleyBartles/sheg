@@ -21479,6 +21479,125 @@ function selectProvider(input2) {
   selected.selected = true;
   return { selected, candidates, decisionReason: selected.cost?.kind === "estimate" ? "lowest_comparable_published_rate_estimate" : "stable_catalogue_order_cost_unverified" };
 }
+function selectProviderComparisonLock(input2) {
+  const memberIds = input2.members.map(({ unitId }) => unitId);
+  const treatmentDimensions = [
+    ...input2.equality.provider === "vary" ? ["provider"] : [],
+    ...input2.equality.model === "vary" ? ["model"] : []
+  ];
+  if (input2.members.length < 2 || new Set(memberIds).size !== memberIds.length) {
+    return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "comparison_members_invalid", candidates: [] };
+  }
+  if (treatmentDimensions.length) {
+    const dimensions = (entry) => ({ provider: providerConfigurationIdentity(entry.provider), model: providerModelIdentity(entry.provider) });
+    const shared = ["provider", "model"].filter((dimension) => input2.equality[dimension] === "same");
+    const first2 = input2.members[0];
+    const keys = [...new Set(first2.catalogue.entries.map((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension]))))];
+    const viableGroups = [];
+    for (const key of keys) {
+      const groupEntries = first2.catalogue.entries.filter((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension])) === key);
+      const selections = input2.members.map((member) => {
+        if (member.catalogue.revision !== first2.catalogue.revision || JSON.stringify(member.catalogue.entries) !== JSON.stringify(first2.catalogue.entries)) {
+          return { unitId: member.unitId, selection: { candidates: [], decisionReason: "comparison_catalogue_mismatch" } };
+        }
+        const candidateIds = new Set(groupEntries.map(({ id }) => id));
+        return { unitId: member.unitId, selection: selectProvider({ ...member, candidates: member.candidates.filter(({ id }) => candidateIds.has(id)) }) };
+      });
+      if (selections.every(({ selection }) => selection.selected)) {
+        const preferencePenalty = selections.reduce((sum2, { selection }) => sum2 + (selection.decisionReason === "request_preference" ? 0 : selection.decisionReason === "saved_user_preference" ? 1 : 2), 0);
+        const variedProviderCount = input2.equality.provider === "vary" ? new Set(selections.map(({ selection }) => {
+          const selected = first2.catalogue.entries.find(({ id }) => id === selection.selected.id);
+          return dimensions(selected).provider;
+        })).size : 0;
+        const variedModelCount = input2.equality.model === "vary" ? new Set(selections.map(({ selection }) => {
+          const selected = first2.catalogue.entries.find(({ id }) => id === selection.selected.id);
+          return dimensions(selected).model;
+        })).size : 0;
+        viableGroups.push({ selections, key, rank: [preferencePenalty, -(variedProviderCount + variedModelCount)] });
+      }
+    }
+    viableGroups.sort((left, right) => left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || keys.indexOf(left.key) - keys.indexOf(right.key));
+    const chosenGroup = viableGroups[0];
+    if (chosenGroup) {
+      const selectedIds = chosenGroup.selections.map(({ selection }) => selection.selected.id);
+      const plannedCalls = input2.members.reduce((sum2, member, index2) => sum2 + (member.candidates.find(({ id }) => id === selectedIds[index2])?.plannedCalls ?? 0), 0);
+      const remainingCalls2 = Math.min(...input2.members.map(({ remainingCalls: remaining }) => remaining));
+      if (plannedCalls > remainingCalls2) return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "comparison_call_allowance_exceeded", candidates: [], members: chosenGroup.selections };
+      const displayCandidates = [...new Set(selectedIds)].map((id) => {
+        const entry = first2.catalogue.entries.find((candidate) => candidate.id === id);
+        const fit = chosenGroup.selections.find(({ selection }) => selection.selected?.id === id)?.selection.selected?.fit;
+        const cost = aggregateCandidateCost(input2.members.map((member) => member.candidates.find((candidate) => candidate.id === id)?.cost));
+        return {
+          id,
+          provider: entry.provider,
+          eligible: true,
+          selected: selectedIds[0] === id,
+          ...fit === void 0 ? {} : { fit },
+          ...cost === void 0 ? {} : { cost }
+        };
+      });
+      return {
+        id: input2.id,
+        memberIds,
+        treatmentDimensions,
+        decisionReason: "comparison_treatment_dimensions_locked",
+        selected: displayCandidates.find(({ id: candidateId }) => candidateId === selectedIds[0]),
+        candidates: displayCandidates,
+        members: chosenGroup.selections
+      };
+    }
+    return {
+      id: input2.id,
+      memberIds,
+      treatmentDimensions,
+      decisionReason: "comparison_treatment_ineligible",
+      candidates: [],
+      members: input2.members.map((member) => ({ unitId: member.unitId, selection: { candidates: [], decisionReason: "no_common_comparison_lock" } }))
+    };
+  }
+  const pins = [...new Set(input2.members.map((member) => member.unitOverride ?? member.unitOverrides?.[member.unitId]).filter((id) => id !== void 0))];
+  if (pins.length > 1) return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "binding_comparison_pins_conflict", candidates: [] };
+  const first = input2.members[0];
+  const catalogue = first.catalogue;
+  const requiredCapabilities = [...new Set(input2.members.flatMap(({ requiredCapabilities: required2 }) => required2))];
+  const questionTypes = [...new Set(input2.members.flatMap(({ questionTypes: types, questionType }) => types ?? [questionType]))];
+  const candidates = catalogue.entries.map((entry) => {
+    const memberSelections = input2.members.map((member) => selectProvider({ ...member, unitOverride: entry.id }));
+    const eligibleForAll = memberSelections.every((selection) => selection.selected?.id === entry.id) && input2.members.every(({ catalogue: memberCatalogue }) => memberCatalogue.revision === catalogue.revision && JSON.stringify(memberCatalogue.entries) === JSON.stringify(catalogue.entries));
+    const fits = memberSelections.map(({ selected }) => selected?.fit);
+    const rejectedFit = memberSelections.map(({ candidates: memberCandidates }) => memberCandidates.find(({ id }) => id === entry.id)?.fit).find((fit2) => fit2?.status !== "fits");
+    const fit = eligibleForAll && fits.every((value) => value?.status === "fits") ? { ...fits[0], tokens: fits.reduce((sum2, value) => sum2 + value.tokens, 0), details: { lockMembers: fits.length, totalInputTokens: fits.reduce((sum2, value) => sum2 + value.tokens, 0) } } : rejectedFit && rejectedFit.status !== "fits" ? rejectedFit : void 0;
+    const plans = input2.members.map((member) => member.candidates.find(({ id }) => id === entry.id));
+    const plannedCalls = plans.every((plan) => plan !== void 0) ? plans.reduce((sum2, plan) => sum2 + plan.plannedCalls, 0) : 0;
+    const cost = aggregateCandidateCost(plans.map((plan) => plan?.cost));
+    const ready = eligibleForAll ? true : memberSelections.every((selection) => selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== "provider_unavailable" && selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== "provider_readiness_unverified");
+    return { id: entry.id, ready, ...fit === void 0 ? {} : { fit }, plannedCalls, ...cost === void 0 ? {} : { cost } };
+  });
+  const remainingCalls = Math.min(...input2.members.map(({ remainingCalls: remaining }) => remaining));
+  const selectionInput = { ...first, requiredCapabilities, questionType: questionTypes[0], questionTypes, remainingCalls, candidates };
+  delete selectionInput.unitOverride;
+  delete selectionInput.unitOverrides;
+  if (pins[0]) selectionInput.unitOverride = pins[0];
+  const result = selectProvider(selectionInput);
+  return {
+    id: input2.id,
+    memberIds,
+    treatmentDimensions,
+    decisionReason: result.decisionReason,
+    ...result.selected === void 0 ? {} : { selected: result.selected },
+    candidates: result.candidates
+  };
+}
+function aggregateCandidateCost(costs) {
+  if (costs.some((cost) => cost === void 0)) return void 0;
+  if (costs.every((cost) => cost?.kind === "no-provider-invoice")) return { kind: "no-provider-invoice", basis: "provider pricing contract" };
+  const estimates = costs.filter((cost) => cost?.kind === "estimate");
+  if (estimates.length === costs.length && new Set(estimates.map(({ currency }) => currency)).size === 1) {
+    const first = estimates[0];
+    return { ...first, amount: estimates.reduce((sum2, { amount }) => sum2 + amount, 0), basis: "published-rate estimate" };
+  }
+  return { kind: "unknown", basis: new Set(estimates.map(({ currency }) => currency)).size > 1 ? "incomparable currency" : "unverified" };
+}
 
 // src/application/provider-batch-planning.ts
 function missingFit(provider, kind, modelIdentity) {
@@ -21722,6 +21841,19 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
         accepted.evaluations.push(...advanced.createdEvaluations);
         accepted.respondents = accepted.respondents.filter((state) => !(state.status === "waiting-fork" && state.branchId === fork.parentBranchId && state.currentNodeId === fork.forkNodeId));
         accepted.respondents.push(...advanced.parentRespondents, ...advanced.childRespondents);
+        if (!explicitProvider) await resolveForkComparisonProviders(
+          reads,
+          commands,
+          runId2,
+          claim2,
+          accepted,
+          fork.forkNodeId,
+          fork.parentBranchId,
+          advanced.createdEvaluations,
+          providerFactory,
+          providerOptions,
+          assertProviderReady2
+        );
       }
     }
     const pending = accepted.evaluations.find((evaluation) => evaluation.status === "pending");
@@ -21833,7 +21965,7 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
     }
   }
 }
-async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2) {
+async function journeyProviderSelectionInput(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2) {
   const snapshot = run.providerSelectionSnapshot;
   if (!snapshot) throw new Error("The automatic provider catalogue was not frozen with the accepted run.");
   const status = reads.getStatus(runId2);
@@ -21863,7 +21995,7 @@ async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFa
     ...run.request.providerSelection?.requiredCapabilities ?? [],
     ...(evaluation.packet.visualMaterials?.length ?? 0) > 0 ? ["pixels"] : []
   ])];
-  const selected = selectProvider({
+  return {
     catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries },
     preferences: snapshot.preferences,
     unitId,
@@ -21873,16 +22005,19 @@ async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFa
     remainingCalls,
     ...run.request.providerSelection?.preferredOrder === void 0 ? {} : { preferredOrder: run.request.providerSelection.preferredOrder },
     ...lockedProvider ?? pins[0] ? { unitOverride: lockedProvider ?? pins[0] } : {}
-  });
-  if (!selected.selected) throw new NoEligibleJourneyProviderError("No eligible provider fits the reached journey unit.");
+  };
+}
+function journeyChoice(evaluation, selected, lockId, decisionReason = selected.decisionReason) {
+  const entry = selected.selected?.provider;
+  if (!selected.selected || !entry) return void 0;
   return providerSelectionInitialChoiceSchema.parse({
     respondentId: evaluation.respondentId,
     questionId: evaluation.questionId,
     branchId: evaluation.branchId,
-    ...lock ? { comparisonLockId: lock.id } : {},
+    ...lockId === void 0 ? {} : { comparisonLockId: lockId },
     providerId: selected.selected.id,
-    modelIdentity: providerModelIdentity(selected.selected.provider),
-    decisionReason: selected.decisionReason,
+    modelIdentity: providerModelIdentity(entry),
+    decisionReason,
     candidates: selected.candidates.map(({ id, eligible, selected: isSelected, fit, cost, exclusion, preferenceRank }) => ({
       id,
       eligible,
@@ -21893,6 +22028,78 @@ async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFa
       ...preferenceRank ? { preferenceRank } : {}
     }))
   });
+}
+async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2) {
+  const input2 = await journeyProviderSelectionInput(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2);
+  const selected = selectProvider(input2);
+  if (!selected.selected) throw new NoEligibleJourneyProviderError("No eligible provider fits the reached journey unit.");
+  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members: members2 }) => members2.some(({ respondentId, questionId, branchId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId && (branchId ?? "root") === evaluation.branchId));
+  return journeyChoice(evaluation, selected, lock?.id);
+}
+async function resolveForkComparisonProviders(reads, commands, runId2, claim2, run, forkNodeId, parentBranchId, created, providerFactory, providerOptions, assertProviderReady2) {
+  const failComparison = (evaluations2) => {
+    const message = "No common provider can satisfy every reached member of this matched comparison.";
+    commands.failJourneyProviderComparison(
+      claim2,
+      evaluations2.map(({ evaluationId, packetFingerprint }) => ({ evaluationId, packetFingerprint })),
+      { code: "comparison_provider_unavailable", message }
+    );
+    for (const evaluation of evaluations2) {
+      evaluation.status = "failed";
+      evaluation.failure = { code: "comparison_provider_unavailable", message };
+      run.respondents = run.respondents.map((state) => state.respondentId === evaluation.respondentId && state.branchId === evaluation.branchId ? {
+        ...state,
+        status: "failed",
+        currentNodeId: null,
+        currentTurnId: null,
+        currentContextId: null,
+        revision: state.revision + 1
+      } : state);
+    }
+  };
+  const taskById = new Map(run.request.journey.tasks.map((task) => [task.id, task]));
+  const byKey = /* @__PURE__ */ new Map();
+  for (const evaluation of created) {
+    const comparisonKey = taskById.get(evaluation.questionId)?.comparisonKey;
+    if (!comparisonKey) continue;
+    const members2 = byKey.get(comparisonKey) ?? [];
+    members2.push(evaluation);
+    byKey.set(comparisonKey, members2);
+  }
+  const status = reads.getStatus(runId2);
+  const remainingCalls = Math.max(0, status.maxCalls - status.usedCalls - status.reservedCalls);
+  for (const [comparisonKey, evaluations2] of byKey) {
+    if (new Set(evaluations2.map(({ branchId }) => branchId)).size < 2 || evaluations2.length < 2) continue;
+    const identityKey = (evaluation) => JSON.stringify([evaluation.respondentId, evaluation.questionId, evaluation.branchId]);
+    const explicit = run.request.providerSelection?.comparisonLocks?.find((lock) => lock.members.some((member) => evaluations2.some((evaluation) => identityKey(evaluation) === JSON.stringify([member.respondentId, member.questionId, member.branchId ?? "root"]))));
+    const lockId = explicit?.id ?? `fork-${hashCanonical({ forkNodeId, parentBranchId, comparisonKey }).slice(0, 24)}`;
+    let inputs;
+    try {
+      inputs = await Promise.all(evaluations2.map(async (evaluation) => {
+        const input2 = await journeyProviderSelectionInput(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2);
+        return { ...input2, unitId: identityKey(evaluation), remainingCalls, candidates: input2.candidates.map((candidate) => ({ ...candidate, plannedCalls: 1 })) };
+      }));
+    } catch (error62) {
+      if (!(error62 instanceof NoEligibleJourneyProviderError)) throw error62;
+      failComparison(evaluations2);
+      continue;
+    }
+    const resolved = selectProviderComparisonLock({ id: lockId, equality: explicit?.equality ?? { provider: "same", model: "same" }, members: inputs });
+    const memberSelections = resolved.members?.length === evaluations2.length ? resolved.members.map(({ selection }) => selection) : resolved.selected ? inputs.map((input2) => selectProvider({ ...input2, unitOverride: resolved.selected.id })) : [];
+    if (memberSelections.length === evaluations2.length && memberSelections.every((selection) => selection.selected)) {
+      const writes = evaluations2.map((evaluation) => {
+        const memberIndex = evaluations2.findIndex(({ evaluationId }) => evaluationId === evaluation.evaluationId);
+        const memberSelection = memberSelections[memberIndex];
+        const choice = memberSelection ? journeyChoice(evaluation, memberSelection, lockId, resolved.decisionReason) : void 0;
+        if (!choice) throw new NoEligibleJourneyProviderError("A ready fork comparison member has no resolved provider choice.");
+        return { evaluationId: evaluation.evaluationId, packetFingerprint: evaluation.packetFingerprint, choice };
+      });
+      commands.persistJourneyProviderChoices(claim2, lockId, writes);
+      for (const evaluation of evaluations2) evaluation.providerSelection = writes.find(({ evaluationId }) => evaluationId === evaluation.evaluationId).choice;
+      continue;
+    }
+    failComparison(evaluations2);
+  }
 }
 function batchVisualMaterials(groups) {
   const byId = /* @__PURE__ */ new Map();
@@ -28581,7 +28788,7 @@ function reopenFailedQuestions(database, runId2) {
   database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId2), eq(evaluations.status, "failed"))).run();
 }
 function reopenJourneyEvaluation(database, runId2, evaluationId, respondentId, branchId) {
-  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId2), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, "failed"))).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
+  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId2), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, "failed"), sql`${evaluations.failureCode} <> 'comparison_provider_unavailable'`)).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
 }
 function restoreFailedJourneyRespondent(database, runId2, respondentId, branchId, currentNodeId, currentTurnId, currentContextId) {
   return database.update(journeyRespondents).set({
@@ -29516,6 +29723,50 @@ function createSqliteCommandRepository(context, storageInfo) {
         now: context.now,
         ownedRun: context.ownedRun
       }, claim2, forkNodeId, parentBranchId));
+    },
+    persistJourneyProviderChoices(claim2, comparisonLockId, writes) {
+      context.ensureOpen();
+      context.transaction(() => {
+        context.ownedRun(claim2, context.now());
+        if (!writes.length || new Set(writes.map(({ evaluationId }) => evaluationId)).size !== writes.length) {
+          throw new RunStoreError("invalid_provider_selection", "A fork comparison must persist one unique choice for each ready member.");
+        }
+        for (const { evaluationId, packetFingerprint, choice: rawChoice } of writes) {
+          const choice = providerSelectionInitialChoiceSchema.parse(rawChoice);
+          if (choice.comparisonLockId !== comparisonLockId) throw new RunStoreError("invalid_provider_selection", "A fork comparison choice has a different comparison identity.");
+          const row = context.database.prepare("SELECT respondent_id, branch_id, question_id, packet_fingerprint, status, provider_selection_json FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(claim2.runId, evaluationId);
+          if (!row || row.status !== "pending" || row.provider_selection_json !== null || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || asText(row.respondent_id, "respondent ID") !== choice.respondentId || asText(row.question_id, "question ID") !== choice.questionId || asText(row.branch_id, "branch ID") !== (choice.branchId ?? "root")) {
+            throw new RunStoreError("evaluation_changed_before_selection", "A ready fork comparison member changed before its common provider selection could be persisted.");
+          }
+          const updated = context.database.prepare("UPDATE evaluations SET provider_selection_json = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending' AND provider_selection_json IS NULL AND packet_fingerprint = ?").run(JSON.stringify(choice), claim2.runId, evaluationId, packetFingerprint);
+          if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_selection", "A ready fork comparison member changed while its common provider selection was being persisted.");
+        }
+      });
+    },
+    failJourneyProviderComparison(claim2, writes, failure2) {
+      context.ensureOpen();
+      context.transaction(() => {
+        context.ownedRun(claim2, context.now());
+        if (writes.length < 2 || new Set(writes.map(({ evaluationId }) => evaluationId)).size !== writes.length) {
+          throw new RunStoreError("invalid_provider_selection", "A matched comparison failure must cover every unique ready member.");
+        }
+        const rows = writes.map(({ evaluationId, packetFingerprint }) => {
+          const row = context.database.prepare("SELECT respondent_id, branch_id, packet_fingerprint, turn_id, status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(claim2.runId, evaluationId);
+          if (!row || row.status !== "pending" || row.turn_id === null || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint) {
+            throw new RunStoreError("evaluation_changed_before_failure", "A matched comparison member changed before its zero-call failure could be committed.");
+          }
+          return { evaluationId, respondentId: asText(row.respondent_id, "respondent ID"), branchId: asText(row.branch_id, "branch ID"), turnId: asText(row.turn_id, "turn ID"), packetFingerprint };
+        });
+        const stateKeys = rows.map(({ respondentId, branchId }) => JSON.stringify([respondentId, branchId]));
+        if (new Set(stateKeys).size !== rows.length) throw new RunStoreError("invalid_provider_selection", "A matched comparison cannot fail two ready questions from the same branch turn.");
+        for (const row of rows) {
+          const updatedEvaluation = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending' AND packet_fingerprint = ?").run(failure2.code, failure2.message, claim2.runId, row.evaluationId, row.packetFingerprint);
+          const updatedRespondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND branch_id = ? AND status = 'active' AND current_turn_id = ?").run(claim2.runId, row.respondentId, row.branchId, row.turnId);
+          if (Number(updatedEvaluation.changes) !== 1 || Number(updatedRespondent.changes) !== 1) {
+            throw new RunStoreError("journey_checkpoint_changed", "A matched comparison branch changed before its zero-call failure could be committed.");
+          }
+        }
+      });
     },
     finish(claim2) {
       context.ensureOpen();

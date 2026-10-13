@@ -22,7 +22,7 @@ export function reopenFailedQuestions(database: NodeSQLiteDatabase, runId: strin
 
 export function reopenJourneyEvaluation(database: NodeSQLiteDatabase, runId: string, evaluationId: string, respondentId: string, branchId: string): boolean {
   return database.update(evaluations).set({ status: 'pending', resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null })
-    .where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, 'failed')))
+    .where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, 'failed'), sql`${evaluations.failureCode} <> 'comparison_provider_unavailable'`))
     .returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
 }
 
