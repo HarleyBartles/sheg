@@ -8,6 +8,7 @@ import test from 'node:test';
 import { RunStoreError } from '../src/application/run-store.js';
 import { openRunStore } from '../src/infrastructure/run-store.js';
 import { applySchemaMigrations, baselineMigration, registeredMigrations } from '../src/infrastructure/sqlite/schema.js';
+import { seedReleasedV030Store } from './helpers/released-v0.3.0-store.js';
 
 async function schema10(): Promise<string> {
   const root = await releasedSchema9();
@@ -23,6 +24,12 @@ async function schema12(): Promise<string> {
   applySchemaMigrations(database, root, registeredMigrations(), 12);
   database.close();
   return root;
+}
+
+async function releasedV030Run(): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-nine-released-v030-'));
+  try { await seedReleasedV030Store(root); return root; }
+  catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
 }
 
 async function releasedSchema9(): Promise<string> {
@@ -58,6 +65,48 @@ function populateLinkedEvidence(database: DatabaseSync): void {
   database.prepare(`INSERT INTO attempt_evaluations (run_id, attempt_id, evaluation_id) VALUES ('run-1', 'attempt-1', 'evaluation-1')`).run();
   database.prepare(`INSERT INTO evaluation_answer_attempts (run_id, evaluation_id, attempt_id) VALUES ('run-1', 'evaluation-1', 'attempt-1')`).run();
 }
+
+test('the v0.3.0 released run remains readable after schema 9 upgrades through the current store', async () => {
+  const root = await releasedV030Run();
+  const runId = '8f57346d-b9ea-46e8-8547-bfd1289f0567';
+  const store = openRunStore(root);
+  let storeClosed = false;
+  try {
+    const status = store.getStatus(runId);
+    const request = store.getRequest(runId);
+    const answer = store.answers(runId).items[0]!;
+    const attempt = store.attempts(runId).items[0]!;
+    assert.equal(store.storageInfo().integrity, 'ok');
+    assert.equal(status.status, 'completed');
+    assert.equal(request.request.kind, 'poll');
+    assert.equal(request.request.label, 'v0.3.0 released article read');
+    assert.equal(request.request.questions[0]?.id, 'continue-reading');
+    assert.deepEqual(answer.result, { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, stop: 0.1 }, attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: { inputTokens: 12, outputTokens: 2 } });
+    assert.deepEqual(attempt.evaluationIds, [answer.evaluationId]);
+    assert.equal(attempt.status, 'answered');
+    store.close();
+    storeClosed = true;
+
+    const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
+    try {
+      assert.equal((database.prepare('PRAGMA integrity_check').get() as { integrity_check: string }).integrity_check, 'ok');
+      assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
+      const backups = (await readdir(path.join(root, 'backups'))).filter((name) => name.endsWith('.sqlite'));
+      assert.equal(backups.length, 5);
+      const backupVersions: number[] = [];
+      for (const name of backups) {
+        const backup = new DatabaseSync(path.join(root, 'backups', name), { readOnly: true });
+        try {
+          backupVersions.push((backup.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
+          assert.equal((backup.prepare('PRAGMA integrity_check').get() as { integrity_check: string }).integrity_check, 'ok');
+          if (backupVersions.at(-1) === 9) assert.equal((backup.prepare(`SELECT result_json FROM evaluations WHERE run_id = ?`).get(runId) as { result_json: string }).result_json,
+            '{"formatVersion":1,"kind":"decision-value","value":{"type":"choice","choice":"continue","probabilities":{"continue":0.9,"stop":0.1}}}');
+        } finally { backup.close(); }
+      }
+      assert.deepEqual(backupVersions.sort((a, b) => a - b), [9, 10, 11, 12, 13]);
+    } finally { database.close(); }
+  } finally { if (!storeClosed) store.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test('a sequential upgrade keeps a verified source backup and commits its checksum ledger with the schema step', async () => {
   const root = await releasedSchema9();
