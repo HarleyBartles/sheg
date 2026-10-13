@@ -148,7 +148,7 @@
 - [x] **Step 3: Implement shared application operations and generated contracts**; do not create parallel CLI/MCP selection logic or hand-edit generated bundles.
 - [x] **Step 4: Update shipped agent guidance** with explicit examples: let Sheg select economically, pin Clef only for pixel-required units, map each portrait choice to its exact image material, pin the same model for a stimulus/respondent comparison, use a provider comparison only when model is intentionally varied, and choose singleton when joint question scoring is unwanted. State that an absent/empty catalogue requires setup for automatic mode while old explicit configs still work unless explicitly disabled.
 - [x] **Step 5: Run contract generation, guidance checks, focused CLI/MCP tests, and skill behavior tests**; expected: current explicit-provider instructions and requests remain usable.
-- [ ] **Step 6: Commit** the public workflow and guidance with generated contract sources only.
+- [x] **Step 6: Commit** the public workflow and guidance with generated contract sources only (`e29cea5`).
 
 ### Task 8: Qualify the Installed Runtime and Prepare the Integration PR
 
@@ -158,11 +158,11 @@
 
 **Produces:** A copied-plugin test proving automatic mixed-provider routing works without checkout state; completed full repository verification, generated parity, package validation, and fresh whole-branch review; reviewable PR to `develop` with transparent risk and evidence.
 
-- [ ] **Step 1: Add a failing copied-package scenario** with mocked providers for text-only and pixel-required stages, enabled/disabled configurations, a locked comparison, a reached journey resolution, source catalogue changes after acceptance, and a retry; inspect physical attempts and ensure no live network or credentials are used.
-- [ ] **Step 2: Run the copied-package test**; expected: fail against current explicit-provider-only package behavior.
-- [ ] **Step 3: Set the unique `0.4.0-dev.N` identity in root `package.json`; run `npm run contracts:build`, `npm run build`, and `npm run plugin:package -- --validate-only`; inspect generated package manifests and confirm tests do not read checkout files or `node_modules`.
-- [ ] **Step 4: Run focused tests and `npm run verify`**; expected: complete test, lint, type, guidance and generated parity gates pass, with only documented environment-specific skips.
-- [ ] **Step 5: Review source boundaries and staged diff**; confirm selector is the single owner of eligibility/economy, entrypoints share one contract, snapshots exclude secrets, and retries cannot substitute. Commit through the tracked hook.
+- [x] **Step 1: Add a copied-package scenario** with mocked providers for text-only and pixel-required stages, enabled/disabled configurations, a locked comparison, a reached journey resolution, source catalogue changes after acceptance, and a retry; inspect physical attempts and ensure no live network or credentials are used. Tasks 1-7 already provide automatic routing, so the earlier expectation that this should fail against explicit-provider-only behavior was stale; a temporary resume-path mutation made this new installed-runtime test fail at its resume assertion before the production code was restored.
+- [x] **Step 2: Run the copied-package test**; expected: pass against the completed source implementation.
+- [x] **Step 3: Set the unique `0.4.0-dev.N` identity in root `package.json`; run `npm run contracts:build`, `npm run build`, and `npm run plugin:package -- --validate-only`; inspect generated package manifests and confirm tests do not read checkout files or `node_modules` (`0.4.0-dev.3`).
+- [x] **Step 4: Run focused tests and `npm run verify`**; expected: complete test, lint, type, guidance and generated parity gates pass, with only documented environment-specific skips (`568 passed, 1 environment-specific skip`).
+- [x] **Step 5: Review source boundaries and staged diff**; confirm selector is the single owner of eligibility/economy, entrypoints share one contract, snapshots exclude secrets, and retries cannot substitute. Commit through the tracked hook.
 - [ ] **Step 6: Refresh `develop`, recheck version uniqueness and full branch diff, verify hosted checks and review threads, merge only when gates pass, verify merged tree and advance the roadmap cursor to Plan 4.**
 
 ## Slice Exit
