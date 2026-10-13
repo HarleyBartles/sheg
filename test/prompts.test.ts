@@ -52,6 +52,28 @@ test('follow-on context modes preserve or replace only the promised respondent s
   assert.throws(() => prepareFollowOnPacket({ source, mode: 'continue', question: nextQuestion }), /completed answer/i);
 });
 
+test('continue follow-on can omit only the selected answer while preserving earlier trajectory and an empty material subset', () => {
+  const previousQuestion = { type: 'choice' as const, id: 'first-interest', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } };
+  const sourceQuestion = { type: 'choice' as const, id: 'image-reaction', instructions: 'Was the image useful?', options: { yes: 'Useful', no: 'Not useful' } };
+  const nextQuestion = { type: 'noul' as const, id: 'continue-reading', instructions: 'Would you continue?' };
+  const earlier = appendTrajectoryResponse(emptyTrajectory(), previousQuestion, { type: 'choice', choice: 'yes' }, ['opening']);
+  const source = compileDecisionRequest({
+    respondentProfile: { intent: 'Learn the story.', context: 'At section four.', desired_outcome: 'Understand the character.', engagement_cues: 'Specific detail.', friction_cues: 'Distraction.' },
+    encounteredItems: [{ id: 'section-four', text: 'The fourth section.' }], trajectory: earlier, question: sourceQuestion,
+  });
+  const options = {
+    source, mode: 'continue' as const, question: nextQuestion,
+    result: { type: 'choice' as const, choice: 'yes', probabilities: { yes: 0.8, no: 0.2 } },
+    retainedMaterial: [], includeSelectedAnswer: false,
+  } as Parameters<typeof prepareFollowOnPacket>[0] & { retainedMaterial: Array<{ id: string; text: string }>; includeSelectedAnswer: boolean };
+
+  const continued = prepareFollowOnPacket(options);
+
+  assert.deepEqual(continued.state.encounteredItems, []);
+  assert.deepEqual(continued.state.trajectory, earlier);
+  assert.equal(continued.state.respondent.profile.intent, source.state.respondent.profile.intent);
+});
+
 test('graph packet retains compact prior choices and every encountered stimulus once', async () => {
   const study = await loadStudy(manifestPath, cohortPath);
   const arm = study.manifest.arms[0]!;

@@ -4,7 +4,7 @@ import { RunStoreError } from '../../application/run-store.js';
 import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { followOnLineageSchema, followOnRunRequestSchema, runRequestSchema, type FollowOnLineage, type FollowOnSourceSet, type ParsedFollowOnRunRequest } from '../../domain/run/request.js';
 import { asNumber, asText, parseJson, parseJsonRecord, type DatabaseRow } from './rows.js';
-import { materialCatalogForRequest, resultFromStorage } from './evidence-records.js';
+import { assertRetainedImageAsset, materialCatalogForExactContext, resultFromStorage } from './evidence-records.js';
 import { evaluationCriteriaSql } from './evaluation-criteria.js';
 import { isImageMaterial } from '../../domain/study/stimulus.js';
 
@@ -54,9 +54,11 @@ export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowO
     const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'source answer'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'source execution'));
     const contextId = asText(row.context_id, 'context ID');
     const respondentId = asText(row.respondent_id, 'respondent ID');
-    const materials = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems);
+    const branchId = row.branch_id === null || row.branch_id === undefined ? undefined : asText(row.branch_id, 'branch ID');
+    const materials = materialCatalogForExactContext(sourceRequest.data, sourceLineage, contextId, respondentId, packet, branchId);
     const selectedMaterialId = result?.type === 'choice' && packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
     const selectedMaterial = selectedMaterialId ? materials.find(({ id }) => id === selectedMaterialId) : undefined;
+    if (selectedMaterial && isImageMaterial(selectedMaterial)) assertRetainedImageAsset(database, request.sourceRunId, selectedMaterial);
     const selectedSource = selectedMaterial && !isImageMaterial(selectedMaterial) && selectedMaterial.sourceId && selectedMaterial.sourceSha256 ? {
       materialId: selectedMaterial.id,
       text: selectedMaterial.text,
@@ -64,12 +66,17 @@ export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowO
       sourceSha256: selectedMaterial.sourceSha256,
       textSha256: createHash('sha256').update(selectedMaterial.text, 'utf8').digest('hex'),
     } : undefined;
-    if (selectedMaterialId && (!selectedMaterial || !isImageMaterial(selectedMaterial)) && !selectedSource) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
+    const selectedVisualMaterial = selectedMaterial && isImageMaterial(selectedMaterial) ? {
+      materialId: selectedMaterial.id, altText: selectedMaterial.altText,
+      ...(selectedMaterial.caption === undefined ? {} : { caption: selectedMaterial.caption }), asset: selectedMaterial.asset,
+    } : undefined;
+    if (selectedMaterialId && !selectedSource && !selectedVisualMaterial) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${selectedMaterialId}.`);
     return {
       evaluationId: asText(row.evaluation_id, 'evaluation ID'), contextId,
-      respondentId, status: asText(row.status, 'evaluation status') as FollowOnSourceSet['turns'][number]['status'], packet, ...(result ? { result } : {}),
+      respondentId, ...(branchId ? { branchId } : {}), status: asText(row.status, 'evaluation status') as FollowOnSourceSet['turns'][number]['status'], packet, ...(result ? { result } : {}),
       materials,
       ...(selectedSource ? { selectedMaterial: selectedSource } : {}),
+      ...(selectedVisualMaterial ? { selectedVisualMaterial } : {}),
     };
   });
   return {

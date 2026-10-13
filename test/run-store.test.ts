@@ -752,6 +752,25 @@ test('a failed fork branch resumes from its saved packet without replaying its p
     assert.deepEqual([readerAPair.members[0]?.execution?.provider, readerAPair.members[0]?.execution?.model], ['laya', 'test-model']);
     assert.ok(readerAPair.members[1]?.failure?.code);
     assert.equal(interruptedComparison.pairs.find(({ respondentId }) => respondentId === 'reader-b')?.complete, true);
+    const survivorFollowOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: runId,
+      selection: { references: [{ evaluationId: answeredPairMember.evaluationId, contextId: answeredPairMember.contextId }] },
+      context: { mode: 'recorded' }, questions: [{ type: 'noul', id: 'survivor-reaction', instructions: 'What did the shown image change for you?' }],
+      provider: input.provider, maxCalls: 1 });
+    const survivorSource = store.resolveFollowOnSources(survivorFollowOn);
+    const survivorPrepared = await prepareFollowOnRun(survivorFollowOn, survivorSource, provider);
+    assert.equal(survivorPrepared.inspection.valid, true, JSON.stringify(survivorPrepared.inspection.problems));
+    assert.deepEqual(survivorPrepared.prepared.lineage?.sourceSelection, {
+      version: 1, matchedEvaluations: 1, includedEvaluations: 1, representedContexts: 1, representedRespondents: 1, followOnEvaluations: 1,
+    });
+    assert.deepEqual(survivorPrepared.prepared.lineage?.selections.map(({ sourceEvaluationId, sourceContextId, respondentId }) => ({ sourceEvaluationId, sourceContextId, respondentId })), [
+      { sourceEvaluationId: answeredPairMember.evaluationId, sourceContextId: answeredPairMember.contextId, respondentId: 'reader-a' },
+    ]);
+    const forgedLineage = structuredClone(survivorPrepared.prepared);
+    forgedLineage.lineage!.sourceSelection!.matchedEvaluations += 1;
+    const forgedSubmissionId = randomUUID();
+    assert.throws(() => store.accept(forgedSubmissionId, forgedLineage), (error: unknown) => error instanceof RunStoreError && error.code === 'invalid_prepared_run');
+    assert.equal(store.findSubmission(forgedSubmissionId, forgedLineage.requestFingerprint), null);
+    assert.deepEqual([store.getJourneyRun(runId).comparisons[0]?.totalPairs, store.getJourneyRun(runId).comparisons[0]?.completePairs, store.getJourneyRun(runId).comparisons[0]?.incompletePairs], [2, 1, 1]);
     const frozenFailure = { evaluationId: failedPairMember.evaluationId, packet: failedPairMember.packet, fingerprint: failedPairMember.packetFingerprint };
     assert.equal(calls.filter(({ questionId }) => questionId === 'prefix-interest').length, 2);
     assert.equal(calls.filter(({ questionId, respondentContext }) => respondentContext === 'Returning buyer' && questionId !== 'prefix-interest').length, 2);
@@ -1545,7 +1564,8 @@ test('evidence query matches typed answers and material while preserving distrib
     assert.equal(query.sourceComplete, true);
     assert.deepEqual(query.lifecycle, { state: 'complete', resume: { eligible: false, reason: 'already_completed' } });
     assert.deepEqual(query.matchedCoverage, { evaluations: { total: 1, pending: 0, answered: 1, failed: 0, unreached: 0 },
-      representedRespondents: 1, selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
+      representedRespondents: 1, selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 },
+      selectedTextMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 }, selectedVisualMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } });
     assert.deepEqual(query.coverage, { totalEvaluations: 2, completedEvaluations: 2, failedEvaluations: 0,
       respondents: { total: 2, active: 0, completed: 2, failed: 0, unreached: 0 } });
     assert.equal(query.items[0]!.respondentId, 'reader-b');
@@ -1596,6 +1616,8 @@ test('evidence query resolves a mapped Choice answer to exact source-linked mate
       materialId: candidate.id, text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
       textSha256: createHash('sha256').update(text, 'utf8').digest('hex'),
     });
+    assert.deepEqual(query.matchedCoverage.selectedTextMaterials, { evaluations: 2, respondents: 2, distinctMaterials: 1 });
+    assert.deepEqual(query.matchedCoverage.selectedVisualMaterials, { evaluations: 0, respondents: 0, distinctMaterials: 0 });
     const followOnRequest = followOnRunRequestSchema.parse({
       kind: 'follow-on', sourceRunId: runId,
       selection: { criteria: { questionId: 'which-section' } },
@@ -1692,7 +1714,7 @@ test('journey mapped Choice selections contribute to matched material coverage a
 
 test('selected-material lineage is recipient-specific, survives source deletion, and rejects tampering', async () => {
   const root = await temporaryRoot();
-  const store = openRunStore(root);
+  let store = openRunStore(root);
   const quote = { id: 'pull-quote', text: 'A city is a promise.', sourceId: 'article-v1', sourceSha256: 'a'.repeat(64) };
   const p3 = { id: 'paragraph-3', text: 'Paragraph three.', sourceId: 'article-v1', sourceSha256: 'b'.repeat(64) };
   const p7 = { id: 'paragraph-7', text: 'Paragraph seven.', sourceId: 'article-v1', sourceSha256: 'c'.repeat(64) };
@@ -1723,6 +1745,8 @@ test('selected-material lineage is recipient-specific, survives source deletion,
     assert.equal(saved.lineage?.selectionCoverage?.eligible, 3);
     assert.equal(saved.lineage?.selections.length, 3);
     assert.equal(saved.lineage?.excludedSelections.length, 1);
+    assert.deepEqual(saved.lineage?.sourceSelection, { version: 1, matchedEvaluations: 4, includedEvaluations: 3,
+      representedContexts: 3, representedRespondents: 3, followOnEvaluations: 3 });
     assert.equal(saved.lineage?.excludedSelections[0]?.reason, 'unmappedChoice');
     for (const selection of saved.lineage!.selections) {
       const output = saved.evaluations.find(({ evaluationId }) => evaluationId === selection.evaluationId)!;
@@ -1732,9 +1756,12 @@ test('selected-material lineage is recipient-specific, survives source deletion,
       assert.equal(selection.selectedMaterial!.textSha256, createHash('sha256').update(selection.selectedMaterial!.text, 'utf8').digest('hex'));
     }
     assert.equal(store.deleteRuns([sourceRunId]).deletedRunIds[0], sourceRunId);
+    store.close();
+    store = openRunStore(root);
     const recalled = store.getRequest(accepted.run.runId);
     assert.equal(recalled.lineage?.sourceAvailable, false);
     assert.deepEqual(recalled.lineage?.selections, saved.lineage?.selections);
+    assert.deepEqual(recalled.lineage?.sourceSelection, saved.lineage?.sourceSelection);
     const retry = store.accept(submissionId, admission.prepared);
     assert.equal(retry.created, false);
     assert.equal(retry.run.runId, accepted.run.runId);
@@ -1820,6 +1847,77 @@ test('follow-on snapshots source material for query and another follow-on after 
     assert.equal(secondPrepared.inspection.valid, true);
     const secondRun = store.accept(randomUUID(), secondPrepared.prepared).run;
     assert.equal(secondRun.status, 'prepared');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('continue follow-on can explicitly retain no prior material while including the selected answer', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourceRequest: InlineRunRequest = { ...input, respondents: [input.respondents[0]!],
+      material: [{ id: 'section-one', text: 'Opening paragraph.' }, { id: 'section-two', text: 'Second paragraph.' }] };
+    const sourceRunId = await completedRun(store, sourceRequest);
+    const source = store.answers(sourceRunId).items[0]!;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: source.evaluationId, contextId: source.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: [], includeSelectedAnswer: true },
+      questions: [{ type: 'noul', id: 'next', instructions: 'Would you continue?' }],
+      provider: input.provider, maxCalls: 1,
+    });
+    const prepared = await prepareFollowOnRun(request, store.resolveFollowOnSources(request), provider);
+    assert.equal(prepared.inspection.valid, true, JSON.stringify(prepared.inspection));
+    const packet = prepared.prepared.evaluations[0]!.packet;
+    const state = packet.state as { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: Array<{ taskId: string; type: string }> } };
+    assert.deepEqual(state.encounteredItems, []);
+    assert.equal(state.trajectory.responses.at(-1)?.taskId, 'interest');
+    assert.equal(state.trajectory.responses.at(-1)?.type, 'choice');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('continue follow-on retains only an ordered source-context subset independently of selected-answer inclusion', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourceRequest: InlineRunRequest = { ...input, respondents: [input.respondents[0]!],
+      material: [
+        { id: 'section-one', text: 'Opening paragraph.' },
+        { id: 'section-two', text: 'Second paragraph.' },
+        { id: 'section-three', text: 'Third paragraph.' },
+      ] };
+    const sourceRunId = await completedRun(store, sourceRequest);
+    const source = store.answers(sourceRunId).items[0]!;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: source.evaluationId, contextId: source.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: ['section-three', 'section-one'], includeSelectedAnswer: false },
+      questions: [{ type: 'noul', id: 'next', instructions: 'Would you continue?' }],
+      provider: input.provider, maxCalls: 1,
+    });
+    const prepared = await prepareFollowOnRun(request, store.resolveFollowOnSources(request), provider);
+    assert.equal(prepared.inspection.valid, true, JSON.stringify(prepared.inspection));
+    const packet = prepared.prepared.evaluations[0]!.packet;
+    const state = packet.state as { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: Array<{ taskId: string }> } };
+    assert.deepEqual(state.encounteredItems, [
+      { id: 'section-one', text: 'Opening paragraph.' },
+      { id: 'section-three', text: 'Third paragraph.' },
+    ]);
+    assert.equal(state.trajectory.responses.some(({ taskId }) => taskId === 'interest'), false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('continue follow-on refuses retained material that was not encountered in its selected source context', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const sourceRunId = await completedRun(store, { ...input, respondents: [input.respondents[0]!] });
+    const source = store.answers(sourceRunId).items[0]!;
+    const request = followOnRunRequestSchema.parse({
+      kind: 'follow-on', sourceRunId, selection: { references: [{ evaluationId: source.evaluationId, contextId: source.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: ['sibling-only-section'] },
+      questions: [{ type: 'noul', id: 'next', instructions: 'Would you continue?' }],
+      provider: input.provider, maxCalls: 1,
+    });
+    await assert.rejects(prepareFollowOnRun(request, store.resolveFollowOnSources(request), provider), /was not encountered/i);
+    assert.equal(store.list({}).items.length, 1);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

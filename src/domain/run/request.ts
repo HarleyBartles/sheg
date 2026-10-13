@@ -9,6 +9,7 @@ import { evaluationStatusSchema, runLifecycleStateSchema, runStatusSchema, resum
 import { decisionResultSchema } from '../decision/decision.js';
 import { providerExecutionEvidenceSchema } from '../decision/decision.js';
 import { isImageMaterial, materialItemSchema, stimulusItemSchema } from '../study/stimulus.js';
+import { ImageMetadataSchema } from '../assets/image.js';
 
 export { materialItemSchema };
 export type RunMaterialItem = z.infer<typeof materialItemSchema>;
@@ -201,10 +202,24 @@ const followOnSelectionSchema = z.union([
 const followOnContextSchema = z.object({
   mode: z.enum(['recorded', 'fresh-material', 'omit-history', 'continue']),
   materialIds: z.array(stimulusItemSchema.shape.id).min(1).optional(),
+  retainedMaterialIds: z.array(stimulusItemSchema.shape.id).optional(),
+  includeSelectedAnswer: z.boolean().optional(),
   includeSelectedMaterial: z.boolean().optional(),
 }).strict().superRefine((contextInput, context) => {
   if (contextInput.materialIds && new Set(contextInput.materialIds).size !== contextInput.materialIds.length) {
     context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Material references must be unique and ordered.' });
+  }
+  if (contextInput.retainedMaterialIds && new Set(contextInput.retainedMaterialIds).size !== contextInput.retainedMaterialIds.length) {
+    context.addIssue({ code: 'custom', path: ['retainedMaterialIds'], message: 'Retained material references must be unique.' });
+  }
+  if (contextInput.retainedMaterialIds?.some((id) => contextInput.materialIds?.includes(id))) {
+    context.addIssue({ code: 'custom', path: ['retainedMaterialIds'], message: 'Retained and additionally selected material references must not overlap.' });
+  }
+  if (contextInput.retainedMaterialIds !== undefined && contextInput.mode !== 'continue') {
+    context.addIssue({ code: 'custom', path: ['retainedMaterialIds'], message: 'Retained material subsets require continue context.' });
+  }
+  if (contextInput.includeSelectedAnswer !== undefined && contextInput.mode !== 'continue') {
+    context.addIssue({ code: 'custom', path: ['includeSelectedAnswer'], message: 'Selected-answer control requires continue context.' });
   }
   if (contextInput.mode === 'recorded' && contextInput.materialIds) {
     context.addIssue({ code: 'custom', path: ['materialIds'], message: 'Recorded context does not allow material changes.' });
@@ -290,6 +305,20 @@ const selectedMaterialEvidenceSchema = z.object({
   sourceSha256: z.string().regex(/^[a-f\d]{64}$/i),
   textSha256: z.string().regex(/^[a-f\d]{64}$/i),
 }).strict();
+const selectedVisualMaterialEvidenceSchema = z.object({
+  materialId: stimulusItemSchema.shape.id,
+  altText: z.string().min(1),
+  caption: z.string().min(1).optional(),
+  asset: ImageMetadataSchema,
+}).strict();
+const sourceSelectionEvidenceSchema = z.object({
+  version: z.literal(1),
+  matchedEvaluations: z.number().int().nonnegative(),
+  includedEvaluations: z.number().int().nonnegative(),
+  representedContexts: z.number().int().nonnegative(),
+  representedRespondents: z.number().int().nonnegative(),
+  followOnEvaluations: z.number().int().nonnegative(),
+}).strict();
 
 export const followOnLineageSchema = z.object({
   sourceRunId: z.string().uuid(),
@@ -299,9 +328,11 @@ export const followOnLineageSchema = z.object({
   sourceAvailable: z.boolean().optional(),
   sourceRecordState: z.enum(['live', 'historical']).optional(),
   selectionCoverage: selectionCoverageSchema.optional(),
+  sourceSelection: sourceSelectionEvidenceSchema.optional(),
   excludedSelections: z.array(followOnExclusionSchema).default([]),
   selections: z.array(z.object({ sourceEvaluationId: z.string().uuid(), sourceContextId: z.string().uuid(), respondentId: z.string().min(1), evaluationId: z.string().uuid(), contextId: z.string().uuid(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+    selectedVisualMaterial: selectedVisualMaterialEvidenceSchema.optional(),
   }).strict()),
   materialSnapshots: z.array(z.object({ contextId: z.string().uuid(), respondentId: z.string().min(1), materials: z.array(materialItemSchema) }).strict()).default([]),
 }).strict();
@@ -337,6 +368,7 @@ export const runEvidenceItemSchema = z.object({
     result: decisionResultSchema.optional(),
     failure: z.object({ code: z.string().min(1), message: z.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
+    selectedVisualMaterial: selectedVisualMaterialEvidenceSchema.optional(),
     execution: providerExecutionEvidenceSchema.optional(),
     branchId: z.string().min(1).optional(),
     turnId: z.string().min(1).optional(),
@@ -371,6 +403,8 @@ export const runEvidencePageSchema = z.object({
     evaluations: z.object({ total: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), answered: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), unreached: z.number().int().nonnegative() }).strict(),
     representedRespondents: z.number().int().nonnegative(),
     selectedMaterials: z.object({ evaluations: z.number().int().nonnegative(), respondents: z.number().int().nonnegative(), distinctMaterials: z.number().int().nonnegative() }).strict(),
+    selectedTextMaterials: z.object({ evaluations: z.number().int().nonnegative(), respondents: z.number().int().nonnegative(), distinctMaterials: z.number().int().nonnegative() }).strict().default({ evaluations: 0, respondents: 0, distinctMaterials: 0 }),
+    selectedVisualMaterials: z.object({ evaluations: z.number().int().nonnegative(), respondents: z.number().int().nonnegative(), distinctMaterials: z.number().int().nonnegative() }).strict().default({ evaluations: 0, respondents: 0, distinctMaterials: 0 }),
   }).strict(),
   nextCursor: z.string().min(1).optional(),
 }).strict();
@@ -432,11 +466,13 @@ export type FollowOnSourceTurn = {
   evaluationId: string;
   contextId: string;
   respondentId: string;
+  branchId?: string;
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   packet: import('../decision/decision.js').DecisionRequest & { state: import('../decision/prompt.js').PromptState };
   result?: import('../decision/decision.js').DecisionResult;
   materials?: RunMaterialItem[];
   selectedMaterial?: RunEvidenceItem['selectedMaterial'];
+  selectedVisualMaterial?: RunEvidenceItem['selectedVisualMaterial'];
 };
 export type FollowOnSourceSet = {
   sourceRunId: string;

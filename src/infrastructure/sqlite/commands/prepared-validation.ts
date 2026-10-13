@@ -26,15 +26,31 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
     if (!parsedLineage.success) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on material lineage is invalid.');
     const lineage = parsedLineage.data;
     const includesSelectedMaterial = parsedRequest.data.context.includeSelectedMaterial === true;
+    if (lineage.sourceSelection !== undefined) {
+      const includedSourceIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const excludedSourceIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
+      const sourceContextIds = new Set(lineage.selections.map(({ sourceContextId }) => sourceContextId));
+      const respondentIds = new Set(lineage.selections.map(({ respondentId }) => respondentId));
+      const followOnEvaluationIds = new Set(lineage.selections.map(({ evaluationId }) => evaluationId));
+      if (excludedSourceIds.size !== lineage.excludedSelections.length || [...includedSourceIds].some((id) => excludedSourceIds.has(id)) ||
+          lineage.sourceSelection.matchedEvaluations !== includedSourceIds.size + excludedSourceIds.size ||
+          lineage.sourceSelection.includedEvaluations !== includedSourceIds.size ||
+          lineage.sourceSelection.representedContexts !== sourceContextIds.size ||
+          lineage.sourceSelection.representedRespondents !== respondentIds.size ||
+          lineage.sourceSelection.followOnEvaluations !== followOnEvaluationIds.size ||
+          lineage.sourceSelection.followOnEvaluations !== prepared.evaluations.length) {
+        throw new RunStoreError('invalid_prepared_run', 'Follow-on source-selection denominators do not match its frozen lineage.');
+      }
+    }
     if (includesSelectedMaterial) {
       const coverage = lineage.selectionCoverage;
       const excludedIds = new Set(lineage.excludedSelections.map(({ sourceEvaluationId }) => sourceEvaluationId));
       const eligibleIds = new Set(lineage.selections.map(({ sourceEvaluationId }) => sourceEvaluationId));
       if (!coverage || coverage.eligible !== eligibleIds.size || coverage.matched !== coverage.eligible + lineage.excludedSelections.length ||
-          [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial }) => !selectedMaterial)) {
+          [...eligibleIds].some((id) => excludedIds.has(id)) || lineage.selections.some(({ selectedMaterial, selectedVisualMaterial }) => Boolean(selectedMaterial) === Boolean(selectedVisualMaterial))) {
         throw new RunStoreError('invalid_prepared_run', 'Selected-material coverage and source lineage are inconsistent.');
       }
-    } else if (lineage.selectionCoverage !== undefined || lineage.selections.some(({ selectedMaterial }) => selectedMaterial !== undefined)) {
+    } else if (lineage.selectionCoverage !== undefined || lineage.selections.some(({ selectedMaterial, selectedVisualMaterial }) => selectedMaterial !== undefined || selectedVisualMaterial !== undefined)) {
       throw new RunStoreError('invalid_prepared_run', 'Selected-material lineage cannot be attached to a request without the resolver flag.');
     }
     const requestedQuestionIds = parsedRequest.data.questions.map(({ id }) => id);
@@ -77,12 +93,20 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
       if (includesSelectedMaterial) {
         const mappings = lineage.selections.filter(({ evaluationId }) => evaluationId === evaluation.evaluationId);
         const selected = mappings[0]?.selectedMaterial;
+        const selectedVisual = mappings[0]?.selectedVisualMaterial;
         const snapshot = snapshotsByKey.get(`${evaluation.contextId}:${evaluation.respondentId}`);
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
+        const snapshotVisual = selectedVisual && snapshot?.materials.find(({ id }) => id === selectedVisual.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text }) => id === selected.materialId && text === selected.text);
-        if (mappings.length !== 1 || !selected || !snapshotItem || !exposed ||
-            selected.textSha256 !== createHash('sha256').update(selected.text, 'utf8').digest('hex') ||
-            snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256) {
+        const boundVisual = selectedVisual && packet.data.visualMaterials?.find(({ id }) => id === selectedVisual.materialId);
+        const snapshotVisualMatches = Boolean(selectedVisual && snapshotVisual && 'type' in snapshotVisual && snapshotVisual.type === 'image' &&
+          snapshotVisual.altText === selectedVisual.altText && snapshotVisual.caption === selectedVisual.caption && hashCanonical(snapshotVisual.asset) === hashCanonical(selectedVisual.asset));
+        const boundVisualMatches = !selectedVisual || !boundVisual ||
+          (boundVisual.altText === selectedVisual.altText && boundVisual.caption === selectedVisual.caption && hashCanonical(boundVisual.asset) === hashCanonical(selectedVisual.asset));
+        if (mappings.length !== 1 || Boolean(selected) === Boolean(selectedVisual) ||
+            Boolean(selected && (!snapshotItem || !exposed || selected.textSha256 !== createHash('sha256').update(selected.text, 'utf8').digest('hex') ||
+              snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256)) ||
+            Boolean(selectedVisual && (!snapshotVisualMatches || !boundVisualMatches))) {
           throw new RunStoreError('invalid_prepared_run', 'Selected-material lineage does not match its frozen recipient packet and catalog.');
         }
       }
@@ -93,10 +117,16 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
       prepared.groups.some((group) => JSON.stringify(group.questionIds) !== JSON.stringify(requestedQuestionIds) ||
           JSON.stringify(questionIdsByGroup.get(group.groupId) ?? []) !== JSON.stringify(group.questionIds))) throw new RunStoreError('invalid_prepared_run', 'Prepared follow-on group lineage is inconsistent.');
     if (includesSelectedMaterial) {
-      const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => question.type === 'choice' ? Object.values(question.materialOptions ?? {}) : []));
+        const linkedIds = new Set(parsedRequest.data.questions.flatMap((question) => [
+          ...(question.type === 'choice' ? Object.values(question.materialOptions ?? {}) : []), ...(question.visual?.materialIds ?? []),
+        ]));
       for (const group of prepared.groups) {
         const snapshot = snapshotsByKey.get(`${group.contextId}:${group.respondentId}`);
-        const expectedIds = new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds]);
+        const groupEvaluationIds = new Set(prepared.evaluations.filter(({ groupId }) => groupId === group.groupId).map(({ evaluationId }) => evaluationId));
+        const selectedLineageIds = lineage.selections.filter(({ evaluationId }) => groupEvaluationIds.has(evaluationId))
+          .flatMap(({ selectedMaterial, selectedVisualMaterial }) => [selectedMaterial?.materialId, selectedVisualMaterial?.materialId])
+          .filter((id): id is string => id !== undefined);
+        const expectedIds = new Set([...encounteredMaterialsFromState(group.state).map(({ id }) => id), ...linkedIds, ...selectedLineageIds]);
         if (!snapshot || JSON.stringify([...snapshot.materials.map(({ id }) => id)].sort()) !== JSON.stringify([...expectedIds].sort())) {
           throw new RunStoreError('invalid_prepared_run', 'Selected-material catalog contains unrelated material or omits a packet dependency.');
         }

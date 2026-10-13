@@ -122,6 +122,16 @@ test('selected-material workflow fixture seeds source evidence and uses real She
   assert.match(fixture.turns[2]!.user, /Do not call another tool/);
 });
 
+test('visual follow-on workflow fixture covers exact image evidence, pixel reuse, history projection, and incomplete pairs', () => {
+  const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/visual-follow-on-context-projection.json', 'utf8')) as { id: string; version: number; setup: { kind: string; version: number }; turns: Array<{ user: string; expectedTools: string[]; criteria: string[] }> };
+  const scenario = loadScenarioCatalog().find(({ id }) => id === fixture.id);
+  const evaluator = loadEvaluatorCatalog().find(({ scenarioId }) => scenarioId === fixture.id);
+  assert.equal(scenario?.version, fixture.version);
+  assert.equal(evaluator?.version, fixture.version);
+  assert.deepEqual(fixture.setup, { kind: 'visual-follow-on-context-projection', version: 1 });
+  assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [['run_query'], ['run_inspect'], []]);
+});
+
 test('partial journey workflow fixture gates run_resume on a separate explicit user turn', () => {
   const fixture = JSON.parse(readFileSync('skills/stimulus-response-polling/tests/behavior/workflows/partial-journey-recovery.json', 'utf8')) as { id: string; version: number; setup: { kind: string; version: number }; turns: Array<{ user: string; expectedTools: string[]; evidence?: unknown }> };
   const scenario = loadScenarioCatalog().find(({ id }) => id === 'partial-journey-recovery');

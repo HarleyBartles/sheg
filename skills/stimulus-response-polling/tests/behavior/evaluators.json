@@ -233,5 +233,25 @@
       "The no-image branch should use Laya while the image branch uses Clef when the study intends to isolate image presence.",
       "The provider choice demonstrates what human readers will do."
     ]
+  },
+  {
+    "scenarioId": "visual-follow-on-context-projection",
+    "version": 1,
+    "criteria": [
+      { "id": "typed-image-evidence", "condition": "Uses the exact query result and explains that selectedVisualMaterial supplies image identity, digest-bound asset metadata, authored alt text and optional caption, with no image bytes and no text selectedMaterial." },
+      { "id": "explicit-pixel-reuse", "condition": "Uses the exact evaluation/context pair and selected image ID in context.materialIds, then binds only that image in the follow-on question's pixel-mode visual.materialIds." },
+      { "id": "independent-context-projection", "condition": "Uses continue with retainedMaterialIds empty and includeSelectedAnswer true, distinguishes this from additive context.materialIds, and excludes sibling answers and unbound sibling pixels." },
+      { "id": "inspection-before-execution", "condition": "Inspects the exact follow-on request and does not start inference when the user asks only to design and inspect it." },
+      { "id": "complete-pair-denominators", "condition": "Reports completePairs and incompletePairs from comparison evidence and treats an incomplete pair as missing evidence, not a tie or preference." },
+      { "id": "correlated-model-evidence", "condition": "Describes simulated visual judgments as correlated model evidence rather than human preference or observed reader behavior." }
+    ],
+    "prohibitedClaims": [
+      "An image selection is text selectedMaterial.",
+      "The query returned image bytes or generated alt text.",
+      "A sibling answer should be included in the selected respondent's continued trajectory.",
+      "An unbound source image is sent to Clef.",
+      "An incomplete pair is a tie or supports a preference.",
+      "Model judgments establish human preference."
+    ]
   }
 ]

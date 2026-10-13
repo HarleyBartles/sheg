@@ -23,8 +23,8 @@ function closeTestServer(server: ReturnType<typeof createServer>): Promise<void>
 
 type JourneyDetailTestShape = { evaluations: Array<{ questionId: string; status: string; turnId: string; contextId: string; packet: { state: { trajectory: { responses: Array<{ taskId: string }> } } } }> };
 type FollowOnRequestTestShape = {
-  evaluations: Array<{ questionId: string; contextId: string; packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } } } }>;
-  lineage: { sourceAvailable: boolean; selections: Array<{ sourceContextId: string; selectedMaterial?: { materialId: string } }>; materialSnapshots: Array<{ materials: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> }> };
+  evaluations: Array<{ questionId: string; contextId: string; packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: unknown[] } }; visualMaterials?: Array<{ id: string; asset: { assetId: string } }> } }>;
+  lineage: { sourceAvailable: boolean; selections: Array<{ sourceContextId: string; selectedMaterial?: { materialId: string }; selectedVisualMaterial?: { materialId: string } }>; materialSnapshots: Array<{ materials: Array<{ id: string; text: string; sourceId?: string; sourceSha256?: string }> }> };
 };
 
 function pluginPackageSource(): string {
@@ -604,7 +604,7 @@ test('a copied plugin runs a Clef visual journey from saved pixels and compact h
         ],
         tasks: [
           { id: 'text-question', type: 'choice', instructions: 'Would you read the next section?', options: { continue: 'Continue', leave: 'Leave' } },
-          { id: 'visual-question', type: 'choice', instructions: 'Does the image support the next section?', options: { continue: 'It supports the section', leave: 'It distracts from the section' }, visual: { mode: 'pixels', materialIds: ['article-image'] } },
+          { id: 'visual-question', type: 'choice', instructions: 'Does the image support the next section?', options: { continue: 'It supports the section', leave: 'It distracts from the section' }, materialOptions: { continue: 'article-image' }, visual: { mode: 'pixels', materialIds: ['article-image'] } },
         ],
         presentation: { kind: 'graph', entryNodeId: 'show-section', maxDecisions: 2, nodes: [
           { id: 'show-section', kind: 'expose', itemId: 'section-three' }, { id: 'ask-text', kind: 'ask', taskId: 'text-question' },
@@ -668,10 +668,54 @@ test('a copied plugin runs a Clef visual journey from saved pixels and compact h
       const visualResponse = JSON.stringify((await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'answers' } })).structuredContent);
       assert.match(visualResponse, /clef/);
       assert.equal(visualResponse.includes(imageBytes.toString('base64')), false);
-      await rm(helper);
-      const unavailable = await resumedClient.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: journey } });
-      assert.equal(unavailable.isError, true, 'A copied package without its secure credential helper must refuse Clef before dispatch.');
-      assert.equal(calls.length, 3);
+      const selected = await resumedClient.callTool({ name: 'run_query', arguments: { sourceRunId: runId, criteria: { questionId: 'visual-question' } } });
+      const visualEvidence = selected.structuredContent as { items: Array<{ evaluationId: string; contextId: string; selectedMaterial?: unknown; selectedVisualMaterial?: { materialId: string; asset: { assetId: string }; altText: string } }> };
+      assert.equal(selected.isError ?? false, false, JSON.stringify(selected.structuredContent));
+      assert.equal(visualEvidence.items.length, 1);
+      assert.equal(visualEvidence.items[0]?.selectedMaterial, undefined);
+      assert.equal(visualEvidence.items[0]?.selectedVisualMaterial?.materialId, 'article-image', JSON.stringify(visualEvidence.items[0]));
+      assert.equal(visualEvidence.items[0]?.selectedVisualMaterial?.asset.assetId, `sha256:${imageDigest}`);
+      const followOn = {
+        kind: 'follow-on', sourceRunId: runId,
+        selection: { references: [{ evaluationId: visualEvidence.items[0]!.evaluationId, contextId: visualEvidence.items[0]!.contextId }] },
+        context: { mode: 'continue', retainedMaterialIds: [], includeSelectedAnswer: true, materialIds: ['article-image'] },
+        questions: [{ type: 'choice', id: 'image-reuse', instructions: 'Does this image still support the next section?', options: { continue: 'It supports the section', leave: 'It distracts from the section' }, materialOptions: { continue: 'article-image' }, visual: { mode: 'pixels', materialIds: ['article-image'] } }],
+        provider: { kind: 'clef', accountId: '0123456789abcdef0123456789abcdef', model: 'clef', timeoutMs: 10_000 }, maxCalls: 1,
+      };
+      const followOnInspection = await resumedClient.callTool({ name: 'run_inspect', arguments: { request: followOn } });
+      assert.equal(followOnInspection.isError ?? false, false, JSON.stringify(followOnInspection));
+      assert.equal((followOnInspection.structuredContent as { valid: boolean }).valid, true, JSON.stringify(followOnInspection.structuredContent));
+      const childAccepted = await resumedClient.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: followOn } });
+      assert.equal(childAccepted.isError ?? false, false, JSON.stringify(childAccepted.structuredContent));
+      const childRunId = (childAccepted.structuredContent as { runId: string }).runId;
+      await waitForCompleted(dataRoot, childRunId);
+      const childBeforeDelete = await resumedClient.callTool({ name: 'run_get', arguments: { runId: childRunId, view: 'request' } });
+      const frozenChild = childBeforeDelete.structuredContent as FollowOnRequestTestShape;
+      assert.equal(frozenChild.evaluations.length, 1);
+      assert.deepEqual(frozenChild.evaluations[0]?.packet.state.encounteredItems, []);
+      assert.equal(frozenChild.evaluations[0]?.packet.state.trajectory.responses.length, 2);
+      assert.deepEqual(frozenChild.evaluations[0]?.packet.visualMaterials?.map(({ id }) => id), ['article-image']);
+      assert.equal(frozenChild.lineage.sourceAvailable, true);
+      assert.equal(calls.at(-1)?.body.images?.[0], `data:image/png;base64,${imageBytes.toString('base64')}`);
+      const sourceDeleted = await resumedClient.callTool({ name: 'run_delete', arguments: { runIds: [runId] } });
+      assert.equal(sourceDeleted.isError ?? false, false, JSON.stringify(sourceDeleted.structuredContent));
+      await killMcpConnection(resumedClient, resumedTransport);
+      const reconnected = new Client({ name: 'sheg-installed-clef-child-read', version: '1.0.0' });
+      const reconnectedTransport = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
+      try {
+        await reconnected.connect(reconnectedTransport);
+        const recalled = await reconnected.callTool({ name: 'run_get', arguments: { runId: childRunId, view: 'request' } });
+        assert.equal(recalled.isError ?? false, false, JSON.stringify(recalled.structuredContent));
+        const persistedChild = recalled.structuredContent as FollowOnRequestTestShape;
+        assert.equal(persistedChild.lineage.sourceAvailable, false);
+        assert.equal(persistedChild.evaluations[0]?.packet.visualMaterials?.[0]?.asset.assetId, `sha256:${imageDigest}`);
+        const evidence = await reconnected.callTool({ name: 'run_get', arguments: { runId: childRunId, view: 'answers' } });
+        assert.equal((evidence.structuredContent as { items: Array<{ status: string }> }).items[0]?.status, 'answered');
+        await rm(helper);
+        const unavailable = await reconnected.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: journey } });
+        assert.equal(unavailable.isError, true, 'A copied package without its secure credential helper must refuse Clef before dispatch.');
+        assert.equal(calls.length, 4);
+      } finally { await killMcpConnection(reconnected, reconnectedTransport); }
     } finally { await killMcpConnection(resumedClient, resumedTransport); }
   } finally {
     releaseVisual?.();

@@ -141,7 +141,9 @@
         "matchedCoverage": {
           "evaluations": { "total": 3, "pending": 0, "answered": 3, "failed": 0, "unreached": 0 },
           "representedRespondents": 3,
-          "selectedMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 }
+          "selectedMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 },
+          "selectedTextMaterials": { "evaluations": 2, "respondents": 2, "distinctMaterials": 2 },
+          "selectedVisualMaterials": { "evaluations": 0, "respondents": 0, "distinctMaterials": 0 }
         }
       },
       "mockOnly": true
@@ -669,6 +671,21 @@
         "unresolvedFutureJourneyUnits": [{ "respondentId": "reader-a", "nodeId": "image-question", "questionId": "image-fit", "unitId": "reader-a/image-fit", "reason": "reached-context-not-yet-known" }]
       },
       "comparisonRule": "The image and no-image conditions must use the same provider and model when the study aims to isolate the image as the only changed variable. A same-provider/model comparison lock can keep both conditions on Clef; the text-only condition remains a Clef text call so provider choice is held fixed."
+    }
+  },
+  {
+    "id": "visual-follow-on-context-projection",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["visual-study", "follow-on", "context-projection", "matched-comparison"],
+    "referencePaths": ["references/run-and-recovery.md", "references/native-clef.md", "references/image-preparation.md", "references/interpret-results.md"],
+    "userRequest": "A source image Choice selected a character portrait. Help me query its exact visual evidence, then design a Clef follow-on that keeps only the intended history and explicitly reuses the selected pixels. Explain how to report incomplete matched pairs.",
+    "controlledEvidence": {
+      "sourceRunId": "{{sourceRunId}}",
+      "questionId": "character-fit",
+      "result": { "choice": "writ", "selectedVisualMaterial": { "materialId": "writ-portrait", "altText": "Approved portrait of Writ, an observant teal-clad specialist with a compact crossbody bag.", "caption": "Writ, the crew archivist.", "asset": { "assetId": "sha256:controlled" } }, "selectedMaterial": null, "imageBytesReturned": false },
+      "siblingAnswer": { "questionId": "sibling-opinion", "choice": "yes" },
+      "matchedComparison": { "totalPairs": 2, "completePairs": 1, "incompletePairs": 1, "incompleteReason": "one condition failed" }
     }
   }
 ]

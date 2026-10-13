@@ -23,6 +23,7 @@ export const promptHistoryEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('visual-response'), sequence: z.number().int().nonnegative(), nodeId: z.string().min(1), taskId: z.string().min(1), result: decisionValueSchema, visualEvidence: visualEvidenceSchema }).strict(),
 ]);
 export type PromptHistoryEvent = z.infer<typeof promptHistoryEventSchema>;
+export type TrajectoryVisualEvidence = z.infer<typeof visualEvidenceSchema>;
 
 export type TrajectoryChoice = {
   taskId: string;
@@ -120,6 +121,7 @@ export function appendTrajectoryResponse(
   question: DecisionRequest['question'],
   result: DecisionValue,
   exposedItemIds: readonly string[],
+  visualEvidence?: TrajectoryVisualEvidence,
 ): TrajectorySummary {
   if (question.type !== result.type) throw new Error('Decision response type does not match the saved question.');
   const exposed = [...exposedItemIds];
@@ -130,16 +132,16 @@ export function appendTrajectoryResponse(
     if (choiceMeaning === undefined) throw new Error(`Saved answer choice ${result.choice} was not offered.`);
     response = { type: 'choice', taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed,
       ...(result.probabilities === undefined ? {} : { probabilities: { ...result.probabilities } }),
-      ...(result.confidence === undefined ? {} : { confidence: result.confidence }) };
+      ...(result.confidence === undefined ? {} : { confidence: result.confidence }), ...(visualEvidence ? { visualEvidence } : {}) };
     choices = [...trajectory.choices, { taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed }];
   } else if (result.type === 'score' && question.type === 'score') {
     if (result.score < 0 || result.score > question.rubric.length - 1) throw new Error('Saved Score answer is outside its question rubric.');
     response = { type: 'score', taskId: question.id, score: result.score,
       meaning: `Expected rubric level ${result.score}; rubric: ${question.rubric.join(' | ')}`,
       probabilities: { ...result.probabilities }, legend: { ...result.legend },
-      ...(result.confidence === undefined ? {} : { confidence: result.confidence }), exposedItemIds: exposed };
+      ...(result.confidence === undefined ? {} : { confidence: result.confidence }), exposedItemIds: exposed, ...(visualEvidence ? { visualEvidence } : {}) };
   } else if (result.type === 'noul' && question.type === 'noul') {
-    response = { type: 'noul', taskId: question.id, noul: result.noul, proposition: question.instructions, exposedItemIds: exposed };
+    response = { type: 'noul', taskId: question.id, noul: result.noul, proposition: question.instructions, exposedItemIds: exposed, ...(visualEvidence ? { visualEvidence } : {}) };
   } else throw new Error('Decision response type does not match the saved question.');
 
   return finishTrajectory({
@@ -160,7 +162,10 @@ export function prepareFollowOnPacket(input: {
   mode: 'recorded' | 'fresh-material' | 'omit-history' | 'continue';
   question: DecisionRequest['question'];
   material?: readonly { id: string; text: string }[];
+  retainedMaterial?: readonly { id: string; text: string }[];
+  includeSelectedAnswer?: boolean;
   visualMaterials?: readonly DecisionVisualMaterial[];
+  visualEvidence?: TrajectoryVisualEvidence;
   result?: DecisionValue;
 }): DecisionRequest & { state: PromptState } {
   const { source, mode, question } = input;
@@ -176,10 +181,13 @@ export function prepareFollowOnPacket(input: {
   if (mode === 'continue') {
     if (!input.result) throw new Error('Continue context requires the selected completed answer.');
     const currentIds = source.state.encounteredItems.map(({ id }) => id);
+    const trajectory = input.includeSelectedAnswer === false
+      ? source.state.trajectory
+      : appendTrajectoryResponse(source.state.trajectory, source.question, input.result, currentIds, input.visualEvidence);
     state = {
       respondent: { profile: { ...source.state.respondent.profile } },
-      encounteredItems: [...source.state.encounteredItems.map((item) => ({ ...item })), ...material],
-      trajectory: appendTrajectoryResponse(source.state.trajectory, source.question, input.result, currentIds),
+      encounteredItems: [...(input.retainedMaterial ?? source.state.encounteredItems).map((item) => ({ ...item })), ...material],
+      trajectory: { ...trajectory, choices: [...trajectory.choices], responses: [...trajectory.responses] },
     };
   } else {
     if (material.length === 0) throw new Error(`${mode} context requires explicit material.`);

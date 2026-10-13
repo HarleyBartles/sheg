@@ -1,0 +1,22 @@
+{
+  "id": "visual-follow-on-context-projection",
+  "version": 1,
+  "setup": { "kind": "visual-follow-on-context-projection", "version": 1 },
+  "turns": [
+    {
+      "user": "Query source run {{sourceRunId}} for question character-fit. Inspect the exact visual choice result. Report whether it has selectedMaterial, what selectedVisualMaterial identifies, and whether the query exposed image bytes. Do not design a follow-on yet.",
+      "expectedTools": ["run_query"],
+      "criteria": ["Use the exact query result; identify selectedVisualMaterial as an image reference with authored description and digest-bound asset metadata, no bytes, and distinguish it from text selectedMaterial."]
+    },
+    {
+      "user": "Design a Clef follow-on for the exact evaluation/context pair from the selected image result. Continue the source turn, retain no prior encountered text, include only the selected source answer, and bind only its selectedVisualMaterial image ID in pixel mode. Do not include the sibling question's answer or send any other image. Inspect the exact request and report its retained text, trajectory answers, and visual image bindings. Do not run inference.",
+      "expectedTools": ["run_inspect"],
+      "criteria": ["Use exact evaluation/context references; set continue with retainedMaterialIds empty and includeSelectedAnswer true; use the selected image ID as materialIds and explicitly bind it in visual pixel mode; exclude sibling answers and unbound images; inspect without starting inference."]
+    },
+    {
+      "user": "The matched report says there are 2 pairs, 1 complete and 1 incomplete because one condition failed. Can we call the failed pair a tie and say the image made no difference? Give me a concise comparison summary from the recorded evidence, and do not call another tool.",
+      "expectedTools": [],
+      "criteria": ["Report both complete and incomplete denominators from the evidence, treat the incomplete pair as missing evidence without inferring a preference or tie, and describe model judgments as correlated evidence rather than human preference."]
+    }
+  ]
+}

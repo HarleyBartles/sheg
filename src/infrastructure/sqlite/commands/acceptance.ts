@@ -169,7 +169,9 @@ function requestedImageMaterials(request: ParsedRunRequest, lineage?: PreparedRu
   }
   if (request.kind === 'follow-on') {
     const bound = new Set(request.questions.flatMap((question) => question.visual?.materialIds ?? []));
-    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials).filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && bound.has(item.id));
+    const selected = new Set((lineage?.selections ?? []).flatMap(({ selectedVisualMaterial }) => selectedVisualMaterial ? [selectedVisualMaterial.materialId] : []));
+    const linked = (lineage?.materialSnapshots ?? []).flatMap(({ materials }) => materials)
+      .filter((item): item is Extract<RunMaterialItem, { type: 'image' }> => isImageMaterial(item) && (bound.has(item.id) || selected.has(item.id)));
     return [...new Map(linked.map((material) => [material.id, material])).values()];
   }
   return [];

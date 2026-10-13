@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { RunStoreError } from '../../application/run-store.js';
 import { asNumber, asText, parseJson, parseJsonRecord, type DatabaseRow } from './rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './cursors.js';
-import { encounteredMaterialsFromState, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './evidence-records.js';
+import { assertRetainedImageAsset, materialCatalogForExactContext, resultFromStorage, storedEvaluationFailure } from './evidence-records.js';
 import { providerExecutionEvidenceSchema } from '../../domain/decision/decision.js';
 import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { hashCanonical } from '../identity.js';
@@ -129,7 +129,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       const coverage = { ...evaluationCoverage, respondents: respondentCoverage };
       const lifecycle = currentLifecycle;
       const matched = (() => {
-        const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id,
+        const matchedRows = context.database.prepare(`SELECT e.evaluation_id, e.ordinal, e.status, e.respondent_id, e.context_id, e.packet_json,
           json_extract(e.packet_json, '$.question') AS question_json, e.result_json
           FROM evaluations AS e ${join} WHERE ${whereSql} ORDER BY e.ordinal`).all(...parameters) as DatabaseRow[];
         const counts = { total: 0, pending: 0, answered: 0, failed: 0, unreached: 0 };
@@ -137,6 +137,8 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         const selectedMaterialIds = new Set<string>();
         const selectedMaterialRespondents = new Set<string>();
         let selectedMaterialEvaluations = 0;
+        const textIds = new Set<string>(); const textRespondents = new Set<string>(); let textEvaluations = 0;
+        const visualIds = new Set<string>(); const visualRespondents = new Set<string>(); let visualEvaluations = 0;
         for (const row of matchedRows) {
           const status = asText(row.status, 'matched evaluation status') as keyof typeof counts;
           if (!Object.hasOwn(counts, status)) throw new RunStoreError('data_integrity_error', 'A matched evaluation has an unsupported status.');
@@ -155,16 +157,27 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
             selectedMaterialEvaluations += 1;
             selectedMaterialIds.add(materialId);
             selectedMaterialRespondents.add(respondentId);
+            const packet = decisionPacketSchema.parse(parseJson(row.packet_json, 'matched packet'));
+            const catalog = materialCatalogForExactContext(parsedRequest.data, lineage, asText(row.context_id, 'matched context ID'), respondentId, packet,
+              row.branch_id === null || row.branch_id === undefined ? undefined : asText(row.branch_id, 'branch ID'));
+            const selected = catalog.find(({ id }) => id === materialId);
+            if (!selected) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            assertRetainedImageAsset(context.database, query.sourceRunId, selected);
+            if (selected && isImageMaterial(selected)) { visualEvaluations += 1; visualIds.add(materialId); visualRespondents.add(respondentId); }
+            else if (selected) { textEvaluations += 1; textIds.add(materialId); textRespondents.add(respondentId); }
           }
         }
         return { count: counts.total, evaluations: counts, representedRespondents: respondents.size,
           selectedMaterialIds: [...selectedMaterialIds],
           selectedMaterialRespondents, selectedMaterialEvaluations,
           selectedMaterials: { evaluations: selectedMaterialEvaluations, respondents: selectedMaterialRespondents.size, distinctMaterials: selectedMaterialIds.size },
+          selectedTextMaterials: { evaluations: textEvaluations, respondents: textRespondents.size, distinctMaterials: textIds.size },
+          selectedVisualMaterials: { evaluations: visualEvaluations, respondents: visualRespondents.size, distinctMaterials: visualIds.size },
           ordinals: matchedRows.map((row) => asNumber(row.ordinal, 'matched evaluation ordinal')),
           evaluationIds: matchedRows.map((row) => asText(row.evaluation_id, 'matched evaluation ID')) };
       })();
-      const matchedCoverage = { evaluations: matched.evaluations, representedRespondents: matched.representedRespondents, selectedMaterials: matched.selectedMaterials };
+      const matchedCoverage = { evaluations: matched.evaluations, representedRespondents: matched.representedRespondents, selectedMaterials: matched.selectedMaterials,
+        selectedTextMaterials: matched.selectedTextMaterials, selectedVisualMaterials: matched.selectedVisualMaterials };
       const matchingOrdinalPairs = matched.ordinals.map((ordinal, index) => ({ ordinal, evaluationId: matched.evaluationIds[index]! }))
         .filter(({ ordinal }) => !cursor || ordinal > cursor.lastOrdinal);
       const pageIds = matchingOrdinalPairs.slice(0, limit + 1).map(({ evaluationId }) => evaluationId);
@@ -192,15 +205,20 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution'));
         const failure = storedEvaluationFailure(row);
         let selectedMaterial: RunEvidencePage['items'][number]['selectedMaterial'];
+        let selectedVisualMaterial: RunEvidencePage['items'][number]['selectedVisualMaterial'];
         if (result?.type === 'choice') {
           const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
           if (materialId) {
-            const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
+            const candidate = materialCatalogForExactContext(parsedRequest.data, lineage, contextId, respondentId, packet,
+              row.branch_id === null || row.branch_id === undefined ? undefined : asText(row.branch_id, 'branch ID')).find(({ id }) => id === materialId);
             if (!candidate) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
+            assertRetainedImageAsset(context.database, query.sourceRunId, candidate);
             if (!isImageMaterial(candidate)) {
               if (!candidate.sourceId || !candidate.sourceSha256) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
               selectedMaterial = { materialId, text: candidate.text, sourceId: candidate.sourceId, sourceSha256: candidate.sourceSha256,
                 textSha256: createHash('sha256').update(candidate.text, 'utf8').digest('hex') };
+            } else {
+              selectedVisualMaterial = { materialId, altText: candidate.altText, ...(candidate.caption === undefined ? {} : { caption: candidate.caption }), asset: candidate.asset };
             }
           }
         }
@@ -214,6 +232,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
           ...(result === undefined ? {} : { result }),
           ...(failure === undefined ? {} : { failure }),
           ...(selectedMaterial === undefined ? {} : { selectedMaterial }),
+          ...(selectedVisualMaterial === undefined ? {} : { selectedVisualMaterial }),
           ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
           ...(row.turn_id === null ? {} : { turnId: asText(row.turn_id, 'turn ID') }),
           ...(row.turn_id === null ? {} : { branchId: asText(row.branch_id, 'branch ID') }),

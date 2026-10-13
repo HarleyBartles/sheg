@@ -312,7 +312,8 @@ test('evidence page reports query-page exhaustion separately from source complet
     lifecycle: { state: 'active', resume: { eligible: false, reason: 'already_active' } },
     coverage: { totalEvaluations: 80, completedEvaluations: 12, failedEvaluations: 0, respondents: { total: 80, active: 68, completed: 12, failed: 0, unreached: 0 } },
     matchedCoverage: { evaluations: { total: 12, pending: 0, answered: 12, failed: 0, unreached: 0 }, representedRespondents: 12,
-      selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } },
+      selectedMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 }, selectedTextMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 },
+      selectedVisualMaterials: { evaluations: 0, respondents: 0, distinctMaterials: 0 } },
     nextCursor: 'cursor-token',
   };
   assert.equal(runEvidencePageSchema.parse(page).sourceComplete, false);

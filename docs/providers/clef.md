@@ -43,6 +43,8 @@ Import an image with `image_import` or `image-import`, then use its saved asset 
 
 Bind only the images the question needs. Clef accepts at most four images in one provider call and at most 64 questions. Sheg orders attachments by the material order frozen in the study request. A pixel Choice question may set `materialOptions` so each stable option ID explicitly identifies its image material; each mapped image must also appear in that question's pixel binding. Sheg includes those option-to-image mappings in the provider prompt. An image answer does not become text `selectedMaterial` evidence for follow-on reuse.
 
+Querying a mapped image Choice returns `selectedVisualMaterial` with its exact material ID, digest-bound asset metadata, authored alt text, and optional caption. It returns no bytes and no text `selectedMaterial`. A follow-on that reuses the image must use that ID in `context.materialIds` and bind it in the follow-on question's `visual: { mode: "pixels", materialIds: [...] }`. The ID selects saved source material; the question binding controls which pixels Clef receives. Bind only the image needed by that question. For retained text and answer history, see the [follow-on context projection recipe](../../skills/stimulus-response-polling/references/run-and-recovery.md#choose-a-follow-on-context-explicitly).
+
 For an article journey, bind an image only on the stage where it is shown. Later text stages receive a compact record of the supplied description, caption, typed response, provider, model, and material identity. They do not receive image bytes again unless a later task explicitly binds that image. Agents can use the same rule to ask a separate question about a deliberate repeat exposure.
 
 ## Inspect and run

@@ -62,6 +62,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
   const evaluations: FrozenEvaluation[] = [];
   const preparedGroups: NonNullable<PreparedRun['groups']> = [];
   const groups = new Map<string, { representative: FollowOnSourceSet['turns'][number]; turns: FollowOnSourceSet['turns'] }>();
+  const includedSourceTurns: FollowOnSourceSet['turns'] = [];
   const selectionExclusions: FollowOnSelectionExclusion[] = [];
   const excludedCounts: SelectionCoverage['excluded'] = { pending: 0, failed: 0, unreached: 0, nonChoice: 0, unmappedChoice: 0 };
   for (const turn of source.turns) {
@@ -69,7 +70,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       let reason: FollowOnSelectionExclusion['reason'] | undefined;
       if (turn.status === 'pending' || turn.status === 'failed' || turn.status === 'unreached') reason = turn.status;
       else if (turn.result?.type !== 'choice') reason = 'nonChoice';
-      else if (!turn.selectedMaterial) reason = 'unmappedChoice';
+      else if (!turn.selectedMaterial && !turn.selectedVisualMaterial) reason = 'unmappedChoice';
       if (reason) {
         excludedCounts[reason] += 1;
         selectionExclusions.push({ sourceEvaluationId: turn.evaluationId, sourceContextId: turn.contextId, respondentId: turn.respondentId,
@@ -79,6 +80,7 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     }
     const groupKey = request.context.includeSelectedMaterial ? `evaluation:${turn.evaluationId}:${turn.contextId}`
       : request.context.mode === 'continue' ? `evaluation:${turn.evaluationId}` : `context:${turn.respondentId}:${turn.contextId}`;
+    includedSourceTurns.push(turn);
     const group = groups.get(groupKey) ?? { representative: turn, turns: [] };
     group.turns.push(turn);
     groups.set(groupKey, group);
@@ -111,12 +113,41 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     if (request.context.includeSelectedMaterial && turn.selectedMaterial) {
       selectedMaterial = mergeMaterials(selectedMaterial, [{ id: turn.selectedMaterial.materialId, text: turn.selectedMaterial.text, sourceId: turn.selectedMaterial.sourceId, sourceSha256: turn.selectedMaterial.sourceSha256 }]);
     }
+    if (request.context.includeSelectedMaterial && turn.selectedVisualMaterial) {
+      const image = catalog.find((item) => item.id === turn.selectedVisualMaterial!.materialId);
+      if (!image || !isImageMaterial(image) || image.altText !== turn.selectedVisualMaterial.altText || image.caption !== turn.selectedVisualMaterial.caption || hashCanonical(image.asset) !== hashCanonical(turn.selectedVisualMaterial.asset)) {
+        throw new RunProblemError('follow_on_material_not_found', `Selected image ${turn.selectedVisualMaterial.materialId} is unavailable or changed in evaluation ${turn.evaluationId}.`);
+      }
+    }
+    const encountered = turn.packet.state.encounteredItems;
+    const retainedMaterial = request.context.retainedMaterialIds === undefined
+      ? encountered
+      : (() => {
+        const requested = new Set(request.context.retainedMaterialIds);
+        const missing = [...requested].filter((id) => !encountered.some((item) => item.id === id));
+        if (missing.length > 0) throw new RunProblemError('follow_on_material_not_found', `Retained material ${missing[0]} was not encountered in evaluation ${turn.evaluationId}.`);
+        return encountered.filter(({ id }) => requested.has(id));
+      })();
     const rawResult = turn.result ? decisionValueFromResult(turn.result) : undefined;
+    const sourceVisualEvidence = turn.packet.question.visual && turn.result ? {
+      mode: turn.packet.question.visual.mode,
+      provider: turn.result.provider,
+      model: turn.result.model,
+      materials: turn.packet.question.visual.materialIds.map((materialId) => {
+        const visual = turn.packet.visualMaterials?.find(({ id }) => id === materialId);
+        if (!visual) throw new RunProblemError('follow_on_context_invalid', `Source visual material ${materialId} is unavailable in evaluation ${turn.evaluationId}.`);
+        return { materialId, assetId: visual.asset.assetId, sha256: visual.asset.sha256, altText: visual.altText,
+          ...(visual.caption === undefined ? {} : { caption: visual.caption }) };
+      }),
+    } : undefined;
     const packets: DecisionRequest[] = [];
     try {
       for (const question of request.questions) {
         packets.push(prepareFollowOnPacket({ source: turn.packet, mode: request.context.mode, question,
-          ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }), visualMaterials: visualMaterialsFor(question), ...(rawResult ? { result: rawResult } : {}) }));
+          ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }),
+          ...(request.context.mode === 'continue' ? { retainedMaterial, includeSelectedAnswer: request.context.includeSelectedAnswer ?? true } : {}),
+          visualMaterials: visualMaterialsFor(question), ...(rawResult ? { result: rawResult } : {}),
+          ...(request.context.mode === 'continue' && request.context.includeSelectedAnswer !== false && sourceVisualEvidence ? { visualEvidence: sourceVisualEvidence } : {}) }));
       }
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');
@@ -140,12 +171,13 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
       return item;
     });
     materialSnapshots.push({ contextId, respondentId: turn.respondentId,
-      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, linkedMaterials) : mergeMaterials(catalog, selectedMaterial) });
+      materials: request.context.includeSelectedMaterial ? mergeMaterials(selectedMaterial, [...linkedMaterials, ...(turn.selectedVisualMaterial ? [catalog.find((item) => item.id === turn.selectedVisualMaterial!.materialId)!] : [])]) : mergeMaterials(catalog, selectedMaterial) });
     preparedGroups.push({ groupId, contextId, respondentId: turn.respondentId, state: packets[0]!.state, questionIds: request.questions.map(({ id }) => id) });
     for (const sourceTurn of turns) for (const evaluation of groupEvaluations) {
       selections.push({ sourceEvaluationId: sourceTurn.evaluationId, sourceContextId: sourceTurn.contextId,
         respondentId: sourceTurn.respondentId, evaluationId: evaluation.evaluationId, contextId: evaluation.contextId,
-        ...(request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}) });
+        ...(request.context.includeSelectedMaterial && sourceTurn.selectedMaterial ? { selectedMaterial: sourceTurn.selectedMaterial } : {}),
+        ...(request.context.includeSelectedMaterial && sourceTurn.selectedVisualMaterial ? { selectedVisualMaterial: sourceTurn.selectedVisualMaterial } : {}) });
     }
   }
   if (groups.size === 0) problems.push({ code: 'no_follow_on_matches', message: 'No source evaluations match this follow-on selection.' });
@@ -164,6 +196,9 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
     ...(sourceWarning ? { warnings: [sourceWarning] } : {}) };
   const lineage: FollowOnLineage = { sourceRunId: source.sourceRunId, sourceStatusAtAcceptance: source.sourceStatus,
     sourceCompleteAtAcceptance: source.sourceComplete, sourceVersion: source.version, selections, materialSnapshots,
+    sourceSelection: { version: 1, matchedEvaluations: source.turns.length, includedEvaluations: includedSourceTurns.length,
+      representedContexts: new Set(includedSourceTurns.map(({ contextId }) => contextId)).size,
+      representedRespondents: new Set(includedSourceTurns.map(({ respondentId }) => respondentId)).size, followOnEvaluations: evaluations.length },
     ...(selectionCoverage ? { selectionCoverage } : {}), excludedSelections: selectionExclusions };
   return { sourceVersion: source.version, inspection,
     prepared: { request, requestFingerprint: hashCanonical({ request, compilerFingerprint }), compilerFingerprint, evaluations, groups: preparedGroups, lineage } };
