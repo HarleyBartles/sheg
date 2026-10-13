@@ -74,19 +74,19 @@
 
 ## Task 3: Freeze Exact Follow-on Asset and Context Dependencies
 
-**Files:** Modify `src/application/run-inspection.ts`, `src/infrastructure/sqlite/commands/acceptance.ts`, `src/infrastructure/sqlite/evidence-records.ts`, `src/infrastructure/sqlite/follow-on-queries.ts`, `src/infrastructure/sqlite/commands/prepared-validation.ts`, `src/infrastructure/sqlite/run-deletion-queries.ts`, and tests in `test/run-store.test.ts`.
+**Files:** Existing asset custody, context resolution, acceptance, and deletion owners already satisfy the behavior; no production change was needed. Extend `test/visual-acceptance.test.ts` for cross-run asset custody and retain the existing `test/run-store.test.ts` source-version revalidation test.
 
 **Consumes:** Task 1 context projection, Task 2 visual references, accepted `run_visual_assets`, image derivation foreign keys, run lineage snapshots and current source-deletion preview.
 
 **Produces:** Every accepted follow-on has enough exact source, asset, and material lineage to remain inspectable and executable after source-run deletion; image assets remain referenced by the follow-on transaction only when that follow-on actually needs them.
 
-- [ ] Trace the existing deletion preview and foreign-key behavior with a source visual run plus an accepted follow-on. Record the observed gap before editing: whether the preview reports the retained child and whether its image bytes remain resolvable after source deletion.
-- [ ] Add a failure-first integration test named `accepted visual follow-on retains its selected source image after deleting the source run`. Use imported bytes, start/complete the source through the public store, accept an explicitly pixel-bound child, delete the source, then load and prepare the child solely from its persisted request/lineage and retained asset references.
-- [ ] Assert the source deletion preview lists the retained child and that `PRAGMA foreign_key_check` passes after deleting the source. The repository has no public image garbage-collection operation, so do not add one in this plan.
-- [ ] If current transactional `run_visual_assets` pinning passes both behaviors, do not change SQL tables or add a migration. If it fails, make the narrowest change within the acceptance transaction and deletion snapshot owners, then prove rollback on a forced insertion/dependency failure.
-- [ ] Validate the frozen follow-on source version again at acceptance; source changes between inspect and accept must reject with no run, group, evaluation, or visual-asset rows written.
-- [ ] Preserve image order and question-scoped binding through storage and resume. Test a selected image alongside an unrelated source image and prove only the explicitly bound image enters the provider request.
-- [ ] Run `node --import tsx --test test/run-store.test.ts test/image-assets.test.ts` and verify legacy text follow-on deletion behavior remains unchanged.
+- [x] Trace the existing deletion preview and foreign-key behavior with a source visual run plus an accepted follow-on. The preview listed the retained child, its `run_visual_assets` row retained the digest-pinned image, and execution resolved the same bytes after source deletion; no custody gap was found.
+- [x] Add the failure-first integration test named `accepted visual follow-on retains its selected source image after deleting the source run`. It completes the source through the worker/store, accepts a pixel-bound child, deletes the source, then recalls and executes the persisted child packet using its retained asset reference.
+- [x] Assert the source deletion preview lists the retained child and that `PRAGMA foreign_key_check` passes after deleting the source. The child retains only its bound `portrait` reference while the source also had an unrelated image.
+- [x] Current transactional `run_visual_assets` pinning passes. No SQL tables, migration, deletion changes, or garbage-collection feature were added. Temporarily removing the asset-link write caused the integration test to fail with `data_integrity_error`; restoring it passed.
+- [x] Validate the frozen follow-on source version again at acceptance; the existing `follow-on acceptance rejects a source that changes after packet fit inspection` test covers the race and atomic rejection.
+- [x] Preserve image order and question-scoped binding through acceptance. The follow-on provider receives only the explicitly bound image, and the stored context contains no sibling image.
+- [x] Run `node --import tsx --test --test-concurrency=4 test/run-store.test.ts test/image-assets.test.ts test/visual-acceptance.test.ts`: 89 passed; legacy text follow-on deletion tests pass.
 
 ## Task 4: Make Selection and Pair Denominators Explicit
 

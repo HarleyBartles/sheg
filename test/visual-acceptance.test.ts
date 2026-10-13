@@ -135,11 +135,16 @@ test('pixel Choice image mappings identify options without creating text selecte
   } finally { await fixture.close(); }
 });
 
-test('mapped image Choice evidence remains visual and can seed an explicitly pixel-bound follow-on after source-file removal', async () => {
+test('accepted visual follow-on retains its selected source image after deleting the source run', async () => {
   const fixture = await setup();
   try {
     const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
-    const sourceRequest = { ...request(fixture.metadata), questions: [{ ...request(fixture.metadata).questions[0]!, materialOptions: { yes: 'portrait' } }] };
+    const otherBytes = await readFile(new URL('./fixtures/images/four-corners.webp', import.meta.url));
+    const otherSha256 = createHash('sha256').update(otherBytes).digest('hex');
+    const otherImage = fixture.imageRepository.saveSource(otherBytes, { assetId: `sha256:${otherSha256}`, sha256: otherSha256, format: 'webp', width: 80, height: 40, bytes: otherBytes.byteLength });
+    const sourceRequest = { ...request(fixture.metadata), material: [...request(fixture.metadata).material,
+      { id: 'unselected-portrait', type: 'image' as const, text: '', altText: 'An alternate unrelated portrait.', asset: otherImage }],
+      questions: [{ ...request(fixture.metadata).questions[0]!, materialOptions: { yes: 'portrait' }, visual: { mode: 'pixels' as const, materialIds: ['portrait', 'unselected-portrait'] } }] };
     const admitted = await prepareRun(sourceRequest, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
     assert.ok(admitted.prepared, JSON.stringify(admitted.inspection.problems));
     const accepted = fixture.store.accept(randomUUID(), admitted.prepared);
@@ -167,10 +172,19 @@ test('mapped image Choice evidence remains visual and can seed an explicitly pix
     ]);
     assert.deepEqual(((packet.state as { encounteredItems: Array<{ id: string }> }).encounteredItems).map(({ id }) => id), ['section-three', 'section-four']);
     const followOnAccepted = fixture.store.accept(randomUUID(), prepared.prepared);
+    assert.deepEqual(fixture.store.previewDelete([accepted.run.runId]).runs[0]?.retainedFollowOnRunIds, [followOnAccepted.run.runId]);
     const frozenFollowOn = fixture.store.getRequest(followOnAccepted.run.runId);
     assert.deepEqual(frozenFollowOn.lineage?.selections[0]?.selectedVisualMaterial, sources.turns[0]?.selectedVisualMaterial);
     assert.deepEqual(frozenFollowOn.lineage?.materialSnapshots[0]?.materials.find(({ id }) => id === 'portrait'), request(fixture.metadata).material[1]);
     assert.equal(fixture.store.deleteRuns([accepted.run.runId]).deletedRunIds[0], accepted.run.runId);
+    const childAfterDeletion = fixture.store.getRequest(followOnAccepted.run.runId);
+    assert.equal(childAfterDeletion.lineage?.sourceAvailable, false);
+    assert.deepEqual(childAfterDeletion.evaluations[0]?.packet.visualMaterials?.map(({ id, asset }) => ({ id, asset })), [{ id: 'portrait', asset: fixture.metadata }]);
+    const custody = new DatabaseSync(path.join(fixture.root, 'runs.sqlite'));
+    try {
+      assert.deepEqual(custody.prepare('PRAGMA foreign_key_check').all(), []);
+      assert.deepEqual(custody.prepare('SELECT material_id FROM run_visual_assets WHERE run_id = ? ORDER BY material_id').all(followOnAccepted.run.runId).map((row) => row.material_id), ['portrait']);
+    } finally { custody.close(); }
     const followOnFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { images: string[]; state: { encounteredItems: Array<{ id: string }> } };
       assert.deepEqual(body.images, [`data:image/png;base64,${Buffer.from(fixture.bytes).toString('base64')}`]);
