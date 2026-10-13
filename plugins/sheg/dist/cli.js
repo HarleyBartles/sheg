@@ -37452,17 +37452,7 @@ function scaledDimensions(image, request, factor = 1) {
     request.maxHeight === void 0 ? 1 : request.maxHeight / image.height,
     factor
   );
-  let width = Math.max(1, Math.floor(image.width * fit));
-  let height = Math.max(1, Math.floor(image.height * fit));
-  for (let attempt = 0; attempt < 32; attempt += 1) {
-    const proportional = Math.min(width / image.width, height / image.height);
-    const nextWidth = Math.max(1, Math.floor(image.width * proportional));
-    const nextHeight = Math.max(1, Math.floor(image.height * proportional));
-    if (nextWidth === width && nextHeight === height) break;
-    width = nextWidth;
-    height = nextHeight;
-  }
-  return { width, height };
+  return { width: Math.max(1, Math.floor(image.width * fit)), height: Math.max(1, Math.floor(image.height * fit)) };
 }
 function createImagePreparationService(repository, codec2, exportRoot) {
   async function verifiedBytes(source) {
@@ -42853,7 +42843,7 @@ function createStaticImageCodec(assetDirectory = fileURLToPath4(new URL("./codec
       const factor = Math.min(width / image.width, height / image.height);
       const expectedWidth = Math.max(1, Math.floor(image.width * factor));
       const expectedHeight = Math.max(1, Math.floor(image.height * factor));
-      if (factor > 1 || width !== expectedWidth || height !== expectedHeight) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions or enlarging the source.");
+      if (factor > 1 || Math.abs(width - expectedWidth) > 1 || Math.abs(height - expectedHeight) > 1) throw new ImageCodecError("image_scale_target_unreachable", "The requested image dimensions cannot be produced without changing its proportions or enlarging the source.");
       await initialize2();
       const scaled = await resize4({ data: image.data, width: image.width, height: image.height }, { width, height, method: "lanczos3", fitMethod: "stretch" });
       const result = view(scaled);

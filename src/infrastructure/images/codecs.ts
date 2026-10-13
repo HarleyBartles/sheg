@@ -205,7 +205,7 @@ export function createStaticImageCodec(assetDirectory = fileURLToPath(new URL('.
       const factor = Math.min(width / image.width, height / image.height);
       const expectedWidth = Math.max(1, Math.floor(image.width * factor));
       const expectedHeight = Math.max(1, Math.floor(image.height * factor));
-      if (factor > 1 || width !== expectedWidth || height !== expectedHeight) throw new ImageCodecError('image_scale_target_unreachable', 'The requested image dimensions cannot be produced without changing its proportions or enlarging the source.');
+      if (factor > 1 || Math.abs(width - expectedWidth) > 1 || Math.abs(height - expectedHeight) > 1) throw new ImageCodecError('image_scale_target_unreachable', 'The requested image dimensions cannot be produced without changing its proportions or enlarging the source.');
       await initialize();
       const scaled = await resize({ data: image.data, width: image.width, height: image.height } as never, { width, height, method: 'lanczos3', fitMethod: 'stretch' });
       const result = view(scaled);
