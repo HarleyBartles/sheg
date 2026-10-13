@@ -687,5 +687,56 @@
       "siblingAnswer": { "questionId": "sibling-opinion", "choice": "yes" },
       "matchedComparison": { "totalPairs": 2, "completePairs": 1, "incompletePairs": 1, "incompleteReason": "one condition failed" }
     }
+  },
+  {
+    "id": "rendered-layout-image-treatment",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["visual-study", "rendered-layout", "matched-comparison"],
+    "referencePaths": ["references/native-clef.md", "references/image-preparation.md", "references/interpret-results.md"],
+    "userRequest": "I have two screenshots of the same article page. One puts the illustration on the left and one on the right, and I may also change the typeface and font size. I want to know whether each layout is readable and which treatment works better. How should I set up the comparison and what should I provide?",
+    "controlledEvidence": {
+      "variantA": "Article screenshot with illustration left, typeface A, font size 16px.",
+      "variantB": "Article screenshot with illustration right, typeface B, font size 18px.",
+      "pageText": "The exact article copy is available as separate text.",
+      "captureProvenance": {"viewport": "unknown", "deviceScaleFactor": "unknown", "browser": "unknown", "fontLoadStatus": "unknown"},
+      "mockOnly": true
+    }
+  },
+  {
+    "id": "character-sketch-unprompted-traits",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["visual-study", "character-design", "unprompted-interpretation"],
+    "referencePaths": ["references/native-clef.md", "references/image-preparation.md", "references/interpret-results.md"],
+    "userRequest": "I have a character sketch but I do not want to prime the viewer with my written concept yet. What personality, role, or story expectations does the image itself communicate, and how should I ask Sheg?",
+    "controlledEvidence": {"portrait": "One unlabeled character sketch with no supplied character brief.", "mockOnly": true}
+  },
+  {
+    "id": "character-sketch-brief-fit",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["visual-study", "character-design", "brief-fit", "comparison-shapes"],
+    "referencePaths": ["references/native-clef.md", "references/image-preparation.md", "references/interpret-results.md"],
+    "userRequest": "I am developing a comic character whose written concept says heroic and intelligent. I have five unlabeled sketches. Which design best expresses the brief, and how should Sheg compare all five when one Clef call accepts no more than four images?",
+    "controlledEvidence": {"brief": "The character should read as heroic and intelligent.", "portraits": ["sketch one", "sketch two", "sketch three", "sketch four", "sketch five"], "mockOnly": true}
+  },
+  {
+    "id": "script-named-character-design-match",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["visual-study", "character-design", "script-evidence", "identity-boundary"],
+    "referencePaths": ["references/native-clef.md", "references/image-preparation.md", "references/interpret-results.md"],
+    "userRequest": "I have a script with several named characters and four design sketches. I want to know which design looks most like the character Mara as written. How do I keep the model from matching the wrong character or treating this as a popularity vote?",
+    "controlledEvidence": {"scriptCharacters": ["Mara, the cautious station engineer", "Tomas, her impulsive brother", "Leena, the station commander"], "targetCharacter": "Mara", "evidenceScope": "Only the supplied scenes that describe Mara and her actions.", "portraits": ["design A", "design B", "design C", "design D"], "mockOnly": true}
+  },
+  {
+    "id": "script-protagonist-prominence",
+    "version": 1,
+    "ownerSkill": "stimulus-response-polling",
+    "tags": ["visual-study", "character-design", "script-evidence", "protagonist-prominence"],
+    "referencePaths": ["references/native-clef.md", "references/image-preparation.md", "references/interpret-results.md"],
+    "userRequest": "I have a story script and five character designs. Which one looks most likely to be the main character from the story? Help me design this so we do not confuse the character who best matches a visual brief with the character the script treats as its protagonist.",
+    "controlledEvidence": {"scriptCharacters": ["Mara, the station engineer", "Tomas, her brother", "Leena, the commander"], "narrativeEvidence": "Mara appears in every supplied scene, initiates the central plan, and resolves the main conflict; the script has no authored visual brief.", "portraits": ["design A", "design B", "design C", "design D", "design E"], "mockOnly": true}
   }
 ]
