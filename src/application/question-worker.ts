@@ -11,6 +11,7 @@ import type { ProviderFactoryOptions } from '../providers/config.js';
 import { decisionValueFromResult } from '../domain/decision/decision.js';
 import type { DecisionBatchRequest, DecisionBatchResult } from '../domain/decision/decision.js';
 import { requireExplicitProvider } from '../domain/run/request.js';
+import { assessProviderBatchPlan } from './provider-batch-planning.js';
 
 const HEARTBEAT_MS = 2_000;
 export async function executeQuestionRun(persistence: RunPersistence, runId: string, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions = {}): Promise<void> {
@@ -39,7 +40,10 @@ export async function executeQuestionRun(persistence: RunPersistence, runId: str
 
 async function executePoll(reads: RunReadRepository, commands: RunCommandRepository, runId: string, claim: import('../domain/run/lifecycle.js').WorkerClaim, providerFactory: ProviderFactory, providerOptions: ProviderFactoryOptions): Promise<void> {
   const prepared = reads.getRequest(runId);
-  const provider = providerFactory(requireExplicitProvider(prepared.request), providerOptions);
+  const configured = requireExplicitProvider(prepared.request);
+  const provider = providerFactory(configured, providerOptions);
+  const providerKind = configured.kind;
+  const modelIdentity = providerKind === 'jev' || providerKind === 'clef' ? configured.model : configured.checkpoint;
   const answers = new Map(reads.evaluationStatuses(runId).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
@@ -47,20 +51,16 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
       if (!commands.heartbeat(claim, Date.now())) return;
       const pending = evaluations.filter((evaluation) => answers.get(evaluation.evaluationId) === 'pending');
       if (!pending.length) break;
-      let batchEvaluations = [pending[0]!];
-      if (provider.decideBatch && provider.measureBatch) {
-        let selected: typeof pending = [];
-        for (let size = pending.length; size >= 1; size -= 1) {
-          const candidate = pending.slice(0, size);
-          const batchQuestions = candidate.map(({ packet }) => packet.question);
-          const batchMaterials = batchVisualMaterials(candidate.map(({ packet }) => packet.visualMaterials ?? []));
-          const fit = await provider.measureBatch({ state: group.state, questions: batchQuestions, ...(batchMaterials.length ? { visualMaterials: batchMaterials } : {}) });
-          if (fit.status === 'fits') { selected = candidate; break; }
-          if (fit.status === 'unavailable') throw new Error('Provider could not confirm fit for the remaining question group.');
-        }
-        if (!selected.length) throw new Error('The remaining question does not fit the provider context.');
-        batchEvaluations = selected;
-      }
+      const pendingPackets = pending.map(({ packet }) => packet);
+      const singletonExecution = prepared.request.providerSelection?.batching === 'singleton' || !provider.decideBatch || !provider.measureBatch;
+      const plan = await assessProviderBatchPlan({
+        group: { groupId: group.groupId, contextId: group.contextId, respondentId: group.respondentId, state: group.state,
+          questions: pendingPackets.map(({ question }) => question), packets: pendingPackets },
+        provider, providerKind, modelIdentity, batching: singletonExecution ? 'singleton' : 'automatic',
+      });
+      if (!plan.batches.length) throw new Error('The provider could not confirm a fitting batch plan for the remaining questions.');
+      const selectedIds = new Set(plan.questionIdsByBatch[0]);
+      const batchEvaluations = pending.filter(({ questionId }) => selectedIds.has(questionId));
       const reservation = commands.reserveBatch(claim, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
       if (!reservation) break;
       const batchQuestions = reservation.evaluations.map(({ packet }) => packet.question);
@@ -69,7 +69,7 @@ async function executePoll(reads: RunReadRepository, commands: RunCommandReposit
       let settled: Array<{ evaluationId: string; status: import('../domain/run/lifecycle.js').AnswerRow['status'] }>;
       try {
         let result: DecisionBatchResult;
-        if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
+        if (provider.decideBatch && prepared.request.providerSelection?.batching !== 'singleton') result = await provider.decideBatch(batch, 1);
         else {
           const single = await provider.decide(reservation.evaluations[0]!.packet, 1);
           result = { answers: [{ questionId: reservation.evaluations[0]!.questionId, value: decisionValueFromResult(single) }], execution: {

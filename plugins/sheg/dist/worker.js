@@ -21169,6 +21169,137 @@ function requireExplicitProvider(request) {
   return providerConfigSchema.parse(request.provider);
 }
 
+// src/application/provider-batch-planning.ts
+function missingFit(provider, kind, modelIdentity) {
+  return {
+    provider: kind,
+    status: "unavailable",
+    method: "unavailable",
+    modelIdentity,
+    tokenCount: "estimated",
+    tokens: 0,
+    contextLimit: null,
+    headroomTokens: null,
+    effectiveLimit: null,
+    details: {},
+    reason: provider.measure || provider.measureBatch ? "provider-measurement-failed" : "provider-measurement-unavailable"
+  };
+}
+function fitProblem(respondentId, fit) {
+  if (fit.status === "fits") return void 0;
+  return {
+    code: fit.status === "overflow" ? "context_overflow" : "context_unverified",
+    respondentId,
+    message: fit.reason ?? `Provider context ${fit.status}.`
+  };
+}
+async function assessProviderBatchPlan(input2) {
+  const { group, provider, providerKind, modelIdentity } = input2;
+  const { groupId, contextId, respondentId, state, questions, packets } = group;
+  void groupId;
+  void contextId;
+  if (questions.length !== packets.length || questions.some((question, index2) => question.id !== packets[index2]?.question.id)) {
+    throw new Error("Provider batch questions must match the ordered frozen packets.");
+  }
+  const materialsByQuestion = new Map(packets.map((packet) => [packet.question.id, packet.visualMaterials ?? []]));
+  const visualFor = (batchQuestions) => {
+    const byId = /* @__PURE__ */ new Map();
+    for (const question of batchQuestions) for (const material of materialsByQuestion.get(question.id) ?? []) byId.set(material.id, material);
+    return [...byId.values()];
+  };
+  const batchRequest = (selected) => {
+    const visualMaterials = visualFor(selected);
+    return { state, questions: [...selected], ...visualMaterials.length ? { visualMaterials } : {} };
+  };
+  const batches = [];
+  const fits = [];
+  const problems = [];
+  const record2 = (ids, fit) => {
+    fits.push({ questionIds: ids, fit });
+    const problem = fitProblem(respondentId, fit);
+    if (problem) problems.push(problem);
+  };
+  const measureOne = async (index2) => {
+    if (!provider.measure) return missingFit(provider, providerKind, modelIdentity);
+    try {
+      return await provider.measure(packets[index2]);
+    } catch {
+      return { ...missingFit(provider, providerKind, modelIdentity), reason: "provider-measurement-failed" };
+    }
+  };
+  const singleton = input2.batching === "singleton" || !provider.measureBatch || !provider.decideBatch;
+  if (singleton) {
+    for (let index2 = 0; index2 < questions.length; index2 += 1) {
+      const question = questions[index2];
+      const measured = await measureOne(index2);
+      record2([question.id], measured);
+      batches.push(batchRequest([question]));
+    }
+  } else {
+    const measureBatch = async (batchQuestions) => {
+      try {
+        return await provider.measureBatch(batchRequest(batchQuestions));
+      } catch {
+        return { ...missingFit(provider, providerKind, modelIdentity), reason: "provider-measurement-failed" };
+      }
+    };
+    let start = 0;
+    while (start < questions.length) {
+      let end = start + 1;
+      let lastFit;
+      while (end <= questions.length) {
+        const candidate = questions.slice(start, end);
+        const measured = await measureBatch(candidate);
+        if (measured.status === "unavailable") {
+          record2(candidate.map(({ id }) => id), measured);
+          return finish();
+        }
+        if (measured.status === "overflow") {
+          if (!lastFit) record2(candidate.map(({ id }) => id), measured);
+          break;
+        }
+        lastFit = { end, fit: measured };
+        end += 1;
+      }
+      if (!lastFit) return finish();
+      const selected = questions.slice(start, lastFit.end);
+      batches.push(batchRequest(selected));
+      record2(selected.map(({ id }) => id), lastFit.fit);
+      start = lastFit.end;
+    }
+  }
+  return finish();
+  function finish() {
+    const tokens = fits.filter(({ fit: measured }) => measured.status === "fits").map(({ fit: measured }) => measured.tokens);
+    const repeatedInputTokens = tokens.length === batches.length ? tokens.reduce((sum2, value) => sum2 + value, 0) : null;
+    const pricing = input2.pricing;
+    let cost;
+    if (pricing?.kind === "no-provider-invoice") cost = { kind: "no-provider-invoice", basis: "provider pricing contract" };
+    else if (pricing?.kind === "published-rate" && repeatedInputTokens !== null) {
+      cost = {
+        kind: "estimate",
+        amount: pricing.amount * repeatedInputTokens / 1e6,
+        currency: pricing.currency,
+        basis: "published-rate estimate",
+        source: pricing.source,
+        observedAt: pricing.observedAt
+      };
+    } else cost = { kind: "unknown", basis: "unverified" };
+    const minimumCalls = batches.length;
+    const remaining = input2.remainingCalls ?? Number.MAX_SAFE_INTEGER;
+    return {
+      batches,
+      questionIdsByBatch: batches.map(({ questions: selected }) => selected.map(({ id }) => id)),
+      fits,
+      problems,
+      minimumCalls,
+      repeatedInputTokens,
+      cost,
+      exceedsRemainingCalls: minimumCalls > remaining
+    };
+  }
+}
+
 // src/application/question-worker.ts
 var HEARTBEAT_MS = 2e3;
 async function executeQuestionRun(persistence, runId2, providerFactory, providerOptions = {}) {
@@ -21201,7 +21332,10 @@ async function executeQuestionRun(persistence, runId2, providerFactory, provider
 }
 async function executePoll(reads, commands, runId2, claim2, providerFactory, providerOptions) {
   const prepared = reads.getRequest(runId2);
-  const provider = providerFactory(requireExplicitProvider(prepared.request), providerOptions);
+  const configured = requireExplicitProvider(prepared.request);
+  const provider = providerFactory(configured, providerOptions);
+  const providerKind = configured.kind;
+  const modelIdentity = providerKind === "jev" || providerKind === "clef" ? configured.model : configured.checkpoint;
   const answers = new Map(reads.evaluationStatuses(runId2).map((answer) => [answer.evaluationId, answer.status]));
   for (const group of prepared.groups ?? []) {
     const evaluations2 = prepared.evaluations.filter((evaluation) => evaluation.groupId === group.groupId);
@@ -21209,23 +21343,25 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory, pro
       if (!commands.heartbeat(claim2, Date.now())) return;
       const pending = evaluations2.filter((evaluation) => answers.get(evaluation.evaluationId) === "pending");
       if (!pending.length) break;
-      let batchEvaluations = [pending[0]];
-      if (provider.decideBatch && provider.measureBatch) {
-        let selected = [];
-        for (let size = pending.length; size >= 1; size -= 1) {
-          const candidate = pending.slice(0, size);
-          const batchQuestions2 = candidate.map(({ packet }) => packet.question);
-          const batchMaterials2 = batchVisualMaterials(candidate.map(({ packet }) => packet.visualMaterials ?? []));
-          const fit = await provider.measureBatch({ state: group.state, questions: batchQuestions2, ...batchMaterials2.length ? { visualMaterials: batchMaterials2 } : {} });
-          if (fit.status === "fits") {
-            selected = candidate;
-            break;
-          }
-          if (fit.status === "unavailable") throw new Error("Provider could not confirm fit for the remaining question group.");
-        }
-        if (!selected.length) throw new Error("The remaining question does not fit the provider context.");
-        batchEvaluations = selected;
-      }
+      const pendingPackets = pending.map(({ packet }) => packet);
+      const singletonExecution = prepared.request.providerSelection?.batching === "singleton" || !provider.decideBatch || !provider.measureBatch;
+      const plan = await assessProviderBatchPlan({
+        group: {
+          groupId: group.groupId,
+          contextId: group.contextId,
+          respondentId: group.respondentId,
+          state: group.state,
+          questions: pendingPackets.map(({ question }) => question),
+          packets: pendingPackets
+        },
+        provider,
+        providerKind,
+        modelIdentity,
+        batching: singletonExecution ? "singleton" : "automatic"
+      });
+      if (!plan.batches.length) throw new Error("The provider could not confirm a fitting batch plan for the remaining questions.");
+      const selectedIds = new Set(plan.questionIdsByBatch[0]);
+      const batchEvaluations = pending.filter(({ questionId }) => selectedIds.has(questionId));
       const reservation = commands.reserveBatch(claim2, group.groupId, batchEvaluations.map(({ evaluationId }) => evaluationId), Date.now());
       if (!reservation) break;
       const batchQuestions = reservation.evaluations.map(({ packet }) => packet.question);
@@ -21234,7 +21370,7 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory, pro
       let settled;
       try {
         let result;
-        if (provider.decideBatch) result = await provider.decideBatch(batch, 1);
+        if (provider.decideBatch && prepared.request.providerSelection?.batching !== "singleton") result = await provider.decideBatch(batch, 1);
         else {
           const single = await provider.decide(reservation.evaluations[0].packet, 1);
           result = { answers: [{ questionId: reservation.evaluations[0].questionId, value: decisionValueFromResult(single) }], execution: {

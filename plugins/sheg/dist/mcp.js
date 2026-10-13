@@ -38899,6 +38899,137 @@ function graphDecisionRange(arm) {
   return visit2(graph.entryNodeId);
 }
 
+// src/application/provider-batch-planning.ts
+function missingFit(provider, kind, modelIdentity) {
+  return {
+    provider: kind,
+    status: "unavailable",
+    method: "unavailable",
+    modelIdentity,
+    tokenCount: "estimated",
+    tokens: 0,
+    contextLimit: null,
+    headroomTokens: null,
+    effectiveLimit: null,
+    details: {},
+    reason: provider.measure || provider.measureBatch ? "provider-measurement-failed" : "provider-measurement-unavailable"
+  };
+}
+function fitProblem(respondentId, fit) {
+  if (fit.status === "fits") return void 0;
+  return {
+    code: fit.status === "overflow" ? "context_overflow" : "context_unverified",
+    respondentId,
+    message: fit.reason ?? `Provider context ${fit.status}.`
+  };
+}
+async function assessProviderBatchPlan(input2) {
+  const { group, provider, providerKind, modelIdentity } = input2;
+  const { groupId, contextId, respondentId, state, questions, packets } = group;
+  void groupId;
+  void contextId;
+  if (questions.length !== packets.length || questions.some((question, index2) => question.id !== packets[index2]?.question.id)) {
+    throw new Error("Provider batch questions must match the ordered frozen packets.");
+  }
+  const materialsByQuestion = new Map(packets.map((packet) => [packet.question.id, packet.visualMaterials ?? []]));
+  const visualFor = (batchQuestions) => {
+    const byId = /* @__PURE__ */ new Map();
+    for (const question of batchQuestions) for (const material of materialsByQuestion.get(question.id) ?? []) byId.set(material.id, material);
+    return [...byId.values()];
+  };
+  const batchRequest = (selected) => {
+    const visualMaterials = visualFor(selected);
+    return { state, questions: [...selected], ...visualMaterials.length ? { visualMaterials } : {} };
+  };
+  const batches = [];
+  const fits = [];
+  const problems = [];
+  const record2 = (ids, fit) => {
+    fits.push({ questionIds: ids, fit });
+    const problem = fitProblem(respondentId, fit);
+    if (problem) problems.push(problem);
+  };
+  const measureOne = async (index2) => {
+    if (!provider.measure) return missingFit(provider, providerKind, modelIdentity);
+    try {
+      return await provider.measure(packets[index2]);
+    } catch {
+      return { ...missingFit(provider, providerKind, modelIdentity), reason: "provider-measurement-failed" };
+    }
+  };
+  const singleton = input2.batching === "singleton" || !provider.measureBatch || !provider.decideBatch;
+  if (singleton) {
+    for (let index2 = 0; index2 < questions.length; index2 += 1) {
+      const question = questions[index2];
+      const measured = await measureOne(index2);
+      record2([question.id], measured);
+      batches.push(batchRequest([question]));
+    }
+  } else {
+    const measureBatch = async (batchQuestions) => {
+      try {
+        return await provider.measureBatch(batchRequest(batchQuestions));
+      } catch {
+        return { ...missingFit(provider, providerKind, modelIdentity), reason: "provider-measurement-failed" };
+      }
+    };
+    let start = 0;
+    while (start < questions.length) {
+      let end = start + 1;
+      let lastFit;
+      while (end <= questions.length) {
+        const candidate = questions.slice(start, end);
+        const measured = await measureBatch(candidate);
+        if (measured.status === "unavailable") {
+          record2(candidate.map(({ id }) => id), measured);
+          return finish();
+        }
+        if (measured.status === "overflow") {
+          if (!lastFit) record2(candidate.map(({ id }) => id), measured);
+          break;
+        }
+        lastFit = { end, fit: measured };
+        end += 1;
+      }
+      if (!lastFit) return finish();
+      const selected = questions.slice(start, lastFit.end);
+      batches.push(batchRequest(selected));
+      record2(selected.map(({ id }) => id), lastFit.fit);
+      start = lastFit.end;
+    }
+  }
+  return finish();
+  function finish() {
+    const tokens = fits.filter(({ fit: measured }) => measured.status === "fits").map(({ fit: measured }) => measured.tokens);
+    const repeatedInputTokens = tokens.length === batches.length ? tokens.reduce((sum2, value) => sum2 + value, 0) : null;
+    const pricing = input2.pricing;
+    let cost;
+    if (pricing?.kind === "no-provider-invoice") cost = { kind: "no-provider-invoice", basis: "provider pricing contract" };
+    else if (pricing?.kind === "published-rate" && repeatedInputTokens !== null) {
+      cost = {
+        kind: "estimate",
+        amount: pricing.amount * repeatedInputTokens / 1e6,
+        currency: pricing.currency,
+        basis: "published-rate estimate",
+        source: pricing.source,
+        observedAt: pricing.observedAt
+      };
+    } else cost = { kind: "unknown", basis: "unverified" };
+    const minimumCalls = batches.length;
+    const remaining = input2.remainingCalls ?? Number.MAX_SAFE_INTEGER;
+    return {
+      batches,
+      questionIdsByBatch: batches.map(({ questions: selected }) => selected.map(({ id }) => id)),
+      fits,
+      problems,
+      minimumCalls,
+      repeatedInputTokens,
+      cost,
+      exceedsRemainingCalls: minimumCalls > remaining
+    };
+  }
+}
+
 // src/application/run-inspection.ts
 function mergeMaterials(...collections) {
   const merged = /* @__PURE__ */ new Map();
@@ -38995,7 +39126,7 @@ async function prepareFollowOnRun(request, source, provider) {
     const modelIdentity = configured.kind === "jev" || configured.kind === "clef" ? configured.model : configured.checkpoint;
     const contextId = randomUUID();
     const groupId = randomUUID();
-    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, configured.kind, modelIdentity);
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: turn.respondentId, state: packets[0].state, questions: request.questions, packets }, provider, configured.kind, modelIdentity, request.providerSelection?.batching ?? "automatic");
     minimumCalls += planned.batches.length;
     fits.push(...planned.fits);
     problems.push(...planned.problems);
@@ -39221,7 +39352,7 @@ async function prepareRun(input2, provider) {
     const contextId = randomUUID();
     const groupId = randomUUID();
     preparedGroups.push({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questionIds: request.questions.map(({ id }) => id) });
-    const planned = await planQuestionBatches({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questions: request.questions, packets }, provider, kind, modelIdentity);
+    const planned = await planQuestionBatches({ groupId, contextId, respondentId: respondent.id, state: packets[0].state, questions: request.questions, packets }, provider, kind, modelIdentity, request.providerSelection?.batching ?? "automatic");
     minimumCalls += planned.batches.length;
     fits.push(...planned.fits);
     problems.push(...planned.problems);
@@ -39257,78 +39388,18 @@ async function prepareRun(input2, provider) {
   };
   return { inspection, prepared };
 }
-async function planQuestionBatches(group, provider, kind, modelIdentity) {
-  const { groupId, contextId, respondentId, state, questions, packets } = group;
-  const batches = [];
-  const fits = [];
-  const problems = [];
-  const materialsByQuestion = new Map(packets.map((packet) => [packet.question.id, packet.visualMaterials ?? []]));
-  const batchVisualMaterials = (batchQuestions) => {
-    const byId = /* @__PURE__ */ new Map();
-    for (const question of batchQuestions) for (const material of materialsByQuestion.get(question.id) ?? []) byId.set(material.id, material);
-    return [...byId.values()];
-  };
-  const measureOne = async (index2) => {
-    if (!provider.measure) return missingMeasureFit(provider, kind, modelIdentity);
-    try {
-      return await provider.measure(packets[index2]);
-    } catch {
-      return { ...missingMeasureFit(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
-    }
-  };
-  const measureBatch = async (batchQuestions) => {
-    if (!provider.measureBatch) return missingMeasureFit(provider, kind, modelIdentity);
-    try {
-      const visualMaterials = batchVisualMaterials(batchQuestions);
-      return await provider.measureBatch({ state, questions: [...batchQuestions], ...visualMaterials.length ? { visualMaterials } : {} });
-    } catch {
-      return { ...missingMeasureFit(provider, kind, modelIdentity), reason: "provider-measurement-failed" };
-    }
-  };
-  const recordFit = (questionIds, fit) => {
-    fits.push({ respondentId, groupId, contextId, questionIds, fit });
-    const problem = problemForFit(respondentId, fit);
-    if (problem) problems.push(problem);
-  };
-  if (!provider.measureBatch || !provider.decideBatch) {
-    for (let index2 = 0; index2 < questions.length; index2 += 1) {
-      const question = questions[index2];
-      const fit = await measureOne(index2);
-      recordFit([question.id], fit);
-      const visualMaterials = batchVisualMaterials([question]);
-      batches.push({ state, questions: [question], ...visualMaterials.length ? { visualMaterials } : {} });
-    }
-    return { batches, fits, problems };
-  }
-  let start = 0;
-  while (start < questions.length) {
-    let end = start + 1;
-    let lastFit;
-    while (end <= questions.length) {
-      const candidate = questions.slice(start, end);
-      const fit = await measureBatch(candidate);
-      if (fit.status === "unavailable") {
-        recordFit(candidate.map(({ id }) => id), fit);
-        return { batches, fits, problems };
-      }
-      if (fit.status === "overflow") {
-        if (!lastFit) recordFit(candidate.map(({ id }) => id), fit);
-        break;
-      }
-      lastFit = { end, fit };
-      end += 1;
-    }
-    if (lastFit) {
-      const selected = questions.slice(start, lastFit.end);
-      const visualMaterials = batchVisualMaterials(selected);
-      batches.push({ state, questions: [...selected], ...visualMaterials.length ? { visualMaterials } : {} });
-      recordFit(selected.map(({ id }) => id), lastFit.fit);
-      start = lastFit.end;
-      continue;
-    }
-    return { batches, fits, problems };
-  }
-  return { batches, fits, problems };
+async function planQuestionBatches(group, provider, kind, modelIdentity, batching = "automatic") {
+  const planned = await assessProviderBatchPlan({ group, provider, providerKind: kind, modelIdentity, batching });
+  const fits = planned.fits.map(({ questionIds, fit }) => ({
+    respondentId: group.respondentId,
+    groupId: group.groupId,
+    contextId: group.contextId,
+    questionIds,
+    fit
+  }));
+  const problems = planned.problems.map(({ code, respondentId, message }) => ({ code, respondentId, message }));
+  if (planned.exceedsRemainingCalls) problems.push({ code: "insufficient_call_limit", message: "The physical request plan exceeds the remaining call limit." });
+  return { batches: planned.batches, fits, problems };
 }
 async function prepareJourneyAdmission(request, provider) {
   const configured = requireExplicitProvider(request);
