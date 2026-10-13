@@ -139,21 +139,28 @@ export function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJ
   }
   const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
   const respondentIdSet = new Set(respondentIds);
-  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length !== respondentIds.length || prepared.evaluations.length === 0) {
+  const forkNodeIds = new Set(journeyTopology(parsedRequest.data.journey).nodes.filter((node) => node.kind === 'fork').map(({ id }) => id));
+  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length < respondentIds.length || prepared.evaluations.length === 0) {
     throw new RunStoreError('invalid_prepared_run', 'Prepared journey requires unique respondent state and at least one reached turn.');
   }
   const stateById = new Map<string, JourneyRespondentState>();
-  const allowedStatuses = new Set(['active', 'completed', 'failed', 'unreached']);
+  const stateKey = (respondentId: string, branchId: string) => JSON.stringify([respondentId, branchId]);
+  const allowedStatuses = new Set(['active', 'waiting-fork', 'branched', 'completed', 'failed', 'unreached']);
   for (const state of prepared.respondents) {
-    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || stateById.has(state.respondentId) || !Number.isSafeInteger(state.revision) || state.revision < 0 ||
+    const key = stateKey(state.respondentId, state.branchId);
+    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || !state.branchId || stateById.has(key) || !Number.isSafeInteger(state.revision) || state.revision < 0 ||
         !Array.isArray(state.events) || !Array.isArray(state.route) ||
         (state.status === 'active' ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) :
-          state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null)) {
+          state.status === 'waiting-fork' ? !(state.currentNodeId && forkNodeIds.has(state.currentNodeId) && state.currentTurnId === null && state.currentContextId) :
+            state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null) ||
+        state.route.some((entry) => entry.branchId !== undefined && !entry.branchId)) {
       throw new RunStoreError('invalid_prepared_run', 'Prepared journey respondent state is inconsistent.');
     }
-    stateById.set(state.respondentId, state);
+    stateById.set(key, state);
   }
-  if (stateById.size !== respondentIdSet.size) throw new RunStoreError('invalid_prepared_run', 'Every journey respondent requires durable state.');
+  if ([...respondentIdSet].some((respondentId) => !prepared.respondents.some((state) => state.respondentId === respondentId))) {
+    throw new RunStoreError('invalid_prepared_run', 'Every journey respondent requires durable state.');
+  }
 
   const evaluationIds = new Set<string>();
   const turnIds = new Set<string>();
@@ -162,13 +169,13 @@ export function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJ
   const activeTurnIds = new Set<string>();
   for (const evaluation of prepared.evaluations) {
     const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    const state = stateById.get(evaluation.respondentId);
+    const state = stateById.get(stateKey(evaluation.respondentId, evaluation.branchId));
     const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
-    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
+    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.branchId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
     if (!packet.success || !state || !respondent || state.status !== 'active' ||
         !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 ||
         !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id ||
-        state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId ||
+        state.branchId !== evaluation.branchId || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId ||
         !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) ||
         hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) ||
         evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) ||
@@ -186,7 +193,7 @@ export function validatePreparedJourney(prepared: PreparedJourneyRun): PreparedJ
     if (state.status === 'active' && !activeTurnIds.has(state.currentTurnId!)) {
       throw new RunStoreError('invalid_prepared_run', 'Every active journey respondent requires one pending turn.');
     }
-    if (state.status !== 'active' && prepared.evaluations.some(({ respondentId }) => respondentId === state.respondentId)) {
+    if (state.status !== 'active' && prepared.evaluations.some(({ respondentId, branchId }) => respondentId === state.respondentId && branchId === state.branchId)) {
       throw new RunStoreError('invalid_prepared_run', 'A terminal or unreached respondent cannot have a pending turn.');
     }
   }

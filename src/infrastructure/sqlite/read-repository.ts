@@ -73,9 +73,9 @@ export function createSqliteReadRepository(context: SqliteRepositoryContext): Ru
       }));
     },
 
-    getJourneyWorkerTurn(runId, evaluationId, respondentId) {
+    getJourneyWorkerTurn(runId, evaluationId, respondentId, branchId) {
       context.ensureOpen();
-      return context.readSnapshot(() => loadJourneyWorkerTurn(context.database, runId, evaluationId, respondentId));
+      return context.readSnapshot(() => loadJourneyWorkerTurn(context.database, runId, evaluationId, respondentId, branchId));
     },
 
     getJourneyRun(runId) {
@@ -178,6 +178,7 @@ export function createSqliteReadRepository(context: SqliteRepositoryContext): Ru
             evaluationId: asText(row.evaluation_id, 'evaluation ID'),
             contextId: asText(row.context_id, 'context ID'),
             respondentId: asText(row.respondent_id, 'respondent ID'),
+            ...(row.turn_id === null ? {} : { branchId: asText(row.branch_id, 'branch ID') }),
             questionId: asText(row.question_id, 'question ID'),
             status: parseStored(evaluationStatusSchema, asText(row.status, 'evaluation status'), 'evaluation status'),
             ...(decoded === undefined ? {} : { result: decoded.result, execution: decoded.execution }),

@@ -105,7 +105,7 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
     if (!commands.heartbeat(claim, Date.now())) return;
     const pending = evaluations.find((evaluation) => evaluation.status === 'pending');
     if (!pending) break;
-    const existingChoice = pending.providerSelection ?? accepted.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === pending.respondentId && choice.questionId === pending.questionId);
+    const existingChoice = pending.providerSelection ?? accepted.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === pending.respondentId && choice.questionId === pending.questionId && (choice.branchId ?? 'root') === pending.branchId);
     let choice;
     try { choice = explicitProvider ? undefined : existingChoice ?? await resolveJourneyProvider(reads, runId, accepted, pending, providerFactory, providerOptions, assertProviderReady); }
     catch (error) {
@@ -118,7 +118,7 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
     const reservation = commands.reserveNext(claim, Date.now(), choice ? { evaluationId: pending.evaluationId, packetFingerprint: pending.packetFingerprint, providerSelection: choice } : undefined);
     if (!reservation) break;
     if (choice) pending.providerSelection = choice;
-    const currentTurn = reads.getJourneyWorkerTurn(runId, reservation.evaluation.evaluationId, reservation.evaluation.respondentId);
+    const currentTurn = reads.getJourneyWorkerTurn(runId, reservation.evaluation.evaluationId, reservation.evaluation.respondentId, reservation.evaluation.branchId ?? 'root');
     const { evaluation: currentEvaluation, respondent: respondentState, profile } = currentTurn;
     const providerConfig = explicitProvider ?? accepted.providerSelectionSnapshot?.catalogue.entries.find(({ id }) => id === reservation.evaluation.providerSelection?.providerId)?.provider;
     if (!providerConfig) throw new Error('The frozen provider choice is absent from the accepted catalogue.');
@@ -127,13 +127,13 @@ async function executeJourney(reads: RunReadRepository, commands: RunCommandRepo
       const result = await provider.decide(reservation.evaluation.packet, 1);
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
       const progress = advanceJourney(accepted.request.journey, profile, {
-        currentNodeId: currentEvaluation.nodeId, events: respondentState.events, route: respondentState.route,
+        branchId: respondentState.branchId, currentNodeId: currentEvaluation.nodeId, events: respondentState.events, route: respondentState.route,
       }, value, accepted.compilerFingerprint, currentEvaluation.packet.question.visual ? {
         provider: result.provider, model: result.model, visualMaterials: currentEvaluation.packet.visualMaterials ?? [],
       } : undefined);
       const nextEvaluation = progress.next ? {
         evaluationId: randomUUID(), turnId: randomUUID(), contextId: randomUUID(),
-        respondentId: respondentState.respondentId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,
+        respondentId: respondentState.respondentId, branchId: respondentState.branchId, questionId: progress.next.taskId, nodeId: progress.next.nodeId,
         pathId: progress.next.pathId,
         occurrence: progress.events.filter((event) => event.type === 'response' && event.taskId === progress.next!.taskId).length + 1,
         ordinal: currentTurn.nextOrdinal, packet: progress.next.packet,
@@ -180,12 +180,12 @@ async function resolveJourneyProvider(reads: RunReadRepository, runId: string, r
   if (!snapshot) throw new Error('The automatic provider catalogue was not frozen with the accepted run.');
   const status = reads.getStatus(runId);
   const remainingCalls = Math.max(0, status.maxCalls - status.usedCalls - status.reservedCalls);
-  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members }) => members.some(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId));
+  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members }) => members.some(({ respondentId, questionId, branchId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId && (branchId ?? 'root') === evaluation.branchId));
   const prior = lock ? run.evaluations.filter((item) => item.providerSelection?.comparisonLockId === lock.id).map((item) => item.providerSelection!) : [];
   const lockedProvider = lock?.equality.provider === 'same' ? prior[0]?.providerId : undefined;
   const lockedModel = lock?.equality.model === 'same' ? prior[0]?.modelIdentity : undefined;
-  const unitId = `${evaluation.respondentId}/${evaluation.questionId}`;
-  const pins = [...new Set([run.request.providerSelection?.unitOverrides?.[unitId], run.request.providerSelection?.unitOverrides?.[evaluation.questionId]].filter((id): id is string => id !== undefined))];
+  const unitId = `${evaluation.respondentId}/${evaluation.questionId}/${evaluation.branchId}`;
+  const pins = [...new Set([run.request.providerSelection?.unitOverrides?.[unitId], run.request.providerSelection?.unitOverrides?.[`${evaluation.respondentId}/${evaluation.questionId}`], run.request.providerSelection?.unitOverrides?.[evaluation.questionId]].filter((id): id is string => id !== undefined))];
   if (pins.length > 1 || (lockedProvider && pins[0] && lockedProvider !== pins[0])) throw new NoEligibleJourneyProviderError('The reached unit has conflicting binding provider constraints.');
   const candidates = await Promise.all(snapshot.catalogue.entries.map(async (entry) => {
     if (!entry.enabled) return { id: entry.id, ready: false, plannedCalls: 1 };
@@ -205,7 +205,7 @@ async function resolveJourneyProvider(reads: RunReadRepository, runId: string, r
     candidates, remainingCalls, ...(run.request.providerSelection?.preferredOrder === undefined ? {} : { preferredOrder: run.request.providerSelection.preferredOrder }),
     ...((lockedProvider ?? pins[0]) ? { unitOverride: lockedProvider ?? pins[0] } : {}) });
   if (!selected.selected) throw new NoEligibleJourneyProviderError('No eligible provider fits the reached journey unit.');
-  return providerSelectionInitialChoiceSchema.parse({ respondentId: evaluation.respondentId, questionId: evaluation.questionId,
+  return providerSelectionInitialChoiceSchema.parse({ respondentId: evaluation.respondentId, questionId: evaluation.questionId, branchId: evaluation.branchId,
     ...(lock ? { comparisonLockId: lock.id } : {}), providerId: selected.selected.id,
     modelIdentity: providerModelIdentity(selected.selected.provider!), decisionReason: selected.decisionReason,
     candidates: selected.candidates.map(({ id, eligible, selected: isSelected, fit, cost, exclusion, preferenceRank }) => ({ id, eligible, selected: isSelected,

@@ -136,11 +136,11 @@ type JourneyBranchState = {
 };
 ```
 
-- [ ] **Step 1: Add storage-contract tests that fail before production changes.** Extend store acceptance/reopen tests with two states for one respondent, distinct branch IDs and context IDs, identical current task/node IDs, and verify readback returns both without treating one as corrupt; add a corrupt cross-branch context reference case that must be rejected.
-- [ ] **Step 2: Run the focused lifecycle/store tests and prove RED.** Run `npm test -- --test-name-pattern="journey branch state|branch-local evaluation identity|corrupt branch context"`; expected: current domain types, SQL decoders, and uniqueness assumptions reject or collapse duplicate respondent state.
-- [ ] **Step 3: Implement branch-scoped lifecycle and persistence mapping.** Add branch IDs to the single lifecycle schemas and command/read owners; update acceptance's initial root records and transaction row mappings; preserve independent `pathId` for response-route history rather than overloading it as branch identity. Reuse already loaded run/evaluation/state rows in each command transaction.
-- [ ] **Step 4: Run focused tests and confirm GREEN.** Run `npm test -- --test-name-pattern="journey branch state|branch-local evaluation identity|corrupt branch context|run store"`; expected: parallel branches for one respondent are valid and cross-branch integrity corruption fails at the storage boundary.
-- [ ] **Step 5: Commit branch-aware lifecycle contracts.** Commit lifecycle, request, command/read owners, and behavior tests as `feat: scope journey state and evaluations by branch`.
+- [x] **Step 1: Add storage-contract tests that fail before production changes.** Extend store acceptance/reopen tests with two states for one respondent, distinct branch IDs and context IDs, identical current task/node IDs, and verify readback returns both without treating one as corrupt; add a corrupt cross-branch context reference case that must be rejected.
+- [x] **Step 2: Run the focused lifecycle/store tests and prove RED.** Run `npm test -- --test-name-pattern="journey branch state|branch-local evaluation identity|corrupt branch context"`; expected: current domain types, SQL decoders, and uniqueness assumptions reject or collapse duplicate respondent state.
+- [x] **Step 3: Implement branch-scoped lifecycle and persistence mapping.** Add branch IDs to the single lifecycle schemas and command/read owners; update acceptance's initial root records and transaction row mappings; preserve independent `pathId` for response-route history rather than overloading it as branch identity. Reuse already loaded run/evaluation/state rows in each command transaction.
+- [x] **Step 4: Run focused tests and confirm GREEN.** Run `npm test -- --test-name-pattern="journey branch state|branch-local evaluation identity|corrupt branch context|run store"`; expected: parallel branches for one respondent are valid and cross-branch integrity corruption fails at the storage boundary.
+- [x] **Step 5: Commit branch-aware lifecycle contracts.** Commit lifecycle, request, command/read owners, and behavior tests as `feat: scope journey state and evaluations by branch`.
 
 ## Task 5: Snapshot the Settled Cohort and Fan Out Atomically
 

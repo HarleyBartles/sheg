@@ -185,14 +185,14 @@ export function materializeJourneyRun(admission: PreparedJourneyAdmission): Prep
     const contextId = randomUUID();
     const turnId = randomUUID();
     const evaluation = {
-      evaluationId, contextId, respondentId: profile.id, questionId: firstPacket.request.question.id,
+      evaluationId, contextId, respondentId: profile.id, branchId: 'root', questionId: firstPacket.request.question.id,
       packet: firstPacket.request, packetFingerprint: hashCanonical({ packet: firstPacket.request, compilerFingerprint }),
       turnId, nodeId: firstPacket.nodeId, pathId: firstPacket.pathId, occurrence: 1, ordinal: ordinal++,
     };
     evaluations.push(evaluation);
     const events = initialJourneyPath(request.journey).events;
     respondents.push({
-      respondentId: profile.id, status: 'active', currentNodeId: firstPacket.nodeId, currentTurnId: turnId,
+      respondentId: profile.id, branchId: 'root', status: 'active', currentNodeId: firstPacket.nodeId, currentTurnId: turnId,
       currentContextId: contextId, revision: 0, events, route: [],
     });
   }

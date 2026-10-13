@@ -7,13 +7,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { materializeJourneyRun, prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
+import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import type { DecisionResult } from '../src/domain/decision/decision.js';
 import { followOnRunRequestSchema, runRequestSchema, type InlineJourneyRequest, type InlineRunRequest, type ParsedFollowOnRunRequest, type ParsedInlineJourneyRequest, type PreparedJourneyRun, type PreparedRun, type RunMaterialItem } from '../src/domain/run/request.js';
 import type { JourneyRespondentState } from '../src/domain/run/lifecycle.js';
 import { compileDecisionPacket, promptContractHash, type PromptHistoryEvent } from '../src/domain/decision/prompt.js';
 import { hashCanonical } from '../src/infrastructure/identity.js';
-import { openRunStore, RunStoreError } from '../src/infrastructure/run-store.js';
+import { openRunStore, RunStoreError, splitRunStore } from '../src/infrastructure/run-store.js';
 import { queryEvidencePage } from '../src/infrastructure/sqlite/evidence-query.js';
 
 const input: InlineRunRequest = {
@@ -89,13 +90,14 @@ function preparedJourneyRun(): PreparedJourneyRun {
     const nodeId = 'ask-interest';
     const packet = compileDecisionPacket(request.journey, respondent, 'interest', initialEvents);
     return {
-      evaluationId: `evaluation-${respondent.id}-opening`, contextId, respondentId: respondent.id,
+      evaluationId: `evaluation-${respondent.id}-opening`, contextId, respondentId: respondent.id, branchId: 'root',
       questionId: 'interest', packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }),
       turnId, nodeId, pathId: 'root', occurrence: 1, ordinal: index,
     };
   });
   const respondents: JourneyRespondentState[] = evaluations.map((evaluation) => ({
     respondentId: evaluation.respondentId,
+    branchId: 'root',
     status: 'active',
     currentNodeId: evaluation.nodeId,
     currentTurnId: evaluation.turnId,
@@ -417,6 +419,103 @@ test('journey acceptance freezes exact reached packets and respondent state acro
   }
 });
 
+function addParallelStoredBranch(database: DatabaseSync, runId: string): void {
+  database.prepare(`INSERT INTO question_groups (group_id, run_id, ordinal, context_id, respondent_id, state_json, question_ids_json)
+    SELECT 'group-reader-a-branch-b', run_id, (SELECT MAX(ordinal) + 1 FROM question_groups WHERE run_id = ?),
+      'context-reader-a-branch-b', respondent_id, state_json, question_ids_json
+    FROM question_groups WHERE run_id = ? AND respondent_id = 'reader-a' ORDER BY ordinal LIMIT 1`).run(runId, runId);
+  database.prepare(`INSERT INTO evaluations (evaluation_id, run_id, ordinal, context_id, respondent_id, branch_id, question_id, group_id,
+      turn_id, node_id, path_id, occurrence, packet_json, packet_fingerprint, provider_selection_json, status, result_json,
+      failure_code, failure_message, failure_detail_json)
+    SELECT 'evaluation-reader-a-branch-b', run_id, (SELECT MAX(ordinal) + 1 FROM evaluations WHERE run_id = ?),
+      'context-reader-a-branch-b', respondent_id, 'condition-b', question_id, 'group-reader-a-branch-b', 'turn-reader-a-branch-b',
+      node_id, path_id, occurrence, packet_json, packet_fingerprint, provider_selection_json, status, result_json,
+      failure_code, failure_message, failure_detail_json
+    FROM evaluations WHERE run_id = ? AND respondent_id = 'reader-a' ORDER BY ordinal LIMIT 1`).run(runId, runId);
+  database.prepare(`INSERT INTO journey_respondents (run_id, respondent_id, branch_id, status, current_node_id, current_turn_id,
+      current_context_id, revision, events_json, route_json, outcome)
+    SELECT run_id, respondent_id, 'condition-b', status, current_node_id, 'turn-reader-a-branch-b',
+      'context-reader-a-branch-b', revision, events_json, route_json, outcome
+    FROM journey_respondents WHERE run_id = ? AND respondent_id = 'reader-a'`).run(runId);
+}
+
+test('journey branch state supports branch-local evaluation identity for one respondent at the same task', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+    addParallelStoredBranch(database, accepted.run.runId);
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.deepEqual(run.respondents.filter(({ respondentId }) => respondentId === 'reader-a')
+      .map(({ respondentId, branchId, currentNodeId, currentContextId, status }) => ({ respondentId, branchId, currentNodeId, currentContextId, status }))
+      .sort((left, right) => left.branchId.localeCompare(right.branchId)), [
+      { respondentId: 'reader-a', branchId: 'condition-b', currentNodeId: 'ask-interest', currentContextId: 'context-reader-a-branch-b', status: 'active' },
+      { respondentId: 'reader-a', branchId: 'root', currentNodeId: 'ask-interest', currentContextId: 'context-reader-a-opening', status: 'active' },
+    ]);
+    assert.deepEqual(run.evaluations.filter(({ respondentId }) => respondentId === 'reader-a')
+      .map(({ respondentId, branchId, nodeId, contextId }) => ({ respondentId, branchId, nodeId, contextId }))
+      .sort((left, right) => (left.branchId ?? '').localeCompare(right.branchId ?? '')), [
+      { respondentId: 'reader-a', branchId: 'condition-b', nodeId: 'ask-interest', contextId: 'context-reader-a-branch-b' },
+      { respondentId: 'reader-a', branchId: 'root', nodeId: 'ask-interest', contextId: 'context-reader-a-opening' },
+    ]);
+  } finally { database.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('journey worker advances and closes each stored branch independently', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  try {
+    const prepared = preparedJourneyRun();
+    prepared.request.maxCalls = 10;
+    prepared.requestFingerprint = hashCanonical({ request: prepared.request, compilerFingerprint: prepared.compilerFingerprint });
+    const accepted = store.acceptJourney(randomUUID(), prepared);
+    const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+    try { addParallelStoredBranch(database, accepted.run.runId); } finally { database.close(); }
+    const deterministicProvider: DecisionProvider = { ...provider, async decide() { return savedAnswer; } };
+    await executeQuestionRun(splitRunStore(store), accepted.run.runId, () => deterministicProvider);
+    const run = store.getJourneyRun(accepted.run.runId);
+    assert.equal(store.getStatus(accepted.run.runId).status, 'completed');
+    assert.equal(run.respondents.length, 3);
+    assert.ok(run.respondents.every((state) => state.status === 'completed' && state.currentTurnId === null));
+    const readerABranches = run.respondents.filter(({ respondentId }) => respondentId === 'reader-a')
+      .map(({ branchId, route }) => ({ branchId, routeBranchIds: route.map((entry) => entry.branchId) }))
+      .sort((left, right) => left.branchId.localeCompare(right.branchId));
+    assert.deepEqual(readerABranches, [
+      { branchId: 'condition-b', routeBranchIds: ['condition-b', 'condition-b'] },
+      { branchId: 'root', routeBranchIds: ['root', 'root'] },
+    ]);
+    assert.equal(run.evaluations.length, 6);
+    assert.ok(run.evaluations.every(({ status }) => status === 'answered'));
+    assert.deepEqual(run.evaluations.filter(({ respondentId }) => respondentId === 'reader-a').map(({ branchId }) => branchId), [
+      'root', 'condition-b', 'root', 'condition-b',
+    ]);
+    const branchEvaluation = run.evaluations.find(({ respondentId, branchId }) => respondentId === 'reader-a' && branchId === 'condition-b')!;
+    assert.equal(store.getContext(accepted.run.runId, branchEvaluation.evaluationId, branchEvaluation.contextId).branchId, 'condition-b');
+    assert.deepEqual(store.answers(accepted.run.runId).items.filter(({ respondentId }) => respondentId === 'reader-a').map(({ branchId }) => branchId), [
+      'root', 'condition-b', 'root', 'condition-b',
+    ]);
+    const evidence = store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { respondentId: 'reader-a' }, limit: 10 });
+    assert.deepEqual(evidence.items.map(({ branchId }) => branchId), ['root', 'condition-b', 'root', 'condition-b']);
+    assert.deepEqual(evidence.coverage.respondents, { total: 2, completed: 2, failed: 0, unreached: 0, active: 0 });
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('corrupt branch context references fail journey recall', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const database = new DatabaseSync(path.join(root, 'runs.sqlite'));
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedJourneyRun());
+    addParallelStoredBranch(database, accepted.run.runId);
+    assert.doesNotThrow(() => store.getJourneyRun(accepted.run.runId));
+    database.prepare("UPDATE evaluations SET context_id = 'context-reader-a-opening' WHERE run_id = ? AND evaluation_id = 'evaluation-reader-a-branch-b'")
+      .run(accepted.run.runId);
+    assert.throws(() => store.getJourneyRun(accepted.run.runId),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
+  } finally { database.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('journey recall rejects corrupt history and route fields behind valid JSON arrays', async () => {
   const corruptions = [
     { column: 'events_json', value: [{ type: 'exposure', sequence: 'zero', nodeId: 'show-opening', itemId: 'section-one' }] },
@@ -480,13 +579,13 @@ test('answer, route transition and next reached turn commit atomically', async (
     const nextPacket = compileDecisionPacket(prepared.request.journey, prepared.request.respondents[0]!, 'interest', events);
     const nextEvaluation = {
       evaluationId: 'evaluation-reader-a-followup', turnId: 'turn-reader-a-followup', contextId: 'context-reader-a-followup',
-      respondentId: 'reader-a', questionId: 'interest', nodeId: 'ask-interest-followup', pathId: 'ask-interest=continue', occurrence: 1, ordinal: 2,
+      respondentId: 'reader-a', branchId: 'root', questionId: 'interest', nodeId: 'ask-interest-followup', pathId: 'ask-interest=continue', occurrence: 1, ordinal: 2,
       packet: nextPacket, packetFingerprint: hashCanonical({ packet: nextPacket, compilerFingerprint: promptContractHash() }),
     };
     const nextState: JourneyRespondentState = {
-      respondentId: 'reader-a', status: 'active', currentNodeId: 'ask-interest-followup', currentTurnId: nextEvaluation.turnId,
+      respondentId: 'reader-a', branchId: 'root', status: 'active', currentNodeId: 'ask-interest-followup', currentTurnId: nextEvaluation.turnId,
       currentContextId: nextEvaluation.contextId, revision: 1, events,
-      route: [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 'continue', probabilities: response.probabilities, confidence: response.confidence }, toNodeId: 'expose-section-three' }],
+      route: [{ branchId: 'root', nodeId: 'ask-interest', response: { type: 'choice', choice: 'continue', probabilities: response.probabilities, confidence: response.confidence }, toNodeId: 'expose-section-three' }],
     };
     store.settleJourney(claim, current.attemptId, { kind: 'answered', result: response }, {
       respondentId: 'reader-a', expectedRevision: 0, state: nextState, nextEvaluation,
@@ -495,7 +594,7 @@ test('answer, route transition and next reached turn commit atomically', async (
     assert.equal(run.evaluations[0]!.result?.type, 'choice');
     assert.equal(run.evaluations.length, 3);
     assert.equal(run.evaluations[2]!.turnId, 'turn-reader-a-followup');
-    assert.deepEqual(run.respondents[0]!.route, [{ nodeId: 'ask-interest', response: { type: 'choice', choice: 'continue', probabilities: response.probabilities, confidence: response.confidence }, toNodeId: 'expose-section-three' }]);
+    assert.deepEqual(run.respondents[0]!.route, [{ branchId: 'root', nodeId: 'ask-interest', response: { type: 'choice', choice: 'continue', probabilities: response.probabilities, confidence: response.confidence }, toNodeId: 'expose-section-three' }]);
     assert.equal(run.respondents[0]!.currentTurnId, 'turn-reader-a-followup');
     assert.equal(run.respondents[1]!.revision, 0);
     assert.deepEqual(run.evaluations[0]!.result, response);
@@ -532,7 +631,7 @@ test('journey storage preserves terminal and unreached respondents without fabri
   try {
     const prepared = preparedJourneyRun();
     prepared.respondents[1] = {
-      respondentId: 'reader-b', status: 'unreached', currentNodeId: null, currentTurnId: null, currentContextId: null,
+      respondentId: 'reader-b', branchId: 'root', status: 'unreached', currentNodeId: null, currentTurnId: null, currentContextId: null,
       revision: 0, events: [], route: [],
     };
     prepared.evaluations.pop();
@@ -580,7 +679,7 @@ test('journey answer and route transition roll back together when next-turn pers
     const packet = compileDecisionPacket(prepared.request.journey, prepared.request.respondents[0]!, 'interest', events);
     const nextEvaluation = {
       evaluationId: 'evaluation-reader-a-followup', turnId: 'turn-reader-a-followup', contextId: 'context-reader-a-followup',
-      respondentId: 'reader-a', questionId: 'interest', nodeId: 'ask-interest-followup', pathId: 'ask-interest=continue', occurrence: 1, ordinal: 2,
+      respondentId: 'reader-a', branchId: 'root', questionId: 'interest', nodeId: 'ask-interest-followup', pathId: 'ask-interest=continue', occurrence: 1, ordinal: 2,
       packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint: promptContractHash() }),
     };
     const state: JourneyRespondentState = {

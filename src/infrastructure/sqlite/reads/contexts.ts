@@ -17,6 +17,7 @@ export function readRunContext(database: DatabaseSync, runId: string, evaluation
   return {
     runId, evaluationId, contextId,
     respondentId: asText(row.respondent_id, 'respondent ID'),
+    ...(row.turn_id === null ? {} : { branchId: asText(row.branch_id, 'branch ID') }),
     questionId: asText(row.question_id, 'question ID'),
     status: asText(row.status, 'evaluation status') as RunContextDetail['status'],
     packet,

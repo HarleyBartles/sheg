@@ -20,17 +20,17 @@ export function reopenFailedQuestions(database: NodeSQLiteDatabase, runId: strin
     .where(and(eq(evaluations.runId, runId), eq(evaluations.status, 'failed'))).run();
 }
 
-export function reopenJourneyEvaluation(database: NodeSQLiteDatabase, runId: string, evaluationId: string, respondentId: string): boolean {
+export function reopenJourneyEvaluation(database: NodeSQLiteDatabase, runId: string, evaluationId: string, respondentId: string, branchId: string): boolean {
   return database.update(evaluations).set({ status: 'pending', resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null })
-    .where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.status, 'failed')))
+    .where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, 'failed')))
     .returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
 }
 
-export function restoreFailedJourneyRespondent(database: NodeSQLiteDatabase, runId: string, respondentId: string, currentNodeId: string, currentTurnId: string, currentContextId: string): boolean {
+export function restoreFailedJourneyRespondent(database: NodeSQLiteDatabase, runId: string, respondentId: string, branchId: string, currentNodeId: string, currentTurnId: string, currentContextId: string): boolean {
   return database.update(journeyRespondents).set({
     status: 'active', currentNodeId, currentTurnId, currentContextId,
     revision: sql`${journeyRespondents.revision} + 1`,
-  }).where(and(eq(journeyRespondents.runId, runId), eq(journeyRespondents.respondentId, respondentId), eq(journeyRespondents.status, 'failed')))
+  }).where(and(eq(journeyRespondents.runId, runId), eq(journeyRespondents.respondentId, respondentId), eq(journeyRespondents.branchId, branchId), eq(journeyRespondents.status, 'failed')))
     .returning({ respondentId: journeyRespondents.respondentId }).all().length === 1;
 }
 
@@ -50,7 +50,7 @@ export function markActiveJourneyRespondentsUnreached(database: NodeSQLiteDataba
   database.update(journeyRespondents).set({
     status: 'unreached', currentNodeId: null, currentTurnId: null, currentContextId: null,
     revision: sql`${journeyRespondents.revision} + 1`,
-  }).where(and(eq(journeyRespondents.runId, runId), eq(journeyRespondents.status, 'active'))).run();
+  }).where(and(eq(journeyRespondents.runId, runId), inArray(journeyRespondents.status, ['active', 'waiting-fork']))).run();
 }
 
 export function deleteRuns(database: NodeSQLiteDatabase, runIds: string[]): void {

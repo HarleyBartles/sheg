@@ -17,7 +17,7 @@ export class JourneyExecutionError extends Error {
 
 export type JourneyProgress = {
   events: JourneyEvent[];
-  route: Array<{ nodeId: string; response: DecisionValue; toNodeId: string }>;
+  route: Array<{ branchId?: string | undefined; nodeId: string; response: DecisionValue; toNodeId: string }>;
   status: 'active' | 'completed';
   outcome: string | null;
   next?: { nodeId: string; taskId: string; pathId: string; packet: DecisionRequest & { state: PromptState } };
@@ -27,7 +27,7 @@ export type JourneyVisualExecution = { provider: DecisionResult['provider']; mod
 export function advanceJourney(
   arm: JourneyDefinition,
   profile: RespondentProfile,
-  state: { currentNodeId: string; events: readonly JourneyEvent[]; route: readonly JourneyProgress['route'][number][] },
+  state: { branchId?: string; currentNodeId: string; events: readonly JourneyEvent[]; route: readonly JourneyProgress['route'][number][] },
   rawResult: DecisionValue,
   compilerFingerprint?: string,
   visualExecution?: JourneyVisualExecution,
@@ -66,7 +66,7 @@ export function advanceJourney(
     } };
   } else answerEvent = { type: 'response', sequence: events.length, nodeId, taskId, result };
   events.push(answerEvent);
-  route.push({ nodeId, response: result, toNodeId: routeTarget });
+  route.push({ branchId: state.branchId ?? 'root', nodeId, response: result, toNodeId: routeTarget });
   const pathId = route.length === 0 ? 'root' : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === 'choice' ? response.choice : `${response.type}:${response.type === 'score' ? response.score : response.noul}`}`).join('>');
 
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));

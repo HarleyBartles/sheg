@@ -37,7 +37,7 @@ export interface RunReadRepository {
   getRequestKind(runId: string): 'poll' | 'journey' | 'follow-on';
   getRequest(runId: string): PreparedRun;
   getJourneyRun(runId: string): JourneyRunRecord;
-  getJourneyWorkerTurn(runId: string, evaluationId: string, respondentId: string): JourneyWorkerTurn;
+  getJourneyWorkerTurn(runId: string, evaluationId: string, respondentId: string, branchId: string): JourneyWorkerTurn;
   list(query: RunListQuery): Page<RunStatusView>;
   queryEvidence(query: RunEvidenceQuery): RunEvidencePage;
   getContext(runId: string, evaluationId: string, contextId: string): RunContextDetail;

@@ -126,8 +126,9 @@ function validateInitialProviderChoices(
     throw new RunStoreError('invalid_prepared_run', 'Automatic run acceptance requires the inspected initial provider choices.');
   }
   if (!choices) return;
-  const unitKey = (unit: { respondentId: string; questionId: string; branchId?: string | undefined }) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? null]);
-  const expected = new Set(evaluations.map(({ respondentId, questionId }) => unitKey({ respondentId, questionId })));
+  const unitKey = (unit: { respondentId: string; questionId: string; branchId?: string | undefined }) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? 'root']);
+  const expected = new Set(evaluations.map((evaluation) => unitKey({ respondentId: evaluation.respondentId, questionId: evaluation.questionId,
+    branchId: 'branchId' in evaluation ? evaluation.branchId : 'root' })));
   if (expected.size !== choices.length || choices.some((choice) => !expected.has(unitKey(choice)))) {
     throw new RunStoreError('invalid_prepared_run', 'Initial provider choices must cover exactly the accepted evaluations.');
   }
@@ -139,12 +140,13 @@ function validateInitialProviderChoices(
   }
   for (const lock of request.providerSelection?.comparisonLocks ?? []) {
     const memberChoices = lock.members.flatMap((member) => {
-      if (member.branchId) return [];
-      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId);
+      const branchId = member.branchId ?? 'root';
+      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId &&
+        (candidate.branchId ?? 'root') === branchId);
       return choice ? [choice] : [];
     });
-    if (lock.members.some((member) => member.branchId === undefined && expected.has(unitKey(member)) &&
-      !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId))) {
+    if (lock.members.some((member) => expected.has(unitKey(member)) &&
+      !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId && (choice.branchId ?? 'root') === (member.branchId ?? 'root')))) {
       throw new RunStoreError('invalid_prepared_run', `Initial provider choices omit a known member of comparison ${lock.id}.`);
     }
     if (memberChoices.length < 2) continue;
@@ -275,6 +277,7 @@ export function insertPreparedJourneyData(database: NodeSQLiteDatabase, runId: s
     ordinal: evaluation.ordinal,
     contextId: evaluation.contextId,
     respondentId: evaluation.respondentId,
+    branchId: evaluation.branchId ?? 'root',
     questionId: evaluation.questionId,
     groupId: evaluation.contextId,
     turnId: evaluation.turnId,
@@ -283,13 +286,14 @@ export function insertPreparedJourneyData(database: NodeSQLiteDatabase, runId: s
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
-    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId && (choice.branchId ?? 'root') === (evaluation.branchId ?? 'root')) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId && (choice.branchId ?? 'root') === (evaluation.branchId ?? 'root'))) : null,
     status: 'pending' as const,
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
   const respondentRows = prepared.respondents.map((respondent) => ({
     runId,
     respondentId: respondent.respondentId,
+    branchId: respondent.branchId ?? 'root',
     status: respondent.status,
     currentNodeId: respondent.currentNodeId,
     currentTurnId: respondent.currentTurnId,

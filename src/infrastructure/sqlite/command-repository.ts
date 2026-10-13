@@ -91,8 +91,8 @@ export function createSqliteCommandRepository(
 
         const failed = context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId) as DatabaseRow;
         const journeyFailures = status === 'partial' && isJourney && statusView.lifecycle.resume.eligible
-          ? context.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.turn_id, e.node_id, e.context_id
-            FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+          ? context.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.branch_id, e.turn_id, e.node_id, e.context_id
+            FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id
             WHERE e.run_id = ? AND e.status = 'failed' AND jr.status = 'failed' ORDER BY e.ordinal`).all(runId) as DatabaseRow[]
           : [];
         const runFailure = context.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId) as DatabaseRow | undefined;
@@ -108,8 +108,9 @@ export function createSqliteCommandRepository(
         for (const checkpoint of journeyFailures) {
           const evaluationId = asText(checkpoint.evaluation_id, 'failed evaluation ID');
           const respondentId = asText(checkpoint.respondent_id, 'failed respondent ID');
-          const reopened = reopenJourneyEvaluation(context.connection.orm, runId, evaluationId, respondentId);
-          const restored = restoreFailedJourneyRespondent(context.connection.orm, runId, respondentId,
+          const branchId = asText(checkpoint.branch_id, 'failed branch ID');
+          const reopened = reopenJourneyEvaluation(context.connection.orm, runId, evaluationId, respondentId, branchId);
+          const restored = restoreFailedJourneyRespondent(context.connection.orm, runId, respondentId, branchId,
             asText(checkpoint.node_id, 'failed turn node ID'), asText(checkpoint.turn_id, 'failed turn ID'),
             asText(checkpoint.context_id, 'failed turn context ID'));
           if (!reopened || !restored) throw new RunStoreError('data_integrity_error', 'The saved failed journey checkpoint changed during resume.');
@@ -176,16 +177,17 @@ export function createSqliteCommandRepository(
       context.transaction(() => {
         const run = context.ownedRun(claim, nowMs);
         if (asNumber(run.reserved_calls, 'reserved calls') !== 0) throw new RunStoreError('attempt_unresolved', 'A zero-attempt failure cannot be recorded while a provider call is reserved.');
-        const row = context.database.prepare("SELECT respondent_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim.runId, evaluationId) as DatabaseRow | undefined;
+        const row = context.database.prepare("SELECT respondent_id, branch_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim.runId, evaluationId) as DatabaseRow | undefined;
         if (!row || asText(row.packet_fingerprint, 'packet fingerprint') !== packetFingerprint || row.turn_id === null) {
           throw new RunStoreError('evaluation_changed_before_failure', 'The reached journey evaluation changed before its zero-attempt failure could be recorded.');
         }
         const respondentId = asText(row.respondent_id, 'respondent ID');
+        const branchId = asText(row.branch_id, 'branch ID');
         const updated = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'")
           .run(failure.code, failure.message, claim.runId, evaluationId);
         if (Number(updated.changes) !== 1) throw new RunStoreError('evaluation_changed_before_failure', 'The reached journey evaluation changed before its zero-attempt failure could be recorded.');
-        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND status = 'active'")
-          .run(claim.runId, respondentId);
+        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND branch_id = ? AND status = 'active'")
+          .run(claim.runId, respondentId, branchId);
         if (Number(respondent.changes) !== 1) throw new RunStoreError('journey_checkpoint_changed', 'The reached respondent checkpoint changed before its failure could be recorded.');
       });
     },

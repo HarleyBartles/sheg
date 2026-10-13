@@ -25883,6 +25883,7 @@ function resumeRefusalMessage(reason) {
   }
 }
 var journeyRouteEntrySchema = external_exports.object({
+  branchId: external_exports.string().min(1).optional(),
   nodeId: external_exports.string().min(1),
   response: decisionValueSchema,
   toNodeId: external_exports.string().min(1)
@@ -26201,6 +26202,7 @@ var runEvidenceItemSchema = external_exports.object({
   failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
   selectedMaterial: selectedMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
+  branchId: external_exports.string().min(1).optional(),
   turnId: external_exports.string().min(1).optional(),
   nodeId: external_exports.string().min(1).optional(),
   occurrence: external_exports.number().int().positive().optional(),
@@ -26973,6 +26975,7 @@ function materializeJourneyRun(admission) {
       evaluationId,
       contextId,
       respondentId: profile.id,
+      branchId: "root",
       questionId: firstPacket.request.question.id,
       packet: firstPacket.request,
       packetFingerprint: hashCanonical({ packet: firstPacket.request, compilerFingerprint }),
@@ -26986,6 +26989,7 @@ function materializeJourneyRun(admission) {
     const events = initialJourneyPath(request.journey).events;
     respondents.push({
       respondentId: profile.id,
+      branchId: "root",
       status: "active",
       currentNodeId: firstPacket.nodeId,
       currentTurnId: turnId,
@@ -34158,6 +34162,7 @@ function persistNextJourneyTurn(database, runId, next) {
     ordinal: next.ordinal,
     contextId: next.contextId,
     respondentId: next.respondentId,
+    branchId: next.branchId,
     questionId: next.questionId,
     groupId: next.contextId,
     turnId: next.turnId,
@@ -34183,6 +34188,7 @@ function persistJourneyRespondentState(database, runId, transition) {
   }).where(and(
     eq(journeyRespondents.runId, runId),
     eq(journeyRespondents.respondentId, transition.respondentId),
+    eq(journeyRespondents.branchId, transition.state.branchId),
     eq(journeyRespondents.revision, transition.expectedRevision)
   )).returning({ runId: journeyRespondents.runId }).all().length === 1;
 }
@@ -34192,21 +34198,22 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
   const attempt = context.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
   if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
   const evaluationId = asText(attempt.evaluation_id, "evaluation ID");
-  const evaluation = context.database.prepare("SELECT packet_json, turn_id, node_id, respondent_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
+  const evaluation = context.database.prepare("SELECT packet_json, turn_id, node_id, respondent_id, branch_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
   if (!evaluation) throw new RunStoreError("data_integrity_error", "The reserved journey turn is missing.");
   const turnId = asText(evaluation.turn_id, "turn ID");
   const nodeId = asText(evaluation.node_id, "node ID");
   const respondentId = asText(evaluation.respondent_id, "respondent ID");
-  if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId || !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 || transition.state.revision !== transition.expectedRevision + 1) {
+  const branchId = asText(evaluation.branch_id, "branch ID");
+  if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId || transition.state.branchId !== branchId || !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 || transition.state.revision !== transition.expectedRevision + 1) {
     throw new RunStoreError("journey_transition_conflict", "Journey transition does not match the reserved respondent turn.");
   }
-  const stateRow = context.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ?").get(claim2.runId, respondentId);
+  const stateRow = context.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ? AND branch_id = ?").get(claim2.runId, respondentId, branchId);
   if (!stateRow || asNumber(stateRow.revision, "journey state revision") !== transition.expectedRevision || asText(stateRow.current_turn_id, "current turn ID") !== turnId || asText(stateRow.current_node_id, "current node ID") !== nodeId) {
     throw new RunStoreError("journey_transition_conflict", "Journey respondent state has moved since this turn was reserved.");
   }
   const priorEvents = parseStored(journeyEventsSchema, parseJson(stateRow.events_json, "journey history"), "journey history");
   const priorRoute = parseStored(journeyRouteSchema, parseJson(stateRow.route_json, "journey route"), "journey route");
-  if (transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) || transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
+  if (transition.state.branchId !== branchId || transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) || transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
     throw new RunStoreError("journey_transition_conflict", "Journey transitions must preserve ordered prior evidence.");
   }
   const runRow = context.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(claim2.runId);
@@ -34234,11 +34241,11 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
     }
     const routeAddition = transition.state.route.slice(priorRoute.length);
     const expectedTarget = context.journeyRouteTarget(parsedRunRequest.data.journey, nodeId, result);
-    if (routeAddition.length !== 1 || routeAddition[0].nodeId !== nodeId || routeAddition[0].toNodeId !== expectedTarget || !context.sameDecisionValue(routeAddition[0].response, result) || transition.state.status === "failed") {
+    if (routeAddition.length !== 1 || (routeAddition[0].branchId ?? "root") !== branchId || routeAddition[0].nodeId !== nodeId || routeAddition[0].toNodeId !== expectedTarget || !context.sameDecisionValue(routeAddition[0].response, result) || transition.state.status === "failed") {
       throw new RunStoreError("journey_transition_conflict", "Journey transition must record the exact typed response and matching route outcome.");
     }
     if (transition.state.status === "active") {
-      if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId || transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId || transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
+      if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId || transition.nextEvaluation.branchId !== branchId || transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId || transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
         throw new RunStoreError("journey_transition_conflict", "An active respondent must point to exactly one next reached turn.");
       }
     } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
@@ -34256,7 +34263,7 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
     linkWinningAnswer(context.orm, claim2.runId, evaluationId, attemptId);
   } else {
     const sharedFailure = outcome.scope === "run";
-    if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
+    if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.branchId !== branchId || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.branchId !== branchId || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
       throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
     }
     const chargedCalls = outcome.providerAttempts ?? 1;
@@ -34271,7 +34278,7 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
     const nextPacket = decisionRequestSchema.safeParse(next.packet);
     const respondent = parsedRunRequest.data.respondents.find(({ id }) => id === respondentId);
     const current = context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS ordinal FROM evaluations WHERE run_id = ?").get(claim2.runId);
-    if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !context.isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
+    if (!nextPacket.success || !respondent || next.respondentId !== respondentId || next.branchId !== branchId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !context.isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
       throw new RunStoreError("invalid_journey_turn", "Next journey turn is invalid or does not follow the persisted evaluation order.");
     }
     persistNextJourneyTurn(context.orm, claim2.runId, next);
@@ -34331,17 +34338,17 @@ function reopenSharedFailure(database, runId, attemptId) {
 function reopenFailedQuestions(database, runId) {
   database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId), eq(evaluations.status, "failed"))).run();
 }
-function reopenJourneyEvaluation(database, runId, evaluationId, respondentId) {
-  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.status, "failed"))).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
+function reopenJourneyEvaluation(database, runId, evaluationId, respondentId, branchId) {
+  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, "failed"))).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
 }
-function restoreFailedJourneyRespondent(database, runId, respondentId, currentNodeId, currentTurnId, currentContextId) {
+function restoreFailedJourneyRespondent(database, runId, respondentId, branchId, currentNodeId, currentTurnId, currentContextId) {
   return database.update(journeyRespondents).set({
     status: "active",
     currentNodeId,
     currentTurnId,
     currentContextId,
     revision: sql`${journeyRespondents.revision} + 1`
-  }).where(and(eq(journeyRespondents.runId, runId), eq(journeyRespondents.respondentId, respondentId), eq(journeyRespondents.status, "failed"))).returning({ respondentId: journeyRespondents.respondentId }).all().length === 1;
+  }).where(and(eq(journeyRespondents.runId, runId), eq(journeyRespondents.respondentId, respondentId), eq(journeyRespondents.branchId, branchId), eq(journeyRespondents.status, "failed"))).returning({ respondentId: journeyRespondents.respondentId }).all().length === 1;
 }
 function prepareResumedRun(database, runId, leaseExpiresMs) {
   database.update(runs).set({
@@ -34364,7 +34371,7 @@ function markActiveJourneyRespondentsUnreached(database, runId) {
     currentTurnId: null,
     currentContextId: null,
     revision: sql`${journeyRespondents.revision} + 1`
-  }).where(and(eq(journeyRespondents.runId, runId), eq(journeyRespondents.status, "active"))).run();
+  }).where(and(eq(journeyRespondents.runId, runId), inArray(journeyRespondents.status, ["active", "waiting-fork"]))).run();
 }
 function deleteRuns(database, runIds) {
   database.delete(runs).where(inArray(runs.runId, runIds)).run();
@@ -34572,18 +34579,23 @@ function validatePreparedJourney(prepared) {
   }
   const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
   const respondentIdSet = new Set(respondentIds);
-  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length !== respondentIds.length || prepared.evaluations.length === 0) {
+  const forkNodeIds = new Set(journeyTopology(parsedRequest.data.journey).nodes.filter((node2) => node2.kind === "fork").map(({ id }) => id));
+  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length < respondentIds.length || prepared.evaluations.length === 0) {
     throw new RunStoreError("invalid_prepared_run", "Prepared journey requires unique respondent state and at least one reached turn.");
   }
   const stateById = /* @__PURE__ */ new Map();
-  const allowedStatuses = /* @__PURE__ */ new Set(["active", "completed", "failed", "unreached"]);
+  const stateKey = (respondentId, branchId) => JSON.stringify([respondentId, branchId]);
+  const allowedStatuses = /* @__PURE__ */ new Set(["active", "waiting-fork", "branched", "completed", "failed", "unreached"]);
   for (const state of prepared.respondents) {
-    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || stateById.has(state.respondentId) || !Number.isSafeInteger(state.revision) || state.revision < 0 || !Array.isArray(state.events) || !Array.isArray(state.route) || (state.status === "active" ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) : state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null)) {
+    const key = stateKey(state.respondentId, state.branchId);
+    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || !state.branchId || stateById.has(key) || !Number.isSafeInteger(state.revision) || state.revision < 0 || !Array.isArray(state.events) || !Array.isArray(state.route) || (state.status === "active" ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) : state.status === "waiting-fork" ? !(state.currentNodeId && forkNodeIds.has(state.currentNodeId) && state.currentTurnId === null && state.currentContextId) : state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null) || state.route.some((entry) => entry.branchId !== void 0 && !entry.branchId)) {
       throw new RunStoreError("invalid_prepared_run", "Prepared journey respondent state is inconsistent.");
     }
-    stateById.set(state.respondentId, state);
+    stateById.set(key, state);
   }
-  if (stateById.size !== respondentIdSet.size) throw new RunStoreError("invalid_prepared_run", "Every journey respondent requires durable state.");
+  if ([...respondentIdSet].some((respondentId) => !prepared.respondents.some((state) => state.respondentId === respondentId))) {
+    throw new RunStoreError("invalid_prepared_run", "Every journey respondent requires durable state.");
+  }
   const evaluationIds = /* @__PURE__ */ new Set();
   const turnIds = /* @__PURE__ */ new Set();
   const contextIds = /* @__PURE__ */ new Set();
@@ -34591,10 +34603,10 @@ function validatePreparedJourney(prepared) {
   const activeTurnIds = /* @__PURE__ */ new Set();
   for (const evaluation of prepared.evaluations) {
     const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    const state = stateById.get(evaluation.respondentId);
+    const state = stateById.get(stateKey(evaluation.respondentId, evaluation.branchId));
     const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
-    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
-    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
+    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.branchId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
+    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.branchId !== evaluation.branchId || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
       throw new RunStoreError("invalid_prepared_run", "Prepared journey turn or context reference is invalid.");
     }
     evaluationIds.add(evaluation.evaluationId);
@@ -34607,7 +34619,7 @@ function validatePreparedJourney(prepared) {
     if (state.status === "active" && !activeTurnIds.has(state.currentTurnId)) {
       throw new RunStoreError("invalid_prepared_run", "Every active journey respondent requires one pending turn.");
     }
-    if (state.status !== "active" && prepared.evaluations.some(({ respondentId }) => respondentId === state.respondentId)) {
+    if (state.status !== "active" && prepared.evaluations.some(({ respondentId, branchId }) => respondentId === state.respondentId && branchId === state.branchId)) {
       throw new RunStoreError("invalid_prepared_run", "A terminal or unreached respondent cannot have a pending turn.");
     }
   }
@@ -34699,8 +34711,12 @@ function validateInitialProviderChoices(snapshot, request, evaluations2) {
     throw new RunStoreError("invalid_prepared_run", "Automatic run acceptance requires the inspected initial provider choices.");
   }
   if (!choices) return;
-  const unitKey = (unit) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? null]);
-  const expected = new Set(evaluations2.map(({ respondentId, questionId }) => unitKey({ respondentId, questionId })));
+  const unitKey = (unit) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? "root"]);
+  const expected = new Set(evaluations2.map((evaluation) => unitKey({
+    respondentId: evaluation.respondentId,
+    questionId: evaluation.questionId,
+    branchId: "branchId" in evaluation ? evaluation.branchId : "root"
+  })));
   if (expected.size !== choices.length || choices.some((choice) => !expected.has(unitKey(choice)))) {
     throw new RunStoreError("invalid_prepared_run", "Initial provider choices must cover exactly the accepted evaluations.");
   }
@@ -34712,11 +34728,11 @@ function validateInitialProviderChoices(snapshot, request, evaluations2) {
   }
   for (const lock of request.providerSelection?.comparisonLocks ?? []) {
     const memberChoices = lock.members.flatMap((member) => {
-      if (member.branchId) return [];
-      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId);
+      const branchId = member.branchId ?? "root";
+      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId && (candidate.branchId ?? "root") === branchId);
       return choice ? [choice] : [];
     });
-    if (lock.members.some((member) => member.branchId === void 0 && expected.has(unitKey(member)) && !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId))) {
+    if (lock.members.some((member) => expected.has(unitKey(member)) && !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId && (choice.branchId ?? "root") === (member.branchId ?? "root")))) {
       throw new RunStoreError("invalid_prepared_run", `Initial provider choices omit a known member of comparison ${lock.id}.`);
     }
     if (memberChoices.length < 2) continue;
@@ -34848,6 +34864,7 @@ function insertPreparedJourneyData(database, runId, prepared) {
     ordinal: evaluation.ordinal,
     contextId: evaluation.contextId,
     respondentId: evaluation.respondentId,
+    branchId: evaluation.branchId ?? "root",
     questionId: evaluation.questionId,
     groupId: evaluation.contextId,
     turnId: evaluation.turnId,
@@ -34856,13 +34873,14 @@ function insertPreparedJourneyData(database, runId, prepared) {
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
-    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId && (choice.branchId ?? "root") === (evaluation.branchId ?? "root")) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId && (choice.branchId ?? "root") === (evaluation.branchId ?? "root"))) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
   const respondentRows = prepared.respondents.map((respondent) => ({
     runId,
     respondentId: respondent.respondentId,
+    branchId: respondent.branchId ?? "root",
     status: respondent.status,
     currentNodeId: respondent.currentNodeId,
     currentTurnId: respondent.currentTurnId,
@@ -35090,8 +35108,8 @@ function createSqliteCommandRepository(context, storageInfo) {
         if (!parsedRequest.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
         const isJourney = parsedRequest.data.kind === "journey";
         const failed = context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId);
-        const journeyFailures = status === "partial" && isJourney && statusView.lifecycle.resume.eligible ? context.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.turn_id, e.node_id, e.context_id
-            FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        const journeyFailures = status === "partial" && isJourney && statusView.lifecycle.resume.eligible ? context.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.branch_id, e.turn_id, e.node_id, e.context_id
+            FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id
             WHERE e.run_id = ? AND e.status = 'failed' AND jr.status = 'failed' ORDER BY e.ordinal`).all(runId) : [];
         const runFailure = context.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId);
         const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
@@ -35103,11 +35121,13 @@ function createSqliteCommandRepository(context, storageInfo) {
         for (const checkpoint of journeyFailures) {
           const evaluationId = asText(checkpoint.evaluation_id, "failed evaluation ID");
           const respondentId = asText(checkpoint.respondent_id, "failed respondent ID");
-          const reopened = reopenJourneyEvaluation(context.connection.orm, runId, evaluationId, respondentId);
+          const branchId = asText(checkpoint.branch_id, "failed branch ID");
+          const reopened = reopenJourneyEvaluation(context.connection.orm, runId, evaluationId, respondentId, branchId);
           const restored = restoreFailedJourneyRespondent(
             context.connection.orm,
             runId,
             respondentId,
+            branchId,
             asText(checkpoint.node_id, "failed turn node ID"),
             asText(checkpoint.turn_id, "failed turn ID"),
             asText(checkpoint.context_id, "failed turn context ID")
@@ -35174,14 +35194,15 @@ function createSqliteCommandRepository(context, storageInfo) {
       context.transaction(() => {
         const run = context.ownedRun(claim2, nowMs);
         if (asNumber(run.reserved_calls, "reserved calls") !== 0) throw new RunStoreError("attempt_unresolved", "A zero-attempt failure cannot be recorded while a provider call is reserved.");
-        const row = context.database.prepare("SELECT respondent_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim2.runId, evaluationId);
+        const row = context.database.prepare("SELECT respondent_id, branch_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim2.runId, evaluationId);
         if (!row || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || row.turn_id === null) {
           throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
         }
         const respondentId = asText(row.respondent_id, "respondent ID");
+        const branchId = asText(row.branch_id, "branch ID");
         const updated = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").run(failure2.code, failure2.message, claim2.runId, evaluationId);
         if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
-        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND status = 'active'").run(claim2.runId, respondentId);
+        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND branch_id = ? AND status = 'active'").run(claim2.runId, respondentId, branchId);
         if (Number(respondent.changes) !== 1) throw new RunStoreError("journey_checkpoint_changed", "The reached respondent checkpoint changed before its failure could be recorded.");
       });
     },
@@ -35533,7 +35554,7 @@ function queryEvidencePage(context, input2) {
     const where = ["e.run_id = ?", "e.ordinal <= ?", ...filters.sql];
     const parameters = [query.sourceRunId, maxOrdinal, ...filters.parameters];
     const whereSql = where.join(" AND ");
-    const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
+    const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id";
     const evaluationCoverage = {
       totalEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
       completedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
@@ -35542,7 +35563,14 @@ function queryEvidencePage(context, input2) {
     let respondentCoverage;
     {
       const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(context.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
-      const statusCounts = parsedRequest.data.kind === "journey" ? context.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+      const statusCounts = parsedRequest.data.kind === "journey" ? context.database.prepare(`SELECT respondent_status AS status, COUNT(*) AS count FROM (
+              SELECT respondent_id, CASE
+                WHEN SUM(status IN ('active', 'waiting-fork')) > 0 THEN 'active'
+                WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                WHEN SUM(status = 'completed') > 0 THEN 'completed'
+                ELSE 'unreached' END AS respondent_status
+              FROM journey_respondents WHERE run_id = ? GROUP BY respondent_id
+            ) GROUP BY respondent_status`).all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
                   WHEN SUM(status = 'pending') > 0 THEN 'active'
                   WHEN SUM(status = 'failed') > 0 THEN 'failed'
@@ -35648,6 +35676,7 @@ function queryEvidencePage(context, input2) {
         ...selectedMaterial === void 0 ? {} : { selectedMaterial },
         ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
         ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
+        ...row.turn_id === null ? {} : { branchId: asText(row.branch_id, "branch ID") },
         ...row.node_id === null ? {} : { nodeId: asText(row.node_id, "node ID") },
         ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
         ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
@@ -35735,6 +35764,8 @@ var journeyTurnRowSchema = external_exports.object({
   evaluation_id: external_exports.string(),
   context_id: external_exports.string(),
   respondent_id: external_exports.string(),
+  branch_id: external_exports.string(),
+  respondent_branch_id: external_exports.string(),
   question_id: external_exports.string(),
   packet_json: external_exports.string(),
   packet_fingerprint: external_exports.string(),
@@ -35757,11 +35788,11 @@ var journeyTurnRowSchema = external_exports.object({
 }).passthrough();
 var loadJourneyWorkerTurnQuery = createSqliteQuery(
   "load-journey-worker-turn",
-  external_exports.tuple([external_exports.string(), external_exports.string(), external_exports.string(), external_exports.string()]),
+  external_exports.tuple([external_exports.string(), external_exports.string(), external_exports.string(), external_exports.string(), external_exports.string()]),
   external_exports.array(journeyTurnRowSchema)
 );
-function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
-  const rows = loadJourneyWorkerTurnQuery.all(database, runId, runId, evaluationId, respondentId);
+function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId, branchId) {
+  const rows = loadJourneyWorkerTurnQuery.all(database, runId, runId, evaluationId, respondentId, branchId);
   const first = rows[0];
   if (!first) throw new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
   const identity = storedJourneyIdentity(first);
@@ -35772,6 +35803,7 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
     evaluationId: asText(first.evaluation_id, "evaluation ID"),
     contextId: asText(first.context_id, "context ID"),
     respondentId: asText(first.respondent_id, "respondent ID"),
+    branchId: asText(first.branch_id, "branch ID"),
     questionId: asText(first.question_id, "question ID"),
     packet,
     packetFingerprint: asText(first.packet_fingerprint, "packet fingerprint"),
@@ -35791,6 +35823,7 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
   const route = parseStored(journeyRouteSchema, parseJson(first.respondent_route_json, "journey route"), "journey route");
   const respondent = {
     respondentId: asText(first.respondent_id, "respondent ID"),
+    branchId: asText(first.respondent_branch_id, "respondent branch ID"),
     status: respondentStatus,
     currentNodeId: asNullableText(first.respondent_current_node_id, "current node ID"),
     currentTurnId: asNullableText(first.respondent_current_turn_id, "current turn ID"),
@@ -35800,7 +35833,7 @@ function loadJourneyWorkerTurn(database, runId, evaluationId, respondentId) {
     route,
     ...first.respondent_outcome === null ? {} : { outcome: asText(first.respondent_outcome, "journey outcome") }
   };
-  if (respondent.status !== "active" || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
+  if (respondent.branchId !== evaluation.branchId || respondent.status !== "active" || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
     throw new RunStoreError("data_integrity_error", "The reserved journey turn does not match the active respondent checkpoint.");
   }
   return {
@@ -35848,7 +35881,7 @@ function loadFollowOnSources(database, input2, notFound) {
     (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
       WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
     FROM evaluations AS e
-    LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+    LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id
     WHERE ${where.join(" AND ")} ORDER BY e.ordinal LIMIT 10001`).all(...parameters);
   if (rows.length > 1e4) throw new RunStoreError("follow_on_selection_too_large", "Follow-on selection matched more than 10,000 evaluations. Narrow the criteria or use explicit references.");
   if ("references" in request.selection && rows.length !== request.selection.references.length) {
@@ -35959,6 +35992,7 @@ function readJourneyRun(database, runId, notFound) {
       respondentId: asText(evaluation.respondent_id, "respondent ID"),
       questionId: asText(evaluation.question_id, "question ID"),
       packet,
+      branchId: asText(evaluation.branch_id, "branch ID"),
       packetFingerprint: asText(evaluation.packet_fingerprint, "packet fingerprint"),
       turnId: asText(evaluation.turn_id, "turn ID"),
       nodeId: asText(evaluation.node_id, "node ID"),
@@ -35983,9 +36017,10 @@ function readJourneyRun(database, runId, notFound) {
     if (failure2) base.failure = failure2;
     return base;
   });
-  const stateRows = database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id").all(runId);
+  const stateRows = database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id, branch_id").all(runId);
   const respondents = stateRows.map((state) => ({
     respondentId: asText(state.respondent_id, "respondent ID"),
+    branchId: asText(state.branch_id, "branch ID"),
     status: parseStored(journeyRespondentStatusSchema, asText(state.status, "journey respondent status"), "journey respondent status"),
     currentNodeId: asNullableText(state.current_node_id, "current node ID"),
     currentTurnId: asNullableText(state.current_turn_id, "current turn ID"),
@@ -35996,7 +36031,9 @@ function readJourneyRun(database, runId, notFound) {
     ...state.outcome === null ? {} : { outcome: asText(state.outcome, "journey outcome") }
   }));
   const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-  if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some(({ respondentId }) => !respondentIds.has(respondentId)) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) || respondents.some((state) => state.status !== "active" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
+  const forkNodeIds = new Set(journeyTopology(parsedRequest.data.journey).nodes.filter((node2) => node2.kind === "fork").map(({ id }) => id));
+  const stateKeys = new Set(respondents.map(({ respondentId, branchId }) => JSON.stringify([respondentId, branchId])));
+  if (respondents.length < respondentIds.size || stateKeys.size !== respondents.length || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some(({ respondentId }) => !respondentIds.has(respondentId)) || respondents.some((state) => state.route.some((entry) => !stateKeys.has(JSON.stringify([state.respondentId, entry.branchId ?? "root"])))) || evaluations2.some((evaluation) => !stateKeys.has(JSON.stringify([evaluation.respondentId, evaluation.branchId]))) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId && evaluation.branchId === state.branchId).length !== 1) || respondents.some((state) => state.status === "waiting-fork" && (state.currentTurnId !== null || state.currentContextId === null || state.currentNodeId === null || !forkNodeIds.has(state.currentNodeId) || evaluations2.some((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.respondentId === state.respondentId && evaluation.branchId === state.branchId))) || respondents.some((state) => state.status === "branched" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null)) || respondents.some((state) => state.status !== "active" && state.status !== "waiting-fork" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null)) || evaluations2.some((evaluation) => evaluation.status === "pending" && !respondents.some((state) => state.status === "active" && state.respondentId === evaluation.respondentId && state.branchId === evaluation.branchId && state.currentTurnId === evaluation.turnId && state.currentNodeId === evaluation.nodeId && state.currentContextId === evaluation.contextId))) {
     throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
   }
   return {
@@ -36024,6 +36061,7 @@ function readRunContext(database, runId, evaluationId, contextId) {
     evaluationId,
     contextId,
     respondentId: asText(row.respondent_id, "respondent ID"),
+    ...row.turn_id === null ? {} : { branchId: asText(row.branch_id, "branch ID") },
     questionId: asText(row.question_id, "question ID"),
     status: asText(row.status, "evaluation status"),
     packet,
@@ -36080,9 +36118,9 @@ function createSqliteReadRepository(context) {
         isRunAvailable: (sourceRunId) => runExists(context.connection.orm, sourceRunId)
       }));
     },
-    getJourneyWorkerTurn(runId, evaluationId, respondentId) {
+    getJourneyWorkerTurn(runId, evaluationId, respondentId, branchId) {
       context.ensureOpen();
-      return context.readSnapshot(() => loadJourneyWorkerTurn(context.database, runId, evaluationId, respondentId));
+      return context.readSnapshot(() => loadJourneyWorkerTurn(context.database, runId, evaluationId, respondentId, branchId));
     },
     getJourneyRun(runId) {
       context.ensureOpen();
@@ -36189,6 +36227,7 @@ function createSqliteReadRepository(context) {
             evaluationId: asText(row.evaluation_id, "evaluation ID"),
             contextId: asText(row.context_id, "context ID"),
             respondentId: asText(row.respondent_id, "respondent ID"),
+            ...row.turn_id === null ? {} : { branchId: asText(row.branch_id, "branch ID") },
             questionId: asText(row.question_id, "question ID"),
             status: parseStored(evaluationStatusSchema, asText(row.status, "evaluation status"), "evaluation status"),
             ...decoded === void 0 ? {} : { result: decoded.result, execution: decoded.execution },
@@ -36359,6 +36398,7 @@ function createSqliteRepositoryContext(connection, databasePath, now) {
       evaluationId: asText(row.evaluation_id, "evaluation ID"),
       contextId: asText(row.context_id, "context ID"),
       respondentId: asText(row.respondent_id, "respondent ID"),
+      ...row.branch_id === null || row.branch_id === void 0 ? {} : { branchId: asText(row.branch_id, "branch ID") },
       questionId: asText(row.question_id, "question ID"),
       packet: decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")),
       packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint"),

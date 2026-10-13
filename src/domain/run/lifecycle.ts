@@ -132,6 +132,7 @@ export type RunProblem = { code: string; respondentId?: string; nodeId?: string;
 export type EvaluationFailure = { code: string; message: string; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence };
 
 export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: DecisionRequest & { state: PromptState } } & {
+  branchId: string;
   turnId: string;
   nodeId: string;
   pathId: string;
@@ -140,6 +141,7 @@ export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: Dec
 };
 
 export const journeyRouteEntrySchema = z.object({
+  branchId: z.string().min(1).optional(),
   nodeId: z.string().min(1),
   response: decisionValueSchema,
   toNodeId: z.string().min(1),
@@ -150,6 +152,7 @@ export const journeyRouteSchema = z.array(journeyRouteEntrySchema);
 
 export type JourneyRespondentState = {
   respondentId: string;
+  branchId: string;
   status: z.infer<typeof journeyRespondentStatusSchema>;
   currentNodeId: string | null;
   currentTurnId: string | null;
@@ -217,6 +220,7 @@ export type AnswerRow = {
   evaluationId: string;
   contextId: string;
   respondentId: string;
+  branchId?: string;
   questionId: string;
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
@@ -229,6 +233,7 @@ export type RunContextDetail = {
   evaluationId: string;
   contextId: string;
   respondentId: string;
+  branchId?: string;
   questionId: string;
   status: AnswerRow['status'];
   packet: DecisionRequest;
