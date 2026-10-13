@@ -163,7 +163,7 @@
 - [x] **Step 3: Set the unique `0.4.0-dev.N` identity in root `package.json`; run `npm run contracts:build`, `npm run build`, and `npm run plugin:package -- --validate-only`; inspect generated package manifests and confirm tests do not read checkout files or `node_modules` (`0.4.0-dev.3`).
 - [x] **Step 4: Run focused tests and `npm run verify`**; expected: complete test, lint, type, guidance and generated parity gates pass, with only documented environment-specific skips (`568 passed, 1 environment-specific skip`).
 - [x] **Step 5: Review source boundaries and staged diff**; confirm selector is the single owner of eligibility/economy, entrypoints share one contract, snapshots exclude secrets, and retries cannot substitute. Commit through the tracked hook.
-- [ ] **Step 6: Refresh `develop`, recheck version uniqueness and full branch diff, verify hosted checks and review threads, merge only when gates pass, verify merged tree and advance the roadmap cursor to Plan 4.**
+- [x] **Step 6: Refresh `develop`, recheck version uniqueness and full branch diff, verify hosted checks and review threads, merge only when gates pass, verify merged tree and advance the roadmap cursor to Plan 4** (PRs #34 and #35; merged tree `574b95c`, package identity `0.4.0-dev.4`).
 
 ## Slice Exit
 

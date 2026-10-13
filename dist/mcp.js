@@ -46065,15 +46065,38 @@ function liveWorkExists(database, nowMs) {
     LIMIT 1`).get(PREPARED_LAUNCH_WINDOW_MS, nowMs, nowMs);
   return row !== void 0;
 }
+function concurrentMigrationProgress(database, migrations, observedVersion, targetVersion) {
+  const currentVersion = pragmaNumber(database, "user_version");
+  const knownVersion = currentVersion === migrations.at(-1)?.toVersion || migrations.some(({ fromVersion }) => fromVersion === currentVersion);
+  if (!knownVersion) return void 0;
+  if (currentVersion >= targetVersion) return "advanced";
+  if (currentVersion !== observedVersion) return "retry";
+  return void 0;
+}
 function applyUpgrade(database, dataRoot, migrations, migration, now) {
   for (let retry = 0; retry < MIGRATION_BACKUP_RETRIES; retry += 1) {
     const observedVersion = pragmaNumber(database, "user_version");
     if (observedVersion === migration.toVersion) return;
     if (observedVersion !== migration.fromVersion) throw new RunStoreError("unsupported_schema_version", `The Sheg datastore changed to schema ${observedVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
-    validateMigrationSource(database, migrations, migration.fromVersion);
+    try {
+      validateMigrationSource(database, migrations, migration.fromVersion);
+    } catch (error62) {
+      const progress = concurrentMigrationProgress(database, migrations, observedVersion, migration.toVersion);
+      if (progress === "advanced") return;
+      if (progress === "retry") continue;
+      throw error62;
+    }
     if (liveWorkExists(database, now())) throw new RunStoreError("migration_deferred", "A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.");
     const beforeBackupDataVersion = pragmaNumber(database, "data_version");
-    const backupPath = verifiedBackup(database, dataRoot, migration.fromVersion, migration.toVersion);
+    let backupPath;
+    try {
+      backupPath = verifiedBackup(database, dataRoot, migration.fromVersion, migration.toVersion);
+    } catch (error62) {
+      const progress = concurrentMigrationProgress(database, migrations, observedVersion, migration.toVersion);
+      if (progress === "advanced") return;
+      if (progress === "retry") continue;
+      throw error62;
+    }
     let transactionOpen = false;
     let foreignKeysDisabled = false;
     try {
@@ -56264,7 +56287,7 @@ function assertNever2(value) {
 // package.json
 var package_default = {
   name: "sheg",
-  version: "0.4.0-dev.4",
+  version: "0.4.0-dev.5",
   description: "Structured stimulus-task-response polling with simulated respondent cohorts using System One models",
   scripts: {
     test: 'node --import tsx --test --test-concurrency=4 "test/**/*.test.ts"',
