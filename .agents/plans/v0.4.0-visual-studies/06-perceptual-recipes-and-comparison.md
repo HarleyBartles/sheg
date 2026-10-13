@@ -101,10 +101,10 @@
 **Produces:** Plan 6 implementation with the complete recipe coverage in acceptance criteria 1-4 and 10, verified scaler contract for criterion 14, evidence-based four-way/pairwise guidance, and Plan 7 left JIT pending. A supported comparison-shape decision is recorded in an ADR if it changes the previous open design; no live token, request body, user asset, or test receipt enters source control.
 
 - [x] **Step 1: Trace the spec requirements to changed owners and behavior tests.** Re-read sections 3-5, 8-13 and criteria 1-4, 10, 14; identify any missing behavior and add its owner test before docs are finalized.
-- [ ] **Step 2: Update the roadmap cursor without receipts.** Mark Plan 6 complete only after recipe tests and required probe analysis are complete; Plan 7 remains JIT pending after the merged Plan 6 predecessor. Record PR/commit identity after merge, not command narration.
+- [x] **Step 2: Update the roadmap cursor without receipts.** Mark Plan 6 complete only after recipe tests and required probe analysis are complete; Plan 7 remains JIT pending after the merged Plan 6 predecessor. Record PR/commit identity after merge, not command narration.
 - [x] **Step 3: Regenerate canonical outputs and run the exact repository gate.** Run `npm run contracts:build`, `npm run build`, `npm run plugin:package -- --validate-only`, `npm run verify`, targeted copied-package tests, and `git diff --check`; inspect generated drift and plugin-owned copies.
 - [x] **Step 4: Conduct a fresh whole-branch review and resolve every actionable finding.** Review source, tests, user-facing recipes, skill behavior fixtures, generated runtime, and decision-record placement against the approved spec.
-- [ ] **Step 5: Verify version identity and publish.** Refresh `origin/develop`, ensure the proposed dev identity is unique, rebuild if stale, commit and push the exact verified tree, open a PR to `develop`, verify CI and merge result, fast-forward `Z:/sheg/develop`, and retire only the verified clean Plan 6 worktree and merged branch.
+- [x] **Step 5: Verify version identity and publish.** Refresh `origin/develop`, ensure the proposed dev identity is unique, rebuild if stale, commit and push the exact verified tree, open a PR to `develop`, verify CI and merge result, fast-forward `Z:/sheg/develop`, and retire only the verified clean Plan 6 worktree and merged branch.
 
 ## Execution Handoff
 
