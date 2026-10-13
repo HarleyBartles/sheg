@@ -20229,6 +20229,20 @@ function journeyTopology(arm) {
   nodes.push({ id: terminal, kind: "terminal", outcome: "complete" });
   return { kind: "graph", nodes, transitions, entryNodeId: exposes[0], maxDecisions: arm.tasks.length };
 }
+function journeyControlSuccessors(graph, nodeId) {
+  const node2 = graph.nodes.find((candidate) => candidate.id === nodeId);
+  if (node2?.kind === "fork") return node2.conditions.map((condition) => ({
+    kind: "condition",
+    conditionId: condition.id,
+    label: condition.label,
+    toNodeId: condition.entryNodeId
+  }));
+  return graph.transitions.filter((transition) => transition.fromNodeId === nodeId).map((transition) => ({
+    kind: "transition",
+    transition,
+    toNodeId: transition.toNodeId
+  }));
+}
 function journeyTransitionForResponse(graph, nodeId, response) {
   return graph.transitions.find((transition) => {
     if (transition.fromNodeId !== nodeId) return false;
@@ -20283,13 +20297,14 @@ function advanceJourney(arm, profile, state, rawResult, compilerFingerprint, vis
     } };
   } else answerEvent = { type: "response", sequence: events.length, nodeId, taskId, result };
   events.push(answerEvent);
-  route.push({ nodeId, response: result, toNodeId: routeTarget });
-  const pathId = route.length === 0 ? "root" : route.map(({ nodeId: routeNode, response }) => `${routeNode}=${response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`}`).join(">");
+  route.push({ branchId: state.branchId ?? "root", nodeId, response: result, toNodeId: routeTarget });
+  const pathId = journeyPathId(route);
   const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
   let current = routeTarget;
   while (true) {
     const node2 = nodes.get(current);
     if (!node2) throw new JourneyExecutionError(`Graph points to unknown node ${current}.`);
+    if (node2.kind === "fork") return { events, route, status: "waiting-fork", outcome: null, forkNodeId: node2.id };
     if (node2.kind === "terminal") return { events, route, status: "completed", outcome: node2.outcome };
     if (node2.kind === "expose") {
       events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
@@ -20301,6 +20316,9 @@ function advanceJourney(arm, profile, state, rawResult, compilerFingerprint, vis
     const packet = compilerFingerprint === void 0 ? compileDecisionPacket(arm, profile, node2.taskId, events) : compileDecisionPacketForCompiler(arm, profile, node2.taskId, events, compilerFingerprint);
     return { events, route, status: "active", outcome: null, next: { nodeId: node2.id, taskId: node2.taskId, pathId, packet } };
   }
+}
+function journeyPathId(route) {
+  return route.length === 0 ? "root" : route.map(({ nodeId, response }) => `${nodeId}=${response.type === "choice" ? response.choice : `${response.type}:${response.type === "score" ? response.score : response.noul}`}`).join(">");
 }
 function normalizeResponse(answer, expectedType) {
   if (typeof answer !== "object" || answer === null) throw new JourneyExecutionError("Task returned a response that is not an object.");
@@ -20540,7 +20558,7 @@ var runStatuses = ["prepared", "running", "completed", "partial", "failed", "can
 var runStatusSchema = external_exports.enum(runStatuses);
 var evaluationStatuses = ["pending", "answered", "failed", "unreached"];
 var evaluationStatusSchema = external_exports.enum(evaluationStatuses);
-var journeyRespondentStatuses = ["active", "completed", "failed", "unreached"];
+var journeyRespondentStatuses = ["active", "waiting-fork", "branched", "completed", "failed", "unreached"];
 var journeyRespondentStatusSchema = external_exports.enum(journeyRespondentStatuses);
 var attemptStatuses = ["reserved", "answered", "failed", "uncertain"];
 var attemptStatusSchema = external_exports.enum(attemptStatuses);
@@ -20586,6 +20604,7 @@ function resumeRefusalMessage(reason) {
   }
 }
 var journeyRouteEntrySchema = external_exports.object({
+  branchId: external_exports.string().min(1).optional(),
   nodeId: external_exports.string().min(1),
   response: decisionValueSchema,
   toNodeId: external_exports.string().min(1)
@@ -20595,9 +20614,18 @@ var journeyRouteSchema = external_exports.array(journeyRouteEntrySchema);
 
 // src/domain/study/presentation.ts
 var identifier3 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+var forkNodeSchema = external_exports.object({
+  id: identifier3,
+  kind: external_exports.literal("fork"),
+  conditions: external_exports.array(external_exports.object({ id: identifier3, label: external_exports.string().trim().min(1), entryNodeId: identifier3 }).strict()).min(2)
+}).strict().superRefine((fork, context) => {
+  const ids = fork.conditions.map(({ id }) => id);
+  if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["conditions"], message: "Fork condition IDs must be unique within the fork." });
+});
 var nodeSchema = external_exports.discriminatedUnion("kind", [
   external_exports.object({ id: identifier3, kind: external_exports.literal("expose"), itemId: identifier3 }).strict(),
   external_exports.object({ id: identifier3, kind: external_exports.literal("ask"), taskId: identifier3 }).strict(),
+  forkNodeSchema,
   external_exports.object({ id: identifier3, kind: external_exports.literal("terminal"), outcome: identifier3 }).strict()
 ]);
 var responseIntervalSchema = external_exports.object({
@@ -20685,6 +20713,15 @@ var noulTaskSchema = external_exports.object({
 }).strict();
 var typedTaskSchema = external_exports.discriminatedUnion("type", [typedChoiceTaskSchema, scoreTaskSchema, noulTaskSchema]);
 var taskSchema = external_exports.union([legacyChoiceTaskSchema, typedTaskSchema]).transform((task) => "type" in task ? task : { ...task, type: "choice" });
+function comparisonTaskSemantics(task) {
+  const shared = { instructions: task.instructions, responseHistory: task.responseHistory ?? "include", type: task.type };
+  if (task.type === "choice") return JSON.stringify({ ...shared, options: Object.entries(task.options), answerKeyOptionId: task.answerKeyOptionId });
+  if (task.type === "score") return JSON.stringify({ ...shared, rubric: task.rubric });
+  return JSON.stringify({ ...shared, criteria: task.criteria });
+}
+function tasksAreComparisonEquivalent(left, right) {
+  return comparisonTaskSemantics(left) === comparisonTaskSemantics(right);
+}
 
 // src/domain/study/arm.ts
 var identifier5 = external_exports.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -20713,10 +20750,11 @@ function validateJourneyDefinition(arm, context) {
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
   }
-  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
-  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
-    context.addIssue({ code: "custom", path: ["tasks"], message: "Each comparisonKey must identify at most one task within an arm." });
+  if (presentation.kind === "graph" && !Number.isSafeInteger(presentation.maxDecisions)) {
+    context.addIssue({ code: "custom", path: ["presentation", "maxDecisions"], message: "Graph maxDecisions must be a positive safe integer." });
   }
+  const tasksByComparisonKey = /* @__PURE__ */ new Map();
+  for (const task of arm.tasks) if (task.comparisonKey) tasksByComparisonKey.set(task.comparisonKey, [...tasksByComparisonKey.get(task.comparisonKey) ?? [], task]);
   for (const [taskIndex, task] of arm.tasks.entries()) {
     if (task.type !== "choice" || !task.materialOptions) continue;
     for (const [optionId, materialId] of Object.entries(task.materialOptions)) {
@@ -20746,7 +20784,12 @@ function validateJourneyDefinition(arm, context) {
       if (!imageIds.has(materialId)) context.addIssue({ code: "custom", path: ["tasks", taskIndex, "visual", "materialIds"], message: `Visual binding references unknown image material ${materialId}.` });
     }
   }
-  if (presentation.kind === "sequence") return;
+  if (presentation.kind === "sequence") {
+    for (const [key, tasks] of tasksByComparisonKey) if (tasks.length > 1) {
+      context.addIssue({ code: "custom", path: ["tasks"], message: `Each comparisonKey must identify at most one task within an arm; duplicate key ${key}.` });
+    }
+    return;
+  }
   const nodesById = new Map(presentation.nodes.map((node2) => [node2.id, node2]));
   if (!nodesById.has(presentation.entryNodeId)) {
     context.addIssue({ code: "custom", path: ["presentation", "entryNodeId"], message: `Unknown entry node ${presentation.entryNodeId}.` });
@@ -20774,6 +20817,9 @@ function validateJourneyDefinition(arm, context) {
     if (source.kind === "terminal") {
       context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Terminal nodes cannot have outgoing transitions." });
     }
+    if (source.kind === "fork") {
+      context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Fork nodes cannot have ordinary transitions; use condition entry nodes." });
+    }
     if (source.kind === "expose" && (edge.optionId !== void 0 || edge.when !== void 0)) {
       context.addIssue({ code: "custom", path: ["presentation", "transitions", index2], message: "Exposure transitions must be unconditional." });
     }
@@ -20782,6 +20828,37 @@ function validateJourneyDefinition(arm, context) {
     const edges = outgoing.get(node2.id) ?? [];
     if (node2.kind === "terminal") {
       if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Terminal nodes cannot have outgoing transitions." });
+      continue;
+    }
+    if (node2.kind === "fork") {
+      if (edges.length > 0) context.addIssue({ code: "custom", path: ["presentation", "nodes", index2], message: "Fork nodes cannot have ordinary transitions; use condition entry nodes." });
+      for (const [conditionIndex, condition] of node2.conditions.entries()) {
+        if (!nodesById.has(condition.entryNodeId)) {
+          context.addIssue({ code: "custom", path: ["presentation", "nodes", index2, "conditions", conditionIndex, "entryNodeId"], message: `Fork condition ${condition.id} references unknown entry node ${condition.entryNodeId}.` });
+          continue;
+        }
+        const seen = /* @__PURE__ */ new Set();
+        let currentNodeId = condition.entryNodeId;
+        let reachesAsk = false;
+        while (!seen.has(currentNodeId)) {
+          seen.add(currentNodeId);
+          const entryNode = nodesById.get(currentNodeId);
+          if (entryNode?.kind === "ask") {
+            reachesAsk = true;
+            break;
+          }
+          if (entryNode?.kind !== "expose") break;
+          const exposureEdges = outgoing.get(entryNode.id) ?? [];
+          const exposureEdge = exposureEdges[0];
+          if (exposureEdges.length !== 1 || !exposureEdge || exposureEdge.optionId !== void 0 || exposureEdge.when !== void 0) break;
+          currentNodeId = exposureEdge.toNodeId;
+        }
+        if (!reachesAsk) context.addIssue({
+          code: "custom",
+          path: ["presentation", "nodes", index2, "conditions", conditionIndex, "entryNodeId"],
+          message: `Fork condition ${condition.id} must reach its first ask before a terminal or nested fork.`
+        });
+      }
       continue;
     }
     if (node2.kind === "expose") {
@@ -20810,7 +20887,9 @@ function validateJourneyDefinition(arm, context) {
       const current = pending.pop();
       if (visited.has(current)) continue;
       visited.add(current);
-      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
+      const node2 = nodesById.get(current);
+      if (node2?.kind === "fork") for (const condition of node2.conditions) pending.push(condition.entryNodeId);
+      else for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
     }
     const unreachable = presentation.nodes.filter((node2) => !visited.has(node2.id)).map((node2) => node2.id);
     if (unreachable.length > 0) {
@@ -20819,11 +20898,14 @@ function validateJourneyDefinition(arm, context) {
     const state = /* @__PURE__ */ new Map();
     const decisionsToTerminal = /* @__PURE__ */ new Map();
     let containsCycle = false;
+    let cycleAt;
+    let overflowAt;
     const longestDecisionsToTerminal = (nodeId) => {
       const node2 = nodesById.get(nodeId);
       if (!node2) return null;
       if (state.get(nodeId) === "visiting") {
         containsCycle = true;
+        cycleAt ??= nodeId;
         return null;
       }
       if (state.get(nodeId) === "visited") return decisionsToTerminal.get(nodeId) ?? null;
@@ -20832,14 +20914,17 @@ function validateJourneyDefinition(arm, context) {
       if (node2.kind === "terminal") {
         longest = 0;
       } else {
-        const edges = outgoing.get(nodeId) ?? [];
-        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
+        const continuations = node2.kind === "fork" ? node2.conditions.map(({ entryNodeId }) => longestDecisionsToTerminal(entryNodeId)) : (outgoing.get(nodeId) ?? []).map((edge) => longestDecisionsToTerminal(edge.toNodeId));
         const completedContinuations = continuations.filter((count2) => count2 !== null);
         if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
           longest = null;
         } else {
-          const nextDecisionCount = Math.max(...completedContinuations);
-          longest = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+          const nextDecisionCount = node2.kind === "fork" ? completedContinuations.reduce((total, count2) => total + count2, 0) : Math.max(...completedContinuations);
+          const decisionCount = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+          if (!Number.isSafeInteger(nextDecisionCount) || !Number.isSafeInteger(decisionCount)) {
+            overflowAt ??= nodeId;
+            longest = null;
+          } else longest = decisionCount;
         }
       }
       state.set(nodeId, "visited");
@@ -20848,7 +20933,9 @@ function validateJourneyDefinition(arm, context) {
     };
     const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
     if (containsCycle) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Graph contains a cycle; every journey must terminate." });
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains a cycle at node ${cycleAt}; every journey must terminate.` });
+    } else if (overflowAt) {
+      context.addIssue({ code: "custom", path: ["presentation", "maxDecisions"], message: `Graph decision fan-out exceeds the safe integer range at node ${overflowAt}.` });
     } else if (longestPath === null) {
       context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Every graph branch must reach a terminal node." });
     } else if (longestPath > presentation.maxDecisions) {
@@ -20857,6 +20944,56 @@ function validateJourneyDefinition(arm, context) {
         path: ["presentation", "maxDecisions"],
         message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`
       });
+    }
+  }
+  if (presentation.nodes.some((node2) => node2.kind === "fork")) {
+    const reachableTasks = (entryNodeId) => {
+      const reached = [];
+      const visited = /* @__PURE__ */ new Set();
+      const pending = [entryNodeId];
+      while (pending.length > 0) {
+        const nodeId = pending.pop();
+        if (visited.has(nodeId)) continue;
+        visited.add(nodeId);
+        const node2 = nodesById.get(nodeId);
+        if (!node2 || node2.kind === "terminal") continue;
+        if (node2.kind === "ask") {
+          const task = taskById.get(node2.taskId);
+          if (task) reached.push(task);
+        }
+        if (node2.kind === "fork") for (const condition of node2.conditions) pending.push(condition.entryNodeId);
+        else for (const edge of outgoing.get(nodeId) ?? []) pending.push(edge.toNodeId);
+      }
+      return reached;
+    };
+    const scopes = presentation.nodes.filter((node2) => node2.kind === "fork").map((fork) => ({
+      fork,
+      byCondition: fork.conditions.map((condition) => {
+        const byKey = /* @__PURE__ */ new Map();
+        for (const task of reachableTasks(condition.entryNodeId)) {
+          if (task.comparisonKey) byKey.set(task.comparisonKey, [...byKey.get(task.comparisonKey) ?? [], task]);
+        }
+        return { condition, byKey };
+      })
+    }));
+    for (const scope of scopes) for (const condition of scope.byCondition) for (const [key, tasks] of condition.byKey) {
+      if (tasks.length > 1) context.addIssue({ code: "custom", path: ["tasks"], message: `comparisonKey ${key} occurs more than once in fork condition ${condition.condition.id}.` });
+    }
+    for (const [key, tasks] of tasksByComparisonKey) {
+      if (tasks.length < 2) continue;
+      const taskIds = new Set(tasks.map(({ id }) => id));
+      const matchedScope = scopes.some(({ byCondition }) => {
+        const conditionsWithKey = byCondition.filter(({ byKey }) => byKey.has(key));
+        const scopedTasks = conditionsWithKey.flatMap(({ byKey }) => byKey.get(key) ?? []);
+        return conditionsWithKey.length >= 2 && conditionsWithKey.every(({ byKey }) => byKey.get(key)?.length === 1) && scopedTasks.length === tasks.length && new Set(scopedTasks.map(({ id }) => id)).size === taskIds.size && scopedTasks.every(({ id }) => taskIds.has(id));
+      });
+      if (!matchedScope || tasks.some((task) => !tasksAreComparisonEquivalent(tasks[0], task))) {
+        context.addIssue({ code: "custom", path: ["tasks"], message: `comparisonKey ${key} may be shared only by equivalent questions in distinct conditions of the same fork.` });
+      }
+    }
+  } else {
+    for (const [key, tasks] of tasksByComparisonKey) if (tasks.length > 1) {
+      context.addIssue({ code: "custom", path: ["tasks"], message: `Each comparisonKey must identify at most one task within an arm; duplicate key ${key}.` });
     }
   }
 }
@@ -21210,6 +21347,7 @@ var runEvidenceItemSchema = external_exports.object({
   failure: external_exports.object({ code: external_exports.string().min(1), message: external_exports.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
   selectedMaterial: selectedMaterialEvidenceSchema.optional(),
   execution: providerExecutionEvidenceSchema.optional(),
+  branchId: external_exports.string().min(1).optional(),
   turnId: external_exports.string().min(1).optional(),
   nodeId: external_exports.string().min(1).optional(),
   occurrence: external_exports.number().int().positive().optional(),
@@ -21340,6 +21478,125 @@ function selectProvider(input2) {
   const selected = orderedHosted[0];
   selected.selected = true;
   return { selected, candidates, decisionReason: selected.cost?.kind === "estimate" ? "lowest_comparable_published_rate_estimate" : "stable_catalogue_order_cost_unverified" };
+}
+function selectProviderComparisonLock(input2) {
+  const memberIds = input2.members.map(({ unitId }) => unitId);
+  const treatmentDimensions = [
+    ...input2.equality.provider === "vary" ? ["provider"] : [],
+    ...input2.equality.model === "vary" ? ["model"] : []
+  ];
+  if (input2.members.length < 2 || new Set(memberIds).size !== memberIds.length) {
+    return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "comparison_members_invalid", candidates: [] };
+  }
+  if (treatmentDimensions.length) {
+    const dimensions = (entry) => ({ provider: providerConfigurationIdentity(entry.provider), model: providerModelIdentity(entry.provider) });
+    const shared = ["provider", "model"].filter((dimension) => input2.equality[dimension] === "same");
+    const first2 = input2.members[0];
+    const keys = [...new Set(first2.catalogue.entries.map((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension]))))];
+    const viableGroups = [];
+    for (const key of keys) {
+      const groupEntries = first2.catalogue.entries.filter((entry) => JSON.stringify(shared.map((dimension) => dimensions(entry)[dimension])) === key);
+      const selections = input2.members.map((member) => {
+        if (member.catalogue.revision !== first2.catalogue.revision || JSON.stringify(member.catalogue.entries) !== JSON.stringify(first2.catalogue.entries)) {
+          return { unitId: member.unitId, selection: { candidates: [], decisionReason: "comparison_catalogue_mismatch" } };
+        }
+        const candidateIds = new Set(groupEntries.map(({ id }) => id));
+        return { unitId: member.unitId, selection: selectProvider({ ...member, candidates: member.candidates.filter(({ id }) => candidateIds.has(id)) }) };
+      });
+      if (selections.every(({ selection }) => selection.selected)) {
+        const preferencePenalty = selections.reduce((sum2, { selection }) => sum2 + (selection.decisionReason === "request_preference" ? 0 : selection.decisionReason === "saved_user_preference" ? 1 : 2), 0);
+        const variedProviderCount = input2.equality.provider === "vary" ? new Set(selections.map(({ selection }) => {
+          const selected = first2.catalogue.entries.find(({ id }) => id === selection.selected.id);
+          return dimensions(selected).provider;
+        })).size : 0;
+        const variedModelCount = input2.equality.model === "vary" ? new Set(selections.map(({ selection }) => {
+          const selected = first2.catalogue.entries.find(({ id }) => id === selection.selected.id);
+          return dimensions(selected).model;
+        })).size : 0;
+        viableGroups.push({ selections, key, rank: [preferencePenalty, -(variedProviderCount + variedModelCount)] });
+      }
+    }
+    viableGroups.sort((left, right) => left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || keys.indexOf(left.key) - keys.indexOf(right.key));
+    const chosenGroup = viableGroups[0];
+    if (chosenGroup) {
+      const selectedIds = chosenGroup.selections.map(({ selection }) => selection.selected.id);
+      const plannedCalls = input2.members.reduce((sum2, member, index2) => sum2 + (member.candidates.find(({ id }) => id === selectedIds[index2])?.plannedCalls ?? 0), 0);
+      const remainingCalls2 = Math.min(...input2.members.map(({ remainingCalls: remaining }) => remaining));
+      if (plannedCalls > remainingCalls2) return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "comparison_call_allowance_exceeded", candidates: [], members: chosenGroup.selections };
+      const displayCandidates = [...new Set(selectedIds)].map((id) => {
+        const entry = first2.catalogue.entries.find((candidate) => candidate.id === id);
+        const fit = chosenGroup.selections.find(({ selection }) => selection.selected?.id === id)?.selection.selected?.fit;
+        const cost = aggregateCandidateCost(input2.members.map((member) => member.candidates.find((candidate) => candidate.id === id)?.cost));
+        return {
+          id,
+          provider: entry.provider,
+          eligible: true,
+          selected: selectedIds[0] === id,
+          ...fit === void 0 ? {} : { fit },
+          ...cost === void 0 ? {} : { cost }
+        };
+      });
+      return {
+        id: input2.id,
+        memberIds,
+        treatmentDimensions,
+        decisionReason: "comparison_treatment_dimensions_locked",
+        selected: displayCandidates.find(({ id: candidateId }) => candidateId === selectedIds[0]),
+        candidates: displayCandidates,
+        members: chosenGroup.selections
+      };
+    }
+    return {
+      id: input2.id,
+      memberIds,
+      treatmentDimensions,
+      decisionReason: "comparison_treatment_ineligible",
+      candidates: [],
+      members: input2.members.map((member) => ({ unitId: member.unitId, selection: { candidates: [], decisionReason: "no_common_comparison_lock" } }))
+    };
+  }
+  const pins = [...new Set(input2.members.map((member) => member.unitOverride ?? member.unitOverrides?.[member.unitId]).filter((id) => id !== void 0))];
+  if (pins.length > 1) return { id: input2.id, memberIds, treatmentDimensions, decisionReason: "binding_comparison_pins_conflict", candidates: [] };
+  const first = input2.members[0];
+  const catalogue = first.catalogue;
+  const requiredCapabilities = [...new Set(input2.members.flatMap(({ requiredCapabilities: required2 }) => required2))];
+  const questionTypes = [...new Set(input2.members.flatMap(({ questionTypes: types, questionType }) => types ?? [questionType]))];
+  const candidates = catalogue.entries.map((entry) => {
+    const memberSelections = input2.members.map((member) => selectProvider({ ...member, unitOverride: entry.id }));
+    const eligibleForAll = memberSelections.every((selection) => selection.selected?.id === entry.id) && input2.members.every(({ catalogue: memberCatalogue }) => memberCatalogue.revision === catalogue.revision && JSON.stringify(memberCatalogue.entries) === JSON.stringify(catalogue.entries));
+    const fits = memberSelections.map(({ selected }) => selected?.fit);
+    const rejectedFit = memberSelections.map(({ candidates: memberCandidates }) => memberCandidates.find(({ id }) => id === entry.id)?.fit).find((fit2) => fit2?.status !== "fits");
+    const fit = eligibleForAll && fits.every((value) => value?.status === "fits") ? { ...fits[0], tokens: fits.reduce((sum2, value) => sum2 + value.tokens, 0), details: { lockMembers: fits.length, totalInputTokens: fits.reduce((sum2, value) => sum2 + value.tokens, 0) } } : rejectedFit && rejectedFit.status !== "fits" ? rejectedFit : void 0;
+    const plans = input2.members.map((member) => member.candidates.find(({ id }) => id === entry.id));
+    const plannedCalls = plans.every((plan) => plan !== void 0) ? plans.reduce((sum2, plan) => sum2 + plan.plannedCalls, 0) : 0;
+    const cost = aggregateCandidateCost(plans.map((plan) => plan?.cost));
+    const ready = eligibleForAll ? true : memberSelections.every((selection) => selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== "provider_unavailable" && selection.candidates.find(({ id }) => id === entry.id)?.exclusion?.code !== "provider_readiness_unverified");
+    return { id: entry.id, ready, ...fit === void 0 ? {} : { fit }, plannedCalls, ...cost === void 0 ? {} : { cost } };
+  });
+  const remainingCalls = Math.min(...input2.members.map(({ remainingCalls: remaining }) => remaining));
+  const selectionInput = { ...first, requiredCapabilities, questionType: questionTypes[0], questionTypes, remainingCalls, candidates };
+  delete selectionInput.unitOverride;
+  delete selectionInput.unitOverrides;
+  if (pins[0]) selectionInput.unitOverride = pins[0];
+  const result = selectProvider(selectionInput);
+  return {
+    id: input2.id,
+    memberIds,
+    treatmentDimensions,
+    decisionReason: result.decisionReason,
+    ...result.selected === void 0 ? {} : { selected: result.selected },
+    candidates: result.candidates
+  };
+}
+function aggregateCandidateCost(costs) {
+  if (costs.some((cost) => cost === void 0)) return void 0;
+  if (costs.every((cost) => cost?.kind === "no-provider-invoice")) return { kind: "no-provider-invoice", basis: "provider pricing contract" };
+  const estimates = costs.filter((cost) => cost?.kind === "estimate");
+  if (estimates.length === costs.length && new Set(estimates.map(({ currency }) => currency)).size === 1) {
+    const first = estimates[0];
+    return { ...first, amount: estimates.reduce((sum2, { amount }) => sum2 + amount, 0), basis: "published-rate estimate" };
+  }
+  return { kind: "unknown", basis: new Set(estimates.map(({ currency }) => currency)).size > 1 ? "incomparable currency" : "unverified" };
 }
 
 // src/application/provider-batch-planning.ts
@@ -21574,13 +21831,34 @@ async function executePoll(reads, commands, runId2, claim2, providerFactory, pro
 }
 async function executeJourney(reads, commands, runId2, claim2, providerFactory, providerOptions, assertProviderReady2) {
   const accepted = reads.getJourneyRun(runId2);
-  const evaluations2 = [...accepted.evaluations];
   const explicitProvider = accepted.request.provider ? requireExplicitProvider(accepted.request) : void 0;
   while (true) {
     if (!commands.heartbeat(claim2, Date.now())) return;
-    const pending = evaluations2.find((evaluation) => evaluation.status === "pending");
+    const waitingForks = new Map(accepted.respondents.filter((state) => state.status === "waiting-fork" && state.currentNodeId !== null).map((state) => [JSON.stringify([state.branchId, state.currentNodeId]), { forkNodeId: state.currentNodeId, parentBranchId: state.branchId }]));
+    for (const fork of waitingForks.values()) {
+      const advanced = commands.advanceJourneyFork(claim2, fork.forkNodeId, fork.parentBranchId);
+      if (advanced.status === "closed" && advanced.createdEvaluations.length > 0) {
+        accepted.evaluations.push(...advanced.createdEvaluations);
+        accepted.respondents = accepted.respondents.filter((state) => !(state.status === "waiting-fork" && state.branchId === fork.parentBranchId && state.currentNodeId === fork.forkNodeId));
+        accepted.respondents.push(...advanced.parentRespondents, ...advanced.childRespondents);
+        if (!explicitProvider) await resolveForkComparisonProviders(
+          reads,
+          commands,
+          runId2,
+          claim2,
+          accepted,
+          fork.forkNodeId,
+          fork.parentBranchId,
+          advanced.createdEvaluations,
+          providerFactory,
+          providerOptions,
+          assertProviderReady2
+        );
+      }
+    }
+    const pending = accepted.evaluations.find((evaluation) => evaluation.status === "pending");
     if (!pending) break;
-    const existingChoice = pending.providerSelection ?? accepted.providerSelectionSnapshot?.initialChoices?.find((choice2) => choice2.respondentId === pending.respondentId && choice2.questionId === pending.questionId);
+    const existingChoice = pending.providerSelection ?? accepted.providerSelectionSnapshot?.initialChoices?.find((choice2) => choice2.respondentId === pending.respondentId && choice2.questionId === pending.questionId && (choice2.branchId ?? "root") === pending.branchId);
     let choice;
     try {
       choice = explicitProvider ? void 0 : existingChoice ?? await resolveJourneyProvider(reads, runId2, accepted, pending, providerFactory, providerOptions, assertProviderReady2);
@@ -21594,12 +21872,21 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
         Date.now()
       );
       pending.status = "failed";
+      pending.failure = { code: "provider_selection_unavailable", message: "No enabled provider fits the reached journey unit and its declared comparison constraints." };
+      accepted.respondents = accepted.respondents.map((state) => state.respondentId === pending.respondentId && state.branchId === pending.branchId ? {
+        ...state,
+        status: "failed",
+        currentNodeId: null,
+        currentTurnId: null,
+        currentContextId: null,
+        revision: state.revision + 1
+      } : state);
       continue;
     }
     const reservation = commands.reserveNext(claim2, Date.now(), choice ? { evaluationId: pending.evaluationId, packetFingerprint: pending.packetFingerprint, providerSelection: choice } : void 0);
     if (!reservation) break;
     if (choice) pending.providerSelection = choice;
-    const currentTurn = reads.getJourneyWorkerTurn(runId2, reservation.evaluation.evaluationId, reservation.evaluation.respondentId);
+    const currentTurn = reads.getJourneyWorkerTurn(runId2, reservation.evaluation.evaluationId, reservation.evaluation.respondentId, reservation.evaluation.branchId ?? "root");
     const { evaluation: currentEvaluation, respondent: respondentState, profile } = currentTurn;
     const providerConfig = explicitProvider ?? accepted.providerSelectionSnapshot?.catalogue.entries.find(({ id }) => id === reservation.evaluation.providerSelection?.providerId)?.provider;
     if (!providerConfig) throw new Error("The frozen provider choice is absent from the accepted catalogue.");
@@ -21608,6 +21895,7 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
       const result = await provider.decide(reservation.evaluation.packet, 1);
       const value = normalizeResponse(result, reservation.evaluation.packet.question.type);
       const progress = advanceJourney(accepted.request.journey, profile, {
+        branchId: respondentState.branchId,
         currentNodeId: currentEvaluation.nodeId,
         events: respondentState.events,
         route: respondentState.route
@@ -21621,6 +21909,7 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
         turnId: randomUUID(),
         contextId: randomUUID(),
         respondentId: respondentState.respondentId,
+        branchId: respondentState.branchId,
         questionId: progress.next.taskId,
         nodeId: progress.next.nodeId,
         pathId: progress.next.pathId,
@@ -21632,9 +21921,9 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
       const state = {
         ...respondentState,
         status: progress.status,
-        currentNodeId: nextEvaluation?.nodeId ?? null,
+        currentNodeId: nextEvaluation?.nodeId ?? progress.forkNodeId ?? null,
         currentTurnId: nextEvaluation?.turnId ?? null,
-        currentContextId: nextEvaluation?.contextId ?? null,
+        currentContextId: nextEvaluation?.contextId ?? (progress.status === "waiting-fork" ? currentEvaluation.contextId : null),
         revision: respondentState.revision + 1,
         events: progress.events,
         route: progress.route,
@@ -21646,8 +21935,12 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
         state,
         ...nextEvaluation ? { nextEvaluation } : {}
       });
-      pending.status = "answered";
-      if (nextEvaluation) evaluations2.push({ ...nextEvaluation, status: "pending" });
+      const settled = accepted.evaluations.find(({ evaluationId }) => evaluationId === currentEvaluation.evaluationId);
+      if (!settled) throw new Error("The settled journey turn is absent from the worker snapshot.");
+      settled.status = "answered";
+      settled.result = result;
+      if (nextEvaluation) accepted.evaluations.push({ ...nextEvaluation, status: "pending" });
+      accepted.respondents = accepted.respondents.map((existingState) => existingState.respondentId === respondentState.respondentId && existingState.branchId === respondentState.branchId ? state : existingState);
     } catch (error62) {
       const scope = failureScope(error62);
       const state = {
@@ -21663,22 +21956,26 @@ async function executeJourney(reads, commands, runId2, claim2, providerFactory, 
         expectedRevision: respondentState.revision,
         state
       });
-      pending.status = "failed";
+      const settled = accepted.evaluations.find(({ evaluationId }) => evaluationId === currentEvaluation.evaluationId);
+      if (!settled) throw new Error("The failed journey turn is absent from the worker snapshot.", { cause: error62 });
+      settled.status = "failed";
+      settled.failure = { code: failureDetails(error62, scope).code, message: failureDetails(error62, scope).message };
+      accepted.respondents = accepted.respondents.map((existingState) => existingState.respondentId === respondentState.respondentId && existingState.branchId === respondentState.branchId ? state : existingState);
       if (scope === "run") break;
     }
   }
 }
-async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2) {
+async function journeyProviderSelectionInput(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2) {
   const snapshot = run.providerSelectionSnapshot;
   if (!snapshot) throw new Error("The automatic provider catalogue was not frozen with the accepted run.");
   const status = reads.getStatus(runId2);
   const remainingCalls = Math.max(0, status.maxCalls - status.usedCalls - status.reservedCalls);
-  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members: members2 }) => members2.some(({ respondentId, questionId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId));
+  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members: members2 }) => members2.some(({ respondentId, questionId, branchId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId && (branchId ?? "root") === evaluation.branchId));
   const prior = lock ? run.evaluations.filter((item) => item.providerSelection?.comparisonLockId === lock.id).map((item) => item.providerSelection) : [];
   const lockedProvider = lock?.equality.provider === "same" ? prior[0]?.providerId : void 0;
   const lockedModel = lock?.equality.model === "same" ? prior[0]?.modelIdentity : void 0;
-  const unitId = `${evaluation.respondentId}/${evaluation.questionId}`;
-  const pins = [...new Set([run.request.providerSelection?.unitOverrides?.[unitId], run.request.providerSelection?.unitOverrides?.[evaluation.questionId]].filter((id) => id !== void 0))];
+  const unitId = `${evaluation.respondentId}/${evaluation.questionId}/${evaluation.branchId}`;
+  const pins = [...new Set([run.request.providerSelection?.unitOverrides?.[unitId], run.request.providerSelection?.unitOverrides?.[`${evaluation.respondentId}/${evaluation.questionId}`], run.request.providerSelection?.unitOverrides?.[evaluation.questionId]].filter((id) => id !== void 0))];
   if (pins.length > 1 || lockedProvider && pins[0] && lockedProvider !== pins[0]) throw new NoEligibleJourneyProviderError("The reached unit has conflicting binding provider constraints.");
   const candidates = await Promise.all(snapshot.catalogue.entries.map(async (entry) => {
     if (!entry.enabled) return { id: entry.id, ready: false, plannedCalls: 1 };
@@ -21698,7 +21995,7 @@ async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFa
     ...run.request.providerSelection?.requiredCapabilities ?? [],
     ...(evaluation.packet.visualMaterials?.length ?? 0) > 0 ? ["pixels"] : []
   ])];
-  const selected = selectProvider({
+  return {
     catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries },
     preferences: snapshot.preferences,
     unitId,
@@ -21708,15 +22005,19 @@ async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFa
     remainingCalls,
     ...run.request.providerSelection?.preferredOrder === void 0 ? {} : { preferredOrder: run.request.providerSelection.preferredOrder },
     ...lockedProvider ?? pins[0] ? { unitOverride: lockedProvider ?? pins[0] } : {}
-  });
-  if (!selected.selected) throw new NoEligibleJourneyProviderError("No eligible provider fits the reached journey unit.");
+  };
+}
+function journeyChoice(evaluation, selected, lockId, decisionReason = selected.decisionReason) {
+  const entry = selected.selected?.provider;
+  if (!selected.selected || !entry) return void 0;
   return providerSelectionInitialChoiceSchema.parse({
     respondentId: evaluation.respondentId,
     questionId: evaluation.questionId,
-    ...lock ? { comparisonLockId: lock.id } : {},
+    branchId: evaluation.branchId,
+    ...lockId === void 0 ? {} : { comparisonLockId: lockId },
     providerId: selected.selected.id,
-    modelIdentity: providerModelIdentity(selected.selected.provider),
-    decisionReason: selected.decisionReason,
+    modelIdentity: providerModelIdentity(entry),
+    decisionReason,
     candidates: selected.candidates.map(({ id, eligible, selected: isSelected, fit, cost, exclusion, preferenceRank }) => ({
       id,
       eligible,
@@ -21727,6 +22028,78 @@ async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFa
       ...preferenceRank ? { preferenceRank } : {}
     }))
   });
+}
+async function resolveJourneyProvider(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2) {
+  const input2 = await journeyProviderSelectionInput(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2);
+  const selected = selectProvider(input2);
+  if (!selected.selected) throw new NoEligibleJourneyProviderError("No eligible provider fits the reached journey unit.");
+  const lock = run.request.providerSelection?.comparisonLocks?.find(({ members: members2 }) => members2.some(({ respondentId, questionId, branchId }) => respondentId === evaluation.respondentId && questionId === evaluation.questionId && (branchId ?? "root") === evaluation.branchId));
+  return journeyChoice(evaluation, selected, lock?.id);
+}
+async function resolveForkComparisonProviders(reads, commands, runId2, claim2, run, forkNodeId, parentBranchId, created, providerFactory, providerOptions, assertProviderReady2) {
+  const failComparison = (evaluations2) => {
+    const message = "No common provider can satisfy every reached member of this matched comparison.";
+    commands.failJourneyProviderComparison(
+      claim2,
+      evaluations2.map(({ evaluationId, packetFingerprint }) => ({ evaluationId, packetFingerprint })),
+      { code: "comparison_provider_unavailable", message }
+    );
+    for (const evaluation of evaluations2) {
+      evaluation.status = "failed";
+      evaluation.failure = { code: "comparison_provider_unavailable", message };
+      run.respondents = run.respondents.map((state) => state.respondentId === evaluation.respondentId && state.branchId === evaluation.branchId ? {
+        ...state,
+        status: "failed",
+        currentNodeId: null,
+        currentTurnId: null,
+        currentContextId: null,
+        revision: state.revision + 1
+      } : state);
+    }
+  };
+  const taskById = new Map(run.request.journey.tasks.map((task) => [task.id, task]));
+  const byKey = /* @__PURE__ */ new Map();
+  for (const evaluation of created) {
+    const comparisonKey = taskById.get(evaluation.questionId)?.comparisonKey;
+    if (!comparisonKey) continue;
+    const members2 = byKey.get(comparisonKey) ?? [];
+    members2.push(evaluation);
+    byKey.set(comparisonKey, members2);
+  }
+  const status = reads.getStatus(runId2);
+  const remainingCalls = Math.max(0, status.maxCalls - status.usedCalls - status.reservedCalls);
+  for (const [comparisonKey, evaluations2] of byKey) {
+    if (new Set(evaluations2.map(({ branchId }) => branchId)).size < 2 || evaluations2.length < 2) continue;
+    const identityKey = (evaluation) => JSON.stringify([evaluation.respondentId, evaluation.questionId, evaluation.branchId]);
+    const explicit = run.request.providerSelection?.comparisonLocks?.find((lock) => lock.members.some((member) => evaluations2.some((evaluation) => identityKey(evaluation) === JSON.stringify([member.respondentId, member.questionId, member.branchId ?? "root"]))));
+    const lockId = explicit?.id ?? `fork-${hashCanonical({ forkNodeId, parentBranchId, comparisonKey }).slice(0, 24)}`;
+    let inputs;
+    try {
+      inputs = await Promise.all(evaluations2.map(async (evaluation) => {
+        const input2 = await journeyProviderSelectionInput(reads, runId2, run, evaluation, providerFactory, providerOptions, assertProviderReady2);
+        return { ...input2, unitId: identityKey(evaluation), remainingCalls, candidates: input2.candidates.map((candidate) => ({ ...candidate, plannedCalls: 1 })) };
+      }));
+    } catch (error62) {
+      if (!(error62 instanceof NoEligibleJourneyProviderError)) throw error62;
+      failComparison(evaluations2);
+      continue;
+    }
+    const resolved = selectProviderComparisonLock({ id: lockId, equality: explicit?.equality ?? { provider: "same", model: "same" }, members: inputs });
+    const memberSelections = resolved.members?.length === evaluations2.length ? resolved.members.map(({ selection }) => selection) : resolved.selected ? inputs.map((input2) => selectProvider({ ...input2, unitOverride: resolved.selected.id })) : [];
+    if (memberSelections.length === evaluations2.length && memberSelections.every((selection) => selection.selected)) {
+      const writes = evaluations2.map((evaluation) => {
+        const memberIndex = evaluations2.findIndex(({ evaluationId }) => evaluationId === evaluation.evaluationId);
+        const memberSelection = memberSelections[memberIndex];
+        const choice = memberSelection ? journeyChoice(evaluation, memberSelection, lockId, resolved.decisionReason) : void 0;
+        if (!choice) throw new NoEligibleJourneyProviderError("A ready fork comparison member has no resolved provider choice.");
+        return { evaluationId: evaluation.evaluationId, packetFingerprint: evaluation.packetFingerprint, choice };
+      });
+      commands.persistJourneyProviderChoices(claim2, lockId, writes);
+      for (const evaluation of evaluations2) evaluation.providerSelection = writes.find(({ evaluationId }) => evaluationId === evaluation.evaluationId).choice;
+      continue;
+    }
+    failComparison(evaluations2);
+  }
 }
 function batchVisualMaterials(groups) {
   const byId = /* @__PURE__ */ new Map();
@@ -26812,7 +27185,7 @@ var runs = sqliteTable("runs", {
   unique("runs_submission_id_uq").on(table.submissionId),
   unique("runs_run_submission_uq").on(table.runId, table.submissionId),
   check2("runs_status_ck", sql`${table.status} IN ('prepared', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted')`),
-  check2("runs_count_ck", sql`${table.evaluationCount} > 0 AND ${table.maxCalls} > 0 AND ${table.usedCalls} >= 0 AND ${table.reservedCalls} >= 0 AND ${table.usedCalls} + ${table.reservedCalls} <= ${table.maxCalls}`),
+  check2("runs_count_ck", sql`${table.evaluationCount} >= 0 AND ${table.maxCalls} > 0 AND ${table.usedCalls} >= 0 AND ${table.reservedCalls} >= 0 AND ${table.usedCalls} + ${table.reservedCalls} <= ${table.maxCalls}`),
   check2("runs_owner_ck", sql`(${table.status} = 'running' AND ${table.ownerToken} IS NOT NULL AND ${table.ownerPid} IS NOT NULL AND ${table.leaseExpiresMs} IS NOT NULL) OR (${table.status} <> 'running' AND ${table.ownerToken} IS NULL AND ${table.ownerPid} IS NULL)`),
   check2("runs_cancel_ck", sql`${table.cancelRequested} IN (0, 1)`),
   check2("runs_failure_scope_ck", sql`${table.failureScope} IS NULL OR ${table.failureScope} IN ('evaluation', 'run')`),
@@ -26849,6 +27222,7 @@ var evaluations = sqliteTable("evaluations", {
   ordinal: integer2("ordinal").notNull(),
   contextId: text("context_id").notNull(),
   respondentId: text("respondent_id").notNull(),
+  branchId: text("branch_id").notNull().default("root"),
   questionId: text("question_id").notNull(),
   groupId: text("group_id").notNull(),
   turnId: text("turn_id"),
@@ -26871,7 +27245,8 @@ var evaluations = sqliteTable("evaluations", {
   unique("evaluations_run_eval_uq").on(table.runId, table.evaluationId),
   unique("evaluations_run_eval_group_uq").on(table.runId, table.evaluationId, table.groupId),
   unique("evaluations_run_turn_uq").on(table.runId, table.turnId),
-  unique("evaluations_run_respondent_node_occurrence_uq").on(table.runId, table.respondentId, table.nodeId, table.occurrence),
+  unique("evaluations_run_respondent_branch_node_occurrence_uq").on(table.runId, table.respondentId, table.branchId, table.nodeId, table.occurrence),
+  unique("evaluations_run_eval_respondent_branch_uq").on(table.runId, table.evaluationId, table.respondentId, table.branchId),
   check2("evaluations_status_ck", sql`${table.status} IN ('pending', 'answered', 'failed', 'unreached')`),
   check2("evaluations_ordinal_ck", sql`${table.ordinal} >= 0`),
   check2("evaluations_journey_identity_ck", sql`(${table.turnId} IS NULL AND ${table.nodeId} IS NULL AND ${table.pathId} IS NULL AND ${table.occurrence} IS NULL) OR (${table.turnId} IS NOT NULL AND ${table.nodeId} IS NOT NULL AND ${table.pathId} IS NOT NULL AND ${table.occurrence} >= 1)`),
@@ -26881,6 +27256,7 @@ var evaluations = sqliteTable("evaluations", {
 var journeyRespondents = sqliteTable("journey_respondents", {
   runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
   respondentId: text("respondent_id").notNull(),
+  branchId: text("branch_id").notNull().default("root"),
   status: text("status", { enum: journeyRespondentStatuses }).notNull(),
   currentNodeId: text("current_node_id"),
   currentTurnId: text("current_turn_id"),
@@ -26890,10 +27266,48 @@ var journeyRespondents = sqliteTable("journey_respondents", {
   routeJson: text("route_json").notNull(),
   outcome: text("outcome")
 }, (table) => [
-  primaryKey({ name: "journey_respondents_pk", columns: [table.runId, table.respondentId] }),
-  check2("journey_respondents_status_ck", sql`${table.status} IN ('active', 'completed', 'failed', 'unreached')`),
+  primaryKey({ name: "journey_respondents_pk", columns: [table.runId, table.respondentId, table.branchId] }),
+  check2("journey_respondents_status_ck", sql`${table.status} IN ('active', 'waiting-fork', 'branched', 'completed', 'failed', 'unreached')`),
   check2("journey_respondents_revision_ck", sql`${table.revision} >= 0`),
-  check2("journey_respondents_checkpoint_ck", sql`(${table.status} = 'active' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NOT NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} <> 'active' AND ${table.currentNodeId} IS NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NULL)`)
+  check2("journey_respondents_checkpoint_ck", sql`(${table.status} = 'active' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NOT NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} = 'waiting-fork' AND ${table.currentNodeId} IS NOT NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NOT NULL) OR (${table.status} IN ('branched', 'completed', 'failed', 'unreached') AND ${table.currentNodeId} IS NULL AND ${table.currentTurnId} IS NULL AND ${table.currentContextId} IS NULL)`)
+]);
+var journeyForks = sqliteTable("journey_forks", {
+  runId: text("run_id").notNull().references(() => runs.runId, { onDelete: "cascade" }),
+  forkNodeId: text("fork_node_id").notNull(),
+  parentBranchId: text("parent_branch_id").notNull(),
+  status: text("status", { enum: ["open", "closed"] }).notNull(),
+  cohortCount: integer2("cohort_count").notNull(),
+  openedMs: integer2("opened_ms").notNull(),
+  closedMs: integer2("closed_ms"),
+  revision: integer2("revision").notNull()
+}, (table) => [
+  primaryKey({ name: "journey_forks_pk", columns: [table.runId, table.forkNodeId, table.parentBranchId] }),
+  check2("journey_forks_status_ck", sql`(${table.status} = 'open' AND ${table.closedMs} IS NULL) OR (${table.status} = 'closed' AND ${table.closedMs} >= ${table.openedMs})`),
+  check2("journey_forks_counts_ck", sql`${table.cohortCount} >= 0 AND ${table.openedMs} >= 0 AND ${table.revision} >= 0`)
+]);
+var journeyForkMembers = sqliteTable("journey_fork_members", {
+  runId: text("run_id").notNull(),
+  forkNodeId: text("fork_node_id").notNull(),
+  parentBranchId: text("parent_branch_id").notNull(),
+  respondentId: text("respondent_id").notNull(),
+  conditionOrdinal: integer2("condition_ordinal").notNull(),
+  conditionId: text("condition_id").notNull(),
+  childBranchId: text("child_branch_id").notNull(),
+  sourceContextId: text("source_context_id").notNull(),
+  childContextId: text("child_context_id").notNull(),
+  childTurnId: text("child_turn_id").notNull(),
+  childEvaluationId: text("child_evaluation_id").notNull()
+}, (table) => [
+  primaryKey({ name: "journey_fork_members_pk", columns: [table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.conditionId] }),
+  foreignKey({ name: "journey_fork_members_fork_fk", columns: [table.runId, table.forkNodeId, table.parentBranchId], foreignColumns: [journeyForks.runId, journeyForks.forkNodeId, journeyForks.parentBranchId] }).onDelete("cascade"),
+  foreignKey({ name: "journey_fork_members_parent_fk", columns: [table.runId, table.respondentId, table.parentBranchId], foreignColumns: [journeyRespondents.runId, journeyRespondents.respondentId, journeyRespondents.branchId] }).onDelete("cascade"),
+  foreignKey({ name: "journey_fork_members_child_evaluation_fk", columns: [table.runId, table.childEvaluationId, table.respondentId, table.childBranchId], foreignColumns: [evaluations.runId, evaluations.evaluationId, evaluations.respondentId, evaluations.branchId] }).onDelete("cascade"),
+  unique("journey_fork_members_ordinal_uq").on(table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.conditionOrdinal),
+  unique("journey_fork_members_child_branch_uq").on(table.runId, table.forkNodeId, table.parentBranchId, table.respondentId, table.childBranchId),
+  unique("journey_fork_members_child_context_uq").on(table.runId, table.childContextId),
+  unique("journey_fork_members_child_turn_uq").on(table.runId, table.childTurnId),
+  unique("journey_fork_members_child_evaluation_uq").on(table.runId, table.childEvaluationId),
+  check2("journey_fork_members_ordinal_ck", sql`${table.conditionOrdinal} >= 0`)
 ]);
 var attempts = sqliteTable("attempts", {
   attemptSequence: integer2("attempt_sequence").primaryKey({ autoIncrement: true }),
@@ -26998,6 +27412,8 @@ var sqliteTables = {
   questionGroups,
   evaluations,
   journeyRespondents,
+  journeyForks,
+  journeyForkMembers,
   attempts,
   attemptEvaluations,
   evaluationAnswerAttempts,
@@ -27014,12 +27430,13 @@ var RECONCILE_SELECTION_LIMIT = 100;
 
 // src/infrastructure/sqlite/schema.ts
 var BASELINE_SCHEMA_VERSION = 9;
-var SCHEMA_VERSION = 13;
+var SCHEMA_VERSION = 14;
 var BASELINE_MIGRATION_ID = "baseline-v9";
 var IMAGE_ASSET_MIGRATION_ID = "image-assets-v10";
 var RUN_VISUAL_ASSETS_MIGRATION_ID = "run-visual-assets-v11";
 var PROVIDER_SELECTION_MIGRATION_ID = "provider-selection-v12";
 var EVALUATION_PROVIDER_SELECTION_MIGRATION_ID = "evaluation-provider-selection-v13";
+var MATCHED_FORKS_MIGRATION_ID = "matched-forks-v14";
 var MIGRATION_BACKUP_RETRIES = 3;
 var SQLITE_TRANSIENT_LOCK_CODES = /* @__PURE__ */ new Set([5, 6]);
 var SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -27076,8 +27493,17 @@ function evaluationProviderSelectionMigration() {
   if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 13 evaluation provider selection migration is missing from this Sheg installation.");
   return { id: EVALUATION_PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 12, toVersion: 13, sql: readFileSync(match, "utf8") };
 }
+function matchedForksMigration() {
+  const candidates = [
+    fileURLToPath(new URL("../../../migrations/0005_matched_forks/migration.sql", import.meta.url)),
+    fileURLToPath(new URL("./migrations/0005_matched_forks/migration.sql", import.meta.url))
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError("datastore_schema_invalid", "The schema 14 matched fork migration is missing from this Sheg installation.");
+  return { id: MATCHED_FORKS_MIGRATION_ID, fromVersion: 13, toVersion: 14, sql: readFileSync(match, "utf8") };
+}
 function registeredMigrations() {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration(), matchedForksMigration()];
 }
 function migrationChecksum(migration) {
   return createHash3("sha256").update(migration.sql).digest("hex");
@@ -27445,7 +27871,7 @@ function openSqliteConnection(databasePath, dataRoot) {
 }
 
 // src/infrastructure/sqlite/command-repository.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { randomUUID as randomUUID5 } from "node:crypto";
 
 // src/infrastructure/sqlite/commands/reservation.ts
 function reservePhysicalAttempt(database, attempt) {
@@ -27855,6 +28281,7 @@ function persistNextJourneyTurn(database, runId2, next) {
     ordinal: next.ordinal,
     contextId: next.contextId,
     respondentId: next.respondentId,
+    branchId: next.branchId,
     questionId: next.questionId,
     groupId: next.contextId,
     turnId: next.turnId,
@@ -27866,6 +28293,25 @@ function persistNextJourneyTurn(database, runId2, next) {
     status: "pending"
   }).run();
   database.update(runs).set({ evaluationCount: sql`${runs.evaluationCount} + 1` }).where(eq(runs.runId, runId2)).run();
+}
+function firstNodeAfterExposures(journey, startNodeId) {
+  if (!startNodeId) return void 0;
+  const graph = journeyTopology(journey);
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const exposures = [];
+  const visited = /* @__PURE__ */ new Set();
+  let currentNodeId = startNodeId;
+  while (!visited.has(currentNodeId)) {
+    visited.add(currentNodeId);
+    const node2 = nodes.get(currentNodeId);
+    if (!node2) return void 0;
+    if (node2.kind !== "expose") return { nodeId: node2.id, exposures };
+    exposures.push(node2);
+    const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+    if (!edge) return void 0;
+    currentNodeId = edge.toNodeId;
+  }
+  return void 0;
 }
 function persistJourneyRespondentState(database, runId2, transition) {
   return database.update(journeyRespondents).set({
@@ -27880,6 +28326,7 @@ function persistJourneyRespondentState(database, runId2, transition) {
   }).where(and(
     eq(journeyRespondents.runId, runId2),
     eq(journeyRespondents.respondentId, transition.respondentId),
+    eq(journeyRespondents.branchId, transition.state.branchId),
     eq(journeyRespondents.revision, transition.expectedRevision)
   )).returning({ runId: journeyRespondents.runId }).all().length === 1;
 }
@@ -27889,21 +28336,22 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
   const attempt = context.database.prepare("SELECT evaluation_id FROM attempts WHERE attempt_id = ? AND run_id = ? AND owner_token = ? AND status = 'reserved'").get(attemptId, claim2.runId, claim2.ownerToken);
   if (!attempt) throw new RunStoreError("attempt_not_reserved", "The provider attempt is not reserved by this worker.");
   const evaluationId = asText(attempt.evaluation_id, "evaluation ID");
-  const evaluation = context.database.prepare("SELECT packet_json, turn_id, node_id, respondent_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
+  const evaluation = context.database.prepare("SELECT packet_json, turn_id, node_id, respondent_id, branch_id FROM evaluations WHERE evaluation_id = ? AND run_id = ?").get(evaluationId, claim2.runId);
   if (!evaluation) throw new RunStoreError("data_integrity_error", "The reserved journey turn is missing.");
   const turnId = asText(evaluation.turn_id, "turn ID");
   const nodeId = asText(evaluation.node_id, "node ID");
   const respondentId = asText(evaluation.respondent_id, "respondent ID");
-  if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId || !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 || transition.state.revision !== transition.expectedRevision + 1) {
+  const branchId = asText(evaluation.branch_id, "branch ID");
+  if (transition.respondentId !== respondentId || transition.state.respondentId !== respondentId || transition.state.branchId !== branchId || !Number.isSafeInteger(transition.expectedRevision) || transition.expectedRevision < 0 || transition.state.revision !== transition.expectedRevision + 1) {
     throw new RunStoreError("journey_transition_conflict", "Journey transition does not match the reserved respondent turn.");
   }
-  const stateRow = context.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ?").get(claim2.runId, respondentId);
+  const stateRow = context.database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? AND respondent_id = ? AND branch_id = ?").get(claim2.runId, respondentId, branchId);
   if (!stateRow || asNumber(stateRow.revision, "journey state revision") !== transition.expectedRevision || asText(stateRow.current_turn_id, "current turn ID") !== turnId || asText(stateRow.current_node_id, "current node ID") !== nodeId) {
     throw new RunStoreError("journey_transition_conflict", "Journey respondent state has moved since this turn was reserved.");
   }
   const priorEvents = parseStored(journeyEventsSchema, parseJson(stateRow.events_json, "journey history"), "journey history");
   const priorRoute = parseStored(journeyRouteSchema, parseJson(stateRow.route_json, "journey route"), "journey route");
-  if (transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) || transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
+  if (transition.state.branchId !== branchId || transition.state.events.length < priorEvents.length || JSON.stringify(transition.state.events.slice(0, priorEvents.length)) !== JSON.stringify(priorEvents) || transition.state.route.length < priorRoute.length || JSON.stringify(transition.state.route.slice(0, priorRoute.length)) !== JSON.stringify(priorRoute)) {
     throw new RunStoreError("journey_transition_conflict", "Journey transitions must preserve ordered prior evidence.");
   }
   const runRow = context.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(claim2.runId);
@@ -27931,12 +28379,25 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
     }
     const routeAddition = transition.state.route.slice(priorRoute.length);
     const expectedTarget = context.journeyRouteTarget(parsedRunRequest.data.journey, nodeId, result);
-    if (routeAddition.length !== 1 || routeAddition[0].nodeId !== nodeId || routeAddition[0].toNodeId !== expectedTarget || !context.sameDecisionValue(routeAddition[0].response, result) || transition.state.status === "failed") {
+    if (routeAddition.length !== 1 || (routeAddition[0].branchId ?? "root") !== branchId || routeAddition[0].nodeId !== nodeId || routeAddition[0].toNodeId !== expectedTarget || !context.sameDecisionValue(routeAddition[0].response, result) || transition.state.status === "failed") {
       throw new RunStoreError("journey_transition_conflict", "Journey transition must record the exact typed response and matching route outcome.");
     }
     if (transition.state.status === "active") {
-      if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId || transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId || transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
+      if (!transition.nextEvaluation || transition.nextEvaluation.respondentId !== respondentId || transition.nextEvaluation.branchId !== branchId || transition.state.currentTurnId !== transition.nextEvaluation.turnId || transition.state.currentContextId !== transition.nextEvaluation.contextId || transition.state.currentNodeId !== transition.nextEvaluation.nodeId) {
         throw new RunStoreError("journey_transition_conflict", "An active respondent must point to exactly one next reached turn.");
+      }
+    } else if (transition.state.status === "waiting-fork") {
+      const checkpoint = firstNodeAfterExposures(parsedRunRequest.data.journey, expectedTarget);
+      const nextNode = checkpoint && parsedRunRequest.data.journey.presentation.kind === "graph" ? parsedRunRequest.data.journey.presentation.nodes.find((candidate) => candidate.id === checkpoint.nodeId) : void 0;
+      const expectedExposures = (checkpoint?.exposures ?? []).map((node2, index2) => ({
+        type: "exposure",
+        sequence: priorEvents.length + index2 + 1,
+        nodeId: node2.id,
+        itemId: node2.itemId
+      }));
+      const actualExposures = transition.state.events.slice(priorEvents.length + 1);
+      if (transition.nextEvaluation || nextNode?.kind !== "fork" || transition.state.currentNodeId !== checkpoint?.nodeId || hashCanonical(actualExposures) !== hashCanonical(expectedExposures) || transition.state.currentTurnId !== null || transition.state.currentContextId === null) {
+        throw new RunStoreError("journey_transition_conflict", "A fork arrival must retain its context at the reached fork without creating a turn.");
       }
     } else if (transition.nextEvaluation || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null) {
       throw new RunStoreError("journey_transition_conflict", "A terminal respondent state cannot have a next reached turn.");
@@ -27953,7 +28414,7 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
     linkWinningAnswer(context.orm, claim2.runId, evaluationId, attemptId);
   } else {
     const sharedFailure = outcome.scope === "run";
-    if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
+    if (transition.nextEvaluation || (sharedFailure ? transition.state.status !== "active" || transition.state.branchId !== branchId || transition.state.currentTurnId !== turnId || transition.state.currentContextId !== asText(stateRow.current_context_id, "current context ID") || transition.state.currentNodeId !== nodeId : transition.state.status !== "failed" || transition.state.branchId !== branchId || transition.state.currentTurnId !== null || transition.state.currentContextId !== null || transition.state.currentNodeId !== null)) {
       throw new RunStoreError("journey_transition_conflict", "A failed turn must preserve a resumable shared turn or stop only this respondent.");
     }
     const chargedCalls = outcome.providerAttempts ?? 1;
@@ -27968,7 +28429,7 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
     const nextPacket = decisionRequestSchema.safeParse(next.packet);
     const respondent = parsedRunRequest.data.respondents.find(({ id }) => id === respondentId);
     const current = context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS ordinal FROM evaluations WHERE run_id = ?").get(claim2.runId);
-    if (!nextPacket.success || !respondent || next.respondentId !== respondentId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !context.isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
+    if (!nextPacket.success || !respondent || next.respondentId !== respondentId || next.branchId !== branchId || !Number.isSafeInteger(next.occurrence) || next.occurrence < 1 || !Number.isSafeInteger(next.ordinal) || next.ordinal !== asNumber(current.ordinal, "evaluation ordinal") + 1 || next.questionId !== nextPacket.data.question.id || !context.isJourneyAskNode(parsedRunRequest.data.journey, next.nodeId, next.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRunRequest.data.journey, respondent, next.questionId, transition.state.events, storedRun.compilerFingerprint)) !== hashCanonical(nextPacket.data) || hashCanonical({ packet: nextPacket.data, compilerFingerprint: storedRun.compilerFingerprint }) !== next.packetFingerprint) {
       throw new RunStoreError("invalid_journey_turn", "Next journey turn is invalid or does not follow the persisted evaluation order.");
     }
     persistNextJourneyTurn(context.orm, claim2.runId, next);
@@ -27979,6 +28440,485 @@ function settleJourneyTurn(context, claim2, attemptId, outcome, transition) {
   if (!chargeReservedAttempt(context.orm, claim2.runId, outcome.kind === "failed" ? outcome.providerAttempts ?? 1 : outcome.result.attempts)) {
     throw new RunStoreError("data_integrity_error", "The run has no reserved physical call to settle.");
   }
+}
+
+// src/infrastructure/sqlite/commands/fork-barrier.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+
+// src/domain/journey/forks.ts
+function journeyForkBarrierReadiness(journey, forkNodeId, parentBranchId, states) {
+  const graph = journeyTopology(journey);
+  const fork = graph.nodes.find((node2) => node2.id === forkNodeId);
+  if (fork?.kind !== "fork") throw new Error(`Node ${forkNodeId} is not a matched fork.`);
+  const branchStates = states.filter((state) => state.branchId === parentBranchId);
+  const arrived = branchStates.filter((state) => state.status === "waiting-fork" && state.currentNodeId === forkNodeId);
+  const activeThatCanStillArrive = branchStates.filter((state) => state.status === "active" && state.currentNodeId !== null && canReachNode(graph, state.currentNodeId, forkNodeId));
+  return {
+    forkNodeId,
+    parentBranchId,
+    arrived,
+    activeThatCanStillArrive,
+    canClose: arrived.length > 0 && activeThatCanStillArrive.length === 0
+  };
+}
+function journeyChildBranchId(parentBranchId, forkNodeId, conditionId) {
+  if (!parentBranchId || !forkNodeId || !conditionId || /[=/]/.test(forkNodeId) || /[=/]/.test(conditionId)) {
+    throw new Error("Fork branch identity contains an empty or ambiguous segment.");
+  }
+  return `${parentBranchId}/${forkNodeId}=${conditionId}`;
+}
+function compileForkConditionEntry(input2) {
+  const graph = journeyTopology(input2.journey);
+  const fork = graph.nodes.find((node2) => node2.id === input2.forkNodeId);
+  const condition = fork?.kind === "fork" ? fork.conditions.find(({ id }) => id === input2.conditionId) : void 0;
+  if (!condition) throw new Error(`Condition ${input2.conditionId} is not declared by fork ${input2.forkNodeId}.`);
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const events = [...input2.parent.events];
+  let current = condition.entryNodeId;
+  const visited = /* @__PURE__ */ new Set();
+  while (true) {
+    if (visited.has(current)) throw new Error(`Fork condition ${condition.id} contains a cycle at node ${current}.`);
+    visited.add(current);
+    const node2 = nodes.get(current);
+    if (!node2) throw new Error(`Fork condition ${condition.id} points to unknown node ${current}.`);
+    if (node2.kind === "ask") {
+      return {
+        branchId: journeyChildBranchId(input2.parent.branchId, input2.forkNodeId, condition.id),
+        nodeId: node2.id,
+        taskId: node2.taskId,
+        pathId: journeyPathId(input2.parent.route),
+        events,
+        packet: compileDecisionPacketForCompiler(input2.journey, input2.profile, node2.taskId, events, input2.compilerFingerprint)
+      };
+    }
+    if (node2.kind !== "expose") throw new Error(`Fork condition ${condition.id} must reach its first ask before a terminal or nested fork.`);
+    events.push({ type: "exposure", sequence: events.length, nodeId: node2.id, itemId: node2.itemId });
+    const next = journeyControlSuccessors(graph, node2.id);
+    if (next.length !== 1 || next[0]?.kind !== "transition") throw new Error(`Fork treatment exposure ${node2.id} does not have one unconditional successor.`);
+    current = next[0].toNodeId;
+  }
+}
+function canReachNode(graph, startNodeId, targetNodeId) {
+  const visited = /* @__PURE__ */ new Set();
+  const pending = [startNodeId];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === targetNodeId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const successor of journeyControlSuccessors(graph, current)) pending.push(successor.toNodeId);
+  }
+  return false;
+}
+
+// src/domain/journey/comparison-evidence.ts
+function comparisonTasksByCondition(journey, forkNodeId) {
+  if (journey.presentation.kind !== "graph") return /* @__PURE__ */ new Map();
+  const graph = journey.presentation;
+  const fork = graph.nodes.find((node2) => node2.id === forkNodeId);
+  if (fork?.kind !== "fork") return /* @__PURE__ */ new Map();
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const transition of graph.transitions) {
+    const targets = outgoing.get(transition.fromNodeId) ?? [];
+    targets.push(transition.toNodeId);
+    outgoing.set(transition.fromNodeId, targets);
+  }
+  const tasks = new Map(journey.tasks.map((task) => [task.id, task]));
+  return new Map(fork.conditions.map((condition) => {
+    const seen = /* @__PURE__ */ new Set();
+    const pending = [condition.entryNodeId];
+    const keys = /* @__PURE__ */ new Map();
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      if (seen.has(nodeId)) continue;
+      seen.add(nodeId);
+      const node2 = nodes.get(nodeId);
+      if (!node2 || node2.kind === "terminal" || node2.kind === "fork") continue;
+      if (node2.kind === "ask") {
+        const task = tasks.get(node2.taskId);
+        if (task?.comparisonKey) keys.set(task.comparisonKey, task.id);
+      }
+      pending.push(...outgoing.get(nodeId) ?? []);
+    }
+    return [condition.id, keys];
+  }));
+}
+function missingMember(condition, branchId, questionId, state) {
+  const notReachedReason = !state ? "branch-state-missing" : state.status === "failed" ? "branch-failed-before-comparison" : state.status === "completed" || state.status === "branched" || state.status === "unreached" ? "branch-ended-before-comparison" : "turn-not-reached-yet";
+  return {
+    conditionId: condition.id,
+    label: condition.label,
+    branchId,
+    questionId,
+    status: "not-reached",
+    ...state?.outcome === void 0 ? {} : { respondentOutcome: state.outcome },
+    notReachedReason
+  };
+}
+function buildJourneyComparisonEvidence(input2) {
+  if (input2.journey.presentation.kind !== "graph") return [];
+  const results = [];
+  for (const barrier of input2.forks) {
+    const fork = input2.journey.presentation.nodes.find((node2) => node2.id === barrier.forkNodeId);
+    if (fork?.kind !== "fork") continue;
+    const members2 = input2.forkMembers.filter((member) => member.forkNodeId === barrier.forkNodeId && member.parentBranchId === barrier.parentBranchId);
+    const respondents = [...new Set(members2.map(({ respondentId }) => respondentId))].sort();
+    const keysByCondition = comparisonTasksByCondition(input2.journey, barrier.forkNodeId);
+    const comparisonKeys = [...new Set([...keysByCondition.values()].flatMap((keys) => [...keys.keys()]))].filter((key) => fork.conditions.filter(({ id }) => keysByCondition.get(id)?.has(key)).length > 1);
+    for (const comparisonKey of comparisonKeys) {
+      const conditions = fork.conditions.flatMap((condition) => {
+        const questionId = keysByCondition.get(condition.id)?.get(comparisonKey);
+        return questionId === void 0 ? [] : [{ ...condition, questionId }];
+      });
+      const conditionPairs = conditions.flatMap((first, index2) => conditions.slice(index2 + 1).map((second) => [first, second]));
+      const pairs = respondents.flatMap((respondentId) => {
+        const conditionBranches = new Map(conditions.map((condition) => [condition.id, members2.find((member) => member.respondentId === respondentId && member.conditionId === condition.id)?.childBranchId]));
+        const occurrences = /* @__PURE__ */ new Set();
+        for (const condition of conditions) {
+          const branchId = conditionBranches.get(condition.id);
+          for (const evaluation of input2.evaluations) if (evaluation.respondentId === respondentId && evaluation.branchId === branchId && evaluation.questionId === condition.questionId) occurrences.add(evaluation.occurrence);
+        }
+        if (occurrences.size === 0) occurrences.add(1);
+        return [...occurrences].sort((left, right) => left - right).flatMap((occurrence) => conditionPairs.map(([first, second]) => {
+          const memberFor = (condition) => {
+            const branchId = conditionBranches.get(condition.id);
+            const state = input2.respondents.find((candidate) => candidate.respondentId === respondentId && candidate.branchId === branchId);
+            const evaluation = branchId === void 0 ? void 0 : input2.evaluations.find((candidate) => candidate.respondentId === respondentId && candidate.branchId === branchId && candidate.questionId === condition.questionId && candidate.occurrence === occurrence);
+            if (!evaluation || branchId === void 0) return missingMember(condition, branchId ?? "", condition.questionId, state);
+            return {
+              conditionId: condition.id,
+              label: condition.label,
+              branchId,
+              questionId: condition.questionId,
+              status: evaluation.status,
+              ...state?.outcome === void 0 ? {} : { respondentOutcome: state.outcome },
+              evaluationId: evaluation.evaluationId,
+              packetFingerprint: evaluation.packetFingerprint,
+              ...evaluation.providerSelection === void 0 ? {} : { providerSelection: evaluation.providerSelection },
+              ...evaluation.result === void 0 ? {} : { result: evaluation.result },
+              ...evaluation.execution === void 0 ? {} : { execution: evaluation.execution },
+              ...evaluation.failure === void 0 ? {} : { failure: evaluation.failure }
+            };
+          };
+          const pairMembers = [memberFor(first), memberFor(second)];
+          return { respondentId, occurrence, complete: pairMembers.every(({ status }) => status === "answered"), members: pairMembers };
+        }));
+      });
+      const completePairs = pairs.filter(({ complete }) => complete).length;
+      results.push({
+        forkNodeId: barrier.forkNodeId,
+        parentBranchId: barrier.parentBranchId,
+        barrierStatus: barrier.status,
+        comparisonKey,
+        conditions: conditions.map(({ id, label, questionId }) => ({ conditionId: id, label, questionId })),
+        cohortRespondents: respondents.length,
+        totalPairs: pairs.length,
+        completePairs,
+        incompletePairs: pairs.length - completePairs,
+        pairs
+      });
+    }
+  }
+  return results;
+}
+
+// src/infrastructure/sqlite/reads/journeys.ts
+function readJourneyRun(database, runId2, notFound) {
+  const row = database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId2);
+  if (!row) throw notFound();
+  const stored = parseJsonRecord(row.request_json, "request");
+  if (!("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) throw new RunStoreError("data_integrity_error", "Stored journey request has an invalid shape.");
+  const parsedRequest = runRequestSchema.safeParse(stored.request);
+  if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || typeof stored.compilerFingerprint !== "string" || typeof stored.requestFingerprint !== "string" || stored.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint") || hashCanonical({ request: parsedRequest.data, compilerFingerprint: stored.compilerFingerprint }) !== stored.requestFingerprint) {
+    throw new RunStoreError("data_integrity_error", "Stored journey request or fingerprint is invalid.");
+  }
+  const evaluationRows = database.prepare(`SELECT e.*,
+    (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id) WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
+    FROM evaluations e WHERE e.run_id = ? ORDER BY e.ordinal`).all(runId2);
+  const evaluations2 = evaluationRows.map((evaluation) => {
+    const packet = parseStored(decisionPacketSchema, parseJson(evaluation.packet_json, "frozen packet"), "frozen packet");
+    const base = {
+      evaluationId: asText(evaluation.evaluation_id, "evaluation ID"),
+      contextId: asText(evaluation.context_id, "context ID"),
+      respondentId: asText(evaluation.respondent_id, "respondent ID"),
+      questionId: asText(evaluation.question_id, "question ID"),
+      packet,
+      branchId: asText(evaluation.branch_id, "branch ID"),
+      packetFingerprint: asText(evaluation.packet_fingerprint, "packet fingerprint"),
+      turnId: asText(evaluation.turn_id, "turn ID"),
+      nodeId: asText(evaluation.node_id, "node ID"),
+      pathId: asText(evaluation.path_id, "path ID"),
+      occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
+      ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
+      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status"),
+      ...evaluation.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.provider_selection_json, "provider selection"), "provider selection") }
+    };
+    if (base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
+      throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
+    }
+    if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
+      throw new RunStoreError("data_integrity_error", "Stored journey packet does not match its context identity.");
+    }
+    if (evaluation.result_json !== null) {
+      const decoded = decodeResultAndExecution(parseJson(evaluation.result_json, "decision value"), parseJson(evaluation.execution_json, "provider execution"));
+      base.result = validateDecision(packet, decoded.result, { maxAttempts: decoded.result.attempts });
+      base.execution = decoded.execution;
+    }
+    const failure2 = storedEvaluationFailure(evaluation);
+    if (failure2) base.failure = failure2;
+    return base;
+  });
+  const stateRows = database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id, branch_id").all(runId2);
+  const respondents = stateRows.map((state) => ({
+    respondentId: asText(state.respondent_id, "respondent ID"),
+    branchId: asText(state.branch_id, "branch ID"),
+    status: parseStored(journeyRespondentStatusSchema, asText(state.status, "journey respondent status"), "journey respondent status"),
+    currentNodeId: asNullableText(state.current_node_id, "current node ID"),
+    currentTurnId: asNullableText(state.current_turn_id, "current turn ID"),
+    currentContextId: asNullableText(state.current_context_id, "current context ID"),
+    revision: asNumber(state.revision, "journey state revision"),
+    events: parseStored(journeyEventsSchema, parseJson(state.events_json, "journey history"), "journey history"),
+    route: parseStored(journeyRouteSchema, parseJson(state.route_json, "journey route"), "journey route"),
+    ...state.outcome === null ? {} : { outcome: asText(state.outcome, "journey outcome") }
+  }));
+  const forks = database.prepare("SELECT * FROM journey_forks WHERE run_id = ? ORDER BY fork_node_id, parent_branch_id").all(runId2).map((fork) => ({
+    forkNodeId: asText(fork.fork_node_id, "fork node ID"),
+    parentBranchId: asText(fork.parent_branch_id, "fork parent branch ID"),
+    status: parseStored(external_exports.enum(["open", "closed"]), asText(fork.status, "fork status"), "fork status"),
+    cohortCount: asNumber(fork.cohort_count, "fork cohort count"),
+    openedMs: asNumber(fork.opened_ms, "fork open time"),
+    ...fork.closed_ms === null ? {} : { closedMs: asNumber(fork.closed_ms, "fork close time") },
+    revision: asNumber(fork.revision, "fork revision")
+  }));
+  const forkMembers = database.prepare("SELECT * FROM journey_fork_members WHERE run_id = ? ORDER BY fork_node_id, parent_branch_id, respondent_id, condition_ordinal").all(runId2).map((member) => ({
+    forkNodeId: asText(member.fork_node_id, "fork node ID"),
+    parentBranchId: asText(member.parent_branch_id, "fork parent branch ID"),
+    respondentId: asText(member.respondent_id, "fork respondent ID"),
+    conditionOrdinal: asNumber(member.condition_ordinal, "fork condition ordinal"),
+    conditionId: asText(member.condition_id, "fork condition ID"),
+    childBranchId: asText(member.child_branch_id, "fork child branch ID"),
+    sourceContextId: asText(member.source_context_id, "fork source context ID"),
+    childContextId: asText(member.child_context_id, "fork child context ID"),
+    childTurnId: asText(member.child_turn_id, "fork child turn ID"),
+    childEvaluationId: asText(member.child_evaluation_id, "fork child evaluation ID")
+  }));
+  const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
+  const graph = journeyTopology(parsedRequest.data.journey);
+  const forkNodes = new Map(graph.nodes.filter((node2) => node2.kind === "fork").map((node2) => [node2.id, node2]));
+  const forkNodeIds = new Set(forkNodes.keys());
+  const stateByKey = new Map(respondents.map((state) => [JSON.stringify([state.respondentId, state.branchId]), state]));
+  const evaluationById = new Map(evaluations2.map((evaluation) => [evaluation.evaluationId, evaluation]));
+  const forkKeys = new Set(forks.map(({ forkNodeId, parentBranchId }) => JSON.stringify([forkNodeId, parentBranchId])));
+  const membersByFork = /* @__PURE__ */ new Map();
+  for (const member of forkMembers) {
+    const key = JSON.stringify([member.forkNodeId, member.parentBranchId]);
+    membersByFork.set(key, [...membersByFork.get(key) ?? [], member]);
+  }
+  const firstAskFor = (entryNodeId) => {
+    let current = entryNodeId;
+    const seen = /* @__PURE__ */ new Set();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const node2 = graph.nodes.find((candidate) => candidate.id === current);
+      if (node2?.kind === "ask") return { nodeId: node2.id, taskId: node2.taskId };
+      if (node2?.kind !== "expose") return void 0;
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+      if (!edge) return void 0;
+      current = edge.toNodeId;
+    }
+    return void 0;
+  };
+  const invalidFork = forks.some((fork) => {
+    const key = JSON.stringify([fork.forkNodeId, fork.parentBranchId]);
+    const node2 = forkNodes.get(fork.forkNodeId);
+    const members2 = membersByFork.get(key) ?? [];
+    if (!node2 || fork.status === "open" && (fork.cohortCount !== 0 || fork.closedMs !== void 0 || members2.length !== 0) || fork.status === "closed" && (fork.closedMs === void 0 || fork.cohortCount < 1 || members2.length !== fork.cohortCount * node2.conditions.length || new Set(members2.map(({ respondentId }) => respondentId)).size !== fork.cohortCount) || fork.status === "open" && !respondents.some((state) => state.branchId === fork.parentBranchId && state.status === "waiting-fork" && state.currentNodeId === fork.forkNodeId)) return true;
+    return members2.some((member) => {
+      const condition = node2.conditions[member.conditionOrdinal];
+      const ask = condition ? firstAskFor(condition.entryNodeId) : void 0;
+      const childState = stateByKey.get(JSON.stringify([member.respondentId, member.childBranchId]));
+      const parentState = stateByKey.get(JSON.stringify([member.respondentId, member.parentBranchId]));
+      const evaluation = evaluationById.get(member.childEvaluationId);
+      let expectedBranchId;
+      try {
+        expectedBranchId = journeyChildBranchId(member.parentBranchId, fork.forkNodeId, member.conditionId);
+      } catch {
+        return true;
+      }
+      return !condition || condition.id !== member.conditionId || expectedBranchId !== member.childBranchId || !ask || childState === void 0 || parentState?.status !== "branched" || evaluation === void 0 || evaluation.respondentId !== member.respondentId || evaluation.branchId !== member.childBranchId || evaluation.contextId !== member.childContextId || evaluation.turnId !== member.childTurnId || evaluation.nodeId !== ask.nodeId || evaluation.questionId !== ask.taskId;
+    });
+  }) || forkMembers.some((member) => !forkKeys.has(JSON.stringify([member.forkNodeId, member.parentBranchId])));
+  if (invalidFork) throw new RunStoreError("data_integrity_error", "Stored journey fork membership does not match the authored fork or its child evaluations.");
+  const stateKeys = new Set(respondents.map(({ respondentId, branchId }) => JSON.stringify([respondentId, branchId])));
+  if (respondents.length < respondentIds.size || stateKeys.size !== respondents.length || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some(({ respondentId }) => !respondentIds.has(respondentId)) || respondents.some((state) => state.route.some((entry) => !stateKeys.has(JSON.stringify([state.respondentId, entry.branchId ?? "root"])))) || evaluations2.some((evaluation) => !stateKeys.has(JSON.stringify([evaluation.respondentId, evaluation.branchId]))) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId && evaluation.branchId === state.branchId).length !== 1) || respondents.some((state) => state.status === "waiting-fork" && (state.currentTurnId !== null || state.currentContextId === null || state.currentNodeId === null || !forkNodeIds.has(state.currentNodeId) || evaluations2.some((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.respondentId === state.respondentId && evaluation.branchId === state.branchId))) || respondents.some((state) => state.status === "branched" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null)) || respondents.some((state) => state.status !== "active" && state.status !== "waiting-fork" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null)) || evaluations2.some((evaluation) => evaluation.status === "pending" && !respondents.some((state) => state.status === "active" && state.respondentId === evaluation.respondentId && state.branchId === evaluation.branchId && state.currentTurnId === evaluation.turnId && state.currentNodeId === evaluation.nodeId && state.currentContextId === evaluation.contextId))) {
+    throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
+  }
+  return {
+    request: parsedRequest.data,
+    requestFingerprint: stored.requestFingerprint,
+    compilerFingerprint: stored.compilerFingerprint,
+    ...stored.providerSelectionSnapshot === void 0 ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) },
+    evaluations: evaluations2,
+    respondents,
+    forks,
+    forkMembers,
+    comparisons: buildJourneyComparisonEvidence({ journey: parsedRequest.data.journey, forks, forkMembers, evaluations: evaluations2, respondents })
+  };
+}
+
+// src/infrastructure/sqlite/commands/fork-barrier.ts
+function advanceJourneyForkBarrier(context, claim2, forkNodeId, parentBranchId) {
+  const nowMs = context.now();
+  context.ownedRun(claim2, nowMs);
+  const requestRow = context.database.prepare("SELECT request_json FROM runs WHERE run_id = ?").get(claim2.runId);
+  const stored = parseJsonRecord(requestRow?.request_json, "run request");
+  const parsed = runRequestSchema.safeParse(stored.request);
+  if (!parsed.success || parsed.data.kind !== "journey" || typeof stored.compilerFingerprint !== "string") {
+    throw new RunStoreError("data_integrity_error", "Stored journey request cannot advance its fork barrier.");
+  }
+  const existingBarrier = context.database.prepare("SELECT status FROM journey_forks WHERE run_id = ? AND fork_node_id = ? AND parent_branch_id = ?").get(claim2.runId, forkNodeId, parentBranchId);
+  if (existingBarrier && asText(existingBarrier.status, "fork barrier status") === "closed") return { status: "closed", createdEvaluationIds: [], createdEvaluations: [], parentRespondents: [], childRespondents: [] };
+  const journeyRun = readJourneyRun(context.database, claim2.runId, () => new RunStoreError("run_not_found", "Run was not found."));
+  const readiness = journeyForkBarrierReadiness(parsed.data.journey, forkNodeId, parentBranchId, journeyRun.respondents);
+  if (readiness.arrived.length === 0) throw new RunStoreError("journey_transition_conflict", "A matched fork barrier can advance only after a respondent reaches it.");
+  context.orm.insert(journeyForks).values({
+    runId: claim2.runId,
+    forkNodeId,
+    parentBranchId,
+    status: "open",
+    cohortCount: 0,
+    openedMs: nowMs,
+    closedMs: null,
+    revision: 0
+  }).onConflictDoNothing().run();
+  const barrier = context.database.prepare("SELECT status, revision FROM journey_forks WHERE run_id = ? AND fork_node_id = ? AND parent_branch_id = ?").get(claim2.runId, forkNodeId, parentBranchId);
+  if (!barrier) throw new RunStoreError("data_integrity_error", "Matched fork barrier was not persisted.");
+  if (asText(barrier.status, "fork barrier status") === "closed") return { status: "closed", createdEvaluationIds: [], createdEvaluations: [], parentRespondents: [], childRespondents: [] };
+  if (!readiness.canClose) return { status: "waiting", createdEvaluationIds: [], createdEvaluations: [], parentRespondents: [], childRespondents: [] };
+  const cohort = [...readiness.arrived].sort((left, right) => left.respondentId < right.respondentId ? -1 : left.respondentId > right.respondentId ? 1 : 0);
+  const fork = parsed.data.journey.presentation.kind === "graph" ? parsed.data.journey.presentation.nodes.find((node2) => node2.id === forkNodeId) : void 0;
+  if (fork?.kind !== "fork") throw new RunStoreError("data_integrity_error", `Matched fork ${forkNodeId} is absent from the accepted journey.`);
+  let nextOrdinal = asNumber(context.database.prepare("SELECT COALESCE(MAX(ordinal), -1) AS maximum FROM evaluations WHERE run_id = ?").get(claim2.runId).maximum, "maximum evaluation ordinal") + 1;
+  const members2 = [];
+  const createdEvaluationIds = [];
+  const createdEvaluations = [];
+  const childRespondents = [];
+  const parentRespondents = [];
+  for (const parent of cohort) {
+    if (!parent.currentContextId) throw new RunStoreError("data_integrity_error", "A fork arrival has no source context identity.");
+    const profile = parsed.data.respondents.find((candidate) => candidate.id === parent.respondentId);
+    if (!profile) throw new RunStoreError("data_integrity_error", "A fork arrival has no frozen respondent profile.");
+    for (const [conditionOrdinal, condition] of fork.conditions.entries()) {
+      let branch;
+      try {
+        branch = compileForkConditionEntry({
+          journey: parsed.data.journey,
+          profile,
+          parent,
+          forkNodeId,
+          conditionId: condition.id,
+          compilerFingerprint: stored.compilerFingerprint
+        });
+      } catch (error62) {
+        throw new RunStoreError("data_integrity_error", error62 instanceof Error ? error62.message : "Fork treatment packet could not be compiled.");
+      }
+      const childContextId = randomUUID3();
+      const childTurnId = randomUUID3();
+      const childEvaluationId = randomUUID3();
+      const occurrence = branch.events.filter((event) => event.type === "response" && event.taskId === branch.taskId).length + 1;
+      const packetFingerprint = hashCanonical({ packet: branch.packet, compilerFingerprint: stored.compilerFingerprint });
+      const evaluation = {
+        evaluationId: childEvaluationId,
+        turnId: childTurnId,
+        contextId: childContextId,
+        respondentId: parent.respondentId,
+        branchId: branch.branchId,
+        questionId: branch.taskId,
+        nodeId: branch.nodeId,
+        pathId: branch.pathId,
+        occurrence,
+        ordinal: nextOrdinal++,
+        packet: branch.packet,
+        packetFingerprint
+      };
+      createdEvaluations.push({ ...evaluation, status: "pending" });
+      context.orm.insert(questionGroups).values({
+        groupId: childContextId,
+        runId: claim2.runId,
+        ordinal: evaluation.ordinal,
+        contextId: childContextId,
+        respondentId: parent.respondentId,
+        stateJson: JSON.stringify(branch.packet.state),
+        questionIdsJson: JSON.stringify([branch.taskId])
+      }).run();
+      context.orm.insert(evaluations).values({
+        ...evaluation,
+        runId: claim2.runId,
+        groupId: childContextId,
+        packetJson: JSON.stringify(branch.packet),
+        providerSelectionJson: null,
+        status: "pending"
+      }).run();
+      const childState = {
+        respondentId: parent.respondentId,
+        branchId: branch.branchId,
+        status: "active",
+        currentNodeId: branch.nodeId,
+        currentTurnId: childTurnId,
+        currentContextId: childContextId,
+        revision: 0,
+        events: branch.events,
+        route: parent.route
+      };
+      childRespondents.push(childState);
+      context.orm.insert(journeyRespondents).values({
+        runId: claim2.runId,
+        respondentId: parent.respondentId,
+        branchId: branch.branchId,
+        status: "active",
+        currentNodeId: branch.nodeId,
+        currentTurnId: childTurnId,
+        currentContextId: childContextId,
+        revision: 0,
+        eventsJson: JSON.stringify(branch.events),
+        routeJson: JSON.stringify(parent.route),
+        outcome: null
+      }).run();
+      members2.push({
+        respondentId: parent.respondentId,
+        conditionOrdinal,
+        conditionId: condition.id,
+        childBranchId: branch.branchId,
+        sourceContextId: parent.currentContextId,
+        childContextId,
+        childTurnId,
+        childEvaluationId
+      });
+      createdEvaluationIds.push(childEvaluationId);
+    }
+  }
+  for (const parent of cohort) {
+    const changed = context.orm.update(journeyRespondents).set({
+      status: "branched",
+      currentNodeId: null,
+      currentTurnId: null,
+      currentContextId: null,
+      revision: parent.revision + 1
+    }).where(sql`${journeyRespondents.runId} = ${claim2.runId} AND ${journeyRespondents.respondentId} = ${parent.respondentId} AND ${journeyRespondents.branchId} = ${parent.branchId} AND ${journeyRespondents.revision} = ${parent.revision} AND ${journeyRespondents.status} = 'waiting-fork' AND ${journeyRespondents.currentNodeId} = ${forkNodeId}`).returning({ respondentId: journeyRespondents.respondentId }).all();
+    if (changed.length !== 1) throw new RunStoreError("journey_transition_conflict", "A respondent fork arrival changed while the cohort was being frozen.");
+    parentRespondents.push({ ...parent, status: "branched", currentNodeId: null, currentTurnId: null, currentContextId: null, revision: parent.revision + 1 });
+  }
+  for (const member of members2) context.orm.insert(journeyForkMembers).values({ runId: claim2.runId, forkNodeId, parentBranchId, ...member }).run();
+  const closed = context.orm.update(journeyForks).set({
+    status: "closed",
+    cohortCount: cohort.length,
+    closedMs: nowMs,
+    revision: asNumber(barrier.revision, "fork barrier revision") + 1
+  }).where(sql`${journeyForks.runId} = ${claim2.runId} AND ${journeyForks.forkNodeId} = ${forkNodeId} AND ${journeyForks.parentBranchId} = ${parentBranchId} AND ${journeyForks.status} = 'open' AND ${journeyForks.revision} = ${asNumber(barrier.revision, "fork barrier revision")}`).returning({ runId: journeyForks.runId }).all();
+  if (closed.length !== 1) throw new RunStoreError("journey_transition_conflict", "The matched fork barrier changed while it was being closed.");
+  context.orm.update(runs).set({ evaluationCount: sql`${runs.evaluationCount} + ${createdEvaluationIds.length}` }).where(eq(runs.runId, claim2.runId)).run();
+  return { status: "closed", createdEvaluationIds, createdEvaluations, parentRespondents, childRespondents };
 }
 
 // src/infrastructure/sqlite/run-deletion-queries.ts
@@ -28028,17 +28968,17 @@ function reopenSharedFailure(database, runId2, attemptId) {
 function reopenFailedQuestions(database, runId2) {
   database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId2), eq(evaluations.status, "failed"))).run();
 }
-function reopenJourneyEvaluation(database, runId2, evaluationId, respondentId) {
-  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId2), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.status, "failed"))).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
+function reopenJourneyEvaluation(database, runId2, evaluationId, respondentId, branchId) {
+  return database.update(evaluations).set({ status: "pending", resultJson: null, failureCode: null, failureMessage: null, failureDetailJson: null }).where(and(eq(evaluations.runId, runId2), eq(evaluations.evaluationId, evaluationId), eq(evaluations.respondentId, respondentId), eq(evaluations.branchId, branchId), eq(evaluations.status, "failed"), sql`${evaluations.failureCode} <> 'comparison_provider_unavailable'`)).returning({ evaluationId: evaluations.evaluationId }).all().length === 1;
 }
-function restoreFailedJourneyRespondent(database, runId2, respondentId, currentNodeId, currentTurnId, currentContextId) {
+function restoreFailedJourneyRespondent(database, runId2, respondentId, branchId, currentNodeId, currentTurnId, currentContextId) {
   return database.update(journeyRespondents).set({
     status: "active",
     currentNodeId,
     currentTurnId,
     currentContextId,
     revision: sql`${journeyRespondents.revision} + 1`
-  }).where(and(eq(journeyRespondents.runId, runId2), eq(journeyRespondents.respondentId, respondentId), eq(journeyRespondents.status, "failed"))).returning({ respondentId: journeyRespondents.respondentId }).all().length === 1;
+  }).where(and(eq(journeyRespondents.runId, runId2), eq(journeyRespondents.respondentId, respondentId), eq(journeyRespondents.branchId, branchId), eq(journeyRespondents.status, "failed"))).returning({ respondentId: journeyRespondents.respondentId }).all().length === 1;
 }
 function prepareResumedRun(database, runId2, leaseExpiresMs) {
   database.update(runs).set({
@@ -28061,7 +29001,7 @@ function markActiveJourneyRespondentsUnreached(database, runId2) {
     currentTurnId: null,
     currentContextId: null,
     revision: sql`${journeyRespondents.revision} + 1`
-  }).where(and(eq(journeyRespondents.runId, runId2), eq(journeyRespondents.status, "active"))).run();
+  }).where(and(eq(journeyRespondents.runId, runId2), inArray(journeyRespondents.status, ["active", "waiting-fork"]))).run();
 }
 function deleteRuns(database, runIds) {
   database.delete(runs).where(inArray(runs.runId, runIds)).run();
@@ -28101,7 +29041,7 @@ function deleteRunSelection(context, runIds) {
 }
 
 // src/infrastructure/sqlite/commands/acceptance.ts
-import { createHash as createHash5, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash5, randomUUID as randomUUID4 } from "node:crypto";
 
 // src/infrastructure/sqlite/run-identity-queries.ts
 function findRunBySubmission(database, submissionId) {
@@ -28269,18 +29209,23 @@ function validatePreparedJourney(prepared) {
   }
   const respondentIds = parsedRequest.data.respondents.map(({ id }) => id);
   const respondentIdSet = new Set(respondentIds);
-  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length !== respondentIds.length || prepared.evaluations.length === 0) {
-    throw new RunStoreError("invalid_prepared_run", "Prepared journey requires unique respondent state and at least one reached turn.");
+  const forkNodeIds = new Set(journeyTopology(parsedRequest.data.journey).nodes.filter((node2) => node2.kind === "fork").map(({ id }) => id));
+  if (respondentIdSet.size !== respondentIds.length || prepared.respondents.length < respondentIds.length || prepared.evaluations.length === 0 && prepared.respondents.some((state) => state.status !== "waiting-fork")) {
+    throw new RunStoreError("invalid_prepared_run", "Prepared journey requires unique respondent state and either a reached turn or an initial fork barrier.");
   }
   const stateById = /* @__PURE__ */ new Map();
-  const allowedStatuses = /* @__PURE__ */ new Set(["active", "completed", "failed", "unreached"]);
+  const stateKey = (respondentId, branchId) => JSON.stringify([respondentId, branchId]);
+  const allowedStatuses = /* @__PURE__ */ new Set(["active", "waiting-fork", "branched", "completed", "failed", "unreached"]);
   for (const state of prepared.respondents) {
-    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || stateById.has(state.respondentId) || !Number.isSafeInteger(state.revision) || state.revision < 0 || !Array.isArray(state.events) || !Array.isArray(state.route) || (state.status === "active" ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) : state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null)) {
+    const key = stateKey(state.respondentId, state.branchId);
+    if (!allowedStatuses.has(state.status) || !respondentIdSet.has(state.respondentId) || !state.branchId || stateById.has(key) || !Number.isSafeInteger(state.revision) || state.revision < 0 || !Array.isArray(state.events) || !Array.isArray(state.route) || (state.status === "active" ? !(state.currentNodeId && state.currentTurnId && state.currentContextId) : state.status === "waiting-fork" ? !(state.currentNodeId && forkNodeIds.has(state.currentNodeId) && state.currentTurnId === null && state.currentContextId) : state.currentNodeId !== null || state.currentTurnId !== null || state.currentContextId !== null) || state.route.some((entry) => entry.branchId !== void 0 && !entry.branchId)) {
       throw new RunStoreError("invalid_prepared_run", "Prepared journey respondent state is inconsistent.");
     }
-    stateById.set(state.respondentId, state);
+    stateById.set(key, state);
   }
-  if (stateById.size !== respondentIdSet.size) throw new RunStoreError("invalid_prepared_run", "Every journey respondent requires durable state.");
+  if ([...respondentIdSet].some((respondentId) => !prepared.respondents.some((state) => state.respondentId === respondentId))) {
+    throw new RunStoreError("invalid_prepared_run", "Every journey respondent requires durable state.");
+  }
   const evaluationIds = /* @__PURE__ */ new Set();
   const turnIds = /* @__PURE__ */ new Set();
   const contextIds = /* @__PURE__ */ new Set();
@@ -28288,10 +29233,10 @@ function validatePreparedJourney(prepared) {
   const activeTurnIds = /* @__PURE__ */ new Set();
   for (const evaluation of prepared.evaluations) {
     const packet = decisionRequestSchema.safeParse(evaluation.packet);
-    const state = stateById.get(evaluation.respondentId);
+    const state = stateById.get(stateKey(evaluation.respondentId, evaluation.branchId));
     const respondent = parsedRequest.data.respondents.find(({ id }) => id === evaluation.respondentId);
-    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
-    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
+    const nodeOccurrence = `${evaluation.respondentId}\0${evaluation.branchId}\0${evaluation.nodeId}\0${evaluation.occurrence}`;
+    if (!packet.success || !state || !respondent || state.status !== "active" || !Number.isSafeInteger(evaluation.ordinal) || evaluation.ordinal < 0 || !Number.isSafeInteger(evaluation.occurrence) || evaluation.occurrence < 1 || !evaluation.turnId || !evaluation.nodeId || !evaluation.pathId || evaluation.questionId !== packet.data.question.id || state.branchId !== evaluation.branchId || state.currentTurnId !== evaluation.turnId || state.currentContextId !== evaluation.contextId || state.currentNodeId !== evaluation.nodeId || !isJourneyAskNode(parsedRequest.data.journey, evaluation.nodeId, evaluation.questionId) || hashCanonical(compileDecisionPacketForCompiler(parsedRequest.data.journey, respondent, evaluation.questionId, state.events, prepared.compilerFingerprint)) !== hashCanonical(packet.data) || evaluationIds.has(evaluation.evaluationId) || turnIds.has(evaluation.turnId) || contextIds.has(evaluation.contextId) || nodeOccurrences.has(nodeOccurrence) || !respondentIdSet.has(evaluation.respondentId) || hashCanonical({ packet: packet.data, compilerFingerprint: prepared.compilerFingerprint }) !== evaluation.packetFingerprint) {
       throw new RunStoreError("invalid_prepared_run", "Prepared journey turn or context reference is invalid.");
     }
     evaluationIds.add(evaluation.evaluationId);
@@ -28304,7 +29249,7 @@ function validatePreparedJourney(prepared) {
     if (state.status === "active" && !activeTurnIds.has(state.currentTurnId)) {
       throw new RunStoreError("invalid_prepared_run", "Every active journey respondent requires one pending turn.");
     }
-    if (state.status !== "active" && prepared.evaluations.some(({ respondentId }) => respondentId === state.respondentId)) {
+    if (state.status !== "active" && prepared.evaluations.some(({ respondentId, branchId }) => respondentId === state.respondentId && branchId === state.branchId)) {
       throw new RunStoreError("invalid_prepared_run", "A terminal or unreached respondent cannot have a pending turn.");
     }
   }
@@ -28355,7 +29300,7 @@ function acceptPreparedRun(context, submissionId, preparedInput) {
       }
     }
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations, prepared.lineage);
-    const runId2 = randomUUID3();
+    const runId2 = randomUUID4();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId: runId2, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedRunData(context.orm, runId2, prepared);
@@ -28379,7 +29324,7 @@ function acceptPreparedJourney(context, submissionId, preparedInput) {
     assertProviderSettingsSnapshot(context.database, prepared.providerSelectionSnapshot, prepared.request);
     validateInitialProviderChoices(prepared.providerSelectionSnapshot, prepared.request, prepared.evaluations);
     const imageMaterials = verifyFrozenVisualAssets(context.database, prepared.request, prepared.evaluations);
-    const runId2 = randomUUID3();
+    const runId2 = randomUUID4();
     const nowMs = context.now();
     insertAcceptedRun(context.orm, { runId: runId2, submissionId, requestFingerprint: prepared.requestFingerprint, createdAt: new Date(nowMs).toISOString(), createdMs: nowMs }, prepared);
     insertPreparedJourneyData(context.orm, runId2, prepared);
@@ -28403,8 +29348,12 @@ function validateInitialProviderChoices(snapshot, request, evaluations2) {
     throw new RunStoreError("invalid_prepared_run", "Automatic run acceptance requires the inspected initial provider choices.");
   }
   if (!choices) return;
-  const unitKey = (unit) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? null]);
-  const expected = new Set(evaluations2.map(({ respondentId, questionId }) => unitKey({ respondentId, questionId })));
+  const unitKey = (unit) => JSON.stringify([unit.respondentId, unit.questionId, unit.branchId ?? "root"]);
+  const expected = new Set(evaluations2.map((evaluation) => unitKey({
+    respondentId: evaluation.respondentId,
+    questionId: evaluation.questionId,
+    branchId: "branchId" in evaluation ? evaluation.branchId : "root"
+  })));
   if (expected.size !== choices.length || choices.some((choice) => !expected.has(unitKey(choice)))) {
     throw new RunStoreError("invalid_prepared_run", "Initial provider choices must cover exactly the accepted evaluations.");
   }
@@ -28416,11 +29365,11 @@ function validateInitialProviderChoices(snapshot, request, evaluations2) {
   }
   for (const lock of request.providerSelection?.comparisonLocks ?? []) {
     const memberChoices = lock.members.flatMap((member) => {
-      if (member.branchId) return [];
-      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId);
+      const branchId = member.branchId ?? "root";
+      const choice = choices.find((candidate) => candidate.respondentId === member.respondentId && candidate.questionId === member.questionId && (candidate.branchId ?? "root") === branchId);
       return choice ? [choice] : [];
     });
-    if (lock.members.some((member) => member.branchId === void 0 && expected.has(unitKey(member)) && !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId))) {
+    if (lock.members.some((member) => expected.has(unitKey(member)) && !memberChoices.some((choice) => choice.respondentId === member.respondentId && choice.questionId === member.questionId && (choice.branchId ?? "root") === (member.branchId ?? "root")))) {
       throw new RunStoreError("invalid_prepared_run", `Initial provider choices omit a known member of comparison ${lock.id}.`);
     }
     if (memberChoices.length < 2) continue;
@@ -28552,6 +29501,7 @@ function insertPreparedJourneyData(database, runId2, prepared) {
     ordinal: evaluation.ordinal,
     contextId: evaluation.contextId,
     respondentId: evaluation.respondentId,
+    branchId: evaluation.branchId ?? "root",
     questionId: evaluation.questionId,
     groupId: evaluation.contextId,
     turnId: evaluation.turnId,
@@ -28560,13 +29510,14 @@ function insertPreparedJourneyData(database, runId2, prepared) {
     occurrence: evaluation.occurrence,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
-    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
+    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId && (choice.branchId ?? "root") === (evaluation.branchId ?? "root")) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId && (choice.branchId ?? "root") === (evaluation.branchId ?? "root"))) : null,
     status: "pending"
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();
   const respondentRows = prepared.respondents.map((respondent) => ({
     runId: runId2,
     respondentId: respondent.respondentId,
+    branchId: respondent.branchId ?? "root",
     status: respondent.status,
     currentNodeId: respondent.currentNodeId,
     currentTurnId: respondent.currentTurnId,
@@ -28794,8 +29745,8 @@ function createSqliteCommandRepository(context, storageInfo) {
         if (!parsedRequest.success) throw new RunStoreError("data_integrity_error", "Stored run request is invalid.");
         const isJourney = parsedRequest.data.kind === "journey";
         const failed = context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND status = 'failed'").get(runId2);
-        const journeyFailures = status === "partial" && isJourney && statusView.lifecycle.resume.eligible ? context.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.turn_id, e.node_id, e.context_id
-            FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+        const journeyFailures = status === "partial" && isJourney && statusView.lifecycle.resume.eligible ? context.database.prepare(`SELECT e.evaluation_id, e.respondent_id, e.branch_id, e.turn_id, e.node_id, e.context_id
+            FROM evaluations e JOIN journey_respondents jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id
             WHERE e.run_id = ? AND e.status = 'failed' AND jr.status = 'failed' ORDER BY e.ordinal`).all(runId2) : [];
         const runFailure = context.database.prepare("SELECT attempt_id, evaluation_id FROM attempts WHERE run_id = ? AND status = 'failed' AND failure_scope = 'run' ORDER BY attempt_sequence DESC LIMIT 1").get(runId2);
         const failedRunEvaluationId = runFailure ? asText(runFailure.evaluation_id, "failed evaluation ID") : void 0;
@@ -28807,11 +29758,13 @@ function createSqliteCommandRepository(context, storageInfo) {
         for (const checkpoint of journeyFailures) {
           const evaluationId = asText(checkpoint.evaluation_id, "failed evaluation ID");
           const respondentId = asText(checkpoint.respondent_id, "failed respondent ID");
-          const reopened = reopenJourneyEvaluation(context.connection.orm, runId2, evaluationId, respondentId);
+          const branchId = asText(checkpoint.branch_id, "failed branch ID");
+          const reopened = reopenJourneyEvaluation(context.connection.orm, runId2, evaluationId, respondentId, branchId);
           const restored = restoreFailedJourneyRespondent(
             context.connection.orm,
             runId2,
             respondentId,
+            branchId,
             asText(checkpoint.node_id, "failed turn node ID"),
             asText(checkpoint.turn_id, "failed turn ID"),
             asText(checkpoint.context_id, "failed turn context ID")
@@ -28832,7 +29785,7 @@ function createSqliteCommandRepository(context, storageInfo) {
         if (!row) throw context.notFound();
         const launchDeadline = row.lease_expires_ms === null ? asNumber(row.created_ms, "created time") + PREPARED_LAUNCH_WINDOW_MS : asNumber(row.lease_expires_ms, "launch deadline");
         if (asText(row.status, "run status") !== "prepared" || asNumber(row.cancel_requested, "cancel flag") === 1 || nowMs >= launchDeadline) return null;
-        const ownerToken = randomUUID4();
+        const ownerToken = randomUUID5();
         if (!claimPreparedRun(context.connection.orm, runId2, ownerToken, workerPid, nowMs + WORKER_LEASE_DURATION_MS)) return null;
         return { runId: runId2, ownerToken };
       });
@@ -28858,7 +29811,7 @@ function createSqliteCommandRepository(context, storageInfo) {
           context.connection.orm.update(evaluations).set({ providerSelectionJson: JSON.stringify(expected.providerSelection) }).where(eq(evaluations.evaluationId, expected.evaluationId)).run();
           row.provider_selection_json = JSON.stringify(expected.providerSelection);
         }
-        const attemptId = randomUUID4();
+        const attemptId = randomUUID5();
         const evaluationId = asText(row.evaluation_id, "evaluation ID");
         reservePhysicalAttempt(context.connection.orm, {
           attemptId,
@@ -28878,14 +29831,15 @@ function createSqliteCommandRepository(context, storageInfo) {
       context.transaction(() => {
         const run = context.ownedRun(claim2, nowMs);
         if (asNumber(run.reserved_calls, "reserved calls") !== 0) throw new RunStoreError("attempt_unresolved", "A zero-attempt failure cannot be recorded while a provider call is reserved.");
-        const row = context.database.prepare("SELECT respondent_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim2.runId, evaluationId);
+        const row = context.database.prepare("SELECT respondent_id, branch_id, packet_fingerprint, turn_id FROM evaluations WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").get(claim2.runId, evaluationId);
         if (!row || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || row.turn_id === null) {
           throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
         }
         const respondentId = asText(row.respondent_id, "respondent ID");
+        const branchId = asText(row.branch_id, "branch ID");
         const updated = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending'").run(failure2.code, failure2.message, claim2.runId, evaluationId);
         if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_failure", "The reached journey evaluation changed before its zero-attempt failure could be recorded.");
-        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND status = 'active'").run(claim2.runId, respondentId);
+        const respondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND branch_id = ? AND status = 'active'").run(claim2.runId, respondentId, branchId);
         if (Number(respondent.changes) !== 1) throw new RunStoreError("journey_checkpoint_changed", "The reached respondent checkpoint changed before its failure could be recorded.");
       });
     },
@@ -28904,7 +29858,7 @@ function createSqliteCommandRepository(context, storageInfo) {
           throw new RunStoreError("invalid_batch_reservation", "A batch may reserve only pending evaluations from the requested group.");
         }
         const sorted = [...selected].sort((left, right) => orderedIds.indexOf(asText(left.question_id, "question ID")) - orderedIds.indexOf(asText(right.question_id, "question ID")));
-        const attemptId = randomUUID4();
+        const attemptId = randomUUID5();
         const anchorId = asText(sorted[0].evaluation_id, "evaluation ID");
         const state = parseJson(group.state_json, "group state");
         const packetQuestions = sorted.map((row) => decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")).question);
@@ -28941,6 +29895,59 @@ function createSqliteCommandRepository(context, storageInfo) {
         journeyRouteTarget,
         isJourneyAskNode: isJourneyAskNode2
       }, claim2, attemptId, outcome, transition));
+    },
+    advanceJourneyFork(claim2, forkNodeId, parentBranchId) {
+      context.ensureOpen();
+      return context.transaction(() => advanceJourneyForkBarrier({
+        database: context.database,
+        orm: context.connection.orm,
+        now: context.now,
+        ownedRun: context.ownedRun
+      }, claim2, forkNodeId, parentBranchId));
+    },
+    persistJourneyProviderChoices(claim2, comparisonLockId, writes) {
+      context.ensureOpen();
+      context.transaction(() => {
+        context.ownedRun(claim2, context.now());
+        if (!writes.length || new Set(writes.map(({ evaluationId }) => evaluationId)).size !== writes.length) {
+          throw new RunStoreError("invalid_provider_selection", "A fork comparison must persist one unique choice for each ready member.");
+        }
+        for (const { evaluationId, packetFingerprint, choice: rawChoice } of writes) {
+          const choice = providerSelectionInitialChoiceSchema.parse(rawChoice);
+          if (choice.comparisonLockId !== comparisonLockId) throw new RunStoreError("invalid_provider_selection", "A fork comparison choice has a different comparison identity.");
+          const row = context.database.prepare("SELECT respondent_id, branch_id, question_id, packet_fingerprint, status, provider_selection_json FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(claim2.runId, evaluationId);
+          if (!row || row.status !== "pending" || row.provider_selection_json !== null || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint || asText(row.respondent_id, "respondent ID") !== choice.respondentId || asText(row.question_id, "question ID") !== choice.questionId || asText(row.branch_id, "branch ID") !== (choice.branchId ?? "root")) {
+            throw new RunStoreError("evaluation_changed_before_selection", "A ready fork comparison member changed before its common provider selection could be persisted.");
+          }
+          const updated = context.database.prepare("UPDATE evaluations SET provider_selection_json = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending' AND provider_selection_json IS NULL AND packet_fingerprint = ?").run(JSON.stringify(choice), claim2.runId, evaluationId, packetFingerprint);
+          if (Number(updated.changes) !== 1) throw new RunStoreError("evaluation_changed_before_selection", "A ready fork comparison member changed while its common provider selection was being persisted.");
+        }
+      });
+    },
+    failJourneyProviderComparison(claim2, writes, failure2) {
+      context.ensureOpen();
+      context.transaction(() => {
+        context.ownedRun(claim2, context.now());
+        if (writes.length < 2 || new Set(writes.map(({ evaluationId }) => evaluationId)).size !== writes.length) {
+          throw new RunStoreError("invalid_provider_selection", "A matched comparison failure must cover every unique ready member.");
+        }
+        const rows = writes.map(({ evaluationId, packetFingerprint }) => {
+          const row = context.database.prepare("SELECT respondent_id, branch_id, packet_fingerprint, turn_id, status FROM evaluations WHERE run_id = ? AND evaluation_id = ?").get(claim2.runId, evaluationId);
+          if (!row || row.status !== "pending" || row.turn_id === null || asText(row.packet_fingerprint, "packet fingerprint") !== packetFingerprint) {
+            throw new RunStoreError("evaluation_changed_before_failure", "A matched comparison member changed before its zero-call failure could be committed.");
+          }
+          return { evaluationId, respondentId: asText(row.respondent_id, "respondent ID"), branchId: asText(row.branch_id, "branch ID"), turnId: asText(row.turn_id, "turn ID"), packetFingerprint };
+        });
+        const stateKeys = rows.map(({ respondentId, branchId }) => JSON.stringify([respondentId, branchId]));
+        if (new Set(stateKeys).size !== rows.length) throw new RunStoreError("invalid_provider_selection", "A matched comparison cannot fail two ready questions from the same branch turn.");
+        for (const row of rows) {
+          const updatedEvaluation = context.database.prepare("UPDATE evaluations SET status = 'failed', failure_code = ?, failure_message = ? WHERE run_id = ? AND evaluation_id = ? AND status = 'pending' AND packet_fingerprint = ?").run(failure2.code, failure2.message, claim2.runId, row.evaluationId, row.packetFingerprint);
+          const updatedRespondent = context.database.prepare("UPDATE journey_respondents SET status = 'failed', current_node_id = NULL, current_turn_id = NULL, current_context_id = NULL, revision = revision + 1 WHERE run_id = ? AND respondent_id = ? AND branch_id = ? AND status = 'active' AND current_turn_id = ?").run(claim2.runId, row.respondentId, row.branchId, row.turnId);
+          if (Number(updatedEvaluation.changes) !== 1 || Number(updatedRespondent.changes) !== 1) {
+            throw new RunStoreError("journey_checkpoint_changed", "A matched comparison branch changed before its zero-call failure could be committed.");
+          }
+        }
+      });
     },
     finish(claim2) {
       context.ensureOpen();
@@ -29237,7 +30244,7 @@ function queryEvidencePage(context, input2) {
     const where = ["e.run_id = ?", "e.ordinal <= ?", ...filters.sql];
     const parameters = [query.sourceRunId, maxOrdinal, ...filters.parameters];
     const whereSql = where.join(" AND ");
-    const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id";
+    const join = "LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id";
     const evaluationCoverage = {
       totalEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "evaluation denominator"),
       completedEvaluations: asNumber(context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal).count, "completed evaluation denominator"),
@@ -29246,7 +30253,14 @@ function queryEvidencePage(context, input2) {
     let respondentCoverage;
     {
       const total = parsedRequest.data.kind === "journey" ? parsedRequest.data.respondents.length : parsedRequest.data.kind === "poll" ? parsedRequest.data.respondents.length : asNumber(context.database.prepare("SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?").get(query.sourceRunId, maxOrdinal).count, "respondent denominator");
-      const statusCounts = parsedRequest.data.kind === "journey" ? context.database.prepare("SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status").all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
+      const statusCounts = parsedRequest.data.kind === "journey" ? context.database.prepare(`SELECT respondent_status AS status, COUNT(*) AS count FROM (
+              SELECT respondent_id, CASE
+                WHEN SUM(status IN ('active', 'waiting-fork')) > 0 THEN 'active'
+                WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                WHEN SUM(status = 'completed') > 0 THEN 'completed'
+                ELSE 'unreached' END AS respondent_status
+              FROM journey_respondents WHERE run_id = ? GROUP BY respondent_id
+            ) GROUP BY respondent_status`).all(query.sourceRunId) : parsedRequest.data.kind === "follow-on" || parsedRequest.data.kind === "poll" ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
                   WHEN SUM(status = 'pending') > 0 THEN 'active'
                   WHEN SUM(status = 'failed') > 0 THEN 'failed'
@@ -29352,6 +30366,7 @@ function queryEvidencePage(context, input2) {
         ...selectedMaterial === void 0 ? {} : { selectedMaterial },
         ...row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, "provider execution")) },
         ...row.turn_id === null ? {} : { turnId: asText(row.turn_id, "turn ID") },
+        ...row.turn_id === null ? {} : { branchId: asText(row.branch_id, "branch ID") },
         ...row.node_id === null ? {} : { nodeId: asText(row.node_id, "node ID") },
         ...row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, "turn occurrence") },
         ...row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, "route outcome") },
@@ -29439,6 +30454,8 @@ var journeyTurnRowSchema = external_exports.object({
   evaluation_id: external_exports.string(),
   context_id: external_exports.string(),
   respondent_id: external_exports.string(),
+  branch_id: external_exports.string(),
+  respondent_branch_id: external_exports.string(),
   question_id: external_exports.string(),
   packet_json: external_exports.string(),
   packet_fingerprint: external_exports.string(),
@@ -29461,11 +30478,11 @@ var journeyTurnRowSchema = external_exports.object({
 }).passthrough();
 var loadJourneyWorkerTurnQuery = createSqliteQuery(
   "load-journey-worker-turn",
-  external_exports.tuple([external_exports.string(), external_exports.string(), external_exports.string(), external_exports.string()]),
+  external_exports.tuple([external_exports.string(), external_exports.string(), external_exports.string(), external_exports.string(), external_exports.string()]),
   external_exports.array(journeyTurnRowSchema)
 );
-function loadJourneyWorkerTurn(database, runId2, evaluationId, respondentId) {
-  const rows = loadJourneyWorkerTurnQuery.all(database, runId2, runId2, evaluationId, respondentId);
+function loadJourneyWorkerTurn(database, runId2, evaluationId, respondentId, branchId) {
+  const rows = loadJourneyWorkerTurnQuery.all(database, runId2, runId2, evaluationId, respondentId, branchId);
   const first = rows[0];
   if (!first) throw new RunStoreError("run_not_found", "The requested run does not exist in this datastore.");
   const identity = storedJourneyIdentity(first);
@@ -29476,6 +30493,7 @@ function loadJourneyWorkerTurn(database, runId2, evaluationId, respondentId) {
     evaluationId: asText(first.evaluation_id, "evaluation ID"),
     contextId: asText(first.context_id, "context ID"),
     respondentId: asText(first.respondent_id, "respondent ID"),
+    branchId: asText(first.branch_id, "branch ID"),
     questionId: asText(first.question_id, "question ID"),
     packet,
     packetFingerprint: asText(first.packet_fingerprint, "packet fingerprint"),
@@ -29495,6 +30513,7 @@ function loadJourneyWorkerTurn(database, runId2, evaluationId, respondentId) {
   const route = parseStored(journeyRouteSchema, parseJson(first.respondent_route_json, "journey route"), "journey route");
   const respondent = {
     respondentId: asText(first.respondent_id, "respondent ID"),
+    branchId: asText(first.respondent_branch_id, "respondent branch ID"),
     status: respondentStatus,
     currentNodeId: asNullableText(first.respondent_current_node_id, "current node ID"),
     currentTurnId: asNullableText(first.respondent_current_turn_id, "current turn ID"),
@@ -29504,7 +30523,7 @@ function loadJourneyWorkerTurn(database, runId2, evaluationId, respondentId) {
     route,
     ...first.respondent_outcome === null ? {} : { outcome: asText(first.respondent_outcome, "journey outcome") }
   };
-  if (respondent.status !== "active" || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
+  if (respondent.branchId !== evaluation.branchId || respondent.status !== "active" || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
     throw new RunStoreError("data_integrity_error", "The reserved journey turn does not match the active respondent checkpoint.");
   }
   return {
@@ -29552,7 +30571,7 @@ function loadFollowOnSources(database, input2, notFound) {
     (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
       WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
     FROM evaluations AS e
-    LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+    LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id
     WHERE ${where.join(" AND ")} ORDER BY e.ordinal LIMIT 10001`).all(...parameters);
   if (rows.length > 1e4) throw new RunStoreError("follow_on_selection_too_large", "Follow-on selection matched more than 10,000 evaluations. Narrow the criteria or use explicit references.");
   if ("references" in request.selection && rows.length !== request.selection.references.length) {
@@ -29642,77 +30661,6 @@ function readPreparedRun(database, runId2, options2) {
   return parsed;
 }
 
-// src/infrastructure/sqlite/reads/journeys.ts
-function readJourneyRun(database, runId2, notFound) {
-  const row = database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId2);
-  if (!row) throw notFound();
-  const stored = parseJsonRecord(row.request_json, "request");
-  if (!("request" in stored) || !("requestFingerprint" in stored) || !("compilerFingerprint" in stored)) throw new RunStoreError("data_integrity_error", "Stored journey request has an invalid shape.");
-  const parsedRequest = runRequestSchema.safeParse(stored.request);
-  if (!parsedRequest.success || parsedRequest.data.kind !== "journey" || typeof stored.compilerFingerprint !== "string" || typeof stored.requestFingerprint !== "string" || stored.requestFingerprint !== asText(row.request_fingerprint, "request fingerprint") || hashCanonical({ request: parsedRequest.data, compilerFingerprint: stored.compilerFingerprint }) !== stored.requestFingerprint) {
-    throw new RunStoreError("data_integrity_error", "Stored journey request or fingerprint is invalid.");
-  }
-  const evaluationRows = database.prepare(`SELECT e.*,
-    (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id) WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
-    FROM evaluations e WHERE e.run_id = ? ORDER BY e.ordinal`).all(runId2);
-  const evaluations2 = evaluationRows.map((evaluation) => {
-    const packet = parseStored(decisionPacketSchema, parseJson(evaluation.packet_json, "frozen packet"), "frozen packet");
-    const base = {
-      evaluationId: asText(evaluation.evaluation_id, "evaluation ID"),
-      contextId: asText(evaluation.context_id, "context ID"),
-      respondentId: asText(evaluation.respondent_id, "respondent ID"),
-      questionId: asText(evaluation.question_id, "question ID"),
-      packet,
-      packetFingerprint: asText(evaluation.packet_fingerprint, "packet fingerprint"),
-      turnId: asText(evaluation.turn_id, "turn ID"),
-      nodeId: asText(evaluation.node_id, "node ID"),
-      pathId: asText(evaluation.path_id, "path ID"),
-      occurrence: asNumber(evaluation.occurrence, "turn occurrence"),
-      ordinal: asNumber(evaluation.ordinal, "evaluation ordinal"),
-      status: parseStored(evaluationStatusSchema, asText(evaluation.status, "evaluation status"), "evaluation status"),
-      ...evaluation.provider_selection_json === null ? {} : { providerSelection: parseStored(providerSelectionInitialChoiceSchema, parseJson(evaluation.provider_selection_json, "provider selection"), "provider selection") }
-    };
-    if (base.status === "answered" && evaluation.result_json === null || base.status === "failed" && evaluation.failure_code === null) {
-      throw new RunStoreError("data_integrity_error", "Stored journey evaluation status does not match its answer evidence.");
-    }
-    if (base.questionId !== packet.question.id || hashCanonical({ packet, compilerFingerprint: stored.compilerFingerprint }) !== base.packetFingerprint) {
-      throw new RunStoreError("data_integrity_error", "Stored journey packet does not match its context identity.");
-    }
-    if (evaluation.result_json !== null) {
-      const decoded = decodeResultAndExecution(parseJson(evaluation.result_json, "decision value"), parseJson(evaluation.execution_json, "provider execution"));
-      base.result = validateDecision(packet, decoded.result, { maxAttempts: decoded.result.attempts });
-      base.execution = decoded.execution;
-    }
-    const failure2 = storedEvaluationFailure(evaluation);
-    if (failure2) base.failure = failure2;
-    return base;
-  });
-  const stateRows = database.prepare("SELECT * FROM journey_respondents WHERE run_id = ? ORDER BY respondent_id").all(runId2);
-  const respondents = stateRows.map((state) => ({
-    respondentId: asText(state.respondent_id, "respondent ID"),
-    status: parseStored(journeyRespondentStatusSchema, asText(state.status, "journey respondent status"), "journey respondent status"),
-    currentNodeId: asNullableText(state.current_node_id, "current node ID"),
-    currentTurnId: asNullableText(state.current_turn_id, "current turn ID"),
-    currentContextId: asNullableText(state.current_context_id, "current context ID"),
-    revision: asNumber(state.revision, "journey state revision"),
-    events: parseStored(journeyEventsSchema, parseJson(state.events_json, "journey history"), "journey history"),
-    route: parseStored(journeyRouteSchema, parseJson(state.route_json, "journey route"), "journey route"),
-    ...state.outcome === null ? {} : { outcome: asText(state.outcome, "journey outcome") }
-  }));
-  const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-  if (respondents.length !== respondentIds.size || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some(({ respondentId }) => !respondentIds.has(respondentId)) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId).length !== 1) || respondents.some((state) => state.status !== "active" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null))) {
-    throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
-  }
-  return {
-    request: parsedRequest.data,
-    requestFingerprint: stored.requestFingerprint,
-    compilerFingerprint: stored.compilerFingerprint,
-    ...stored.providerSelectionSnapshot === void 0 ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) },
-    evaluations: evaluations2,
-    respondents
-  };
-}
-
 // src/infrastructure/sqlite/reads/contexts.ts
 function readRunContext(database, runId2, evaluationId, contextId) {
   const row = database.prepare(`SELECT e.*, r.request_json FROM evaluations e JOIN runs r USING (run_id)
@@ -29728,6 +30676,7 @@ function readRunContext(database, runId2, evaluationId, contextId) {
     evaluationId,
     contextId,
     respondentId: asText(row.respondent_id, "respondent ID"),
+    ...row.turn_id === null ? {} : { branchId: asText(row.branch_id, "branch ID") },
     questionId: asText(row.question_id, "question ID"),
     status: asText(row.status, "evaluation status"),
     packet,
@@ -29784,9 +30733,9 @@ function createSqliteReadRepository(context) {
         isRunAvailable: (sourceRunId) => runExists(context.connection.orm, sourceRunId)
       }));
     },
-    getJourneyWorkerTurn(runId2, evaluationId, respondentId) {
+    getJourneyWorkerTurn(runId2, evaluationId, respondentId, branchId) {
       context.ensureOpen();
-      return context.readSnapshot(() => loadJourneyWorkerTurn(context.database, runId2, evaluationId, respondentId));
+      return context.readSnapshot(() => loadJourneyWorkerTurn(context.database, runId2, evaluationId, respondentId, branchId));
     },
     getJourneyRun(runId2) {
       context.ensureOpen();
@@ -29893,6 +30842,7 @@ function createSqliteReadRepository(context) {
             evaluationId: asText(row.evaluation_id, "evaluation ID"),
             contextId: asText(row.context_id, "context ID"),
             respondentId: asText(row.respondent_id, "respondent ID"),
+            ...row.turn_id === null ? {} : { branchId: asText(row.branch_id, "branch ID") },
             questionId: asText(row.question_id, "question ID"),
             status: parseStored(evaluationStatusSchema, asText(row.status, "evaluation status"), "evaluation status"),
             ...decoded === void 0 ? {} : { result: decoded.result, execution: decoded.execution },
@@ -30063,6 +31013,7 @@ function createSqliteRepositoryContext(connection, databasePath, now) {
       evaluationId: asText(row.evaluation_id, "evaluation ID"),
       contextId: asText(row.context_id, "context ID"),
       respondentId: asText(row.respondent_id, "respondent ID"),
+      ...row.branch_id === null || row.branch_id === void 0 ? {} : { branchId: asText(row.branch_id, "branch ID") },
       questionId: asText(row.question_id, "question ID"),
       packet: decisionRequestSchema.parse(parseJson(row.packet_json, "frozen packet")),
       packetFingerprint: asText(row.packet_fingerprint, "packet fingerprint"),

@@ -44,7 +44,7 @@ test('inspection rejects a future schema without changing database bytes or side
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('fresh schema initialization preserves the v9 baseline identity and records both additive successors', async () => {
+test('fresh schema initialization preserves the v9 baseline identity and records each sequential successor', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'sheg-schema-baseline-'));
   try {
     const store = openRunStore(root);
@@ -58,6 +58,7 @@ test('fresh schema initialization preserves the v9 baseline identity and records
         { version: 11, migration_id: 'run-visual-assets-v11', checksum_length: 64 },
         { version: 12, migration_id: 'provider-selection-v12', checksum_length: 64 },
         { version: 13, migration_id: 'evaluation-provider-selection-v13', checksum_length: 64 },
+        { version: 14, migration_id: 'matched-forks-v14', checksum_length: 64 },
       ]);
     } finally { database.close(); }
     const reopened = openRunStore(root);

@@ -11,7 +11,7 @@ import { z } from 'zod';
 const sqliteInteger = z.union([z.number(), z.bigint()]);
 const journeyTurnRowSchema = z.object({
   request_json: z.string(), request_fingerprint: z.string(), evaluation_id: z.string(), context_id: z.string(),
-  respondent_id: z.string(), question_id: z.string(), packet_json: z.string(), packet_fingerprint: z.string(),
+  respondent_id: z.string(), branch_id: z.string(), respondent_branch_id: z.string(), question_id: z.string(), packet_json: z.string(), packet_fingerprint: z.string(),
   turn_id: z.string(), node_id: z.string(), path_id: z.string(), occurrence: sqliteInteger, ordinal: sqliteInteger,
   status: z.string(), respondent_status: z.string(), respondent_current_node_id: z.string().nullable(),
   provider_selection_json: z.string().nullable(),
@@ -21,12 +21,12 @@ const journeyTurnRowSchema = z.object({
 }).passthrough();
 const loadJourneyWorkerTurnQuery = createSqliteQuery(
   'load-journey-worker-turn',
-  z.tuple([z.string(), z.string(), z.string(), z.string()]),
+  z.tuple([z.string(), z.string(), z.string(), z.string(), z.string()]),
   z.array(journeyTurnRowSchema),
 );
 
-export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, evaluationId: string, respondentId: string): JourneyWorkerTurn {
-  const rows = loadJourneyWorkerTurnQuery.all(database, runId, runId, evaluationId, respondentId);
+export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, evaluationId: string, respondentId: string, branchId: string): JourneyWorkerTurn {
+  const rows = loadJourneyWorkerTurnQuery.all(database, runId, runId, evaluationId, respondentId, branchId);
   const first = rows[0];
   if (!first) throw new RunStoreError('run_not_found', 'The requested run does not exist in this datastore.');
   const identity = storedJourneyIdentity(first);
@@ -38,6 +38,7 @@ export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, eva
     evaluationId: asText(first.evaluation_id, 'evaluation ID'),
     contextId: asText(first.context_id, 'context ID'),
     respondentId: asText(first.respondent_id, 'respondent ID'),
+    branchId: asText(first.branch_id, 'branch ID'),
     questionId: asText(first.question_id, 'question ID'),
     packet,
     packetFingerprint: asText(first.packet_fingerprint, 'packet fingerprint'),
@@ -59,6 +60,7 @@ export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, eva
   const route = parseStored(journeyRouteSchema, parseJson(first.respondent_route_json, 'journey route'), 'journey route');
   const respondent: JourneyRespondentState = {
     respondentId: asText(first.respondent_id, 'respondent ID'),
+    branchId: asText(first.respondent_branch_id, 'respondent branch ID'),
     status: respondentStatus,
     currentNodeId: asNullableText(first.respondent_current_node_id, 'current node ID'),
     currentTurnId: asNullableText(first.respondent_current_turn_id, 'current turn ID'),
@@ -68,7 +70,7 @@ export function loadJourneyWorkerTurn(database: DatabaseSync, runId: string, eva
     route,
     ...(first.respondent_outcome === null ? {} : { outcome: asText(first.respondent_outcome, 'journey outcome') }),
   };
-  if (respondent.status !== 'active' || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
+  if (respondent.branchId !== evaluation.branchId || respondent.status !== 'active' || respondent.currentTurnId !== evaluation.turnId || respondent.currentNodeId !== evaluation.nodeId || respondent.currentContextId !== evaluation.contextId) {
     throw new RunStoreError('data_integrity_error', 'The reserved journey turn does not match the active respondent checkpoint.');
   }
 

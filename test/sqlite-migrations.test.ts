@@ -123,7 +123,7 @@ test('a schema 10 datastore upgrades additively through current schema and leave
   store.close();
   const database = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
   try {
-    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 13);
+    assert.equal((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 14);
     assert.deepEqual({
       run: { ...(database.prepare("SELECT run_id, request_json, evaluation_count, used_calls FROM runs WHERE run_id = 'run-1'").get() as Record<string, unknown>) },
       packet: { ...(database.prepare("SELECT packet_json, packet_fingerprint, result_json FROM evaluations WHERE evaluation_id = 'evaluation-1'").get() as Record<string, unknown>) },
@@ -146,7 +146,7 @@ test('schema 12 upgrades add a nullable evaluation choice without rewriting exis
   store.close();
   const current = new DatabaseSync(path.join(root, 'runs.sqlite'), { readOnly: true });
   try {
-    assert.equal((current.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 13);
+    assert.equal((current.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 14);
     assert.deepEqual({ ...(current.prepare("SELECT run_id, packet_json, packet_fingerprint, result_json FROM evaluations WHERE evaluation_id = 'evaluation-1'").get() as Record<string, unknown>) }, before);
     assert.equal((current.prepare("SELECT provider_selection_json FROM evaluations WHERE evaluation_id = 'evaluation-1'").get() as { provider_selection_json: string | null }).provider_selection_json, null);
     assert.deepEqual(current.prepare('PRAGMA foreign_key_check').all(), []);

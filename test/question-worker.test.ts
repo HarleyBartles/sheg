@@ -98,8 +98,8 @@ function preparedJourney(respondentCount = 1, maxCalls = 3, compilerFingerprint 
     const evaluationId = randomUUID();
     const turnId = randomUUID();
     const contextId = randomUUID();
-    states.push({ respondentId: respondent.id, status: 'active', currentNodeId: 'ask-interest', currentTurnId: turnId, currentContextId: contextId, revision: 0, events, route: [] });
-    return { evaluationId, turnId, contextId, respondentId: respondent.id, questionId: 'interest', nodeId: 'ask-interest', pathId: 'root', occurrence: 1, ordinal,
+    states.push({ respondentId: respondent.id, branchId: 'root', status: 'active', currentNodeId: 'ask-interest', currentTurnId: turnId, currentContextId: contextId, revision: 0, events, route: [] });
+    return { evaluationId, turnId, contextId, respondentId: respondent.id, branchId: 'root', questionId: 'interest', nodeId: 'ask-interest', pathId: 'root', occurrence: 1, ordinal,
       packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }) };
   });
   return {
@@ -124,12 +124,12 @@ function preparedSequenceJourney(): PreparedJourneyRun {
   const turnId = randomUUID();
   const contextId = randomUUID();
   const state: JourneyRespondentState = {
-    respondentId: respondent.id, status: 'active', currentNodeId: 'sequence-ask-interest', currentTurnId: turnId, currentContextId: contextId,
+    respondentId: respondent.id, branchId: 'root', status: 'active', currentNodeId: 'sequence-ask-interest', currentTurnId: turnId, currentContextId: contextId,
     revision: 0, events, route: [],
   };
   return {
     request: parsed, requestFingerprint, compilerFingerprint, respondents: [state],
-    evaluations: [{ evaluationId, turnId, contextId, respondentId: respondent.id, questionId: 'interest', nodeId: 'sequence-ask-interest', pathId: 'root', occurrence: 1, ordinal: 0,
+    evaluations: [{ evaluationId, turnId, contextId, respondentId: respondent.id, branchId: 'root', questionId: 'interest', nodeId: 'sequence-ask-interest', pathId: 'root', occurrence: 1, ordinal: 0,
       packet, packetFingerprint: hashCanonical({ packet, compilerFingerprint }) }],
   };
 }

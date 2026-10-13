@@ -73,3 +73,14 @@ export const taskSchema = z.union([legacyChoiceTaskSchema, typedTaskSchema]).tra
 
 export type StudyTask = z.output<typeof taskSchema>;
 export type StudyTaskInput = z.input<typeof taskSchema>;
+
+export function comparisonTaskSemantics(task: StudyTask): string {
+  const shared = { instructions: task.instructions, responseHistory: task.responseHistory ?? 'include', type: task.type };
+  if (task.type === 'choice') return JSON.stringify({ ...shared, options: Object.entries(task.options), answerKeyOptionId: task.answerKeyOptionId });
+  if (task.type === 'score') return JSON.stringify({ ...shared, rubric: task.rubric });
+  return JSON.stringify({ ...shared, criteria: task.criteria });
+}
+
+export function tasksAreComparisonEquivalent(left: StudyTask, right: StudyTask): boolean {
+  return comparisonTaskSemantics(left) === comparisonTaskSemantics(right);
+}

@@ -566,6 +566,52 @@
                             },
                             "kind": {
                               "type": "string",
+                              "const": "fork"
+                            },
+                            "conditions": {
+                              "minItems": 2,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "entryNodeId": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "label",
+                                  "entryNodeId"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "kind",
+                            "conditions"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "kind": {
+                              "type": "string",
                               "const": "terminal"
                             },
                             "outcome": {

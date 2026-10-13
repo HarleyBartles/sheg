@@ -66,7 +66,7 @@ export const runStatusSchema = z.enum(runStatuses);
 export type RunStatus = z.infer<typeof runStatusSchema>;
 export const evaluationStatuses = ['pending', 'answered', 'failed', 'unreached'] as const;
 export const evaluationStatusSchema = z.enum(evaluationStatuses);
-export const journeyRespondentStatuses = ['active', 'completed', 'failed', 'unreached'] as const;
+export const journeyRespondentStatuses = ['active', 'waiting-fork', 'branched', 'completed', 'failed', 'unreached'] as const;
 export const journeyRespondentStatusSchema = z.enum(journeyRespondentStatuses);
 export const attemptStatuses = ['reserved', 'answered', 'failed', 'uncertain'] as const;
 export const attemptStatusSchema = z.enum(attemptStatuses);
@@ -132,6 +132,7 @@ export type RunProblem = { code: string; respondentId?: string; nodeId?: string;
 export type EvaluationFailure = { code: string; message: string; detail?: DecisionFailureDetail; providerFailure?: ProviderFailureEvidence };
 
 export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: DecisionRequest & { state: PromptState } } & {
+  branchId: string;
   turnId: string;
   nodeId: string;
   pathId: string;
@@ -140,6 +141,7 @@ export type JourneyEvaluation = Omit<FrozenEvaluation, 'packet'> & { packet: Dec
 };
 
 export const journeyRouteEntrySchema = z.object({
+  branchId: z.string().min(1).optional(),
   nodeId: z.string().min(1),
   response: decisionValueSchema,
   toNodeId: z.string().min(1),
@@ -150,6 +152,7 @@ export const journeyRouteSchema = z.array(journeyRouteEntrySchema);
 
 export type JourneyRespondentState = {
   respondentId: string;
+  branchId: string;
   status: z.infer<typeof journeyRespondentStatusSchema>;
   currentNodeId: string | null;
   currentTurnId: string | null;
@@ -167,6 +170,65 @@ export type JourneyEvaluationRecord = JourneyEvaluation & {
   failure?: EvaluationFailure;
 };
 
+export type JourneyForkRecord = {
+  forkNodeId: string;
+  parentBranchId: string;
+  status: 'open' | 'closed';
+  cohortCount: number;
+  openedMs: number;
+  closedMs?: number;
+  revision: number;
+};
+
+export type JourneyForkMemberRecord = {
+  forkNodeId: string;
+  parentBranchId: string;
+  respondentId: string;
+  conditionOrdinal: number;
+  conditionId: string;
+  childBranchId: string;
+  sourceContextId: string;
+  childContextId: string;
+  childTurnId: string;
+  childEvaluationId: string;
+};
+
+export type JourneyComparisonPairMember = {
+  conditionId: string;
+  label: string;
+  branchId: string;
+  questionId: string;
+  status: 'pending' | 'answered' | 'failed' | 'unreached' | 'not-reached';
+  respondentOutcome?: string;
+  evaluationId?: string;
+  packetFingerprint?: string;
+  providerSelection?: ProviderSelectionInitialChoice;
+  result?: DecisionResult;
+  execution?: import('../decision/decision.js').ProviderExecutionEvidence;
+  failure?: EvaluationFailure;
+  notReachedReason?: 'branch-failed-before-comparison' | 'branch-ended-before-comparison' | 'turn-not-reached-yet' | 'branch-state-missing';
+};
+
+export type JourneyComparisonPair = {
+  respondentId: string;
+  occurrence: number;
+  complete: boolean;
+  members: [JourneyComparisonPairMember, JourneyComparisonPairMember];
+};
+
+export type JourneyComparisonEvidence = {
+  forkNodeId: string;
+  parentBranchId: string;
+  barrierStatus: 'open' | 'closed';
+  comparisonKey: string;
+  conditions: Array<{ conditionId: string; label: string; questionId: string }>;
+  cohortRespondents: number;
+  totalPairs: number;
+  completePairs: number;
+  incompletePairs: number;
+  pairs: JourneyComparisonPair[];
+};
+
 export type JourneyRunRecord = {
   request: import('./request.js').ParsedInlineJourneyRequest;
   requestFingerprint: string;
@@ -174,6 +236,9 @@ export type JourneyRunRecord = {
   providerSelectionSnapshot?: ProviderSelectionPolicySnapshot;
   evaluations: JourneyEvaluationRecord[];
   respondents: JourneyRespondentState[];
+  forks: JourneyForkRecord[];
+  forkMembers: JourneyForkMemberRecord[];
+  comparisons: JourneyComparisonEvidence[];
 };
 
 export type JourneyWorkerTurn = {
@@ -217,6 +282,7 @@ export type AnswerRow = {
   evaluationId: string;
   contextId: string;
   respondentId: string;
+  branchId?: string;
   questionId: string;
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   result?: DecisionResult;
@@ -229,6 +295,7 @@ export type RunContextDetail = {
   evaluationId: string;
   contextId: string;
   respondentId: string;
+  branchId?: string;
   questionId: string;
   status: AnswerRow['status'];
   packet: DecisionRequest;

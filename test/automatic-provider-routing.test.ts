@@ -137,3 +137,77 @@ test('automatic journey routes reached units, preserves matched-provider locks, 
   } finally { store.close(); images.close(); await rm(root, { recursive: true, force: true }); }
   }
 });
+
+test('a shared fork comparison resolves every ready branch to Clef before dispatch, or fails without calls when none can serve all', async () => {
+  for (const visionEnabled of [true, false]) {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-fork-provider-lock-'));
+    const images = openImageAssetRepository(root);
+    const store = openRunStore(root);
+    const requests: Array<{ kind: 'laya' | 'clef'; request: DecisionRequest }> = [];
+    try {
+      const bytes = await readFile(new URL('./fixtures/images/four-corners-transparent.png', import.meta.url));
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      const image = images.saveSource(bytes, { assetId: `sha256:${sha256}`, sha256, format: 'png', width: 80, height: 40, bytes: bytes.byteLength });
+      store.setProviderSettings({ catalogue: { entries: catalogue.entries.map((entry) => entry.id === 'vision' ? { ...entry, enabled: visionEnabled } : entry) }, preferences: { preferredOrder: [] } }, 0);
+      const service = createRunService({ reads: store, commands: store, close: store.close.bind(store) }, root,
+        (config) => provider(config.kind === 'laya' ? 'laya' : 'clef', requests), { async launch() {} }, { async assertProviderReady() {} });
+      const request = inlineJourneyRequestSchema.parse({
+        kind: 'journey', respondents: [{ id: 'reader-a', intent: 'Assess the illustration', context: 'A visual reader', desired_outcome: 'Judge the image in context', engagement_cues: 'Relevant details', friction_cues: 'Distraction' }],
+        journey: { id: 'article', label: 'Image comparison', items: [
+          { id: 'opening', text: 'A short opening before the comparison.' },
+          { id: 'image-treatment', type: 'image', text: '', altText: 'A small friendly character carrying a satchel.', caption: 'Character portrait.', asset: image },
+          { id: 'text-treatment', text: 'The section continues without the portrait.' },
+        ], tasks: [
+          { id: 'prefix', type: 'choice', instructions: 'Would you continue into the next section?', options: { continue: 'Continue', stop: 'Stop' } },
+          { id: 'with-image', type: 'choice', comparisonKey: 'image-contribution', instructions: 'Would you continue into the next section?', options: { continue: 'Continue', stop: 'Stop' }, visual: { mode: 'pixels', materialIds: ['image-treatment'] } },
+          { id: 'without-image', type: 'choice', comparisonKey: 'image-contribution', instructions: 'Would you continue into the next section?', options: { continue: 'Continue', stop: 'Stop' } },
+        ], presentation: { kind: 'graph', entryNodeId: 'opening-exposure', maxDecisions: 3, nodes: [
+          { id: 'opening-exposure', kind: 'expose', itemId: 'opening' }, { id: 'prefix-ask', kind: 'ask', taskId: 'prefix' },
+          { id: 'image-fork', kind: 'fork', conditions: [{ id: 'present', label: 'Image present', entryNodeId: 'image-exposure' }, { id: 'absent', label: 'Image absent', entryNodeId: 'text-exposure' }] },
+          { id: 'image-exposure', kind: 'expose', itemId: 'image-treatment' }, { id: 'image-ask', kind: 'ask', taskId: 'with-image' },
+          { id: 'text-exposure', kind: 'expose', itemId: 'text-treatment' }, { id: 'text-ask', kind: 'ask', taskId: 'without-image' },
+          { id: 'done', kind: 'terminal', outcome: 'complete' },
+        ], transitions: [
+          { fromNodeId: 'opening-exposure', toNodeId: 'prefix-ask' }, { fromNodeId: 'prefix-ask', optionId: 'continue', toNodeId: 'image-fork' },
+          { fromNodeId: 'prefix-ask', optionId: 'stop', toNodeId: 'done' }, { fromNodeId: 'image-exposure', toNodeId: 'image-ask' },
+          { fromNodeId: 'text-exposure', toNodeId: 'text-ask' }, { fromNodeId: 'image-ask', optionId: 'continue', toNodeId: 'done' },
+          { fromNodeId: 'image-ask', optionId: 'stop', toNodeId: 'done' }, { fromNodeId: 'text-ask', optionId: 'continue', toNodeId: 'done' },
+          { fromNodeId: 'text-ask', optionId: 'stop', toNodeId: 'done' },
+        ] },
+        },
+        providerSelection: {}, maxCalls: 3,
+      });
+      const inspected = await service.inspect(request);
+      assert.equal(inspected.valid, true, JSON.stringify(inspected.problems));
+      const accepted = await service.start(randomUUID(), { ...request, expectedSelectionFingerprint: inspected.selectionFingerprint });
+      const model = (kind: 'laya' | 'clef') => ({ measure: () => fit(kind, kind === 'laya' ? local.checkpoint : 'clef'), async decide(packet: DecisionRequest) {
+        requests.push({ kind, request: packet });
+        const questionId = packet.question.id;
+        if (questionId !== 'prefix') {
+          const evaluations = store.getJourneyRun(accepted.runId).evaluations;
+          const choices = evaluations.filter(({ questionId: id }) => id === 'with-image' || id === 'without-image');
+          assert.equal(choices.length, 2);
+          assert.ok(choices.every(({ providerSelection }) => providerSelection?.providerId === (visionEnabled ? 'vision' : undefined)), 'Both sibling provider decisions must be persisted before either dispatch.');
+        }
+        return { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, stop: 0.1 }, attempts: 1, provider: kind,
+          model: kind === 'laya' ? 'local-reader' : 'clef', latencyMs: 1, usage: {} };
+      } });
+      await executeQuestionRun(splitRunStore(store), accepted.runId, (config) => model(config.kind === 'laya' ? 'laya' : 'clef'));
+      const branches = store.getJourneyRun(accepted.runId).evaluations.filter(({ questionId }) => questionId === 'with-image' || questionId === 'without-image');
+      if (visionEnabled) {
+        assert.equal(requests.filter(({ request: packet }) => packet.question.id === 'with-image' || packet.question.id === 'without-image').length, 2,
+          JSON.stringify({ status: store.getStatus(accepted.runId), branches }));
+        assert.ok(branches.every(({ providerSelection }) => providerSelection?.providerId === 'vision'));
+        assert.deepEqual(branches.map(({ branchId, providerSelection }) => providerSelection?.branchId === branchId), [true, true]);
+        assert.equal(new Set(branches.map(({ providerSelection }) => providerSelection?.comparisonLockId)).size, 1);
+        assert.equal(store.getJourneyRun(accepted.runId).evaluations.find(({ questionId }) => questionId === 'prefix')?.providerSelection?.providerId, 'local');
+      } else {
+        assert.equal(requests.filter(({ request: packet }) => packet.question.id === 'with-image' || packet.question.id === 'without-image').length, 0);
+        assert.ok(branches.every(({ status, failure }) => status === 'failed' && failure?.code === 'comparison_provider_unavailable'));
+        assert.ok(branches.every(({ providerSelection }) => providerSelection === undefined));
+        assert.equal(store.attempts(accepted.runId).items.length, 1, 'Only the shared prefix may consume a physical call when no provider fits both conditions.');
+        await assert.rejects(service.resume(accepted.runId), 'An unavailable matched provider must not let resume dispatch one condition independently.');
+      }
+    } finally { store.close(); images.close(); await rm(root, { recursive: true, force: true }); }
+  }
+});

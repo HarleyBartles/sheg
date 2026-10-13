@@ -11,6 +11,7 @@ import { createRunServiceForStore as createRunService } from './helpers/run-serv
 import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { executeQuestionRun } from '../src/application/question-worker.js';
 import type { InlineRunRequest } from '../src/domain/run/request.js';
+import type { DecisionProvider } from '../src/domain/decision/provider.js';
 import type { StaticImageCodec } from '../src/infrastructure/images/codecs.js';
 import { ClefProvider } from '../src/providers/clef.js';
 import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
@@ -32,6 +33,66 @@ async function localImageCodec(root: string) {
   ];
   await Promise.all(assets.map(([source, target]) => copyFile(path.join(packages, source!), path.join(directory, target!))));
   return createStaticImageCodec(directory);
+}
+
+function matchedJourneyRequest() {
+  return {
+    kind: 'journey' as const,
+    respondents: [{ id: 'reader', intent: 'Understand the article', context: 'A first-time reader', desired_outcome: 'Decide whether to continue', engagement_cues: 'Clear examples', friction_cues: 'Promotional imagery' }],
+    journey: {
+      id: 'article', label: 'Article image placement',
+      items: [
+        { id: 'opening', text: 'The opening section.' },
+        { id: 'section-four-with-image', text: 'Section four, shown after the editorial illustration.' },
+        { id: 'section-four-without-image', text: 'Section four, shown without the editorial illustration.' },
+      ],
+      tasks: [
+        { id: 'prefix-interest', type: 'choice' as const, instructions: 'Would you continue after the opening section?', options: { continue: 'Continue', leave: 'Leave' } },
+        { id: 'with-image-interest', type: 'choice' as const, instructions: 'Would you continue reading section four?', options: { continue: 'Continue', leave: 'Leave' }, comparisonKey: 'section-four-interest' },
+        { id: 'without-image-interest', type: 'choice' as const, instructions: 'Would you continue reading section four?', options: { continue: 'Continue', leave: 'Leave' }, comparisonKey: 'section-four-interest' },
+      ],
+      presentation: {
+        kind: 'graph' as const, entryNodeId: 'show-opening', maxDecisions: 3,
+        nodes: [
+          { id: 'show-opening', kind: 'expose' as const, itemId: 'opening' },
+          { id: 'ask-prefix', kind: 'ask' as const, taskId: 'prefix-interest' },
+          { id: 'condition-fork', kind: 'fork' as const, conditions: [
+            { id: 'with-image', label: 'With image', entryNodeId: 'show-image' },
+            { id: 'without-image', label: 'Without image', entryNodeId: 'show-no-image' },
+          ] },
+          { id: 'show-image', kind: 'expose' as const, itemId: 'section-four-with-image' },
+          { id: 'ask-with-image', kind: 'ask' as const, taskId: 'with-image-interest' },
+          { id: 'show-no-image', kind: 'expose' as const, itemId: 'section-four-without-image' },
+          { id: 'ask-without-image', kind: 'ask' as const, taskId: 'without-image-interest' },
+          { id: 'finished', kind: 'terminal' as const, outcome: 'complete' },
+          { id: 'left', kind: 'terminal' as const, outcome: 'left-before-treatment' },
+        ],
+        transitions: [
+          { fromNodeId: 'show-opening', toNodeId: 'ask-prefix' },
+          { fromNodeId: 'ask-prefix', optionId: 'continue', toNodeId: 'condition-fork' },
+          { fromNodeId: 'ask-prefix', optionId: 'leave', toNodeId: 'left' },
+          { fromNodeId: 'show-image', toNodeId: 'ask-with-image' },
+          { fromNodeId: 'show-no-image', toNodeId: 'ask-without-image' },
+          { fromNodeId: 'ask-with-image', optionId: 'continue', toNodeId: 'finished' },
+          { fromNodeId: 'ask-with-image', optionId: 'leave', toNodeId: 'left' },
+          { fromNodeId: 'ask-without-image', optionId: 'continue', toNodeId: 'finished' },
+          { fromNodeId: 'ask-without-image', optionId: 'leave', toNodeId: 'left' },
+        ],
+      },
+    },
+    provider: { kind: 'jev' as const, route: 'openrouter' as const, model: 'typesafe/jev-1.13' },
+    maxCalls: 3,
+  };
+}
+
+const journeyFit = { provider: 'jev' as const, status: 'fits' as const, method: 'test', modelIdentity: 'typesafe/jev-1.13', tokenCount: 'estimated' as const, tokens: 10, contextLimit: 1000, headroomTokens: 100, effectiveLimit: 900, details: {} };
+
+function matchedJourneyProvider(): DecisionProvider {
+  return { measure: () => journeyFit, async decide(packet) {
+    const choices = packet.question.type === 'choice' ? Object.keys(packet.question.options) : [];
+    const choice = choices[0]!;
+    return { type: 'choice', choice, probabilities: Object.fromEntries(choices.map((id) => [id, id === choice ? 0.9 : 0.1])), attempts: 1, provider: 'jev', model: 'typesafe/jev-1.13', latencyMs: 1, usage: {} };
+  } };
 }
 
 test('CLI and MCP share durable execution, submission retries, recall and cancellation', async (t) => {
@@ -70,6 +131,69 @@ test('CLI and MCP share durable execution, submission retries, recall and cancel
     assert.equal(await runCli(['cancel', '--run-id', run.runId], io, service), 0);
     assert.equal(JSON.parse(output.pop()!).status, 'completed');
   } finally { await client.close(); await server.close(); }
+});
+
+test('CLI and MCP accept the same matched journey and expose identical branch comparison evidence', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sheg-matched-fork-entrypoints-'));
+  const store = openRunStore(root);
+  const provider = matchedJourneyProvider();
+  const service = createRunService(store, root, () => provider, { async launch(_root, runId) {
+    await executeQuestionRun(splitRunStore(store), runId, () => provider);
+  } });
+  const output: string[] = [];
+  const errors: string[] = [];
+  const io = { out: (value: string) => { output.push(value); return true; }, error: (value: string) => { errors.push(value); return true; } };
+  const client = new Client({ name: 'matched-fork-contract', version: '1' });
+  const server = createPollingServer(service, root);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const request = matchedJourneyRequest();
+    const requestPath = path.join(root, 'matched-journey.json');
+    await writeFile(requestPath, JSON.stringify(request));
+    assert.equal(await runCli(['start', '--request', requestPath, '--submission-id', randomUUID()], io, service), 0, errors.join('\n'));
+    const cliRun = JSON.parse(output.pop()!) as { runId: string; status: string };
+    assert.equal(cliRun.status, 'completed');
+
+    const started = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request } });
+    assert.equal(started.isError ?? false, false, JSON.stringify(started.structuredContent));
+    const mcpRun = started.structuredContent as { runId: string; status: string };
+    assert.equal(mcpRun.status, 'completed');
+
+    const cliJourneyRequestPath = path.join(root, 'cli-journey-read.json');
+    await writeFile(cliJourneyRequestPath, JSON.stringify({ runId: mcpRun.runId, view: 'journey' }));
+    assert.equal(await runCli(['get', '--request', cliJourneyRequestPath], io, service), 0, errors.join('\n'));
+    const cliJourney = JSON.parse(output.pop()!) as { comparisons: Array<Record<string, unknown>>; forks: unknown[]; forkMembers: unknown[] };
+    const mcpJourneyResponse = await client.callTool({ name: 'run_get', arguments: { runId: mcpRun.runId, view: 'journey' } });
+    assert.equal(mcpJourneyResponse.isError ?? false, false);
+    const mcpJourney = mcpJourneyResponse.structuredContent as typeof cliJourney;
+    assert.deepEqual(cliJourney, mcpJourney);
+    assert.equal(mcpJourney.forks.length, 1);
+    assert.equal(mcpJourney.forkMembers.length, 2);
+    assert.deepEqual(mcpJourney.comparisons.map(({ comparisonKey, cohortRespondents, totalPairs, completePairs, incompletePairs }) =>
+      [comparisonKey, cohortRespondents, totalPairs, completePairs, incompletePairs]), [['section-four-interest', 1, 1, 1, 0]]);
+    assert.deepEqual((mcpJourney.comparisons[0] as { pairs: Array<{ members: Array<{ conditionId: string; status: string; execution?: { provider: string; model: string } }> }> }).pairs[0]?.members
+      .map(({ conditionId, status, execution }) => [conditionId, status, execution?.provider, execution?.model]), [
+        ['with-image', 'answered', 'jev', 'typesafe/jev-1.13'],
+        ['without-image', 'answered', 'jev', 'typesafe/jev-1.13'],
+      ]);
+
+    const firstEvaluation = store.getJourneyRun(mcpRun.runId).evaluations[0]!;
+    const invalidContext = { runId: mcpRun.runId, view: 'context', evaluationId: firstEvaluation.evaluationId, contextId: randomUUID() };
+    const invalidContextPath = path.join(root, 'invalid-context.json');
+    await writeFile(invalidContextPath, JSON.stringify(invalidContext));
+    assert.equal(await runCli(['get', '--request', invalidContextPath], io, service), 1);
+    const cliError = JSON.parse(errors.pop()!) as { error: string };
+    const mcpError = await client.callTool({ name: 'run_get', arguments: invalidContext });
+    assert.equal(mcpError.isError, true);
+    assert.match(cliError.error, /evaluation and context handles do not identify a context/i);
+    assert.deepEqual(mcpError.structuredContent, { error: { code: 'context_not_found', message: cliError.error } });
+  } finally {
+    await client.close();
+    await server.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('CLI help lists all supported workflow commands', async () => {

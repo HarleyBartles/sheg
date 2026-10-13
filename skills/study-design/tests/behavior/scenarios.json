@@ -53,8 +53,7 @@
       "cohort": "same profile labels, separate simulated runs",
       "mockOnly": true
     }
-  }
-,
+  },
   {
     "id": "discover-study-design-positive",
     "version": 1,
@@ -72,5 +71,22 @@
     "referencePaths": [],
     "userRequest": "The headline says our neighborhood poll is open. Please fix the responsive CSS for the poll banner so it wraps on mobile.",
     "controlledEvidence": { "requestType": "frontend-copy-and-css", "mockOnly": true }
+  },
+  {
+    "id": "matched-article-image-fork",
+    "version": 1,
+    "ownerSkill": "study-design",
+    "tags": ["journey", "matched-comparison", "visual"],
+    "referencePaths": ["references/primitives-and-tools.md"],
+    "userRequest": "I have a five-section article. After section three, before section four, I want to know whether an illustration improves the flow. Should I do one group with the image and a separate group without it, or can Sheg compare the two for the same readers? Explain how to keep the question and model fair, how the image affects provider choice, and what the results will actually show.",
+    "controlledEvidence": {
+      "sharedPrefix": "Sections one through three, read once before the image insertion point.",
+      "conditionA": "Section four with the user-supplied illustration and factual alt text.",
+      "conditionB": "The exact same section four without the illustration.",
+      "question": "Would you continue reading after section four?",
+      "respondentPerspectives": ["new reader", "returning reader", "reader focused on the topic"],
+      "task": "Design only; do not start a live run.",
+      "mockOnly": true
+    }
   }
 ]

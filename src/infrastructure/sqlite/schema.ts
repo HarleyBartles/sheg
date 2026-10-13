@@ -10,13 +10,14 @@ import { sqliteTables } from './tables.js';
 import { PREPARED_LAUNCH_WINDOW_MS } from './work-policy.js';
 
 export const BASELINE_SCHEMA_VERSION = 9;
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 export const BASELINE_MIGRATION_ID = 'baseline-v9';
 export const IMAGE_ASSET_MIGRATION_ID = 'image-assets-v10';
 export const RUN_VISUAL_ASSETS_MIGRATION_ID = 'run-visual-assets-v11';
 export const PROVIDER_SELECTION_MIGRATION_ID = 'provider-selection-v12';
 export const EVALUATION_PROVIDER_SELECTION_MIGRATION_ID = 'evaluation-provider-selection-v13';
-export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets', '0002_run_visual_assets', '0003_provider_selection', '0004_evaluation_provider_selection'] as const;
+export const MATCHED_FORKS_MIGRATION_ID = 'matched-forks-v14';
+export const MIGRATION_ASSET_DIRECTORIES = ['0000_baseline_v9', '0001_image_assets', '0002_run_visual_assets', '0003_provider_selection', '0004_evaluation_provider_selection', '0005_matched_forks'] as const;
 const MIGRATION_BACKUP_RETRIES = 3;
 const SQLITE_TRANSIENT_LOCK_CODES = new Set([5, 6]);
 const SQLITE_WAL_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1600];
@@ -87,8 +88,18 @@ function evaluationProviderSelectionMigration(): SqliteMigration {
   return { id: EVALUATION_PROVIDER_SELECTION_MIGRATION_ID, fromVersion: 12, toVersion: 13, sql: readFileSync(match, 'utf8') };
 }
 
+function matchedForksMigration(): SqliteMigration {
+  const candidates = [
+    fileURLToPath(new URL('../../../migrations/0005_matched_forks/migration.sql', import.meta.url)),
+    fileURLToPath(new URL('./migrations/0005_matched_forks/migration.sql', import.meta.url)),
+  ];
+  const match = candidates.find(existsSync);
+  if (!match) throw new RunStoreError('datastore_schema_invalid', 'The schema 14 matched fork migration is missing from this Sheg installation.');
+  return { id: MATCHED_FORKS_MIGRATION_ID, fromVersion: 13, toVersion: 14, sql: readFileSync(match, 'utf8') };
+}
+
 export function registeredMigrations(): SqliteMigration[] {
-  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration()];
+  return [baselineMigration(), imageAssetMigration(), runVisualAssetsMigration(), providerSelectionMigration(), evaluationProviderSelectionMigration(), matchedForksMigration()];
 }
 
 function migrationChecksum(migration: SqliteMigration): string {

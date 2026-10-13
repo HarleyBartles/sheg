@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
+import { materializeJourneyRun, prepareFollowOnRun, prepareRun } from '../src/application/run-inspection.js';
 import type { DecisionProvider, ProviderContextFit } from '../src/domain/decision/provider.js';
 import { compileDecisionRequest, emptyTrajectory } from '../src/domain/decision/prompt.js';
 import type { DecisionBatchRequest, DecisionRequest, DecisionResult } from '../src/domain/decision/decision.js';
 import { followOnRunRequestSchema, type FollowOnSourceSet, type FollowOnSourceTurn, type InlineRunRequest } from '../src/domain/run/request.js';
+import { estimateRunDecisionCalls } from '../src/domain/journey/route-bounds.js';
+import { journeyDefinitionSchema } from '../src/domain/study/arm.js';
+import type { StudyPresentation } from '../src/domain/study/presentation.js';
+import type { RespondentProfile } from '../src/domain/respondents/profile.js';
 import { JevProvider } from '../src/providers/jev.js';
 import { defaultJevConfig } from '../src/providers/jev/config.js';
 
@@ -556,6 +560,67 @@ function journeyRequest(maxCalls = 1, respondentCount = 1) {
   };
 }
 
+function journeyRequestWithFork() {
+  const base = journeyRequest(2);
+  return {
+    ...base,
+    journey: {
+      ...base.journey,
+      presentation: {
+        kind: 'graph',
+        entryNodeId: 'entry',
+        maxDecisions: 3,
+        nodes: [
+          { id: 'entry', kind: 'ask', taskId: 'continue' },
+          { id: 'expose-section-three', kind: 'expose', itemId: 'section-three' },
+          { id: 'treatment-fork', kind: 'fork', conditions: [
+            { id: 'with-image', label: 'With image', entryNodeId: 'ask-with-image' },
+            { id: 'without-image', label: 'Without image', entryNodeId: 'ask-without-image' },
+          ] },
+          { id: 'ask-with-image', kind: 'ask', taskId: 'interest' },
+          { id: 'ask-without-image', kind: 'ask', taskId: 'interest' },
+          { id: 'finished', kind: 'terminal', outcome: 'complete' },
+        ],
+        transitions: [
+          { fromNodeId: 'entry', optionId: 'continue', toNodeId: 'expose-section-three' },
+          { fromNodeId: 'entry', optionId: 'leave', toNodeId: 'finished' },
+          { fromNodeId: 'expose-section-three', toNodeId: 'treatment-fork' },
+          { fromNodeId: 'ask-with-image', optionId: 'yes', toNodeId: 'finished' },
+          { fromNodeId: 'ask-with-image', optionId: 'no', toNodeId: 'finished' },
+          { fromNodeId: 'ask-without-image', optionId: 'yes', toNodeId: 'finished' },
+          { fromNodeId: 'ask-without-image', optionId: 'no', toNodeId: 'finished' },
+        ],
+      },
+    },
+  };
+}
+
+function journeyRequestStartingAtFork() {
+  const base = journeyRequestWithFork();
+  const graph = base.journey.presentation as Extract<StudyPresentation, { kind: 'graph' }>;
+  return {
+    ...base,
+    maxCalls: 4,
+    journey: { ...base.journey, presentation: {
+      ...graph, entryNodeId: 'treatment-fork',
+      nodes: graph.nodes.filter((node) => node.id !== 'entry' && node.id !== 'expose-section-three'),
+      transitions: graph.transitions.filter((edge) => edge.fromNodeId !== 'entry' && edge.toNodeId !== 'expose-section-three' && edge.fromNodeId !== 'expose-section-three'),
+    } },
+  };
+}
+
+const boundsRespondent: RespondentProfile = {
+  id: 'reader-a', intent: 'Understand', context: 'New reader', desired_outcome: 'Choose',
+  engagement_cues: 'Examples', friction_cues: 'Hype',
+};
+
+function prefixMatchedForkJourney() {
+  const base = journeyRequestWithFork();
+  const presentation = base.journey.presentation as Extract<StudyPresentation, { kind: 'graph' }>;
+  const transitions = presentation.transitions.map((edge) => edge.fromNodeId === 'entry' ? { ...edge, toNodeId: 'expose-section-three' } : edge);
+  return journeyDefinitionSchema.parse({ ...base.journey, presentation: { ...presentation, maxDecisions: 3, transitions } });
+}
+
 test('journey admission measures initial contexts and reports reached-turn fit checks without inference', async () => {
   const fixture = makeProvider();
   const result = await prepareRun(journeyRequest(), fixture.provider);
@@ -570,6 +635,97 @@ test('journey admission measures initial contexts and reports reached-turn fit c
   assert.deepEqual(fixture.measured[0]!.state.encounteredItems, []);
   assert.equal(result.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
   assert.equal(fixture.decisions, 0);
+});
+
+test('journey admission measures only the true initial packet before a later matched fork', async () => {
+  const fixture = makeProvider();
+  const result = await prepareRun(journeyRequestWithFork(), fixture.provider);
+  assert.equal(result.inspection.valid, true);
+  assert.equal(result.inspection.minimumCalls, 1);
+  assert.equal(result.inspection.maximumCalls, 3);
+  assert.equal(result.journey?.packets.length, 1);
+  assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue']);
+  assert.equal(fixture.decisions, 0);
+});
+
+test('journey beginning at a matched fork admits waiting states without inventing an initial turn', async () => {
+  const fixture = makeProvider();
+  const result = await prepareRun(journeyRequestStartingAtFork(), fixture.provider);
+  assert.equal(result.inspection.valid, true, JSON.stringify(result.inspection.problems));
+  assert.equal(result.journey?.packets.length, 0);
+  assert.equal(fixture.measured.length, 0);
+  const prepared = materializeJourneyRun(result.journey!);
+  assert.equal(prepared.evaluations.length, 0);
+  assert.ok(prepared.respondents.every((state) => state.status === 'waiting-fork' && state.currentNodeId === 'treatment-fork'));
+  assert.ok(prepared.respondents.every((state) => state.currentTurnId === null && state.currentContextId !== null));
+});
+
+test('fork call bounds count the prefix once and sum both condition asks while response alternatives retain min and max', () => {
+  const journey = prefixMatchedForkJourney();
+  assert.deepEqual(estimateRunDecisionCalls([journey], [boundsRespondent]), { minimumDecisionCalls: 3, maximumDecisionCalls: 3 });
+  const journeyGraph = journey.presentation as Extract<StudyPresentation, { kind: 'graph' }>;
+  assert.throws(() => estimateRunDecisionCalls([{ ...journey, presentation: { ...journeyGraph, maxDecisions: 2 } }], [boundsRespondent]), /requires 3 decisions.*maxDecisions \(2\)/i);
+  const ordinary = journeyDefinitionSchema.parse(journeyRequest().journey);
+  assert.deepEqual(estimateRunDecisionCalls([ordinary], [boundsRespondent]), { minimumDecisionCalls: 1, maximumDecisionCalls: 2 });
+});
+
+test('fork fan-out topology sums nested condition work without duplicating its shared prefix', () => {
+  const base = journeyRequestWithFork();
+  const presentation = base.journey.presentation as Extract<StudyPresentation, { kind: 'graph' }>;
+  const nestedFork = { id: 'second-treatment-fork', kind: 'fork' as const, conditions: [
+    { id: 'nested-first', label: 'First nested condition', entryNodeId: 'nested-ask-one' },
+    { id: 'nested-second', label: 'Second nested condition', entryNodeId: 'nested-ask-two' },
+  ] };
+  const tasks = [
+    ...base.journey.tasks,
+    { id: 'nested-question-one', type: 'choice', instructions: 'Would you continue?', options: { yes: 'Yes', no: 'No' } },
+    { id: 'nested-question-two', type: 'choice', instructions: 'Would you continue?', options: { yes: 'Yes', no: 'No' } },
+  ];
+  const nodes = [
+    ...presentation.nodes, nestedFork,
+    { id: 'nested-ask-one', kind: 'ask', taskId: 'nested-question-one' },
+    { id: 'nested-ask-two', kind: 'ask', taskId: 'nested-question-two' },
+  ];
+  const transitions = presentation.transitions.map((edge) => edge.fromNodeId === 'entry'
+    ? { ...edge, toNodeId: 'expose-section-three' }
+    : edge.fromNodeId === 'ask-with-image' ? { ...edge, toNodeId: 'second-treatment-fork' } : edge);
+  transitions.push(
+    { fromNodeId: 'nested-ask-one', optionId: 'yes', toNodeId: 'finished' },
+    { fromNodeId: 'nested-ask-one', optionId: 'no', toNodeId: 'finished' },
+    { fromNodeId: 'nested-ask-two', optionId: 'yes', toNodeId: 'finished' },
+    { fromNodeId: 'nested-ask-two', optionId: 'no', toNodeId: 'finished' },
+  );
+  const journey = journeyDefinitionSchema.parse({ ...base.journey, tasks, presentation: { ...presentation, maxDecisions: 5, nodes, transitions } });
+  assert.deepEqual(estimateRunDecisionCalls([journey], [boundsRespondent]), { minimumDecisionCalls: 5, maximumDecisionCalls: 5 });
+});
+
+test('topology overflow and cycles fail with the fork node that makes the path unsafe', () => {
+  const base = journeyRequestWithFork();
+  const presentation = base.journey.presentation as Extract<StudyPresentation, { kind: 'graph' }>;
+  const cycleTransitions = presentation.transitions.map((edge) => edge.fromNodeId === 'ask-with-image'
+    ? { ...edge, toNodeId: 'treatment-fork' }
+    : edge);
+  const cycleJourney = { ...base.journey, presentation: { ...presentation, maxDecisions: 3, transitions: cycleTransitions } };
+  assert.throws(() => estimateRunDecisionCalls([cycleJourney as never], [boundsRespondent]), /cycle at node treatment-fork/i);
+
+  const forkCount = 54;
+  const forks = Array.from({ length: forkCount }, (_, index) => ({ id: `overflow-fork-${index}`, kind: 'fork', conditions: [
+    { id: `left-${index}`, label: 'Left', entryNodeId: index + 1 === forkCount ? 'overflow-ask' : `overflow-fork-${index + 1}` },
+    { id: `right-${index}`, label: 'Right', entryNodeId: index + 1 === forkCount ? 'overflow-ask' : `overflow-fork-${index + 1}` },
+  ] }));
+  const overflowJourney = {
+    ...base.journey,
+    tasks: [{ id: 'overflow-question', type: 'choice', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } }],
+    presentation: {
+      kind: 'graph', entryNodeId: 'overflow-fork-0', maxDecisions: Number.MAX_SAFE_INTEGER,
+      nodes: [...forks, { id: 'overflow-ask', kind: 'ask', taskId: 'overflow-question' }, { id: 'overflow-end', kind: 'terminal', outcome: 'complete' }],
+      transitions: [
+        { fromNodeId: 'overflow-ask', optionId: 'yes', toNodeId: 'overflow-end' },
+        { fromNodeId: 'overflow-ask', optionId: 'no', toNodeId: 'overflow-end' },
+      ],
+    },
+  };
+  assert.throws(() => estimateRunDecisionCalls([overflowJourney as never], [boundsRespondent]), /fan-out exceeds the safe integer range at node overflow-fork/i);
 });
 
 test('journey admission rejects a terminal entry that cannot materialize an initial ask', async () => {

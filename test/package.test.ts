@@ -128,7 +128,7 @@ test('a copied plugin launches its shipped MCP without checkout or node_modules'
   assert.equal(await exists(path.join(pluginData, 'runs.sqlite')), false);
   assert.equal(await exists(path.join(plugin, 'runs.sqlite')), false);
   const initialized = new DatabaseSync(path.join(dataRoot, 'runs.sqlite'), { readOnly: true });
-  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 13); }
+  try { assert.equal((initialized.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 14); }
   finally { initialized.close(); }
   assert.equal(await exists(path.resolve(plugin, 'skills/stimulus-response-polling/references/../../../dist/data/respondent-archetypes/story-craft-and-culture.json')), true);
 });
@@ -935,7 +935,7 @@ test('a copied MCP splits local independent questions and resumes without replay
   }
 });
 
-test('a copied plugin freezes and retries mixed automatic routing using isolated credential and network mocks', { skip: process.platform !== 'win32' }, async (t) => {
+test('a copied plugin runs and recovers a mixed-provider matched image fork without replaying its prefix or completed pair member', { skip: process.platform !== 'win32' }, async (t) => {
   const sandbox = await mkdtemp(path.join(os.tmpdir(), 'sheg-installed-automatic-routing-'));
   t.after(() => rm(sandbox, { recursive: true, force: true }));
   const plugin = path.join(sandbox, 'installed', 'sheg');
@@ -1043,31 +1043,46 @@ globalThis.fetch = async (input, init) => {
         { id: 'reader-a', intent: 'Understand the section', context: 'A curious reader', desired_outcome: 'Decide whether to continue', engagement_cues: 'Concrete details', friction_cues: 'Distraction' },
         { id: 'reader-b', intent: 'Understand the section', context: 'A time-pressed reader', desired_outcome: 'Decide whether to continue', engagement_cues: 'Clear structure', friction_cues: 'Wasted time' },
       ],
-      journey: { id: 'article', label: 'Text then image', items: [
+      journey: { id: 'article', label: 'Matched section-four image treatment', items: [
         { id: 'section-three', text: 'Section three explains the evidence behind the recommendation.' },
-        { id: 'visual-sample', type: 'image', text: '', altText: 'A transparent image with red, green, blue, and yellow squares at its corners.', caption: 'Four-color corner test image.', asset: image },
+        { id: 'section-four', text: 'Section four explains how careful records help residents.' },
+        { id: 'article-image', type: 'image', text: '', altText: 'A transparent image with red, green, blue, and yellow squares at its corners.', caption: 'Four-color corner test image.', asset: image },
       ], tasks: [
         { id: 'continue-reading', type: 'choice', instructions: 'Would you continue from section three?', options: { continue: 'Continue', leave: 'Leave' } },
-        { id: 'image-fit', type: 'choice', instructions: 'Does this image support section four?', options: { supports: 'Supports it', distracts: 'Distracts from it' }, visual: { mode: 'pixels', materialIds: ['visual-sample'] } },
-      ], presentation: { kind: 'graph', entryNodeId: 'expose-three', maxDecisions: 2, nodes: [
+        { id: 'image-fit', type: 'choice', instructions: 'Would you continue reading section four?', options: { continue: 'Continue', leave: 'Leave' }, comparisonKey: 'section-four-interest', visual: { mode: 'pixels', materialIds: ['article-image'] } },
+        { id: 'text-fit', type: 'choice', instructions: 'Would you continue reading section four?', options: { continue: 'Continue', leave: 'Leave' }, comparisonKey: 'section-four-interest' },
+        { id: 'section-five-interest', type: 'choice', instructions: 'Would you continue into section five?', options: { continue: 'Continue', leave: 'Leave' } },
+      ], presentation: { kind: 'graph', entryNodeId: 'expose-three', maxDecisions: 5, nodes: [
         { id: 'expose-three', kind: 'expose', itemId: 'section-three' },
         { id: 'ask-three', kind: 'ask', taskId: 'continue-reading' },
-        { id: 'expose-visual-sample', kind: 'expose', itemId: 'visual-sample' },
+        { id: 'condition-fork', kind: 'fork', conditions: [
+          { id: 'with-image', label: 'With image', entryNodeId: 'expose-four-image' },
+          { id: 'without-image', label: 'Without image', entryNodeId: 'expose-four-text' },
+        ] },
+        { id: 'expose-four-image', kind: 'expose', itemId: 'section-four' },
+        { id: 'expose-image', kind: 'expose', itemId: 'article-image' },
         { id: 'ask-image', kind: 'ask', taskId: 'image-fit' },
+        { id: 'expose-four-text', kind: 'expose', itemId: 'section-four' },
+        { id: 'ask-text', kind: 'ask', taskId: 'text-fit' },
+        { id: 'ask-onward', kind: 'ask', taskId: 'section-five-interest' },
         { id: 'complete', kind: 'terminal', outcome: 'complete' },
         { id: 'leave', kind: 'terminal', outcome: 'leave' },
       ], transitions: [
         { fromNodeId: 'expose-three', toNodeId: 'ask-three' },
-        { fromNodeId: 'ask-three', optionId: 'continue', toNodeId: 'expose-visual-sample' },
+        { fromNodeId: 'ask-three', optionId: 'continue', toNodeId: 'condition-fork' },
         { fromNodeId: 'ask-three', optionId: 'leave', toNodeId: 'leave' },
-        { fromNodeId: 'expose-visual-sample', toNodeId: 'ask-image' },
-        { fromNodeId: 'ask-image', optionId: 'supports', toNodeId: 'complete' },
-        { fromNodeId: 'ask-image', optionId: 'distracts', toNodeId: 'complete' },
+        { fromNodeId: 'expose-four-image', toNodeId: 'expose-image' },
+        { fromNodeId: 'expose-image', toNodeId: 'ask-image' },
+        { fromNodeId: 'ask-image', optionId: 'continue', toNodeId: 'ask-onward' },
+        { fromNodeId: 'ask-image', optionId: 'leave', toNodeId: 'ask-onward' },
+        { fromNodeId: 'expose-four-text', toNodeId: 'ask-text' },
+        { fromNodeId: 'ask-text', optionId: 'continue', toNodeId: 'ask-onward' },
+        { fromNodeId: 'ask-text', optionId: 'leave', toNodeId: 'ask-onward' },
+        { fromNodeId: 'ask-onward', optionId: 'continue', toNodeId: 'complete' },
+        { fromNodeId: 'ask-onward', optionId: 'leave', toNodeId: 'complete' },
       ] } },
-      providerSelection: { preferredOrder: ['local-reader', 'vision'], comparisonLocks: [{ id: 'same-image-model', members: [
-        { respondentId: 'reader-a', questionId: 'image-fit' }, { respondentId: 'reader-b', questionId: 'image-fit' },
-      ], equality: { provider: 'same', model: 'same' } }] },
-      maxCalls: 5,
+      providerSelection: { preferredOrder: ['local-reader', 'vision'] },
+      maxCalls: 11,
     };
     const inspected = await client.callTool({ name: 'run_inspect', arguments: { request } });
     assert.equal(inspected.isError ?? false, false, JSON.stringify(inspected.structuredContent));
@@ -1077,7 +1092,7 @@ globalThis.fetch = async (input, init) => {
       ['reader-a', 'continue-reading', 'local-reader'], ['reader-b', 'continue-reading', 'local-reader'],
     ]);
     assert.equal(inspection.initialChoices[0]?.candidates.find(({ id }) => id === 'disabled-vision')?.eligible, false);
-    assert.deepEqual([...new Set(inspection.unresolvedFutureJourneyUnits.map(({ questionId }) => questionId))], ['image-fit']);
+    assert.deepEqual([...new Set(inspection.unresolvedFutureJourneyUnits.map(({ questionId }) => questionId))], ['image-fit', 'text-fit', 'section-five-interest']);
 
     const started = await client.callTool({ name: 'run_start', arguments: { submissionId: randomUUID(), request: { ...request, expectedSelectionFingerprint: (inspection as unknown as { selectionFingerprint: string }).selectionFingerprint } } });
     assert.equal(started.isError ?? false, false, JSON.stringify(started.structuredContent));
@@ -1090,17 +1105,18 @@ globalThis.fetch = async (input, init) => {
       }
       assert.fail(`Timed out waiting for ${path.basename(file)}.`);
     };
+    let statusClient = client;
     const waitForStatus = async (expected: 'partial' | 'completed') => {
       const deadline = Date.now() + 30_000;
       let actual = 'unknown';
       while (Date.now() < deadline) {
-        const result = await client.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+        const result = await statusClient.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
         actual = String((result.structuredContent as { status?: string }).status);
         if (actual === expected) return;
         await new Promise((resolve) => setTimeout(resolve, 30));
       }
-      const journey = await client.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
-      const attempts = await client.callTool({ name: 'run_get', arguments: { runId, view: 'attempts' } });
+      const journey = await statusClient.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+      const attempts = await statusClient.callTool({ name: 'run_get', arguments: { runId, view: 'attempts' } });
       const mockCalls = await readFile(callsPath, 'utf8').catch(() => '');
       const evaluations = (journey.structuredContent as { evaluations?: Array<{ respondentId: string; questionId: string; status: string; providerSelection?: { providerId: string } }> }).evaluations ?? [];
       const attemptItems = (attempts.structuredContent as { items?: Array<{ status: string; failure?: { code: string } }> }).items ?? [];
@@ -1117,35 +1133,79 @@ globalThis.fetch = async (input, init) => {
     await writeFile(releasePath, 'continue');
     await waitForStatus('partial');
     const beforeRetry = await client.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
-    const partial = beforeRetry.structuredContent as { providerSelectionSnapshot: { catalogueRevision: number; catalogue: { entries: Array<{ id: string; enabled: boolean }> } }; evaluations: Array<{ respondentId: string; questionId: string; status: string; providerSelection?: { providerId: string; modelIdentity: string; comparisonLockId?: string } }> };
+    const partial = beforeRetry.structuredContent as { providerSelectionSnapshot: { catalogueRevision: number; catalogue: { entries: Array<{ id: string; enabled: boolean }> } };
+      comparisons: Array<{ comparisonKey: string; cohortRespondents: number; totalPairs: number; completePairs: number; incompletePairs: number; pairs: Array<{ respondentId: string; complete: boolean; members: Array<{ conditionId: string; status: string; packetFingerprint?: string; providerSelection?: { providerId: string; modelIdentity: string; comparisonLockId?: string } }> }> }>;
+      evaluations: Array<{ respondentId: string; branchId: string; questionId: string; status: string; packet: { state: { encounteredItems: Array<{ id: string; text: string }>; trajectory: { responses: Array<{ taskId: string }> } }; visualMaterials?: Array<{ id: string; altText: string; caption?: string; asset: { assetId: string } }> }; providerSelection?: { providerId: string; modelIdentity: string; comparisonLockId?: string } }> };
     assert.equal(partial.providerSelectionSnapshot.catalogueRevision, initialRevision + 1);
     assert.equal(partial.providerSelectionSnapshot.catalogue.entries.find(({ id }) => id === 'vision')?.enabled, true);
-    assert.equal(partial.evaluations.find(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'image-fit')?.providerSelection?.providerId, 'vision', JSON.stringify(partial));
-    const resumed = await client.callTool({ name: 'run_resume', arguments: { runId } });
+    const interruptedComparison = partial.comparisons.find(({ comparisonKey }) => comparisonKey === 'section-four-interest');
+    assert.ok(interruptedComparison);
+    assert.deepEqual([interruptedComparison.cohortRespondents, interruptedComparison.totalPairs, interruptedComparison.completePairs, interruptedComparison.incompletePairs], [2, 2, 1, 1]);
+    const incompletePair = interruptedComparison.pairs.find(({ respondentId }) => respondentId === 'reader-a');
+    assert.deepEqual(incompletePair?.members.map(({ conditionId, status }) => [conditionId, status]), [['with-image', 'failed'], ['without-image', 'answered']]);
+    assert.ok(incompletePair?.members.every(({ packetFingerprint, providerSelection }) => packetFingerprint && providerSelection?.providerId === 'vision' && providerSelection.modelIdentity === 'clef'));
+    const failedComparisonEvaluation = partial.evaluations.find(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'image-fit');
+    assert.equal(failedComparisonEvaluation?.providerSelection?.providerId, 'vision', JSON.stringify(partial));
+    assert.equal(partial.evaluations.filter(({ questionId }) => questionId === 'continue-reading').length, 2);
+    assert.equal(partial.evaluations.filter(({ questionId }) => questionId === 'section-five-interest').length, 3);
+    const savedPacket = failedComparisonEvaluation?.packet;
+    assert.ok(savedPacket);
+    assert.deepEqual(savedPacket.state.trajectory.responses.map(({ taskId }) => taskId), ['continue-reading']);
+    assert.deepEqual(savedPacket.visualMaterials?.map(({ id, altText, caption }) => [id, altText, caption]), [['article-image', 'A transparent image with red, green, blue, and yellow squares at its corners.', 'Four-color corner test image.']]);
+    await killMcpConnection(client, transport);
+
+    const resumedClient = new Client({ name: 'sheg-installed-matched-fork-resume', version: '1.0.0' });
+    const resumedTransport = new StdioClientTransport({ command: process.execPath, args: [path.join(plugin, 'dist', 'mcp.js')], cwd: sandbox, env });
+    try {
+    await resumedClient.connect(resumedTransport);
+    statusClient = resumedClient;
+    const reopened = await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'status' } });
+    assert.equal((reopened.structuredContent as { status: string }).status, 'partial');
+    const resumed = await resumedClient.callTool({ name: 'run_resume', arguments: { runId } });
     assert.equal(resumed.isError ?? false, false, JSON.stringify(resumed.structuredContent));
     assert.ok(['prepared', 'running'].includes((resumed.structuredContent as { status: string }).status), 'Explicit resume must restart the same installed journey with its saved provider choice.');
     await waitForStatus('completed');
 
-    const finalResult = await client.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
+    const finalResult = await resumedClient.callTool({ name: 'run_get', arguments: { runId, view: 'journey' } });
     assert.equal(finalResult.isError ?? false, false, JSON.stringify(finalResult.structuredContent));
     const completed = finalResult.structuredContent as typeof partial;
-    assert.deepEqual(completed.evaluations.map(({ respondentId, questionId, status, providerSelection }) => [respondentId, questionId, status, providerSelection?.providerId]), [
-      ['reader-a', 'continue-reading', 'answered', 'local-reader'], ['reader-b', 'continue-reading', 'answered', 'local-reader'],
-      ['reader-a', 'image-fit', 'answered', 'vision'], ['reader-b', 'image-fit', 'answered', 'vision'],
+    const sortedEvaluations = [...completed.evaluations].sort((left, right) =>
+      `${left.respondentId}/${left.branchId}/${left.questionId}`.localeCompare(`${right.respondentId}/${right.branchId}/${right.questionId}`));
+    assert.deepEqual(sortedEvaluations.filter(({ questionId }) => questionId === 'continue-reading').map(({ respondentId, status, providerSelection }) => [respondentId, status, providerSelection?.providerId]), [
+      ['reader-a', 'answered', 'local-reader'], ['reader-b', 'answered', 'local-reader'],
     ]);
-    const visualChoices = completed.evaluations.filter(({ questionId }) => questionId === 'image-fit').map(({ providerSelection }) => providerSelection);
-    assert.ok(visualChoices.every((choice) => choice?.modelIdentity === 'clef' && choice.comparisonLockId === 'same-image-model'));
+    const matchedEvaluations = sortedEvaluations.filter(({ questionId }) => questionId === 'image-fit' || questionId === 'text-fit');
+    assert.equal(matchedEvaluations.length, 4);
+    assert.ok(matchedEvaluations.every(({ status, providerSelection }) => status === 'answered' && providerSelection?.providerId === 'vision' && providerSelection.modelIdentity === 'clef'));
+    assert.equal(new Set(matchedEvaluations.map(({ providerSelection }) => providerSelection?.comparisonLockId)).size, 1);
+    assert.equal(sortedEvaluations.filter(({ questionId }) => questionId === 'section-five-interest').length, 4);
+    assert.ok(sortedEvaluations.filter(({ questionId }) => questionId === 'section-five-interest').every(({ branchId, status, providerSelection, packet }) =>
+      branchId !== 'root' && status === 'answered' && providerSelection?.providerId === 'local-reader' && packet.state.trajectory.responses.length === 2));
+    const completedComparison = completed.comparisons.find(({ comparisonKey }) => comparisonKey === 'section-four-interest');
+    assert.deepEqual([completedComparison?.totalPairs, completedComparison?.completePairs, completedComparison?.incompletePairs], [2, 2, 0]);
+    assert.deepEqual(completedComparison?.pairs.map(({ respondentId, complete }) => [respondentId, complete]), [['reader-a', true], ['reader-b', true]]);
+    const retryPacket = sortedEvaluations.find(({ respondentId, questionId, status }) => respondentId === 'reader-a' && questionId === 'image-fit' && status === 'answered')?.packet;
+    assert.deepEqual(retryPacket, savedPacket, 'Reopening the copied runtime and resuming a failed branch must reuse its exact packet.');
     const records = (await readFile(callsPath, 'utf8')).trim().split(/\r?\n/).map((line) => JSON.parse(line) as { kind: string; url: string; body: { model: string; state: unknown; questions: Record<string, unknown>; images?: string[] }; hasFixtureCredential?: boolean });
     const layaCalls = records.filter(({ kind }) => kind === 'laya');
     const clefCalls = records.filter(({ kind }) => kind === 'clef');
-    assert.equal(layaCalls.length, 2);
-    assert.equal(clefCalls.length, 3);
+    assert.equal(layaCalls.length, 6);
+    assert.equal(clefCalls.length, 5);
     assert.ok(layaCalls.every(({ body }) => body.model === 'local-reader-v1'));
-    assert.ok(clefCalls.every(({ body, url }) => body.model === 'clef' && url.endsWith('/ai/run/@cf/cloudflare/clef') && body.images?.length === 1));
+    assert.ok(clefCalls.every(({ body, url }) => body.model === 'clef' && url.endsWith('/ai/run/@cf/cloudflare/clef')));
+    assert.equal(clefCalls.filter(({ body }) => body.images?.length === 1).length, 3);
+    assert.equal(clefCalls.filter(({ body }) => body.images === undefined).length, 2);
     assert.ok(clefCalls.every(({ hasFixtureCredential }) => hasFixtureCredential === true), 'The installed Clef provider must read and send the isolated fixture credential.');
-    assert.deepEqual(clefCalls[0]?.body, clefCalls[2]?.body, 'Resuming a failed reached image unit must reuse the exact packet and provider payload.');
+    assert.deepEqual(clefCalls[0]?.body, clefCalls[4]?.body, 'Reopening the copied runtime must retry the same image packet and provider payload.');
     assert.equal(records.some(({ url }) => url.includes('openrouter') || url.includes('clef-flash')), false);
     assert.doesNotMatch(JSON.stringify(records), /offline-fixture-token/i, 'The mock credential must not appear in provider URLs or request bodies.');
+    const layaText = JSON.stringify(layaCalls.map(({ body }) => body));
+    assert.match(layaText, /Four-color corner test image/);
+    assert.match(layaText, /A transparent image with red, green, blue, and yellow squares at its corners\./);
+    assert.match(layaText, /article-image/, 'Compact visual history retains stable material identity.');
+    assert.match(layaText, /"choiceMeaning":"Continue"/, 'Compact visual history retains the exact authored meaning of the typed response.');
+    assert.match(layaText, /"visualEvidence"/, 'Onward text receives structured visual exposure evidence without pixel payloads.');
+    } finally { await killMcpConnection(resumedClient, resumedTransport); }
   } finally {
     await client.close().catch(() => undefined);
     await transport.close().catch(() => undefined);

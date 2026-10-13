@@ -51,6 +51,7 @@ export function createSqliteRepositoryContext(connection: SqliteConnection, data
       evaluationId: asText(row.evaluation_id, 'evaluation ID'),
       contextId: asText(row.context_id, 'context ID'),
       respondentId: asText(row.respondent_id, 'respondent ID'),
+      ...(row.branch_id === null || row.branch_id === undefined ? {} : { branchId: asText(row.branch_id, 'branch ID') }),
       questionId: asText(row.question_id, 'question ID'),
       packet: decisionRequestSchema.parse(parseJson(row.packet_json, 'frozen packet')),
       packetFingerprint: asText(row.packet_fingerprint, 'packet fingerprint'),

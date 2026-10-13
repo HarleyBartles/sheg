@@ -338,6 +338,7 @@ export const runEvidenceItemSchema = z.object({
     failure: z.object({ code: z.string().min(1), message: z.string().min(1), detail: decisionFailureDetailSchema.optional(), providerFailure: providerFailureEvidenceSchema.optional() }).strict().optional(),
     selectedMaterial: selectedMaterialEvidenceSchema.optional(),
     execution: providerExecutionEvidenceSchema.optional(),
+    branchId: z.string().min(1).optional(),
     turnId: z.string().min(1).optional(),
     nodeId: z.string().min(1).optional(),
     occurrence: z.number().int().positive().optional(),
@@ -397,6 +398,7 @@ export function requireExplicitProvider(request: { provider?: ProviderConfigInpu
 }
 
 export type FrozenEvaluation = {
+  branchId?: string;
   groupId?: string;
   evaluationId: string;
   contextId: string;

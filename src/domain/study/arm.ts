@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { presentationSchema, type PresentationTransition } from './presentation.js';
 import { isImageMaterial, materialItemSchema, sourceReferenceSchema } from './stimulus.js';
-import { taskSchema } from './task.js';
+import { taskSchema, tasksAreComparisonEquivalent } from './task.js';
 import type { StudyTask } from './task.js';
 
 const identifier = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -35,10 +35,11 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: 'custom', path: ['presentation'], message: 'Item, task, and graph node IDs must be unique within an arm.' });
   }
-  const comparisonKeys = arm.tasks.flatMap((task) => task.comparisonKey ? [task.comparisonKey] : []);
-  if (new Set(comparisonKeys).size !== comparisonKeys.length) {
-    context.addIssue({ code: 'custom', path: ['tasks'], message: 'Each comparisonKey must identify at most one task within an arm.' });
+  if (presentation.kind === 'graph' && !Number.isSafeInteger(presentation.maxDecisions)) {
+    context.addIssue({ code: 'custom', path: ['presentation', 'maxDecisions'], message: 'Graph maxDecisions must be a positive safe integer.' });
   }
+  const tasksByComparisonKey = new Map<string, StudyTask[]>();
+  for (const task of arm.tasks) if (task.comparisonKey) tasksByComparisonKey.set(task.comparisonKey, [...(tasksByComparisonKey.get(task.comparisonKey) ?? []), task]);
 
   for (const [taskIndex, task] of arm.tasks.entries()) {
     if (task.type !== 'choice' || !task.materialOptions) continue;
@@ -71,7 +72,12 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
     }
   }
 
-  if (presentation.kind === 'sequence') return;
+  if (presentation.kind === 'sequence') {
+    for (const [key, tasks] of tasksByComparisonKey) if (tasks.length > 1) {
+      context.addIssue({ code: 'custom', path: ['tasks'], message: `Each comparisonKey must identify at most one task within an arm; duplicate key ${key}.` });
+    }
+    return;
+  }
 
   const nodesById = new Map(presentation.nodes.map((node) => [node.id, node]));
   if (!nodesById.has(presentation.entryNodeId)) {
@@ -102,6 +108,9 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
     if (source.kind === 'terminal') {
       context.addIssue({ code: 'custom', path: ['presentation', 'transitions', index], message: 'Terminal nodes cannot have outgoing transitions.' });
     }
+    if (source.kind === 'fork') {
+      context.addIssue({ code: 'custom', path: ['presentation', 'transitions', index], message: 'Fork nodes cannot have ordinary transitions; use condition entry nodes.' });
+    }
     if (source.kind === 'expose' && (edge.optionId !== undefined || edge.when !== undefined)) {
       context.addIssue({ code: 'custom', path: ['presentation', 'transitions', index], message: 'Exposure transitions must be unconditional.' });
     }
@@ -111,6 +120,31 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
     const edges = outgoing.get(node.id) ?? [];
     if (node.kind === 'terminal') {
       if (edges.length > 0) context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index], message: 'Terminal nodes cannot have outgoing transitions.' });
+      continue;
+    }
+    if (node.kind === 'fork') {
+      if (edges.length > 0) context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index], message: 'Fork nodes cannot have ordinary transitions; use condition entry nodes.' });
+      for (const [conditionIndex, condition] of node.conditions.entries()) {
+        if (!nodesById.has(condition.entryNodeId)) {
+          context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index, 'conditions', conditionIndex, 'entryNodeId'], message: `Fork condition ${condition.id} references unknown entry node ${condition.entryNodeId}.` });
+          continue;
+        }
+        const seen = new Set<string>();
+        let currentNodeId = condition.entryNodeId;
+        let reachesAsk = false;
+        while (!seen.has(currentNodeId)) {
+          seen.add(currentNodeId);
+          const entryNode = nodesById.get(currentNodeId);
+          if (entryNode?.kind === 'ask') { reachesAsk = true; break; }
+          if (entryNode?.kind !== 'expose') break;
+          const exposureEdges = outgoing.get(entryNode.id) ?? [];
+          const exposureEdge = exposureEdges[0];
+          if (exposureEdges.length !== 1 || !exposureEdge || exposureEdge.optionId !== undefined || exposureEdge.when !== undefined) break;
+          currentNodeId = exposureEdge.toNodeId;
+        }
+        if (!reachesAsk) context.addIssue({ code: 'custom', path: ['presentation', 'nodes', index, 'conditions', conditionIndex, 'entryNodeId'],
+          message: `Fork condition ${condition.id} must reach its first ask before a terminal or nested fork.` });
+      }
       continue;
     }
     if (node.kind === 'expose') {
@@ -144,7 +178,9 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
       const current = pending.pop()!;
       if (visited.has(current)) continue;
       visited.add(current);
-      for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
+      const node = nodesById.get(current);
+      if (node?.kind === 'fork') for (const condition of node.conditions) pending.push(condition.entryNodeId);
+      else for (const edge of outgoing.get(current) ?? []) pending.push(edge.toNodeId);
     }
     const unreachable = presentation.nodes.filter((node) => !visited.has(node.id)).map((node) => node.id);
     if (unreachable.length > 0) {
@@ -154,11 +190,14 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
     const state = new Map<string, 'visiting' | 'visited'>();
     const decisionsToTerminal = new Map<string, number | null>();
     let containsCycle = false;
+    let cycleAt: string | undefined;
+    let overflowAt: string | undefined;
     const longestDecisionsToTerminal = (nodeId: string): number | null => {
       const node = nodesById.get(nodeId);
       if (!node) return null;
       if (state.get(nodeId) === 'visiting') {
         containsCycle = true;
+        cycleAt ??= nodeId;
         return null;
       }
       if (state.get(nodeId) === 'visited') return decisionsToTerminal.get(nodeId) ?? null;
@@ -168,14 +207,21 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
       if (node.kind === 'terminal') {
         longest = 0;
       } else {
-        const edges = outgoing.get(nodeId) ?? [];
-        const continuations = edges.map((edge) => longestDecisionsToTerminal(edge.toNodeId));
+        const continuations = node.kind === 'fork'
+          ? node.conditions.map(({ entryNodeId }) => longestDecisionsToTerminal(entryNodeId))
+          : (outgoing.get(nodeId) ?? []).map((edge) => longestDecisionsToTerminal(edge.toNodeId));
         const completedContinuations = continuations.filter((count): count is number => count !== null);
         if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
           longest = null;
         } else {
-          const nextDecisionCount = Math.max(...completedContinuations);
-          longest = nextDecisionCount + (node.kind === 'ask' ? 1 : 0);
+          const nextDecisionCount = node.kind === 'fork'
+            ? completedContinuations.reduce((total, count) => total + count, 0)
+            : Math.max(...completedContinuations);
+          const decisionCount = nextDecisionCount + (node.kind === 'ask' ? 1 : 0);
+          if (!Number.isSafeInteger(nextDecisionCount) || !Number.isSafeInteger(decisionCount)) {
+            overflowAt ??= nodeId;
+            longest = null;
+          } else longest = decisionCount;
         }
       }
       state.set(nodeId, 'visited');
@@ -185,7 +231,9 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
 
     const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
     if (containsCycle) {
-      context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: 'Graph contains a cycle; every journey must terminate.' });
+      context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: `Graph contains a cycle at node ${cycleAt}; every journey must terminate.` });
+    } else if (overflowAt) {
+      context.addIssue({ code: 'custom', path: ['presentation', 'maxDecisions'], message: `Graph decision fan-out exceeds the safe integer range at node ${overflowAt}.` });
     } else if (longestPath === null) {
       context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: 'Every graph branch must reach a terminal node.' });
     } else if (longestPath > presentation.maxDecisions) {
@@ -194,6 +242,59 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
         path: ['presentation', 'maxDecisions'],
         message: `A graph branch requires ${longestPath} decisions, exceeding maxDecisions (${presentation.maxDecisions}).`,
       });
+    }
+  }
+
+  if (presentation.nodes.some((node) => node.kind === 'fork')) {
+    const reachableTasks = (entryNodeId: string): StudyTask[] => {
+      const reached: StudyTask[] = [];
+      const visited = new Set<string>();
+      const pending = [entryNodeId];
+      while (pending.length > 0) {
+        const nodeId = pending.pop()!;
+        if (visited.has(nodeId)) continue;
+        visited.add(nodeId);
+        const node = nodesById.get(nodeId);
+        if (!node || node.kind === 'terminal') continue;
+        if (node.kind === 'ask') {
+          const task = taskById.get(node.taskId);
+          if (task) reached.push(task);
+        }
+        if (node.kind === 'fork') for (const condition of node.conditions) pending.push(condition.entryNodeId);
+        else for (const edge of outgoing.get(nodeId) ?? []) pending.push(edge.toNodeId);
+      }
+      return reached;
+    };
+    const scopes = presentation.nodes.filter((node) => node.kind === 'fork').map((fork) => ({
+      fork,
+      byCondition: fork.conditions.map((condition) => {
+        const byKey = new Map<string, StudyTask[]>();
+        for (const task of reachableTasks(condition.entryNodeId)) {
+          if (task.comparisonKey) byKey.set(task.comparisonKey, [...(byKey.get(task.comparisonKey) ?? []), task]);
+        }
+        return { condition, byKey };
+      }),
+    }));
+    for (const scope of scopes) for (const condition of scope.byCondition) for (const [key, tasks] of condition.byKey) {
+      if (tasks.length > 1) context.addIssue({ code: 'custom', path: ['tasks'], message: `comparisonKey ${key} occurs more than once in fork condition ${condition.condition.id}.` });
+    }
+    for (const [key, tasks] of tasksByComparisonKey) {
+      if (tasks.length < 2) continue;
+      const taskIds = new Set(tasks.map(({ id }) => id));
+      const matchedScope = scopes.some(({ byCondition }) => {
+        const conditionsWithKey = byCondition.filter(({ byKey }) => byKey.has(key));
+        const scopedTasks = conditionsWithKey.flatMap(({ byKey }) => byKey.get(key) ?? []);
+        return conditionsWithKey.length >= 2 && conditionsWithKey.every(({ byKey }) => byKey.get(key)?.length === 1) &&
+          scopedTasks.length === tasks.length && new Set(scopedTasks.map(({ id }) => id)).size === taskIds.size &&
+          scopedTasks.every(({ id }) => taskIds.has(id));
+      });
+      if (!matchedScope || tasks.some((task) => !tasksAreComparisonEquivalent(tasks[0]!, task))) {
+        context.addIssue({ code: 'custom', path: ['tasks'], message: `comparisonKey ${key} may be shared only by equivalent questions in distinct conditions of the same fork.` });
+      }
+    }
+  } else {
+    for (const [key, tasks] of tasksByComparisonKey) if (tasks.length > 1) {
+      context.addIssue({ code: 'custom', path: ['tasks'], message: `Each comparisonKey must identify at most one task within an arm; duplicate key ${key}.` });
     }
   }
 }

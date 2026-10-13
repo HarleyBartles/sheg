@@ -90,7 +90,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       const where = ['e.run_id = ?', 'e.ordinal <= ?', ...filters.sql];
       const parameters: Array<string | number> = [query.sourceRunId, maxOrdinal, ...filters.parameters];
       const whereSql = where.join(' AND ');
-      const join = 'LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id';
+      const join = 'LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id';
       const evaluationCoverage = {
         totalEvaluations: asNumber((context.database.prepare('SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'evaluation denominator'),
         completedEvaluations: asNumber((context.database.prepare("SELECT COUNT(*) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ? AND status = 'answered'").get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'completed evaluation denominator'),
@@ -102,7 +102,14 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
           : parsedRequest.data.kind === 'poll' ? parsedRequest.data.respondents.length
             : asNumber((context.database.prepare('SELECT COUNT(DISTINCT respondent_id) AS count FROM evaluations WHERE run_id = ? AND ordinal <= ?').get(query.sourceRunId, maxOrdinal) as DatabaseRow).count, 'respondent denominator');
         const statusCounts = parsedRequest.data.kind === 'journey'
-          ? context.database.prepare('SELECT status, COUNT(*) AS count FROM journey_respondents WHERE run_id = ? GROUP BY status').all(query.sourceRunId) as DatabaseRow[]
+          ? context.database.prepare(`SELECT respondent_status AS status, COUNT(*) AS count FROM (
+              SELECT respondent_id, CASE
+                WHEN SUM(status IN ('active', 'waiting-fork')) > 0 THEN 'active'
+                WHEN SUM(status = 'failed') > 0 THEN 'failed'
+                WHEN SUM(status = 'completed') > 0 THEN 'completed'
+                ELSE 'unreached' END AS respondent_status
+              FROM journey_respondents WHERE run_id = ? GROUP BY respondent_id
+            ) GROUP BY respondent_status`).all(query.sourceRunId) as DatabaseRow[]
           : parsedRequest.data.kind === 'follow-on' || parsedRequest.data.kind === 'poll'
             ? context.database.prepare(`SELECT status, COUNT(*) AS count FROM (
                 SELECT respondent_id, CASE
@@ -209,6 +216,7 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
           ...(selectedMaterial === undefined ? {} : { selectedMaterial }),
           ...(row.execution_json === null ? {} : { execution: providerExecutionEvidenceSchema.parse(parseJson(row.execution_json, 'provider execution')) }),
           ...(row.turn_id === null ? {} : { turnId: asText(row.turn_id, 'turn ID') }),
+          ...(row.turn_id === null ? {} : { branchId: asText(row.branch_id, 'branch ID') }),
           ...(row.node_id === null ? {} : { nodeId: asText(row.node_id, 'node ID') }),
           ...(row.occurrence === null ? {} : { occurrence: asNumber(row.occurrence, 'turn occurrence') }),
           ...(row.route_outcome === null ? {} : { outcome: asText(row.route_outcome, 'route outcome') }),

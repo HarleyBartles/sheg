@@ -43,7 +43,7 @@ export function loadFollowOnSources(database: DatabaseSync, input: ParsedFollowO
     (SELECT a.execution_json FROM evaluation_answer_attempts ea JOIN attempts a USING (attempt_id)
       WHERE ea.evaluation_id = e.evaluation_id) AS execution_json
     FROM evaluations AS e
-    LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id
+    LEFT JOIN journey_respondents AS jr ON jr.run_id = e.run_id AND jr.respondent_id = e.respondent_id AND jr.branch_id = e.branch_id
     WHERE ${where.join(' AND ')} ORDER BY e.ordinal LIMIT 10001`).all(...parameters) as DatabaseRow[];
   if (rows.length > 10_000) throw new RunStoreError('follow_on_selection_too_large', 'Follow-on selection matched more than 10,000 evaluations. Narrow the criteria or use explicit references.');
   if ('references' in request.selection && rows.length !== request.selection.references.length) {

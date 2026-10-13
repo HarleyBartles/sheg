@@ -2,17 +2,209 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runJourney } from '../src/domain/journey/run.js';
+import { advanceJourney, JourneyExecutionError, runJourney } from '../src/domain/journey/run.js';
+import { walkStudyPackets } from '../src/domain/journey/packet-walker.js';
+import { journeyControlSuccessors, journeyTopology } from '../src/domain/journey/topology.js';
 import type { PromptState } from '../src/domain/decision/prompt.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 import { loadRespondents } from '../src/domain/respondents/cohort.js';
 import type { DecisionRequest } from '../src/domain/decision/decision.js';
-import type { StudyArm } from '../src/domain/study/arm.js';
+import { studyArmSchema, type StudyArm } from '../src/domain/study/arm.js';
 
 const fixtures = new URL('./fixtures/', import.meta.url);
 const article = studyManifestSchema.parse(JSON.parse(readFileSync(fileURLToPath(new URL('article.json', fixtures)), 'utf8'))).arms[0]!;
 const chapter = studyManifestSchema.parse(JSON.parse(readFileSync(fileURLToPath(new URL('chapter.json', fixtures)), 'utf8'))).arms[0]!;
 const profile = loadRespondents(JSON.parse(readFileSync(fileURLToPath(new URL('cohort.json', fixtures)), 'utf8')))[0]!;
+
+function matchedForkArm(): StudyArm {
+  const answerItems = [
+    { id: 'continue-a', text: 'Read the next passage.', sourceId: 'source-a', sourceSha256: 'a'.repeat(64) },
+    { id: 'stop-a', text: 'Stop here.', sourceId: 'source-a', sourceSha256: 'a'.repeat(64) },
+    { id: 'continue-b', text: 'Read the next passage.', sourceId: 'source-b', sourceSha256: 'b'.repeat(64) },
+    { id: 'stop-b', text: 'Stop here.', sourceId: 'source-b', sourceSha256: 'b'.repeat(64) },
+  ];
+  return {
+    ...chapter,
+    items: [...chapter.items, ...answerItems],
+    tasks: [
+      { id: 'image-condition-question', type: 'choice', instructions: 'Would you continue reading?', comparisonKey: 'image-effect', options: { continue: 'Read the next passage.', stop: 'Stop here.' }, materialOptions: { continue: 'continue-a', stop: 'stop-a' } },
+      { id: 'text-condition-question', type: 'choice', instructions: 'Would you continue reading?', comparisonKey: 'image-effect', options: { continue: 'Read the next passage.', stop: 'Stop here.' }, materialOptions: { continue: 'continue-b', stop: 'stop-b' } },
+    ],
+    presentation: {
+      kind: 'graph', entryNodeId: 'treatment-fork', maxDecisions: 2,
+      nodes: [
+        { id: 'treatment-fork', kind: 'fork', conditions: [
+          { id: 'image-present', label: 'With the image', entryNodeId: 'ask-with-image' },
+          { id: 'image-absent', label: 'Without the image', entryNodeId: 'ask-without-image' },
+        ] },
+        { id: 'ask-with-image', kind: 'ask', taskId: 'image-condition-question' },
+        { id: 'ask-without-image', kind: 'ask', taskId: 'text-condition-question' },
+        { id: 'fork-end', kind: 'terminal', outcome: 'complete' },
+      ],
+      transitions: [
+        { fromNodeId: 'ask-with-image', optionId: 'continue', toNodeId: 'fork-end' },
+        { fromNodeId: 'ask-with-image', optionId: 'stop', toNodeId: 'fork-end' },
+        { fromNodeId: 'ask-without-image', optionId: 'continue', toNodeId: 'fork-end' },
+        { fromNodeId: 'ask-without-image', optionId: 'stop', toNodeId: 'fork-end' },
+      ],
+    },
+  } as unknown as StudyArm;
+}
+
+function matchedForkArmWithTasks(tasks: StudyArm['tasks'], type: 'choice' | 'score' | 'noul'): StudyArm {
+  const arm = matchedForkArm();
+  const presentation = arm.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>;
+  const transitions = type === 'choice' ? presentation.transitions : [
+    ...presentation.transitions.filter(({ fromNodeId }) => fromNodeId !== 'ask-with-image' && fromNodeId !== 'ask-without-image'),
+    ...['ask-with-image', 'ask-without-image'].map((fromNodeId) => ({ fromNodeId, toNodeId: 'fork-end', when: {
+      type, minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: true,
+    } })),
+  ];
+  return { ...arm, tasks, presentation: { ...presentation, transitions } };
+}
+
+test('matched fork graph contract accepts distinct equivalent condition questions and material bindings', () => {
+  const arm = matchedForkArm();
+  const parsed = studyArmSchema.safeParse(arm);
+  assert.equal(parsed.success, true, parsed.success ? '' : parsed.error.message);
+  if (!parsed.success || parsed.data.presentation.kind !== 'graph') return;
+  const fork = parsed.data.presentation.nodes.find((node) => node.id === 'treatment-fork');
+  assert.equal(fork?.kind, 'fork');
+  const [firstTask, secondTask] = parsed.data.tasks;
+  assert.equal(firstTask?.type, 'choice');
+  assert.equal(secondTask?.type, 'choice');
+  if (firstTask?.type === 'choice' && secondTask?.type === 'choice') assert.notDeepEqual(firstTask.materialOptions, secondTask.materialOptions);
+});
+
+test('fork topology exposes condition successors separately from ordinary response transitions', () => {
+  const graph = journeyTopology(matchedForkArm());
+  assert.deepEqual(journeyControlSuccessors(graph, 'treatment-fork'), [
+    { kind: 'condition', conditionId: 'image-present', label: 'With the image', toNodeId: 'ask-with-image' },
+    { kind: 'condition', conditionId: 'image-absent', label: 'Without the image', toNodeId: 'ask-without-image' },
+  ]);
+  assert.deepEqual(journeyControlSuccessors(graph, 'ask-with-image').map(({ kind, toNodeId }) => ({ kind, toNodeId })), [
+    { kind: 'transition', toNodeId: 'fork-end' }, { kind: 'transition', toNodeId: 'fork-end' },
+  ]);
+});
+
+test('matched fork graph contract rejects malformed conditions, targets, and ordinary outgoing transitions', () => {
+  const arm = matchedForkArm();
+  const presentation = arm.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>;
+  const fork = presentation.nodes[0]!;
+  assert.equal(studyArmSchema.safeParse({ ...arm, presentation: { ...presentation, nodes: [{ ...fork, conditions: [] }, ...presentation.nodes.slice(1)] } }).success, false);
+  assert.equal(studyArmSchema.safeParse({ ...arm, presentation: { ...presentation, nodes: [{ ...fork, conditions: [fork.kind === 'fork' ? fork.conditions[0] : null] }, ...presentation.nodes.slice(1)] } }).success, false);
+  assert.equal(studyArmSchema.safeParse({ ...arm, presentation: { ...presentation, nodes: [{ ...fork, conditions: fork.kind === 'fork' ? [fork.conditions[0], { ...fork.conditions[1]!, id: fork.conditions[0]!.id }] : [] }, ...presentation.nodes.slice(1)] } }).success, false);
+  assert.equal(studyArmSchema.safeParse({ ...arm, presentation: { ...presentation, nodes: [{ ...fork, conditions: fork.kind === 'fork' ? [fork.conditions[0], { ...fork.conditions[1]!, entryNodeId: 'missing-node' }] : [] }, ...presentation.nodes.slice(1)] } }).success, false);
+  assert.equal(studyArmSchema.safeParse({ ...arm, presentation: { ...presentation, transitions: [...presentation.transitions, { fromNodeId: 'treatment-fork', optionId: 'continue', toNodeId: 'fork-end' }] } }).success, false);
+});
+
+test('matched fork conditions must reach a first ask before a terminal or nested fork', () => {
+  const arm = matchedForkArm();
+  const graph = arm.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>;
+  const fork = graph.nodes.find((node) => node.id === 'treatment-fork');
+  assert.equal(fork?.kind, 'fork');
+  if (fork?.kind !== 'fork') return;
+  const rejected = studyArmSchema.safeParse({
+    ...arm,
+    presentation: { ...graph, nodes: graph.nodes.map((node) => node.id === fork.id ? {
+      ...fork, conditions: fork.conditions.map((condition, index) => index === 0 ? { ...condition, entryNodeId: 'fork-end' } : condition),
+    } : node) },
+  });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) assert.equal(rejected.error.issues.some(({ message }) => /must reach its first ask before a terminal or nested fork/i.test(message)), true);
+});
+
+test('comparisonKey across fork rejects different question instructions, history policy, and typed interpretation', () => {
+  const arm = matchedForkArm();
+  const assertSemanticMismatch = (input: StudyArm): void => {
+    const parsed = studyArmSchema.safeParse(input);
+    assert.equal(parsed.success, false);
+    if (!parsed.success) assert.equal(parsed.error.issues.some(({ path, message }) => path[0] === 'tasks' && /comparisonKey/.test(message)), true, parsed.error.message);
+  };
+  assertSemanticMismatch({ ...arm, tasks: [arm.tasks[0]!, { ...arm.tasks[1]!, instructions: 'Would you keep reading?' }] });
+  assertSemanticMismatch({ ...arm, tasks: [arm.tasks[0]!, { ...arm.tasks[1]!, responseHistory: 'omit' }] });
+
+  const choiceFirst = arm.tasks[0]!;
+  const choiceSecond = arm.tasks[1]!;
+  if (choiceFirst.type !== 'choice' || choiceSecond.type !== 'choice') throw new Error('Fork fixture requires Choice questions.');
+  assertSemanticMismatch({ ...arm, tasks: [choiceFirst, { ...choiceSecond, options: { continue: 'Read the next chapter.', stop: 'Stop here.' }, materialOptions: undefined }] });
+  assertSemanticMismatch({ ...arm, tasks: [choiceFirst, { ...choiceSecond, options: { stop: 'Stop here.', continue: 'Read the next passage.' }, materialOptions: undefined }] });
+  assertSemanticMismatch({ ...arm, tasks: [choiceFirst, { ...choiceSecond, answerKeyOptionId: 'continue', materialOptions: undefined }] });
+
+  const scoreFirst = { id: 'score-with-image', type: 'score' as const, instructions: 'How compelling is the next section?', comparisonKey: 'image-effect', rubric: ['Not compelling', 'Compelling'] };
+  const scoreSecond = { ...scoreFirst, id: 'score-without-image', rubric: ['Weak', 'Strong'] };
+  assertSemanticMismatch(matchedForkArmWithTasks([scoreFirst, scoreSecond], 'score'));
+  const noulFirst = { id: 'noul-with-image', type: 'noul' as const, instructions: 'Would you continue?', comparisonKey: 'image-effect', criteria: { true: 'Would continue reading.', false: 'Would not continue reading.' } };
+  const noulSecond = { ...noulFirst, id: 'noul-without-image', criteria: { true: 'Wants the next section.', false: 'Does not want the next section.' } };
+  assertSemanticMismatch(matchedForkArmWithTasks([noulFirst, noulSecond], 'noul'));
+  const mixedTypedSecond = { id: 'typed-condition-question', type: 'noul' as const, comparisonKey: 'image-effect', instructions: 'Would you continue reading?' };
+  const mixed = matchedForkArmWithTasks([choiceFirst, mixedTypedSecond], 'choice');
+  assertSemanticMismatch({ ...mixed, presentation: { ...(mixed.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>), transitions: [
+    ...(mixed.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>).transitions.filter(({ fromNodeId }) => fromNodeId !== 'ask-without-image'),
+    { fromNodeId: 'ask-without-image', toNodeId: 'fork-end', when: { type: 'noul', minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: true } },
+  ] } });
+
+  const duplicateArm = matchedForkArm();
+  const duplicateGraph = duplicateArm.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>;
+  const duplicate = studyArmSchema.safeParse({
+    ...duplicateArm,
+    tasks: [...duplicateArm.tasks, { ...duplicateArm.tasks[0]!, id: 'repeat-image-question' }],
+    presentation: {
+      ...duplicateGraph,
+      maxDecisions: 2,
+      nodes: [...duplicateGraph.nodes, { id: 'ask-repeat-image', kind: 'ask', taskId: 'repeat-image-question' }],
+      transitions: [
+        ...duplicateGraph.transitions.map((edge) => edge.fromNodeId === 'ask-with-image' ? { ...edge, toNodeId: 'ask-repeat-image' } : edge),
+        { fromNodeId: 'ask-repeat-image', optionId: 'continue', toNodeId: 'fork-end' },
+        { fromNodeId: 'ask-repeat-image', optionId: 'stop', toNodeId: 'fork-end' },
+      ],
+    },
+  });
+  assert.equal(duplicate.success, false);
+  if (!duplicate.success) assert.equal(duplicate.error.issues.some(({ message }) => /comparisonKey image-effect occurs more than once in fork condition image-present/.test(message)), true, duplicate.error.message);
+});
+
+test('runJourney and packet walking fail closed at matched forks before asking either sibling', async () => {
+  const arm = matchedForkArm();
+  let calls = 0;
+  await assert.rejects(runJourney({ arm, profile, ask: async () => { calls += 1; return { choice: 'continue' }; } }), (error: unknown) => error instanceof JourneyExecutionError && /matched fork/i.test(error.message));
+  assert.equal(calls, 0);
+  const packets: unknown[] = [];
+  const walk = walkStudyPackets([arm], [profile], (packet) => packets.push(packet));
+  assert.equal(walk.status, 'incomplete');
+  assert.equal(walk.incompleteReason, 'Matched forks require durable runtime execution.');
+  assert.equal(walk.packetCount, 0);
+  assert.deepEqual(packets, []);
+});
+
+test('durable journey advancement records fork arrival without exposing a condition early', () => {
+  const base = matchedForkArm();
+  const graph = base.presentation as Extract<StudyArm['presentation'], { kind: 'graph' }>;
+  const prefix: StudyArm = {
+    ...base,
+    tasks: [{ id: 'prefix-question', type: 'choice', instructions: 'Continue?', options: { continue: 'Continue', stop: 'Stop' } }, ...base.tasks],
+    presentation: {
+      ...graph,
+      entryNodeId: 'prefix-ask',
+      nodes: [{ id: 'prefix-ask', kind: 'ask', taskId: 'prefix-question' }, ...graph.nodes],
+      transitions: [
+        { fromNodeId: 'prefix-ask', optionId: 'continue', toNodeId: 'treatment-fork' },
+        { fromNodeId: 'prefix-ask', optionId: 'stop', toNodeId: 'fork-end' },
+        ...graph.transitions,
+      ],
+    },
+  };
+  const progress = advanceJourney(prefix, profile, {
+    branchId: 'root', currentNodeId: 'prefix-ask', events: [], route: [],
+  }, { type: 'choice', choice: 'continue' });
+
+  assert.equal(progress.status, 'waiting-fork');
+  assert.equal(progress.forkNodeId, 'treatment-fork');
+  assert.equal(progress.next, undefined);
+  assert.equal(progress.events.length, 1);
+  assert.equal(progress.events[0]?.type, 'response');
+  assert.equal(progress.events[0]?.nodeId, 'prefix-ask');
+});
 
 test('sequence mode exposes bounded stimulus then asks each typed task', async () => {
   const requests: DecisionRequest[] = [];
