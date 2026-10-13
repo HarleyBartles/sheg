@@ -48,7 +48,7 @@
 - [x] **Step 4: Run the codec test and prove RED.** Run `node --import tsx --test --test-name-pattern="integer-quantized proportional|non-proportional dimensions" test/image-codecs.test.ts`; expected: the valid rounded target is rejected by the current strict exact-floor ratio check while the deliberately distorted target remains rejected.
 - [x] **Step 5: Implement the minimum correction and verify GREEN.** Compute dimensions from one common fit factor and floor once; remove iterative inward recomputation. In the codec, accept at most one-pixel integer quantization per dimension while retaining no-upscale and aspect-error bounds. Run both focused tests and verify the deliberately distorted control still fails.
 - [x] **Step 6: Verify approved candidates through Sheg's built CLI.** Build the runtime, import and scale Klause and Index approved hero sources in an isolated scratch data root, and inspect returned metadata and exported previews. Confirm candidate dimensions respect bounds, look at each complete candidate, and confirm source digest/bytes do not change. Keep source files untouched.
-- [ ] **Step 7: Commit the verified scaler source, tests and human guide update.** Stage only the two owners, focused tests, guide, and this plan's Task 1 completion state; commit as `fix: scale non-integer image aspect ratios safely`.
+- [x] **Step 7: Commit the verified scaler source, tests and human guide update.** Stage only the two owners, focused tests, guide, and this plan's Task 1 completion state; commit as `fix: scale non-integer image aspect ratios safely`.
 
 ## Task 2: Prove Six-Design Pair Exposure and Compare Shapes
 
