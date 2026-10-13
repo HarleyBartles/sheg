@@ -74,6 +74,7 @@ export function advanceJourney(
   while (true) {
     const node = nodes.get(current);
     if (!node) throw new JourneyExecutionError(`Graph points to unknown node ${current}.`);
+    if (node.kind === 'fork') throw new JourneyExecutionError('Matched fork journeys require durable runtime execution.');
     if (node.kind === 'terminal') return { events, route, status: 'completed', outcome: node.outcome };
     if (node.kind === 'expose') {
       events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
@@ -93,6 +94,7 @@ export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise
   const events: JourneyEvent[] = [];
   let decisionCount = 0;
   const graph = journeyTopology(arm);
+  if (graph.nodes.some((node) => node.kind === 'fork')) throw new JourneyExecutionError('Matched fork journeys require durable runtime execution.');
 
   const expose = (itemId: string, nodeId: string): void => {
     events.push({ type: 'exposure', sequence: events.length, nodeId, itemId });
@@ -120,6 +122,7 @@ export async function runJourney({ arm, profile, ask }: JourneyOptions): Promise
       current = edge.toNodeId;
       continue;
     }
+    if (node.kind === 'fork') throw new JourneyExecutionError('Matched fork journeys require durable runtime execution.');
     if (decisionCount >= graph.maxDecisions) return { events, outcome: null, status: 'decision-limit', decisionCount };
     const response = await answer(node.taskId, node.id);
     const edge = journeyTransitionForResponse(graph, node.id, response);

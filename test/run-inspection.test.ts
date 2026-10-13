@@ -556,6 +556,41 @@ function journeyRequest(maxCalls = 1, respondentCount = 1) {
   };
 }
 
+function journeyRequestWithFork() {
+  const base = journeyRequest(2);
+  return {
+    ...base,
+    journey: {
+      ...base.journey,
+      presentation: {
+        kind: 'graph',
+        entryNodeId: 'entry',
+        maxDecisions: 2,
+        nodes: [
+          { id: 'entry', kind: 'ask', taskId: 'continue' },
+          { id: 'expose-section-three', kind: 'expose', itemId: 'section-three' },
+          { id: 'treatment-fork', kind: 'fork', conditions: [
+            { id: 'with-image', label: 'With image', entryNodeId: 'ask-with-image' },
+            { id: 'without-image', label: 'Without image', entryNodeId: 'ask-without-image' },
+          ] },
+          { id: 'ask-with-image', kind: 'ask', taskId: 'interest' },
+          { id: 'ask-without-image', kind: 'ask', taskId: 'interest' },
+          { id: 'finished', kind: 'terminal', outcome: 'complete' },
+        ],
+        transitions: [
+          { fromNodeId: 'entry', optionId: 'continue', toNodeId: 'expose-section-three' },
+          { fromNodeId: 'entry', optionId: 'leave', toNodeId: 'finished' },
+          { fromNodeId: 'expose-section-three', toNodeId: 'treatment-fork' },
+          { fromNodeId: 'ask-with-image', optionId: 'yes', toNodeId: 'finished' },
+          { fromNodeId: 'ask-with-image', optionId: 'no', toNodeId: 'finished' },
+          { fromNodeId: 'ask-without-image', optionId: 'yes', toNodeId: 'finished' },
+          { fromNodeId: 'ask-without-image', optionId: 'no', toNodeId: 'finished' },
+        ],
+      },
+    },
+  };
+}
+
 test('journey admission measures initial contexts and reports reached-turn fit checks without inference', async () => {
   const fixture = makeProvider();
   const result = await prepareRun(journeyRequest(), fixture.provider);
@@ -569,6 +604,16 @@ test('journey admission measures initial contexts and reports reached-turn fit c
   assert.deepEqual(fixture.measured.map(({ question }) => question.id), ['continue']);
   assert.deepEqual(fixture.measured[0]!.state.encounteredItems, []);
   assert.equal(result.inspection.warnings?.some(({ code }) => code === 'reached_turn_fit_check'), true);
+  assert.equal(fixture.decisions, 0);
+});
+
+test('journey admission refuses any study containing a matched fork before measuring an initial packet', async () => {
+  const fixture = makeProvider();
+  const result = await prepareRun(journeyRequestWithFork(), fixture.provider);
+  assert.equal(result.inspection.valid, false);
+  assert.equal(result.inspection.problems.some(({ code, message }) => code === 'invalid_journey' && /matched forks require durable runtime execution/i.test(message)), true);
+  assert.equal(result.journey, undefined);
+  assert.equal(fixture.measured.length, 0);
   assert.equal(fixture.decisions, 0);
 });
 

@@ -208,6 +208,7 @@ function initialJourneyPath(arm: ParsedInlineJourneyRequest['journey']): { event
     const node = nodes.get(current);
     if (!node) throw new Error(`Journey points to unknown node ${current}.`);
     if (node.kind === 'ask') return { events, nodeId: node.id, taskId: node.taskId };
+    if (node.kind === 'fork') throw new Error('Matched forks require durable runtime execution.');
     if (node.kind === 'terminal') throw new Error('Journey must reach an ask node before a terminal node.');
     events.push({ type: 'exposure', sequence: events.length, nodeId: node.id, itemId: node.itemId });
     const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id);
@@ -493,6 +494,7 @@ export async function prepareAutomaticallySelectedJourney(
   settings: { catalogue: ProviderCatalogue; preferences: ProviderPreference },
   providerCandidates: ProviderBatchCandidate[],
 ): Promise<{ inspection: Inspection; journey?: PreparedJourneyAdmission }> {
+  if (journeyHasFork(request.journey)) return unsupportedForkInspection(request.respondents.length);
   const compilerFingerprint = promptContractHash();
   let callBounds: ReturnType<typeof estimateRunDecisionCalls>;
   try { callBounds = estimateRunDecisionCalls([request.journey], request.respondents); }
@@ -637,6 +639,7 @@ async function planQuestionBatches(
 }
 
 async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, provider: DecisionProvider): Promise<{ inspection: Inspection; journey?: PreparedJourneyAdmission }> {
+  if (journeyHasFork(request.journey)) return unsupportedForkInspection(request.respondents.length);
   const configured = requireExplicitProvider(request);
   const compilerFingerprint = promptContractHash();
   let callBounds: ReturnType<typeof estimateRunDecisionCalls>;
@@ -722,4 +725,13 @@ async function prepareJourneyAdmission(request: ParsedInlineJourneyRequest, prov
       packets,
     },
   };
+}
+
+function journeyHasFork(journey: ParsedInlineJourneyRequest['journey']): boolean {
+  return journey.presentation.kind === 'graph' && journey.presentation.nodes.some((node) => node.kind === 'fork');
+}
+
+function unsupportedForkInspection(respondentCount: number): { inspection: Inspection } {
+  return { inspection: { valid: false, respondentCount, minimumCalls: 0,
+    problems: [{ code: 'invalid_journey', message: 'Matched forks require durable runtime execution.' }], fits: [] } };
 }

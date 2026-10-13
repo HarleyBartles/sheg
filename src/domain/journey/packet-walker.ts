@@ -64,6 +64,9 @@ export function walkStudyPackets(
   if (arms.length === 0 || respondents.length === 0) {
     markIncomplete('Preflight requires at least one study arm and one respondent.');
   }
+  if (!stopped && arms.some((arm) => arm.presentation.kind === 'graph' && arm.presentation.nodes.some((node) => node.kind === 'fork'))) {
+    markIncomplete('Matched forks require durable runtime execution.');
+  }
 
   const emitPacket = (arm: JourneyDefinition, respondent: RespondentProfile, taskId: string, nodeId: string, decisionIndex: number, choices: readonly PathChoice[], events: readonly PromptHistoryEvent[]): void => {
     if (packetCount >= maxPackets) {
@@ -135,6 +138,12 @@ export function walkStudyPackets(
             visitNode(edge.toNodeId, decisionCount);
             events.pop();
           }
+          activeNodes.delete(nodeId);
+          return;
+        }
+
+        if (node.kind === 'fork') {
+          markIncomplete('Matched forks require durable runtime execution.');
           activeNodes.delete(nodeId);
           return;
         }
