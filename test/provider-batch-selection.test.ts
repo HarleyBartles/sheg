@@ -63,3 +63,29 @@ test('singleton mode and providers without batch support retain one question per
   assert.equal(withoutBatchSupport.minimumCalls, 2);
   assert.equal(singleMeasurements, 2);
 });
+
+test('provider selection uses the complete batch cost and remaining call plan', async () => {
+  const selectBatches = (batchModule as unknown as { assessAndSelectProviderBatches?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> }).assessAndSelectProviderBatches;
+  assert.equal(typeof selectBatches, 'function', 'automatic selection must consume complete candidate batch plans');
+  if (!selectBatches) throw new Error('Candidate batch assessment is not integrated with provider selection');
+  const catalogue = {
+    revision: 1,
+    entries: [
+      { id: 'singleton', enabled: true, provider: { kind: 'jev', route: 'openrouter', model: 'model-single' }, execution: 'hosted', capabilities: ['text', 'pixels'],
+        questionTypes: ['choice', 'score', 'noul'], pricing: { kind: 'published-rate', currency: 'USD', unit: 'million-input-tokens', amount: 0.01, source: 'https://rates.example/single', observedAt: '2026-10-13' } },
+      { id: 'grouped', enabled: true, provider: { kind: 'jev', route: 'openrouter', model: 'model-grouped' }, execution: 'hosted', capabilities: ['text', 'pixels'],
+        questionTypes: ['choice', 'score', 'noul'], pricing: { kind: 'published-rate', currency: 'USD', unit: 'million-input-tokens', amount: 0.02, source: 'https://rates.example/grouped', observedAt: '2026-10-13' } },
+    ],
+  };
+  const result = await selectBatches({ group, catalogue, preferences: { preferredOrder: [] }, unitId: 'reader-a/article-check', requiredCapabilities: ['text', 'pixels'],
+    questionType: 'choice', remainingCalls: 1, batching: 'automatic', candidates: [
+      { id: 'singleton', providerKind: 'jev', modelIdentity: 'model-single', ready: true,
+        provider: { measure: () => fit('jev', 'fits', 200), async decide() { throw new Error('Selection must not infer.'); } } },
+      { id: 'grouped', providerKind: 'jev', modelIdentity: 'model-grouped', ready: true,
+        provider: { measureBatch: (batch: DecisionBatchRequest) => fit('jev', 'fits', 101 + batch.questions.length), async decide() { throw new Error('Selection must not infer.'); }, async decideBatch() { throw new Error('Selection must not infer.'); } } },
+    ] });
+  assert.equal((result.selection as { selected?: { id: string } }).selected?.id, 'grouped');
+  assert.equal((result.plans as Record<string, { minimumCalls: number }>).singleton!.minimumCalls, 2);
+  assert.equal((result.plans as Record<string, { minimumCalls: number }>).grouped!.minimumCalls, 1);
+  assert.equal((result.selection as { candidates: Array<{ id: string; eligible: boolean }> }).candidates.find(({ id }) => id === 'singleton')?.eligible, false);
+});

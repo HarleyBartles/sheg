@@ -1,7 +1,7 @@
 import type { DecisionBatchRequest, DecisionQuestion, DecisionRequest } from '../domain/decision/decision.js';
 import type { DecisionProvider, ProviderContextFit, ProviderKind } from '../domain/decision/provider.js';
 import type { ProviderCatalogueEntry } from '../providers/config.js';
-import type { CandidateCost } from './provider-selection.js';
+import { selectProvider, type CandidateCost, type ProviderSelectionInput, type ProviderSelectionResult } from './provider-selection.js';
 
 export type ProviderBatchGroup = {
   groupId: string;
@@ -31,6 +31,19 @@ export type ProviderBatchPlanInput = {
   remainingCalls?: number;
   pricing?: ProviderCatalogueEntry['pricing'];
 };
+export type ProviderBatchCandidate = {
+  id: string;
+  provider: DecisionProvider;
+  providerKind: ProviderKind;
+  modelIdentity: string;
+  ready: boolean;
+};
+export type ProviderBatchSelectionInput = Omit<ProviderSelectionInput, 'candidates'> & {
+  group: ProviderBatchGroup;
+  candidates: ProviderBatchCandidate[];
+  batching: 'automatic' | 'singleton';
+};
+export type ProviderBatchSelection = { selection: ProviderSelectionResult; plans: Record<string, ProviderBatchPlan> };
 
 function missingFit(provider: DecisionProvider, kind: ProviderKind, modelIdentity: string): ProviderContextFit {
   return { provider: kind, status: 'unavailable', method: 'unavailable', modelIdentity, tokenCount: 'estimated', tokens: 0,
@@ -128,4 +141,43 @@ export async function assessProviderBatchPlan(input: ProviderBatchPlanInput): Pr
     return { batches, questionIdsByBatch: batches.map(({ questions: selected }) => selected.map(({ id }) => id)), fits, problems, minimumCalls,
       repeatedInputTokens, cost, exceedsRemainingCalls: minimumCalls > remaining };
   }
+}
+
+export async function assessAndSelectProviderBatches(input: ProviderBatchSelectionInput): Promise<ProviderBatchSelection> {
+  const plans = Object.fromEntries(await Promise.all(input.candidates.map(async (candidate) => {
+    const entry = input.catalogue.entries.find(({ id }) => id === candidate.id);
+    const plan = await assessProviderBatchPlan({ group: input.group, provider: candidate.provider, providerKind: candidate.providerKind,
+      modelIdentity: candidate.modelIdentity, batching: input.batching, remainingCalls: input.remainingCalls, ...(entry ? { pricing: entry.pricing } : {}) });
+    return [candidate.id, plan] as const;
+  })));
+  const candidates = input.candidates.map((candidate) => {
+    const plan = plans[candidate.id]!;
+    const fit = aggregateFit(input.group, plan, candidate.providerKind, candidate.modelIdentity);
+    return { id: candidate.id, ready: candidate.ready, fit, plannedCalls: plan.minimumCalls, cost: plan.cost };
+  });
+  const selectionInput: Omit<ProviderSelectionInput, 'candidates'> = {
+    catalogue: input.catalogue, preferences: input.preferences, unitId: input.unitId, requiredCapabilities: input.requiredCapabilities,
+    questionType: input.questionType, remainingCalls: input.remainingCalls,
+    ...(input.preferredOrder === undefined ? {} : { preferredOrder: input.preferredOrder }),
+    ...(input.unitOverride === undefined ? {} : { unitOverride: input.unitOverride }),
+    ...(input.unitOverrides === undefined ? {} : { unitOverrides: input.unitOverrides }),
+  };
+  return { selection: selectProvider({ ...selectionInput, candidates }), plans };
+}
+
+function aggregateFit(group: ProviderBatchGroup, plan: ProviderBatchPlan, provider: ProviderKind, modelIdentity: string): ProviderContextFit {
+  const selectedFits = plan.questionIdsByBatch.map((ids) => plan.fits.find(({ questionIds }) =>
+    questionIds.length === ids.length && questionIds.every((id, index) => id === ids[index]))?.fit);
+  const covered = plan.questionIdsByBatch.flat();
+  const complete = covered.length === group.questions.length && group.questions.every((question, index) => covered[index] === question.id);
+  if (complete && selectedFits.length > 0 && selectedFits.every((fit) => fit?.status === 'fits')) {
+    const measured = selectedFits as ProviderContextFit[];
+    const first = measured[0]!;
+    return { ...first, tokens: plan.repeatedInputTokens ?? measured.reduce((sum, fit) => sum + fit.tokens, 0),
+      details: { plannedCalls: plan.minimumCalls, perBatchTokens: measured.map(({ tokens }) => tokens).join(',') } };
+  }
+  const rejected = plan.fits.find(({ fit }) => fit.status !== 'fits')?.fit;
+  if (rejected) return rejected;
+  return { provider, status: 'unavailable', method: 'unavailable', modelIdentity, tokenCount: 'estimated', tokens: 0,
+    contextLimit: null, headroomTokens: null, effectiveLimit: null, details: {}, reason: 'provider-batch-plan-incomplete' };
 }
