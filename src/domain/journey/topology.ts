@@ -4,6 +4,10 @@ import type { DecisionValue } from '../decision/decision.js';
 
 type GraphPresentation = Extract<StudyPresentation, { kind: 'graph' }>;
 
+export type JourneyControlSuccessor =
+  | { kind: 'condition'; conditionId: string; label: string; toNodeId: string }
+  | { kind: 'transition'; transition: GraphPresentation['transitions'][number]; toNodeId: string };
+
 /** Compile the author-friendly sequence shorthand to the same deterministic graph used at runtime. */
 export function journeyTopology(arm: JourneyDefinition): Extract<StudyPresentation, { kind: 'graph' }> {
   if (arm.presentation.kind === 'graph') return arm.presentation;
@@ -30,6 +34,16 @@ export function journeyTopology(arm: JourneyDefinition): Extract<StudyPresentati
   });
   nodes.push({ id: terminal, kind: 'terminal', outcome: 'complete' });
   return { kind: 'graph', nodes, transitions, entryNodeId: exposes[0]!, maxDecisions: arm.tasks.length };
+}
+
+export function journeyControlSuccessors(graph: GraphPresentation, nodeId: string): JourneyControlSuccessor[] {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+  if (node?.kind === 'fork') return node.conditions.map((condition) => ({
+    kind: 'condition', conditionId: condition.id, label: condition.label, toNodeId: condition.entryNodeId,
+  }));
+  return graph.transitions.filter((transition) => transition.fromNodeId === nodeId).map((transition) => ({
+    kind: 'transition', transition, toNodeId: transition.toNodeId,
+  }));
 }
 
 export function journeyTransitionForResponse(

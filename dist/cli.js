@@ -23242,6 +23242,20 @@ function journeyTopology(arm) {
   nodes.push({ id: terminal, kind: "terminal", outcome: "complete" });
   return { kind: "graph", nodes, transitions, entryNodeId: exposes[0], maxDecisions: arm.tasks.length };
 }
+function journeyControlSuccessors(graph, nodeId) {
+  const node2 = graph.nodes.find((candidate) => candidate.id === nodeId);
+  if (node2?.kind === "fork") return node2.conditions.map((condition) => ({
+    kind: "condition",
+    conditionId: condition.id,
+    label: condition.label,
+    toNodeId: condition.entryNodeId
+  }));
+  return graph.transitions.filter((transition) => transition.fromNodeId === nodeId).map((transition) => ({
+    kind: "transition",
+    transition,
+    toNodeId: transition.toNodeId
+  }));
+}
 function journeyTransitionForResponse(graph, nodeId, response) {
   return graph.transitions.find((transition) => {
     if (transition.fromNodeId !== nodeId) return false;
@@ -23480,6 +23494,9 @@ function validateJourneyDefinition(arm, context) {
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: "custom", path: ["presentation"], message: "Item, task, and graph node IDs must be unique within an arm." });
   }
+  if (presentation.kind === "graph" && !Number.isSafeInteger(presentation.maxDecisions)) {
+    context.addIssue({ code: "custom", path: ["presentation", "maxDecisions"], message: "Graph maxDecisions must be a positive safe integer." });
+  }
   const tasksByComparisonKey = /* @__PURE__ */ new Map();
   for (const task of arm.tasks) if (task.comparisonKey) tasksByComparisonKey.set(task.comparisonKey, [...tasksByComparisonKey.get(task.comparisonKey) ?? [], task]);
   for (const [taskIndex, task] of arm.tasks.entries()) {
@@ -23601,11 +23618,14 @@ function validateJourneyDefinition(arm, context) {
     const state = /* @__PURE__ */ new Map();
     const decisionsToTerminal = /* @__PURE__ */ new Map();
     let containsCycle = false;
+    let cycleAt;
+    let overflowAt;
     const longestDecisionsToTerminal = (nodeId) => {
       const node2 = nodesById.get(nodeId);
       if (!node2) return null;
       if (state.get(nodeId) === "visiting") {
         containsCycle = true;
+        cycleAt ??= nodeId;
         return null;
       }
       if (state.get(nodeId) === "visited") return decisionsToTerminal.get(nodeId) ?? null;
@@ -23619,8 +23639,12 @@ function validateJourneyDefinition(arm, context) {
         if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
           longest = null;
         } else {
-          const nextDecisionCount = Math.max(...completedContinuations);
-          longest = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+          const nextDecisionCount = node2.kind === "fork" ? completedContinuations.reduce((total, count2) => total + count2, 0) : Math.max(...completedContinuations);
+          const decisionCount = nextDecisionCount + (node2.kind === "ask" ? 1 : 0);
+          if (!Number.isSafeInteger(nextDecisionCount) || !Number.isSafeInteger(decisionCount)) {
+            overflowAt ??= nodeId;
+            longest = null;
+          } else longest = decisionCount;
         }
       }
       state.set(nodeId, "visited");
@@ -23629,7 +23653,9 @@ function validateJourneyDefinition(arm, context) {
     };
     const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
     if (containsCycle) {
-      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Graph contains a cycle; every journey must terminate." });
+      context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: `Graph contains a cycle at node ${cycleAt}; every journey must terminate.` });
+    } else if (overflowAt) {
+      context.addIssue({ code: "custom", path: ["presentation", "maxDecisions"], message: `Graph decision fan-out exceeds the safe integer range at node ${overflowAt}.` });
     } else if (longestPath === null) {
       context.addIssue({ code: "custom", path: ["presentation", "nodes"], message: "Every graph branch must reach a terminal node." });
     } else if (longestPath > presentation.maxDecisions) {
@@ -26273,7 +26299,7 @@ function estimateRunDecisionCalls(arms, respondents) {
     minimumDecisionCalls += range.minimum * respondents.length;
     maximumDecisionCalls += range.maximum * respondents.length;
     if (!Number.isSafeInteger(minimumDecisionCalls) || !Number.isSafeInteger(maximumDecisionCalls)) {
-      throw new RangeError("Run decision-call bounds exceed the safe integer range.");
+      throw new RangeError(`Run decision-call bounds for ${arm.id} exceed the safe integer range.`);
     }
   }
   return { minimumDecisionCalls, maximumDecisionCalls };
@@ -26281,12 +26307,6 @@ function estimateRunDecisionCalls(arms, respondents) {
 function graphDecisionRange(arm) {
   const graph = journeyTopology(arm);
   const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
-  const outgoing = /* @__PURE__ */ new Map();
-  for (const edge of graph.transitions) {
-    const edges = outgoing.get(edge.fromNodeId) ?? [];
-    edges.push(edge);
-    outgoing.set(edge.fromNodeId, edges);
-  }
   const memo2 = /* @__PURE__ */ new Map();
   const active = /* @__PURE__ */ new Set();
   const visit2 = (nodeId) => {
@@ -26297,19 +26317,35 @@ function graphDecisionRange(arm) {
     if (!node2) throw new Error(`Run call bounds encountered an unknown node ${nodeId}.`);
     if (node2.kind === "terminal") return { minimum: 0, maximum: 0 };
     active.add(nodeId);
-    const edges = outgoing.get(nodeId) ?? [];
-    if (edges.length === 0) throw new Error(`Run call bounds found no outgoing transition at ${nodeId}.`);
-    const branches = edges.map((edge) => visit2(edge.toNodeId));
-    const decisionCost = node2.kind === "ask" ? 1 : 0;
-    const range = {
-      minimum: decisionCost + Math.min(...branches.map((branch) => branch.minimum)),
-      maximum: decisionCost + Math.max(...branches.map((branch) => branch.maximum))
-    };
+    const successors = journeyControlSuccessors(graph, nodeId);
+    let range;
+    if (node2.kind === "fork") {
+      const branches = successors.filter((successor) => successor.kind === "condition").map((successor) => visit2(successor.toNodeId));
+      if (branches.length !== node2.conditions.length) throw new Error(`Run call bounds could not enumerate every condition at fork ${nodeId} in ${arm.id}.`);
+      range = branches.reduce((total, branch) => ({
+        minimum: checkedAdd(total.minimum, branch.minimum, node2.id, arm.id),
+        maximum: checkedAdd(total.maximum, branch.maximum, node2.id, arm.id)
+      }), { minimum: 0, maximum: 0 });
+    } else {
+      const transitions = successors.filter((successor) => successor.kind === "transition");
+      if (transitions.length === 0) throw new Error(`Run call bounds found no outgoing transition at ${nodeId} in ${arm.id}.`);
+      const branches = transitions.map((successor) => visit2(successor.toNodeId));
+      const decisionCost = node2.kind === "ask" ? 1 : 0;
+      range = {
+        minimum: checkedAdd(decisionCost, Math.min(...branches.map((branch) => branch.minimum)), nodeId, arm.id),
+        maximum: checkedAdd(decisionCost, Math.max(...branches.map((branch) => branch.maximum)), nodeId, arm.id)
+      };
+    }
     active.delete(nodeId);
     memo2.set(nodeId, range);
     return range;
   };
   return visit2(graph.entryNodeId);
+}
+function checkedAdd(left, right, nodeId, armId) {
+  const total = left + right;
+  if (!Number.isSafeInteger(total)) throw new RangeError(`Run call bounds overflow at node ${nodeId} in ${armId}.`);
+  return total;
 }
 
 // src/application/provider-selection.ts

@@ -35,6 +35,9 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
   if (new Set(allIds).size !== allIds.length) {
     context.addIssue({ code: 'custom', path: ['presentation'], message: 'Item, task, and graph node IDs must be unique within an arm.' });
   }
+  if (presentation.kind === 'graph' && !Number.isSafeInteger(presentation.maxDecisions)) {
+    context.addIssue({ code: 'custom', path: ['presentation', 'maxDecisions'], message: 'Graph maxDecisions must be a positive safe integer.' });
+  }
   const tasksByComparisonKey = new Map<string, StudyTask[]>();
   for (const task of arm.tasks) if (task.comparisonKey) tasksByComparisonKey.set(task.comparisonKey, [...(tasksByComparisonKey.get(task.comparisonKey) ?? []), task]);
 
@@ -169,11 +172,14 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
     const state = new Map<string, 'visiting' | 'visited'>();
     const decisionsToTerminal = new Map<string, number | null>();
     let containsCycle = false;
+    let cycleAt: string | undefined;
+    let overflowAt: string | undefined;
     const longestDecisionsToTerminal = (nodeId: string): number | null => {
       const node = nodesById.get(nodeId);
       if (!node) return null;
       if (state.get(nodeId) === 'visiting') {
         containsCycle = true;
+        cycleAt ??= nodeId;
         return null;
       }
       if (state.get(nodeId) === 'visited') return decisionsToTerminal.get(nodeId) ?? null;
@@ -190,8 +196,14 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
         if (continuations.length === 0 || completedContinuations.length !== continuations.length) {
           longest = null;
         } else {
-          const nextDecisionCount = Math.max(...completedContinuations);
-          longest = nextDecisionCount + (node.kind === 'ask' ? 1 : 0);
+          const nextDecisionCount = node.kind === 'fork'
+            ? completedContinuations.reduce((total, count) => total + count, 0)
+            : Math.max(...completedContinuations);
+          const decisionCount = nextDecisionCount + (node.kind === 'ask' ? 1 : 0);
+          if (!Number.isSafeInteger(nextDecisionCount) || !Number.isSafeInteger(decisionCount)) {
+            overflowAt ??= nodeId;
+            longest = null;
+          } else longest = decisionCount;
         }
       }
       state.set(nodeId, 'visited');
@@ -201,7 +213,9 @@ function validateJourneyDefinition(arm: JourneyDefinition, context: z.Refinement
 
     const longestPath = longestDecisionsToTerminal(presentation.entryNodeId);
     if (containsCycle) {
-      context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: 'Graph contains a cycle; every journey must terminate.' });
+      context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: `Graph contains a cycle at node ${cycleAt}; every journey must terminate.` });
+    } else if (overflowAt) {
+      context.addIssue({ code: 'custom', path: ['presentation', 'maxDecisions'], message: `Graph decision fan-out exceeds the safe integer range at node ${overflowAt}.` });
     } else if (longestPath === null) {
       context.addIssue({ code: 'custom', path: ['presentation', 'nodes'], message: 'Every graph branch must reach a terminal node.' });
     } else if (longestPath > presentation.maxDecisions) {

@@ -4,6 +4,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { JourneyExecutionError, runJourney } from '../src/domain/journey/run.js';
 import { walkStudyPackets } from '../src/domain/journey/packet-walker.js';
+import { journeyControlSuccessors, journeyTopology } from '../src/domain/journey/topology.js';
 import type { PromptState } from '../src/domain/decision/prompt.js';
 import { studyManifestSchema } from '../src/domain/study/study.js';
 import { loadRespondents } from '../src/domain/respondents/cohort.js';
@@ -30,7 +31,7 @@ function matchedForkArm(): StudyArm {
       { id: 'text-condition-question', type: 'choice', instructions: 'Would you continue reading?', comparisonKey: 'image-effect', options: { continue: 'Read the next passage.', stop: 'Stop here.' }, materialOptions: { continue: 'continue-b', stop: 'stop-b' } },
     ],
     presentation: {
-      kind: 'graph', entryNodeId: 'treatment-fork', maxDecisions: 1,
+      kind: 'graph', entryNodeId: 'treatment-fork', maxDecisions: 2,
       nodes: [
         { id: 'treatment-fork', kind: 'fork', conditions: [
           { id: 'image-present', label: 'With the image', entryNodeId: 'ask-with-image' },
@@ -73,6 +74,17 @@ test('matched fork graph contract accepts distinct equivalent condition question
   assert.equal(firstTask?.type, 'choice');
   assert.equal(secondTask?.type, 'choice');
   if (firstTask?.type === 'choice' && secondTask?.type === 'choice') assert.notDeepEqual(firstTask.materialOptions, secondTask.materialOptions);
+});
+
+test('fork topology exposes condition successors separately from ordinary response transitions', () => {
+  const graph = journeyTopology(matchedForkArm());
+  assert.deepEqual(journeyControlSuccessors(graph, 'treatment-fork'), [
+    { kind: 'condition', conditionId: 'image-present', label: 'With the image', toNodeId: 'ask-with-image' },
+    { kind: 'condition', conditionId: 'image-absent', label: 'Without the image', toNodeId: 'ask-without-image' },
+  ]);
+  assert.deepEqual(journeyControlSuccessors(graph, 'ask-with-image').map(({ kind, toNodeId }) => ({ kind, toNodeId })), [
+    { kind: 'transition', toNodeId: 'fork-end' }, { kind: 'transition', toNodeId: 'fork-end' },
+  ]);
 });
 
 test('matched fork graph contract rejects malformed conditions, targets, and ordinary outgoing transitions', () => {
