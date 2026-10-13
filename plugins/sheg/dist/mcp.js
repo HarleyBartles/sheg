@@ -47155,6 +47155,117 @@ function canReachNode(graph, startNodeId, targetNodeId) {
   return false;
 }
 
+// src/domain/journey/comparison-evidence.ts
+function comparisonTasksByCondition(journey, forkNodeId) {
+  if (journey.presentation.kind !== "graph") return /* @__PURE__ */ new Map();
+  const graph = journey.presentation;
+  const fork = graph.nodes.find((node2) => node2.id === forkNodeId);
+  if (fork?.kind !== "fork") return /* @__PURE__ */ new Map();
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const transition of graph.transitions) {
+    const targets = outgoing.get(transition.fromNodeId) ?? [];
+    targets.push(transition.toNodeId);
+    outgoing.set(transition.fromNodeId, targets);
+  }
+  const tasks = new Map(journey.tasks.map((task) => [task.id, task]));
+  return new Map(fork.conditions.map((condition) => {
+    const seen = /* @__PURE__ */ new Set();
+    const pending = [condition.entryNodeId];
+    const keys = /* @__PURE__ */ new Map();
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      if (seen.has(nodeId)) continue;
+      seen.add(nodeId);
+      const node2 = nodes.get(nodeId);
+      if (!node2 || node2.kind === "terminal" || node2.kind === "fork") continue;
+      if (node2.kind === "ask") {
+        const task = tasks.get(node2.taskId);
+        if (task?.comparisonKey) keys.set(task.comparisonKey, task.id);
+      }
+      pending.push(...outgoing.get(nodeId) ?? []);
+    }
+    return [condition.id, keys];
+  }));
+}
+function missingMember(condition, branchId, questionId, state) {
+  const notReachedReason = !state ? "branch-state-missing" : state.status === "failed" ? "branch-failed-before-comparison" : state.status === "completed" || state.status === "branched" || state.status === "unreached" ? "branch-ended-before-comparison" : "turn-not-reached-yet";
+  return {
+    conditionId: condition.id,
+    label: condition.label,
+    branchId,
+    questionId,
+    status: "not-reached",
+    ...state?.outcome === void 0 ? {} : { respondentOutcome: state.outcome },
+    notReachedReason
+  };
+}
+function buildJourneyComparisonEvidence(input2) {
+  if (input2.journey.presentation.kind !== "graph") return [];
+  const results = [];
+  for (const barrier of input2.forks) {
+    const fork = input2.journey.presentation.nodes.find((node2) => node2.id === barrier.forkNodeId);
+    if (fork?.kind !== "fork") continue;
+    const members2 = input2.forkMembers.filter((member) => member.forkNodeId === barrier.forkNodeId && member.parentBranchId === barrier.parentBranchId);
+    const respondents = [...new Set(members2.map(({ respondentId }) => respondentId))].sort();
+    const keysByCondition = comparisonTasksByCondition(input2.journey, barrier.forkNodeId);
+    const comparisonKeys = [...new Set([...keysByCondition.values()].flatMap((keys) => [...keys.keys()]))].filter((key) => fork.conditions.filter(({ id }) => keysByCondition.get(id)?.has(key)).length > 1);
+    for (const comparisonKey of comparisonKeys) {
+      const conditions = fork.conditions.flatMap((condition) => {
+        const questionId = keysByCondition.get(condition.id)?.get(comparisonKey);
+        return questionId === void 0 ? [] : [{ ...condition, questionId }];
+      });
+      const conditionPairs = conditions.flatMap((first, index2) => conditions.slice(index2 + 1).map((second) => [first, second]));
+      const pairs = respondents.flatMap((respondentId) => {
+        const conditionBranches = new Map(conditions.map((condition) => [condition.id, members2.find((member) => member.respondentId === respondentId && member.conditionId === condition.id)?.childBranchId]));
+        const occurrences = /* @__PURE__ */ new Set();
+        for (const condition of conditions) {
+          const branchId = conditionBranches.get(condition.id);
+          for (const evaluation of input2.evaluations) if (evaluation.respondentId === respondentId && evaluation.branchId === branchId && evaluation.questionId === condition.questionId) occurrences.add(evaluation.occurrence);
+        }
+        if (occurrences.size === 0) occurrences.add(1);
+        return [...occurrences].sort((left, right) => left - right).flatMap((occurrence) => conditionPairs.map(([first, second]) => {
+          const memberFor = (condition) => {
+            const branchId = conditionBranches.get(condition.id);
+            const state = input2.respondents.find((candidate) => candidate.respondentId === respondentId && candidate.branchId === branchId);
+            const evaluation = branchId === void 0 ? void 0 : input2.evaluations.find((candidate) => candidate.respondentId === respondentId && candidate.branchId === branchId && candidate.questionId === condition.questionId && candidate.occurrence === occurrence);
+            if (!evaluation || branchId === void 0) return missingMember(condition, branchId ?? "", condition.questionId, state);
+            return {
+              conditionId: condition.id,
+              label: condition.label,
+              branchId,
+              questionId: condition.questionId,
+              status: evaluation.status,
+              ...state?.outcome === void 0 ? {} : { respondentOutcome: state.outcome },
+              evaluationId: evaluation.evaluationId,
+              packetFingerprint: evaluation.packetFingerprint,
+              ...evaluation.providerSelection === void 0 ? {} : { providerSelection: evaluation.providerSelection },
+              ...evaluation.result === void 0 ? {} : { result: evaluation.result },
+              ...evaluation.execution === void 0 ? {} : { execution: evaluation.execution },
+              ...evaluation.failure === void 0 ? {} : { failure: evaluation.failure }
+            };
+          };
+          const pairMembers = [memberFor(first), memberFor(second)];
+          return { respondentId, occurrence, complete: pairMembers.every(({ status }) => status === "answered"), members: pairMembers };
+        }));
+      });
+      const completePairs = pairs.filter(({ complete }) => complete).length;
+      results.push({
+        forkNodeId: barrier.forkNodeId,
+        parentBranchId: barrier.parentBranchId,
+        barrierStatus: barrier.status,
+        comparisonKey,
+        conditions: conditions.map(({ id, label, questionId }) => ({ conditionId: id, label, questionId })),
+        cohortRespondents: respondents.length,
+        completePairs,
+        incompletePairs: pairs.length - completePairs,
+        pairs
+      });
+    }
+  }
+  return results;
+}
+
 // src/infrastructure/sqlite/reads/journeys.ts
 function readJourneyRun(database, runId, notFound) {
   const row = database.prepare("SELECT request_json, request_fingerprint FROM runs WHERE run_id = ?").get(runId);
@@ -47214,8 +47325,74 @@ function readJourneyRun(database, runId, notFound) {
     route: parseStored(journeyRouteSchema, parseJson(state.route_json, "journey route"), "journey route"),
     ...state.outcome === null ? {} : { outcome: asText(state.outcome, "journey outcome") }
   }));
+  const forks = database.prepare("SELECT * FROM journey_forks WHERE run_id = ? ORDER BY fork_node_id, parent_branch_id").all(runId).map((fork) => ({
+    forkNodeId: asText(fork.fork_node_id, "fork node ID"),
+    parentBranchId: asText(fork.parent_branch_id, "fork parent branch ID"),
+    status: parseStored(external_exports.enum(["open", "closed"]), asText(fork.status, "fork status"), "fork status"),
+    cohortCount: asNumber(fork.cohort_count, "fork cohort count"),
+    openedMs: asNumber(fork.opened_ms, "fork open time"),
+    ...fork.closed_ms === null ? {} : { closedMs: asNumber(fork.closed_ms, "fork close time") },
+    revision: asNumber(fork.revision, "fork revision")
+  }));
+  const forkMembers = database.prepare("SELECT * FROM journey_fork_members WHERE run_id = ? ORDER BY fork_node_id, parent_branch_id, respondent_id, condition_ordinal").all(runId).map((member) => ({
+    forkNodeId: asText(member.fork_node_id, "fork node ID"),
+    parentBranchId: asText(member.parent_branch_id, "fork parent branch ID"),
+    respondentId: asText(member.respondent_id, "fork respondent ID"),
+    conditionOrdinal: asNumber(member.condition_ordinal, "fork condition ordinal"),
+    conditionId: asText(member.condition_id, "fork condition ID"),
+    childBranchId: asText(member.child_branch_id, "fork child branch ID"),
+    sourceContextId: asText(member.source_context_id, "fork source context ID"),
+    childContextId: asText(member.child_context_id, "fork child context ID"),
+    childTurnId: asText(member.child_turn_id, "fork child turn ID"),
+    childEvaluationId: asText(member.child_evaluation_id, "fork child evaluation ID")
+  }));
   const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-  const forkNodeIds = new Set(journeyTopology(parsedRequest.data.journey).nodes.filter((node2) => node2.kind === "fork").map(({ id }) => id));
+  const graph = journeyTopology(parsedRequest.data.journey);
+  const forkNodes = new Map(graph.nodes.filter((node2) => node2.kind === "fork").map((node2) => [node2.id, node2]));
+  const forkNodeIds = new Set(forkNodes.keys());
+  const stateByKey = new Map(respondents.map((state) => [JSON.stringify([state.respondentId, state.branchId]), state]));
+  const evaluationById = new Map(evaluations2.map((evaluation) => [evaluation.evaluationId, evaluation]));
+  const forkKeys = new Set(forks.map(({ forkNodeId, parentBranchId }) => JSON.stringify([forkNodeId, parentBranchId])));
+  const membersByFork = /* @__PURE__ */ new Map();
+  for (const member of forkMembers) {
+    const key = JSON.stringify([member.forkNodeId, member.parentBranchId]);
+    membersByFork.set(key, [...membersByFork.get(key) ?? [], member]);
+  }
+  const firstAskFor = (entryNodeId) => {
+    let current = entryNodeId;
+    const seen = /* @__PURE__ */ new Set();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const node2 = graph.nodes.find((candidate) => candidate.id === current);
+      if (node2?.kind === "ask") return { nodeId: node2.id, taskId: node2.taskId };
+      if (node2?.kind !== "expose") return void 0;
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node2.id);
+      if (!edge) return void 0;
+      current = edge.toNodeId;
+    }
+    return void 0;
+  };
+  const invalidFork = forks.some((fork) => {
+    const key = JSON.stringify([fork.forkNodeId, fork.parentBranchId]);
+    const node2 = forkNodes.get(fork.forkNodeId);
+    const members2 = membersByFork.get(key) ?? [];
+    if (!node2 || fork.status === "open" && (fork.cohortCount !== 0 || fork.closedMs !== void 0 || members2.length !== 0) || fork.status === "closed" && (fork.closedMs === void 0 || fork.cohortCount < 1 || members2.length !== fork.cohortCount * node2.conditions.length || new Set(members2.map(({ respondentId }) => respondentId)).size !== fork.cohortCount) || fork.status === "open" && !respondents.some((state) => state.branchId === fork.parentBranchId && state.status === "waiting-fork" && state.currentNodeId === fork.forkNodeId)) return true;
+    return members2.some((member) => {
+      const condition = node2.conditions[member.conditionOrdinal];
+      const ask = condition ? firstAskFor(condition.entryNodeId) : void 0;
+      const childState = stateByKey.get(JSON.stringify([member.respondentId, member.childBranchId]));
+      const parentState = stateByKey.get(JSON.stringify([member.respondentId, member.parentBranchId]));
+      const evaluation = evaluationById.get(member.childEvaluationId);
+      let expectedBranchId;
+      try {
+        expectedBranchId = journeyChildBranchId(member.parentBranchId, fork.forkNodeId, member.conditionId);
+      } catch {
+        return true;
+      }
+      return !condition || condition.id !== member.conditionId || expectedBranchId !== member.childBranchId || !ask || childState === void 0 || parentState?.status !== "branched" || evaluation === void 0 || evaluation.respondentId !== member.respondentId || evaluation.branchId !== member.childBranchId || evaluation.contextId !== member.childContextId || evaluation.turnId !== member.childTurnId || evaluation.nodeId !== ask.nodeId || evaluation.questionId !== ask.taskId;
+    });
+  }) || forkMembers.some((member) => !forkKeys.has(JSON.stringify([member.forkNodeId, member.parentBranchId])));
+  if (invalidFork) throw new RunStoreError("data_integrity_error", "Stored journey fork membership does not match the authored fork or its child evaluations.");
   const stateKeys = new Set(respondents.map(({ respondentId, branchId }) => JSON.stringify([respondentId, branchId])));
   if (respondents.length < respondentIds.size || stateKeys.size !== respondents.length || new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size || respondents.some(({ respondentId }) => !respondentIds.has(respondentId)) || respondents.some((state) => state.route.some((entry) => !stateKeys.has(JSON.stringify([state.respondentId, entry.branchId ?? "root"])))) || evaluations2.some((evaluation) => !stateKeys.has(JSON.stringify([evaluation.respondentId, evaluation.branchId]))) || respondents.some((state) => state.status === "active" && evaluations2.filter((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.turnId === state.currentTurnId && evaluation.contextId === state.currentContextId && evaluation.nodeId === state.currentNodeId && evaluation.respondentId === state.respondentId && evaluation.branchId === state.branchId).length !== 1) || respondents.some((state) => state.status === "waiting-fork" && (state.currentTurnId !== null || state.currentContextId === null || state.currentNodeId === null || !forkNodeIds.has(state.currentNodeId) || evaluations2.some((evaluation) => ["pending", "failed"].includes(evaluation.status) && evaluation.respondentId === state.respondentId && evaluation.branchId === state.branchId))) || respondents.some((state) => state.status === "branched" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null)) || respondents.some((state) => state.status !== "active" && state.status !== "waiting-fork" && (state.currentTurnId !== null || state.currentContextId !== null || state.currentNodeId !== null)) || evaluations2.some((evaluation) => evaluation.status === "pending" && !respondents.some((state) => state.status === "active" && state.respondentId === evaluation.respondentId && state.branchId === evaluation.branchId && state.currentTurnId === evaluation.turnId && state.currentNodeId === evaluation.nodeId && state.currentContextId === evaluation.contextId))) {
     throw new RunStoreError("data_integrity_error", "Stored journey respondent states do not match the reached turns.");
@@ -47226,7 +47403,10 @@ function readJourneyRun(database, runId, notFound) {
     compilerFingerprint: stored.compilerFingerprint,
     ...stored.providerSelectionSnapshot === void 0 ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) },
     evaluations: evaluations2,
-    respondents
+    respondents,
+    forks,
+    forkMembers,
+    comparisons: buildJourneyComparisonEvidence({ journey: parsedRequest.data.journey, forks, forkMembers, evaluations: evaluations2, respondents })
   };
 }
 

@@ -155,8 +155,8 @@ function barrierJourneyRequest(respondents: InlineJourneyRequest['respondents'] 
   };
 }
 
-function preparedBarrierJourneyRun(respondents: InlineJourneyRequest['respondents']): PreparedJourneyRun {
-  const parsed = runRequestSchema.parse(barrierJourneyRequest(respondents));
+function preparedBarrierJourneyRun(respondents: InlineJourneyRequest['respondents'], maxCalls = respondents.length * 3): PreparedJourneyRun {
+  const parsed = runRequestSchema.parse({ ...barrierJourneyRequest(respondents), maxCalls });
   if (parsed.kind !== 'journey') throw new Error('Barrier fixture did not parse as a journey.');
   const compilerFingerprint = promptContractHash();
   const requestFingerprint = hashCanonical({ request: parsed, compilerFingerprint });
@@ -663,6 +663,10 @@ test('settled fork cohort waits for every eligible respondent, excludes paths th
     assert.ok(childEvaluations.some(({ branchId, packet }) => branchId.endsWith('=with-image') && packet.state.encounteredItems.some(({ id }) => id === 'image-condition')));
     assert.ok(childEvaluations.some(({ branchId, packet }) => branchId.endsWith('=without-image') && packet.state.encounteredItems.some(({ id }) => id === 'text-condition')));
     assert.equal(calls.filter((call) => call.includes('with-image-interest') || call.includes('without-image-interest')).length, 4);
+    database.prepare('UPDATE journey_fork_members SET condition_ordinal = 8 WHERE run_id = ? AND respondent_id = ? AND condition_id = ?')
+      .run(accepted.run.runId, 'reader-a', 'with-image');
+    assert.throws(() => store.getJourneyRun(accepted.run.runId),
+      (error: unknown) => error instanceof RunStoreError && error.code === 'data_integrity_error');
   } finally { database.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -713,6 +717,92 @@ test('a journey worker freezes the prefix cohort before dispatching any matched 
     const parents = store.getJourneyRun(accepted.run.runId).respondents.filter(({ branchId }) => branchId === 'root');
     assert.ok(parents.every(({ status }) => status === 'branched'));
   } finally { database.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('a failed fork branch resumes from its saved packet without replaying its pair, prefix, or another respondent', async () => {
+  const root = await temporaryRoot();
+  let store = openRunStore(root);
+  let failedOnce = false;
+  const calls: Array<{ questionId: string; respondentContext: string }> = [];
+  const deterministicProvider: DecisionProvider = { ...provider, async decide(packet) {
+    const respondentContext = (packet.state as { respondent?: { profile?: { context?: string } } }).respondent?.profile?.context ?? '';
+    calls.push({ questionId: packet.question.id, respondentContext });
+    if (packet.question.id === 'without-image-interest' && respondentContext === 'New buyer' && !failedOnce) {
+      failedOnce = true;
+      throw new Error('simulated dispatched branch failure');
+    }
+    return { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, stop: 0.1 }, attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} };
+  } };
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedBarrierJourneyRun(journeyRequest.respondents, 7));
+    const runId = accepted.run.runId;
+    await executeQuestionRun(splitRunStore(store), runId, () => deterministicProvider);
+    assert.equal(store.getStatus(runId).status, 'partial');
+    const beforeReopen = store.getJourneyRun(runId);
+    const answeredPairMember = beforeReopen.evaluations.find(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'with-image-interest')!;
+    const failedPairMember = beforeReopen.evaluations.find(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'without-image-interest')!;
+    assert.equal(answeredPairMember.status, 'answered');
+    assert.equal(failedPairMember.status, 'failed');
+    const interruptedComparison = beforeReopen.comparisons.find(({ comparisonKey }) => comparisonKey === 'image-effect')!;
+    assert.deepEqual([interruptedComparison.cohortRespondents, interruptedComparison.completePairs, interruptedComparison.incompletePairs], [2, 1, 1]);
+    const readerAPair = interruptedComparison.pairs.find(({ respondentId }) => respondentId === 'reader-a')!;
+    assert.equal(readerAPair.complete, false);
+    assert.deepEqual(readerAPair.members.map(({ conditionId, status }) => [conditionId, status]), [['with-image', 'answered'], ['without-image', 'failed']]);
+    assert.ok(readerAPair.members.every(({ evaluationId, packetFingerprint }) => evaluationId && packetFingerprint));
+    assert.deepEqual([readerAPair.members[0]?.execution?.provider, readerAPair.members[0]?.execution?.model], ['laya', 'test-model']);
+    assert.ok(readerAPair.members[1]?.failure?.code);
+    assert.equal(interruptedComparison.pairs.find(({ respondentId }) => respondentId === 'reader-b')?.complete, true);
+    const frozenFailure = { evaluationId: failedPairMember.evaluationId, packet: failedPairMember.packet, fingerprint: failedPairMember.packetFingerprint };
+    assert.equal(calls.filter(({ questionId }) => questionId === 'prefix-interest').length, 2);
+    assert.equal(calls.filter(({ questionId, respondentContext }) => respondentContext === 'Returning buyer' && questionId !== 'prefix-interest').length, 2);
+
+    store.close();
+    store = openRunStore(root);
+    assert.deepEqual(store.getJourneyRun(runId).evaluations.find(({ evaluationId }) => evaluationId === frozenFailure.evaluationId)?.packet, frozenFailure.packet);
+    assert.equal(store.resume(runId, Date.now()).started, true);
+    await executeQuestionRun(splitRunStore(store), runId, () => deterministicProvider);
+
+    assert.equal(store.getStatus(runId).status, 'completed');
+    const afterResume = store.getJourneyRun(runId).evaluations;
+    const completedComparison = store.getJourneyRun(runId).comparisons.find(({ comparisonKey }) => comparisonKey === 'image-effect')!;
+    assert.deepEqual([completedComparison.completePairs, completedComparison.incompletePairs], [2, 0]);
+    assert.equal(afterResume.find(({ evaluationId }) => evaluationId === frozenFailure.evaluationId)?.packetFingerprint, frozenFailure.fingerprint);
+    assert.equal(afterResume.filter(({ questionId }) => questionId === 'prefix-interest').length, 2);
+    assert.equal(calls.filter(({ questionId }) => questionId === 'prefix-interest').length, 2);
+    assert.equal(calls.filter(({ questionId, respondentContext }) => respondentContext === 'Returning buyer' && questionId !== 'prefix-interest').length, 2);
+    assert.equal(calls.filter(({ questionId, respondentContext }) => questionId === 'with-image-interest' && respondentContext === 'New buyer').length, 1);
+    assert.equal(calls.filter(({ questionId, respondentContext }) => questionId === 'without-image-interest' && respondentContext === 'New buyer').length, 2);
+    const attempts = store.attempts(runId).items;
+    assert.equal(attempts.length, 7);
+    assert.equal(attempts.filter(({ evaluationIds }) => evaluationIds.includes(frozenFailure.evaluationId)).length, 2);
+    assert.equal(attempts.filter(({ evaluationIds }) => evaluationIds.includes(answeredPairMember.evaluationId)).length, 1);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('run-wide cancellation preserves settled fork members and leaves their pair inspectably incomplete', async () => {
+  const root = await temporaryRoot();
+  const store = openRunStore(root);
+  const calls: string[] = [];
+  const deterministicProvider: DecisionProvider = { ...provider, async decide(packet) {
+    calls.push(packet.question.id);
+    if (packet.question.id === 'with-image-interest') store.requestCancel(runId);
+    return { type: 'choice', choice: 'continue', probabilities: { continue: 0.9, stop: 0.1 }, attempts: 1, provider: 'laya', model: 'test-model', latencyMs: 1, usage: {} };
+  } };
+  let runId = '';
+  try {
+    const accepted = store.acceptJourney(randomUUID(), preparedBarrierJourneyRun(journeyRequest.respondents.slice(0, 1)));
+    runId = accepted.run.runId;
+    await executeQuestionRun(splitRunStore(store), runId, () => deterministicProvider);
+    assert.equal(store.getStatus(runId).status, 'cancelled');
+    assert.deepEqual(calls, ['prefix-interest', 'with-image-interest']);
+    const run = store.getJourneyRun(runId);
+    const comparison = run.comparisons.find(({ comparisonKey }) => comparisonKey === 'image-effect')!;
+    assert.deepEqual([comparison.cohortRespondents, comparison.completePairs, comparison.incompletePairs], [1, 0, 1]);
+    assert.deepEqual(comparison.pairs[0]?.members.map(({ conditionId, status }) => [conditionId, status]), [
+      ['with-image', 'answered'], ['without-image', 'pending'],
+    ]);
+    assert.equal(store.attempts(runId).items.length, 2);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('corrupt branch context references fail journey recall', async () => {

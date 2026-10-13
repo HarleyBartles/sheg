@@ -170,6 +170,64 @@ export type JourneyEvaluationRecord = JourneyEvaluation & {
   failure?: EvaluationFailure;
 };
 
+export type JourneyForkRecord = {
+  forkNodeId: string;
+  parentBranchId: string;
+  status: 'open' | 'closed';
+  cohortCount: number;
+  openedMs: number;
+  closedMs?: number;
+  revision: number;
+};
+
+export type JourneyForkMemberRecord = {
+  forkNodeId: string;
+  parentBranchId: string;
+  respondentId: string;
+  conditionOrdinal: number;
+  conditionId: string;
+  childBranchId: string;
+  sourceContextId: string;
+  childContextId: string;
+  childTurnId: string;
+  childEvaluationId: string;
+};
+
+export type JourneyComparisonPairMember = {
+  conditionId: string;
+  label: string;
+  branchId: string;
+  questionId: string;
+  status: 'pending' | 'answered' | 'failed' | 'unreached' | 'not-reached';
+  respondentOutcome?: string;
+  evaluationId?: string;
+  packetFingerprint?: string;
+  providerSelection?: ProviderSelectionInitialChoice;
+  result?: DecisionResult;
+  execution?: import('../decision/decision.js').ProviderExecutionEvidence;
+  failure?: EvaluationFailure;
+  notReachedReason?: 'branch-failed-before-comparison' | 'branch-ended-before-comparison' | 'turn-not-reached-yet' | 'branch-state-missing';
+};
+
+export type JourneyComparisonPair = {
+  respondentId: string;
+  occurrence: number;
+  complete: boolean;
+  members: [JourneyComparisonPairMember, JourneyComparisonPairMember];
+};
+
+export type JourneyComparisonEvidence = {
+  forkNodeId: string;
+  parentBranchId: string;
+  barrierStatus: 'open' | 'closed';
+  comparisonKey: string;
+  conditions: Array<{ conditionId: string; label: string; questionId: string }>;
+  cohortRespondents: number;
+  completePairs: number;
+  incompletePairs: number;
+  pairs: JourneyComparisonPair[];
+};
+
 export type JourneyRunRecord = {
   request: import('./request.js').ParsedInlineJourneyRequest;
   requestFingerprint: string;
@@ -177,6 +235,9 @@ export type JourneyRunRecord = {
   providerSelectionSnapshot?: ProviderSelectionPolicySnapshot;
   evaluations: JourneyEvaluationRecord[];
   respondents: JourneyRespondentState[];
+  forks: JourneyForkRecord[];
+  forkMembers: JourneyForkMemberRecord[];
+  comparisons: JourneyComparisonEvidence[];
 };
 
 export type JourneyWorkerTurn = {

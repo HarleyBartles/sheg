@@ -1,10 +1,13 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
 import { hashCanonical } from '../../identity.js';
 import { decisionPacketSchema } from '../../../domain/decision/prompt.js';
 import { journeyTopology } from '../../../domain/journey/topology.js';
+import { journeyChildBranchId } from '../../../domain/journey/forks.js';
+import { buildJourneyComparisonEvidence } from '../../../domain/journey/comparison-evidence.js';
 import { validateDecision } from '../../../domain/decision/validate.js';
 import { runRequestSchema } from '../../../domain/run/request.js';
-import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, providerSelectionInitialChoiceSchema, providerSelectionPolicySnapshotSchema, type JourneyEvaluationRecord, type JourneyRespondentState, type JourneyRunRecord } from '../../../domain/run/lifecycle.js';
+import { evaluationStatusSchema, journeyEventsSchema, journeyRespondentStatusSchema, journeyRouteSchema, providerSelectionInitialChoiceSchema, providerSelectionPolicySnapshotSchema, type JourneyEvaluationRecord, type JourneyForkMemberRecord, type JourneyForkRecord, type JourneyRespondentState, type JourneyRunRecord } from '../../../domain/run/lifecycle.js';
 import { RunStoreError } from '../../../application/run-store.js';
 import { asNumber, asNullableText, asText, parseJson, parseJsonRecord, parseStored, type DatabaseRow } from '../rows.js';
 import { decodeResultAndExecution, storedEvaluationFailure } from '../evidence-records.js';
@@ -63,8 +66,69 @@ export function readJourneyRun(database: DatabaseSync, runId: string, notFound: 
     route: parseStored(journeyRouteSchema, parseJson(state.route_json, 'journey route'), 'journey route'),
     ...(state.outcome === null ? {} : { outcome: asText(state.outcome, 'journey outcome') }),
   }));
+  const forks: JourneyForkRecord[] = (database.prepare('SELECT * FROM journey_forks WHERE run_id = ? ORDER BY fork_node_id, parent_branch_id').all(runId) as DatabaseRow[]).map((fork) => ({
+    forkNodeId: asText(fork.fork_node_id, 'fork node ID'), parentBranchId: asText(fork.parent_branch_id, 'fork parent branch ID'),
+    status: parseStored(z.enum(['open', 'closed']), asText(fork.status, 'fork status'), 'fork status'),
+    cohortCount: asNumber(fork.cohort_count, 'fork cohort count'), openedMs: asNumber(fork.opened_ms, 'fork open time'),
+    ...(fork.closed_ms === null ? {} : { closedMs: asNumber(fork.closed_ms, 'fork close time') }), revision: asNumber(fork.revision, 'fork revision'),
+  }));
+  const forkMembers: JourneyForkMemberRecord[] = (database.prepare('SELECT * FROM journey_fork_members WHERE run_id = ? ORDER BY fork_node_id, parent_branch_id, respondent_id, condition_ordinal').all(runId) as DatabaseRow[]).map((member) => ({
+    forkNodeId: asText(member.fork_node_id, 'fork node ID'), parentBranchId: asText(member.parent_branch_id, 'fork parent branch ID'),
+    respondentId: asText(member.respondent_id, 'fork respondent ID'), conditionOrdinal: asNumber(member.condition_ordinal, 'fork condition ordinal'),
+    conditionId: asText(member.condition_id, 'fork condition ID'), childBranchId: asText(member.child_branch_id, 'fork child branch ID'),
+    sourceContextId: asText(member.source_context_id, 'fork source context ID'), childContextId: asText(member.child_context_id, 'fork child context ID'),
+    childTurnId: asText(member.child_turn_id, 'fork child turn ID'), childEvaluationId: asText(member.child_evaluation_id, 'fork child evaluation ID'),
+  }));
   const respondentIds = new Set(parsedRequest.data.respondents.map(({ id }) => id));
-  const forkNodeIds = new Set(journeyTopology(parsedRequest.data.journey).nodes.filter((node) => node.kind === 'fork').map(({ id }) => id));
+  const graph = journeyTopology(parsedRequest.data.journey);
+  const forkNodes = new Map(graph.nodes.filter((node) => node.kind === 'fork').map((node) => [node.id, node]));
+  const forkNodeIds = new Set(forkNodes.keys());
+  const stateByKey = new Map(respondents.map((state) => [JSON.stringify([state.respondentId, state.branchId]), state]));
+  const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.evaluationId, evaluation]));
+  const forkKeys = new Set(forks.map(({ forkNodeId, parentBranchId }) => JSON.stringify([forkNodeId, parentBranchId])));
+  const membersByFork = new Map<string, JourneyForkMemberRecord[]>();
+  for (const member of forkMembers) {
+    const key = JSON.stringify([member.forkNodeId, member.parentBranchId]);
+    membersByFork.set(key, [...(membersByFork.get(key) ?? []), member]);
+  }
+  const firstAskFor = (entryNodeId: string): { nodeId: string; taskId: string } | undefined => {
+    let current = entryNodeId;
+    const seen = new Set<string>();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const node = graph.nodes.find((candidate) => candidate.id === current);
+      if (node?.kind === 'ask') return { nodeId: node.id, taskId: node.taskId };
+      if (node?.kind !== 'expose') return undefined;
+      const edge = graph.transitions.find((candidate) => candidate.fromNodeId === node.id);
+      if (!edge) return undefined;
+      current = edge.toNodeId;
+    }
+    return undefined;
+  };
+  const invalidFork = forks.some((fork) => {
+    const key = JSON.stringify([fork.forkNodeId, fork.parentBranchId]);
+    const node = forkNodes.get(fork.forkNodeId);
+    const members = membersByFork.get(key) ?? [];
+    if (!node || (fork.status === 'open' && (fork.cohortCount !== 0 || fork.closedMs !== undefined || members.length !== 0)) ||
+        (fork.status === 'closed' && (fork.closedMs === undefined || fork.cohortCount < 1 || members.length !== fork.cohortCount * node.conditions.length ||
+          new Set(members.map(({ respondentId }) => respondentId)).size !== fork.cohortCount)) ||
+        (fork.status === 'open' && !respondents.some((state) => state.branchId === fork.parentBranchId && state.status === 'waiting-fork' && state.currentNodeId === fork.forkNodeId))) return true;
+    return members.some((member) => {
+      const condition = node.conditions[member.conditionOrdinal];
+      const ask = condition ? firstAskFor(condition.entryNodeId) : undefined;
+      const childState = stateByKey.get(JSON.stringify([member.respondentId, member.childBranchId]));
+      const parentState = stateByKey.get(JSON.stringify([member.respondentId, member.parentBranchId]));
+      const evaluation = evaluationById.get(member.childEvaluationId);
+      let expectedBranchId: string;
+      try { expectedBranchId = journeyChildBranchId(member.parentBranchId, fork.forkNodeId, member.conditionId); } catch { return true; }
+      return !condition || condition.id !== member.conditionId || expectedBranchId !== member.childBranchId || !ask ||
+        childState === undefined || parentState?.status !== 'branched' || evaluation === undefined ||
+        evaluation.respondentId !== member.respondentId || evaluation.branchId !== member.childBranchId ||
+        evaluation.contextId !== member.childContextId || evaluation.turnId !== member.childTurnId ||
+        evaluation.nodeId !== ask.nodeId || evaluation.questionId !== ask.taskId;
+    });
+  }) || forkMembers.some((member) => !forkKeys.has(JSON.stringify([member.forkNodeId, member.parentBranchId])));
+  if (invalidFork) throw new RunStoreError('data_integrity_error', 'Stored journey fork membership does not match the authored fork or its child evaluations.');
   const stateKeys = new Set(respondents.map(({ respondentId, branchId }) => JSON.stringify([respondentId, branchId])));
   if (respondents.length < respondentIds.size || stateKeys.size !== respondents.length ||
       new Set(respondents.map(({ respondentId }) => respondentId)).size !== respondentIds.size ||
@@ -82,5 +146,6 @@ export function readJourneyRun(database: DatabaseSync, runId: string, notFound: 
     throw new RunStoreError('data_integrity_error', 'Stored journey respondent states do not match the reached turns.');
   }
   return { request: parsedRequest.data, requestFingerprint: stored.requestFingerprint, compilerFingerprint: stored.compilerFingerprint,
-    ...(stored.providerSelectionSnapshot === undefined ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) }), evaluations, respondents };
+    ...(stored.providerSelectionSnapshot === undefined ? {} : { providerSelectionSnapshot: providerSelectionPolicySnapshotSchema.parse(stored.providerSelectionSnapshot) }),
+    evaluations, respondents, forks, forkMembers, comparisons: buildJourneyComparisonEvidence({ journey: parsedRequest.data.journey, forks, forkMembers, evaluations, respondents }) };
 }
