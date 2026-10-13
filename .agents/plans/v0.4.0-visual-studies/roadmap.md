@@ -2,7 +2,7 @@
 
 **Design authority:** [Approved visual-studies specification](../../specs/2026-10-04-v0.4.0-visual-studies.md), approved on 2026-10-12. The specification governs scope and experiment semantics; this roadmap governs dependency order. Read both before writing or executing a child plan.
 
-**Baseline:** Released v0.3.0 and SQLite schema 9. Plans 1-6 are delivered on `develop` through `522ecf0` (`0.4.0-dev.9`, PR #40). Plan 7 is the current just-in-time plan, based on that merged predecessor. Each ordinary integration PR gets its own unique development identity on the intended v0.4.0 line; planning commits alone do not publish a release.
+**Baseline:** Released v0.3.0 and SQLite schema 9. Plans 1-7 are delivered on `develop` through `8ade0ba` (`0.4.0-dev.11`, PR #42). Each ordinary integration PR gets its own unique development identity on the intended v0.4.0 line; planning commits alone do not publish a release.
 
 **Release outcome:** Authors can study article images and placement, supplied rendered A/B treatments, and character brief/script fit using frozen text and images. One durable study can combine capable providers, matched independent branches, compact visual history, and inspectable results. Agents know defaults and override controls rather than routing internals.
 
@@ -18,7 +18,7 @@ Plans 1-6 are delivered. Later rows define deliverables and dependency exits; wr
 | 4 | Matched forks within mixed-provider journeys | complete | [04-matched-forks.md](04-matched-forks.md), based on `fa6ea8f` | Merged in `e799630` (`0.4.0-dev.6`) | [#37](https://github.com/HarleyBartles/sheg/pull/37) | Reported in chat | Matched-branch execution, shared provider/model locks, independent histories, pair evidence, branch recovery, and copied installed-runtime qualification are merged. |
 | 5 | Visual follow-ons and comparison evidence | complete | [05-visual-follow-ons.md](05-visual-follow-ons.md), based on `552d031` | Merged in `773cbc6` (`0.4.0-dev.8`) | [#39](https://github.com/HarleyBartles/sheg/pull/39) | Reported in chat | Follow-on retention, deletion custody, matched-pair evidence, bounded discovery, and legacy compatibility shipped. |
 | 6 | Perceptual recipes and comparison investigation | complete | [06-perceptual-recipes-and-comparison.md](06-perceptual-recipes-and-comparison.md), based on `773cbc6` | Merged in `522ecf0` (`0.4.0-dev.9`) | [#40](https://github.com/HarleyBartles/sheg/pull/40) | Reported in chat | Article placement, rendered treatments, character/script matching, six-image exploration, and supported four-way/pairwise guidance shipped. |
-| 7 | Integrated installed-runtime qualification | in progress | [07-integrated-runtime-qualification.md](07-integrated-runtime-qualification.md), based on `522ecf0` | Not implemented | Not opened | Reported in chat | Qualify the installed integrated journey against a representative released schema-9 store, recovery, custody, maintenance, and release packaging; keep evidence outside shipped source. |
+| 7 | Integrated installed-runtime qualification | complete | [07-integrated-runtime-qualification.md](07-integrated-runtime-qualification.md), based on `522ecf0` | Merged in `8ade0ba` (`0.4.0-dev.11`) | [#42](https://github.com/HarleyBartles/sheg/pull/42) | Reported in chat | Qualify the installed integrated journey against a representative released schema-9 store, recovery, custody, maintenance, and release packaging; keep evidence outside shipped source. |
 
 ## Slice contracts
 
