@@ -14,7 +14,7 @@
       "criteria": ["Use exact evaluation/context references; set continue with retainedMaterialIds empty and includeSelectedAnswer true; use the selected image ID as materialIds and explicitly bind it in visual pixel mode; exclude sibling answers and unbound images; inspect without starting inference."]
     },
     {
-      "user": "For a matched comparison whose recorded evidence says completePairs is 1 and incompletePairs is 1 because one condition failed, explain what the denominator supports. State that the incomplete pair is missing evidence, not a tie or preference. Explain that model judgments are correlated evidence, not human preference. Do not call another tool.",
+      "user": "The matched report says there are 2 pairs, 1 complete and 1 incomplete because one condition failed. Can we call the failed pair a tie and say the image made no difference? Give me a concise comparison summary from the recorded evidence, and do not call another tool.",
       "expectedTools": [],
       "criteria": ["Report both complete and incomplete denominators from the evidence, treat the incomplete pair as missing evidence without inferring a preference or tie, and describe model judgments as correlated evidence rather than human preference."]
     }

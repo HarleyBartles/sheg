@@ -98,13 +98,15 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
         const snapshotVisual = selectedVisual && snapshot?.materials.find(({ id }) => id === selectedVisual.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text }) => id === selected.materialId && text === selected.text);
-        const boundVisual = selectedVisual && packet.data.visualMaterials?.some(({ id, altText, caption, asset }) => id === selectedVisual.materialId &&
-          altText === selectedVisual.altText && caption === selectedVisual.caption && hashCanonical(asset) === hashCanonical(selectedVisual.asset));
+        const boundVisual = selectedVisual && packet.data.visualMaterials?.find(({ id }) => id === selectedVisual.materialId);
+        const snapshotVisualMatches = Boolean(selectedVisual && snapshotVisual && 'type' in snapshotVisual && snapshotVisual.type === 'image' &&
+          snapshotVisual.altText === selectedVisual.altText && snapshotVisual.caption === selectedVisual.caption && hashCanonical(snapshotVisual.asset) === hashCanonical(selectedVisual.asset));
+        const boundVisualMatches = !selectedVisual || !boundVisual ||
+          (boundVisual.altText === selectedVisual.altText && boundVisual.caption === selectedVisual.caption && hashCanonical(boundVisual.asset) === hashCanonical(selectedVisual.asset));
         if (mappings.length !== 1 || Boolean(selected) === Boolean(selectedVisual) ||
             Boolean(selected && (!snapshotItem || !exposed || selected.textSha256 !== createHash('sha256').update(selected.text, 'utf8').digest('hex') ||
               snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256)) ||
-            Boolean(selectedVisual && (!snapshotVisual || !('type' in snapshotVisual) || snapshotVisual.type !== 'image' || !boundVisual ||
-              snapshotVisual.altText !== selectedVisual.altText || snapshotVisual.caption !== selectedVisual.caption || hashCanonical(snapshotVisual.asset) !== hashCanonical(selectedVisual.asset)))) {
+            Boolean(selectedVisual && (!snapshotVisualMatches || !boundVisualMatches))) {
           throw new RunStoreError('invalid_prepared_run', 'Selected-material lineage does not match its frozen recipient packet and catalog.');
         }
       }

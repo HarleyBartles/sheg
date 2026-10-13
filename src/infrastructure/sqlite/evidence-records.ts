@@ -5,6 +5,9 @@ import { decisionFailureDetailSchema, decisionResultSchema, decisionValueSchema,
 import { asText, type DatabaseRow } from './rows.js';
 import type { FollowOnLineage, ParsedRunRequest, RunMaterialItem } from '../../domain/run/request.js';
 import type { DecisionResult } from '../../domain/decision/decision.js';
+import type { DecisionRequest } from '../../domain/decision/decision.js';
+import type { PromptState } from '../../domain/decision/prompt.js';
+import { journeyControlSuccessors, journeyTopology } from '../../domain/journey/topology.js';
 import type { EvaluationFailure } from '../../domain/run/lifecycle.js';
 import { decodeStoredPayload, encodeStoredPayload } from './payload-codecs.js';
 import { z } from 'zod';
@@ -40,6 +43,54 @@ export function materialCatalogForRequest(request: ParsedRunRequest, lineage: Fo
     ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? []
     : [];
   return mergeMaterialCatalog(source, inherited, encountered);
+}
+
+export function materialCatalogForExactContext(request: ParsedRunRequest, lineage: FollowOnLineage | undefined, contextId: string, respondentId: string,
+  packet: DecisionRequest & { state: PromptState }, branchId?: string): RunMaterialItem[] {
+  const catalog = materialCatalogForRequest(request, lineage, contextId, respondentId, packet.state.encounteredItems);
+  if (request.kind !== 'journey' || !branchId) return catalog;
+  const siblingMaterialIds = siblingJourneyMaterialIds(request, branchId);
+  const exposedVisualIds = new Set([
+    ...(packet.visualMaterials ?? []).map(({ id }) => id),
+    ...packet.state.trajectory.responses.flatMap((response) => response.visualEvidence?.materials.map(({ materialId }) => materialId) ?? []),
+  ]);
+  return catalog.filter((material) => !siblingMaterialIds.has(material.id) && (!isImageMaterial(material) || exposedVisualIds.has(material.id)));
+}
+
+function siblingJourneyMaterialIds(request: Extract<ParsedRunRequest, { kind: 'journey' }>, branchId: string): Set<string> {
+  const graph = journeyTopology(request.journey);
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const assignments = branchId.split('/').slice(1).flatMap((part) => {
+    const separator = part.indexOf('=');
+    return separator > 0 ? [{ forkNodeId: part.slice(0, separator), conditionId: part.slice(separator + 1) }] : [];
+  });
+  const exposuresFrom = (entryNodeId: string): Set<string> => {
+    const exposed = new Set<string>();
+    const pending = [entryNodeId];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const nodeId = pending.pop()!;
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
+      const node = nodes.get(nodeId);
+      if (!node) continue;
+      if (node.kind === 'expose') exposed.add(node.itemId);
+      pending.push(...journeyControlSuccessors(graph, nodeId).map(({ toNodeId }) => toNodeId));
+    }
+    return exposed;
+  };
+  const siblings = new Set<string>();
+  for (const { forkNodeId, conditionId } of assignments) {
+    const fork = nodes.get(forkNodeId);
+    if (fork?.kind !== 'fork') continue;
+    const selected = fork.conditions.find(({ id }) => id === conditionId);
+    if (!selected) continue;
+    const selectedExposures = exposuresFrom(selected.entryNodeId);
+    for (const condition of fork.conditions) if (condition.id !== conditionId) {
+      for (const materialId of exposuresFrom(condition.entryNodeId)) if (!selectedExposures.has(materialId)) siblings.add(materialId);
+    }
+  }
+  return siblings;
 }
 
 export function assertRetainedImageAsset(database: DatabaseSync, runId: string, material: RunMaterialItem): void {

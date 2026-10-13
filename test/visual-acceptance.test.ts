@@ -144,6 +144,21 @@ test('pixel Choice image mappings identify options without creating text selecte
     assert.deepEqual(followOnAdmission.prepared.lineage?.sourceSelection, {
       version: 1, matchedEvaluations: 2, includedEvaluations: 1, representedContexts: 1, representedRespondents: 1, followOnEvaluations: 1,
     });
+    const continued = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
+      selection: { references: [{ evaluationId: sources.turns[0]!.evaluationId, contextId: sources.turns[0]!.contextId }] },
+      context: { mode: 'continue', retainedMaterialIds: [], includeSelectedAnswer: true },
+      questions: [{ type: 'noul', id: 'continue-after-image', instructions: 'Would you continue reading?' }], provider: config, maxCalls: 1 });
+    const continuedSources = fixture.store.resolveFollowOnSources(continued);
+    const continuedAdmission = await prepareFollowOnRun(continued, continuedSources, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(continuedAdmission.prepared, JSON.stringify(continuedAdmission.inspection.problems));
+    assert.deepEqual(continuedAdmission.prepared.evaluations[0]?.packet.visualMaterials, undefined);
+    const continuedState = continuedAdmission.prepared.evaluations[0]?.packet.state as { trajectory: { responses: unknown[] } } | undefined;
+    assert.deepEqual(continuedState?.trajectory.responses, [{ type: 'choice', taskId: 'image-fit',
+      choiceId: 'yes', choiceMeaning: 'Adds to the section', exposedItemIds: ['section-three'], probabilities: { yes: 0.9, no: 0.1 }, visualEvidence: {
+        mode: 'pixels', provider: 'clef', model: 'clef', materials: [{ materialId: 'portrait', assetId: fixture.metadata.assetId,
+          sha256: fixture.metadata.sha256, altText: 'Approved specialist portrait.', caption: 'Writ at the ledger desk.' }],
+      },
+    }]);
     const database = new DatabaseSync(path.join(fixture.root, 'runs.sqlite'));
     try { database.prepare('DELETE FROM run_visual_assets WHERE run_id = ? AND material_id = ?').run(accepted.run.runId, 'portrait'); }
     finally { database.close(); }
@@ -224,6 +239,116 @@ test('accepted visual follow-on retains its selected source image after deleting
         { material_id: 'portrait', asset_id: fixture.metadata.assetId },
       ]);
     } finally { db.close(); }
+  } finally { await fixture.close(); }
+});
+
+test('a selected image can be retained by a mixed visual and text follow-on group without binding pixels to text', async () => {
+  const fixture = await setup();
+  try {
+    const imageResolver = { resolve: (assetId: string) => ({ metadata: fixture.imageRepository.metadata(assetId), bytes: fixture.imageRepository.bytes(assetId) }) };
+    const sourceRequest = { ...request(fixture.metadata), questions: [{ ...request(fixture.metadata).questions[0]!, materialOptions: { yes: 'portrait' } }] };
+    const sourceAdmission = await prepareRun(sourceRequest, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(sourceAdmission.prepared, JSON.stringify(sourceAdmission.inspection.problems));
+    const source = fixture.store.accept(randomUUID(), sourceAdmission.prepared);
+    const sourceFetch = (async () => Response.json({ success: true, result: { model: 'clef', answers: {
+      'image-fit': { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 } },
+    }, usage: { input_tokens: 30, output_tokens: 0 } }, errors: [], messages: [] })) as typeof fetch;
+    await executeQuestionRun(splitRunStore(fixture.store), source.run.runId, (_providerConfig, options) => new ClefProvider(config, sourceFetch,
+      { credentialStore: credentials, ...(options?.imageResolver ? { imageResolver: options.imageResolver } : {}) }), { imageResolver });
+    const sourceEvidence = fixture.store.queryEvidence({ sourceRunId: source.run.runId, criteria: { questionId: 'image-fit' } }).items[0]!;
+    const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: source.run.runId,
+      selection: { references: [{ evaluationId: sourceEvidence.evaluationId, contextId: sourceEvidence.contextId }] },
+      context: { mode: 'fresh-material', includeSelectedMaterial: true, materialIds: ['portrait'] },
+      material: [{ id: 'next-scene', text: 'The hero quietly checks the ledger.' }],
+      questions: [
+        { type: 'noul', id: 'visual-fit', instructions: 'Does the portrait fit this character?', visual: { mode: 'pixels', materialIds: ['portrait'] } },
+        { type: 'noul', id: 'text-fit', instructions: 'Does the scene fit the character brief?' },
+      ], provider: config, maxCalls: 1 });
+    const sources = fixture.store.resolveFollowOnSources(followOn);
+    const prepared = await prepareFollowOnRun(followOn, sources, new ClefProvider(config, fetch, { credentialStore: credentials, imageResolver }));
+    assert.ok(prepared.inspection.valid, JSON.stringify(prepared.inspection.problems));
+    assert.deepEqual(prepared.prepared.evaluations.map(({ packet }) => packet.visualMaterials?.map(({ id }) => id)), [['portrait'], undefined]);
+    const child = fixture.store.accept(randomUUID(), prepared.prepared);
+    assert.deepEqual(fixture.store.getRequest(child.run.runId).evaluations.map(({ packet }) => packet.visualMaterials?.map(({ id }) => id)), [['portrait'], undefined]);
+  } finally { await fixture.close(); }
+});
+
+test('follow-on material lookup rejects an image confined to a sibling journey branch', async () => {
+  const fixture = await setup();
+  try {
+    const secondBytes = await readFile(new URL('./fixtures/images/four-corners.webp', import.meta.url));
+    const secondSha256 = createHash('sha256').update(secondBytes).digest('hex');
+    const secondImage = fixture.imageRepository.saveSource(secondBytes, { assetId: `sha256:${secondSha256}`, sha256: secondSha256,
+      format: 'webp', width: 80, height: 40, bytes: secondBytes.byteLength });
+    const prefixAnswer = { type: 'choice' as const, choice: 'continue', probabilities: { continue: 0.9, leave: 0.1 },
+      attempts: 1, provider: 'clef' as const, model: 'clef', latencyMs: 1, usage: {} };
+    const visualAnswer = { type: 'choice' as const, choice: 'yes', probabilities: { yes: 0.9, no: 0.1 },
+      attempts: 1, provider: 'clef' as const, model: 'clef', latencyMs: 1, usage: {} };
+    const deterministicProvider: DecisionProvider = {
+      measure: () => ({ provider: 'clef', status: 'fits', method: 'fixture', modelIdentity: 'clef', tokenCount: 'measured',
+        tokens: 20, contextLimit: 65_536, headroomTokens: 100, effectiveLimit: 65_436, details: {} }),
+      async decide(packet) { return packet.question.id === 'prefix' ? prefixAnswer : visualAnswer; },
+    };
+    const imageQuestion = (id: string, materialId: string) => ({ id, type: 'choice' as const, instructions: 'Does the image support this section?',
+      options: { yes: 'It supports the section', no: 'It distracts from the section' }, materialOptions: { yes: materialId },
+      visual: { mode: 'pixels' as const, materialIds: [materialId] } });
+    const journey = {
+      kind: 'journey' as const,
+      respondents: [{ id: 'reader-a', intent: 'Read the article', context: 'At the visual comparison', desired_outcome: 'Understand the section', engagement_cues: 'Concrete evidence', friction_cues: 'Distraction' }],
+      provider: config, maxCalls: 3,
+      journey: {
+        id: 'forked-images', label: 'Two matched visual treatments',
+        items: [
+          { id: 'opening', text: 'The article introduces the question.' },
+          { id: 'image-a', type: 'image' as const, text: '', altText: 'The first treatment image.', asset: fixture.metadata },
+          { id: 'image-b', type: 'image' as const, text: '', altText: 'The sibling treatment image.', asset: secondImage },
+          { id: 'image-c', type: 'image' as const, text: '', altText: 'An image never exposed in this journey.', asset: fixture.metadata },
+        ],
+        tasks: [
+          { id: 'prefix', type: 'choice' as const, instructions: 'Would you continue?', options: { continue: 'Continue', leave: 'Leave' } },
+          imageQuestion('question-a', 'image-a'), imageQuestion('question-b', 'image-b'),
+        ],
+        presentation: { kind: 'graph' as const, entryNodeId: 'show-opening', maxDecisions: 3,
+          nodes: [
+            { id: 'show-opening', kind: 'expose' as const, itemId: 'opening' },
+            { id: 'ask-prefix', kind: 'ask' as const, taskId: 'prefix' },
+            { id: 'fork', kind: 'fork' as const, conditions: [
+              { id: 'a', label: 'Treatment A', entryNodeId: 'show-a' },
+              { id: 'b', label: 'Treatment B', entryNodeId: 'show-b' },
+            ] },
+            { id: 'show-a', kind: 'expose' as const, itemId: 'image-a' }, { id: 'ask-a', kind: 'ask' as const, taskId: 'question-a' },
+            { id: 'show-b', kind: 'expose' as const, itemId: 'image-b' }, { id: 'ask-b', kind: 'ask' as const, taskId: 'question-b' },
+            { id: 'done-a', kind: 'terminal' as const, outcome: 'complete-a' }, { id: 'done-b', kind: 'terminal' as const, outcome: 'complete-b' },
+            { id: 'left', kind: 'terminal' as const, outcome: 'left' },
+          ],
+          transitions: [
+            { fromNodeId: 'show-opening', toNodeId: 'ask-prefix' },
+            { fromNodeId: 'ask-prefix', optionId: 'continue', toNodeId: 'fork' }, { fromNodeId: 'ask-prefix', optionId: 'leave', toNodeId: 'left' },
+            { fromNodeId: 'show-a', toNodeId: 'ask-a' }, { fromNodeId: 'show-b', toNodeId: 'ask-b' },
+            { fromNodeId: 'ask-a', optionId: 'yes', toNodeId: 'done-a' }, { fromNodeId: 'ask-a', optionId: 'no', toNodeId: 'done-a' },
+            { fromNodeId: 'ask-b', optionId: 'yes', toNodeId: 'done-b' }, { fromNodeId: 'ask-b', optionId: 'no', toNodeId: 'done-b' },
+          ],
+        },
+      },
+    };
+    const admission = await prepareRun(journey, deterministicProvider);
+    assert.ok(admission.journey, JSON.stringify(admission.inspection.problems));
+    const accepted = fixture.store.acceptJourney(randomUUID(), materializeJourneyRun(admission.journey));
+    await executeQuestionRun(splitRunStore(fixture.store), accepted.run.runId, () => deterministicProvider);
+    const source = fixture.store.queryEvidence({ sourceRunId: accepted.run.runId, criteria: { questionId: 'question-a' } }).items[0]!;
+    const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.run.runId,
+      selection: { references: [{ evaluationId: source.evaluationId, contextId: source.contextId }] },
+      context: { mode: 'continue', materialIds: ['image-b'] },
+      questions: [{ type: 'noul', id: 'reuse-sibling', instructions: 'Does the other treatment fit?', visual: { mode: 'pixels', materialIds: ['image-b'] } }],
+      provider: config, maxCalls: 1 });
+    const sources = fixture.store.resolveFollowOnSources(followOn);
+    assert.deepEqual(sources.turns[0]?.packet.visualMaterials?.map(({ id }) => id), ['image-a']);
+    await assert.rejects(prepareFollowOnRun(followOn, sources, deterministicProvider),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'follow_on_material_not_found');
+    const unexposedFollowOn = followOnRunRequestSchema.parse({ ...followOn, context: { mode: 'continue', materialIds: ['image-c'] },
+      questions: [{ ...followOn.questions[0]!, visual: { mode: 'pixels', materialIds: ['image-c'] } }] });
+    await assert.rejects(prepareFollowOnRun(unexposedFollowOn, fixture.store.resolveFollowOnSources(unexposedFollowOn), deterministicProvider),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'follow_on_material_not_found');
   } finally { await fixture.close(); }
 });
 

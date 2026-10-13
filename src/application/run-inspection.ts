@@ -129,13 +129,25 @@ export async function prepareFollowOnRun(request: ParsedFollowOnRunRequest, sour
         return encountered.filter(({ id }) => requested.has(id));
       })();
     const rawResult = turn.result ? decisionValueFromResult(turn.result) : undefined;
+    const sourceVisualEvidence = turn.packet.question.visual && turn.result ? {
+      mode: turn.packet.question.visual.mode,
+      provider: turn.result.provider,
+      model: turn.result.model,
+      materials: turn.packet.question.visual.materialIds.map((materialId) => {
+        const visual = turn.packet.visualMaterials?.find(({ id }) => id === materialId);
+        if (!visual) throw new RunProblemError('follow_on_context_invalid', `Source visual material ${materialId} is unavailable in evaluation ${turn.evaluationId}.`);
+        return { materialId, assetId: visual.asset.assetId, sha256: visual.asset.sha256, altText: visual.altText,
+          ...(visual.caption === undefined ? {} : { caption: visual.caption }) };
+      }),
+    } : undefined;
     const packets: DecisionRequest[] = [];
     try {
       for (const question of request.questions) {
         packets.push(prepareFollowOnPacket({ source: turn.packet, mode: request.context.mode, question,
           ...(request.context.mode === 'recorded' ? {} : { material: selectedMaterial }),
           ...(request.context.mode === 'continue' ? { retainedMaterial, includeSelectedAnswer: request.context.includeSelectedAnswer ?? true } : {}),
-          visualMaterials: visualMaterialsFor(question), ...(rawResult ? { result: rawResult } : {}) }));
+          visualMaterials: visualMaterialsFor(question), ...(rawResult ? { result: rawResult } : {}),
+          ...(request.context.mode === 'continue' && request.context.includeSelectedAnswer !== false && sourceVisualEvidence ? { visualEvidence: sourceVisualEvidence } : {}) }));
       }
     } catch (error) {
       throw new RunProblemError('follow_on_context_invalid', error instanceof Error ? error.message : 'Follow-on context could not be prepared.');

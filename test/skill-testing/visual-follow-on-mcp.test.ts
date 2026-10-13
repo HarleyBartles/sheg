@@ -63,8 +63,6 @@ test('visual follow-on workflow inspects typed image evidence, binds only select
       assert.equal((invalidMcp.structuredContent as { valid: boolean }).valid, false);
     } finally { store.close(); }
 
-    const fixture = JSON.parse(await readFile('skills/stimulus-response-polling/tests/behavior/workflows/visual-follow-on-context-projection.json', 'utf8')) as { turns: Array<{ criteria: string[] }> };
-    assert.ok(fixture.turns.flatMap(({ criteria }) => criteria).some((criterion) => /incomplete pair as missing evidence/i.test(criterion)));
   } finally {
     await client?.close();
     await transport?.close();

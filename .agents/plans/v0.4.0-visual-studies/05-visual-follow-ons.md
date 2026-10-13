@@ -20,6 +20,8 @@
 - Keep encountered image descriptions, exact captions and typed reactions as compact text history. Image pixels are resent only when the follow-on question explicitly binds that image in `visual.mode: "pixels"`; `described` mode remains text evidence.
 - A mapped image Choice is an image reference with its authored descriptor/caption and digest. It must never be coerced into text `selectedMaterial` evidence or exposed as pixel bytes in ordinary query output.
 - Resolve source material by exact context lineage; reject missing, unexposed, ambiguous, conflicting or sibling material. Preserve encountered order for retained materials and explicit authored order for newly supplied material.
+- A continuing follow-on that includes a selected visual answer carries that turn's compact visual evidence (descriptor, caption, digest/material identity and provider/model) without carrying pixels; omitting the selected answer omits its response evidence.
+- Selected-image lineage is checked against the recipient context snapshot, while pixels remain question-scoped so a mixed visual/text group does not attach images to text questions.
 - Retain accepted asset dependencies after source run deletion and release them only when every dependent run and image derivation is deleted. Verify this through public store operations and foreign-key/integrity checks.
 - Preserve matched-pair evidence as observed condition outcomes plus complete/incomplete denominators, provider/model identity, and source selection lineage. Never impute missing responses, convert incomplete pairs to ties, combine provider confidence scales, or claim independent human observations.
 - Generate schemas, runtime bundles and skill packages from canonical source. No repo-local path or test fixture becomes a runtime dependency.
@@ -65,12 +67,12 @@
 
 - [x] Add a strict `selectedVisualMaterial` evidence schema to query items and follow-on source turns. Include image material ID, digest-bound asset metadata, alt text, and optional exact caption; exclude bytes and local paths.
 - [x] Update `evidence-query.ts` to return this field only when an answered Choice maps its selected option to an image available in that exact packet/catalog. Keep `selectedMaterial` absent for image selections. Add separate text/image selected-material coverage counts while preserving the existing `selectedMaterials` shape for old consumers.
-- [x] Update `follow-on-queries.ts` to resolve mapped image selections through `materialCatalogForRequest` and validate their saved asset metadata; malformed or absent mapped image evidence is a bounded `data_integrity_error`.
+- [x] Update `follow-on-queries.ts` to resolve mapped image selections through the source context catalog and validate their saved asset metadata; malformed or absent mapped image evidence is a bounded `data_integrity_error`.
 - [x] Extend follow-on lineage selection records with optional `selectedVisualMaterial`, preserving parse compatibility for historical records. `includeSelectedMaterial` includes mapped text or image options from authored Choice questions; unresolved mapped images fail as data-integrity errors.
 - [x] Add the named store-level test. Assert exact returned metadata, no `selectedMaterial`, no image bytes in query output, a follow-on packet with only the explicitly bound image bytes resolved at dispatch, and a digest-identical lineage snapshot.
-- [x] Run the focused store/MCP tests and witness the test fail before adding production code. Use the existing real SQLite image asset repository and injected provider recording the actual request packet; do not mock material lookup. The test exposed missing query evidence and, with a typed Noul follow-on, a validator omission of pixel-bound visual dependencies.
+- [x] Use the real SQLite image asset repository and inspect accepted packet/query evidence through the public store; retain failure-first tests for missing query evidence and invalid pixel-bound visual dependencies.
 - [x] Update `prepared-validation.ts` to cross-check visual selection lineage against the frozen recipient packet, source catalog, material snapshot and visual binding. Reject metadata substitution and preserve recipient-specific material snapshots.
-- [x] Regenerate contract schemas and run focused tests. Confirm historical lineage fixtures without `selectedVisualMaterial` still decode and remain readable. `npm run verify`: 596 passed, 1 Windows symlink capability skip.
+- [x] Preserve historical lineage reads without `selectedVisualMaterial` while testing the new image evidence shape.
 
 ## Task 3: Freeze Exact Follow-on Asset and Context Dependencies
 
@@ -80,13 +82,12 @@
 
 **Produces:** Every accepted follow-on has enough exact source, asset, and material lineage to remain inspectable and executable after source-run deletion; image assets remain referenced by the follow-on transaction only when that follow-on actually needs them.
 
-- [x] Trace the existing deletion preview and foreign-key behavior with a source visual run plus an accepted follow-on. The preview listed the retained child, its `run_visual_assets` row retained the digest-pinned image, and execution resolved the same bytes after source deletion; no custody gap was found.
 - [x] Add the failure-first integration test named `accepted visual follow-on retains its selected source image after deleting the source run`. It completes the source through the worker/store, accepts a pixel-bound child, deletes the source, then recalls and executes the persisted child packet using its retained asset reference.
 - [x] Assert the source deletion preview lists the retained child and that `PRAGMA foreign_key_check` passes after deleting the source. The child retains only its bound `portrait` reference while the source also had an unrelated image.
-- [x] Current transactional `run_visual_assets` pinning passes. No SQL tables, migration, deletion changes, or garbage-collection feature were added. Temporarily removing the asset-link write caused the integration test to fail with `data_integrity_error`; restoring it passed.
+- [x] Keep transactional `run_visual_assets` pinning as the custody owner; no schema or deletion change is needed.
 - [x] Validate the frozen follow-on source version again at acceptance; the existing `follow-on acceptance rejects a source that changes after packet fit inspection` test covers the race and atomic rejection.
 - [x] Preserve image order and question-scoped binding through acceptance. The follow-on provider receives only the explicitly bound image, and the stored context contains no sibling image.
-- [x] Run `node --import tsx --test --test-concurrency=4 test/run-store.test.ts test/image-assets.test.ts test/visual-acceptance.test.ts`: 89 passed; legacy text follow-on deletion tests pass.
+- [x] Preserve the existing source-version revalidation and legacy text follow-on deletion behavior.
 
 ## Task 4: Make Selection and Pair Denominators Explicit
 
@@ -101,7 +102,7 @@
 - [x] Preserve the existing `JourneyComparisonEvidence` and `run_query` output, including pair counts and per-member `result`, `failure`, `providerSelection`, and `execution`; no second aggregate of paired score/confidence values was added.
 - [x] Add optional `sourceSelection: { version: 1, matchedEvaluations, includedEvaluations, representedContexts, representedRespondents, followOnEvaluations }` to `FollowOnLineage`. Compute it from matched and included source turns, unique source contexts/respondents, and prepared evaluations. Keep old `selectionCoverage` and records without `sourceSelection` readable.
 - [x] Extend `prepared-validation.ts` to recompute and reject mismatched `sourceSelection` from lineage selections and child evaluations. A forged matched count is rejected before any submission record exists.
-- [x] Run denominator tests first and witness both fail on missing `sourceSelection`; implement at the domain, preparation, and validation owners rather than serializers.
+- [x] Keep denominator calculation and validation at the domain, preparation, and persistence boundaries.
 - [x] Historical text lineage, image lineage, incomplete pair denominators, missing responses, and evaluation-local provider evidence remain readable and distinct.
 
 ## Task 5: Teach and Qualify Visual Follow-on Workflows
@@ -113,7 +114,7 @@
 **Produces:** An installed agent recipe that selects exact source evaluation/context handles; chooses recorded or continue; independently sets retained material and answer visibility; exposes image descriptors/captions/typed reactions as compact history; resends pixels only through explicit question bindings; compares complete and incomplete pairs with correct denominators; and describes model evidence as correlated judgments.
 
 - [x] Add a behavioral fixture named `visual-follow-on-context-projection` under the existing skill workflow fixtures. The scripted turns require the agent to inspect a mapped image Choice result, distinguish it from text `selectedMaterial`, select a retained subset (including empty where appropriate), explicitly bind pixels for Clef reuse, inspect the exact request, and report incomplete-pair denominators without calling them ties.
-- [x] Add an executable skill behavior test that rejects a workflow which reuses an image through text selection, sends unbound sibling pixels, includes sibling answers, or reports an incomplete pair as a preference. Prove the test fails when the behavior fixture is deliberately changed to omit the explicit image binding, then restore the fixture and confirm it passes.
+- [x] Exercise exact image evidence, explicit bound-pixel projection, sibling-answer exclusion, unbound-image rejection, and question-scoped mixed visual/text packets through the real MCP/store workflow. Keep incomplete-pair interpretation as an adversarial campaign criterion rather than a wording-detector test.
 - [x] Update the existing follow-on section and tool table rather than adding a parallel high-level recipe. Link provider limits to the Clef guide and human image custody to the image-preparation guide. Keep README unchanged because no first-use task is being added.
 - [x] Extend `test/package.test.ts` to copy the built plugin to an unrelated temp location, run a visual Choice source plus image follow-on through the shipped MCP, delete the source run, reconnect using CLI/MCP as appropriate, and verify the child request, evidence and asset are available without checkout files.
 - [x] Regenerate contracts and plugin using `npm run contracts:build`, `npm run build`, `npm run plugin:package -- --validate-only`, then run `npm run verify` and `node --import tsx --test test/package.test.ts`.

@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { RunStoreError } from '../../application/run-store.js';
 import { asNumber, asText, parseJson, parseJsonRecord, type DatabaseRow } from './rows.js';
 import { decodeCursor, encodeCursor, pageSize } from './cursors.js';
-import { assertRetainedImageAsset, encounteredMaterialsFromState, materialCatalogForRequest, resultFromStorage, storedEvaluationFailure } from './evidence-records.js';
+import { assertRetainedImageAsset, materialCatalogForExactContext, resultFromStorage, storedEvaluationFailure } from './evidence-records.js';
 import { providerExecutionEvidenceSchema } from '../../domain/decision/decision.js';
 import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { hashCanonical } from '../identity.js';
@@ -158,7 +158,8 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
             selectedMaterialIds.add(materialId);
             selectedMaterialRespondents.add(respondentId);
             const packet = decisionPacketSchema.parse(parseJson(row.packet_json, 'matched packet'));
-            const catalog = materialCatalogForRequest(parsedRequest.data, lineage, asText(row.context_id, 'matched context ID'), respondentId, encounteredMaterialsFromState(packet.state));
+            const catalog = materialCatalogForExactContext(parsedRequest.data, lineage, asText(row.context_id, 'matched context ID'), respondentId, packet,
+              row.branch_id === null || row.branch_id === undefined ? undefined : asText(row.branch_id, 'branch ID'));
             const selected = catalog.find(({ id }) => id === materialId);
             if (!selected) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
             assertRetainedImageAsset(context.database, query.sourceRunId, selected);
@@ -208,7 +209,8 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         if (result?.type === 'choice') {
           const materialId = packet.question.type === 'choice' ? packet.question.materialOptions?.[result.choice] : undefined;
           if (materialId) {
-            const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
+            const candidate = materialCatalogForExactContext(parsedRequest.data, lineage, contextId, respondentId, packet,
+              row.branch_id === null || row.branch_id === undefined ? undefined : asText(row.branch_id, 'branch ID')).find(({ id }) => id === materialId);
             if (!candidate) throw new RunStoreError('data_integrity_error', `Mapped Choice answer has no retained material evidence for ${materialId}.`);
             assertRetainedImageAsset(context.database, query.sourceRunId, candidate);
             if (!isImageMaterial(candidate)) {

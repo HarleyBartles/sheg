@@ -466,6 +466,7 @@ export type FollowOnSourceTurn = {
   evaluationId: string;
   contextId: string;
   respondentId: string;
+  branchId?: string;
   status: 'pending' | 'answered' | 'failed' | 'unreached';
   packet: import('../decision/decision.js').DecisionRequest & { state: import('../decision/prompt.js').PromptState };
   result?: import('../decision/decision.js').DecisionResult;

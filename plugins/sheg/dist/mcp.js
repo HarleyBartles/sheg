@@ -37726,7 +37726,7 @@ function emptyTrajectory() {
     responses: []
   });
 }
-function appendTrajectoryResponse(trajectory, question, result, exposedItemIds) {
+function appendTrajectoryResponse(trajectory, question, result, exposedItemIds, visualEvidence) {
   if (question.type !== result.type) throw new Error("Decision response type does not match the saved question.");
   const exposed = [...exposedItemIds];
   let response;
@@ -37741,7 +37741,8 @@ function appendTrajectoryResponse(trajectory, question, result, exposedItemIds) 
       choiceMeaning,
       exposedItemIds: exposed,
       ...result.probabilities === void 0 ? {} : { probabilities: { ...result.probabilities } },
-      ...result.confidence === void 0 ? {} : { confidence: result.confidence }
+      ...result.confidence === void 0 ? {} : { confidence: result.confidence },
+      ...visualEvidence ? { visualEvidence } : {}
     };
     choices = [...trajectory.choices, { taskId: question.id, choiceId: result.choice, choiceMeaning, exposedItemIds: exposed }];
   } else if (result.type === "score" && question.type === "score") {
@@ -37754,10 +37755,11 @@ function appendTrajectoryResponse(trajectory, question, result, exposedItemIds) 
       probabilities: { ...result.probabilities },
       legend: { ...result.legend },
       ...result.confidence === void 0 ? {} : { confidence: result.confidence },
-      exposedItemIds: exposed
+      exposedItemIds: exposed,
+      ...visualEvidence ? { visualEvidence } : {}
     };
   } else if (result.type === "noul" && question.type === "noul") {
-    response = { type: "noul", taskId: question.id, noul: result.noul, proposition: question.instructions, exposedItemIds: exposed };
+    response = { type: "noul", taskId: question.id, noul: result.noul, proposition: question.instructions, exposedItemIds: exposed, ...visualEvidence ? { visualEvidence } : {} };
   } else throw new Error("Decision response type does not match the saved question.");
   return finishTrajectory({
     version: 1,
@@ -37783,7 +37785,7 @@ function prepareFollowOnPacket(input2) {
   if (mode === "continue") {
     if (!input2.result) throw new Error("Continue context requires the selected completed answer.");
     const currentIds = source.state.encounteredItems.map(({ id }) => id);
-    const trajectory = input2.includeSelectedAnswer === false ? source.state.trajectory : appendTrajectoryResponse(source.state.trajectory, source.question, input2.result, currentIds);
+    const trajectory = input2.includeSelectedAnswer === false ? source.state.trajectory : appendTrajectoryResponse(source.state.trajectory, source.question, input2.result, currentIds, input2.visualEvidence);
     state = {
       respondent: { profile: { ...source.state.respondent.profile } },
       encounteredItems: [...(input2.retainedMaterial ?? source.state.encounteredItems).map((item) => ({ ...item })), ...material],
@@ -39687,6 +39689,22 @@ async function prepareFollowOnRun(request, source, provider) {
       return encountered.filter(({ id }) => requested.has(id));
     })();
     const rawResult = turn.result ? decisionValueFromResult(turn.result) : void 0;
+    const sourceVisualEvidence = turn.packet.question.visual && turn.result ? {
+      mode: turn.packet.question.visual.mode,
+      provider: turn.result.provider,
+      model: turn.result.model,
+      materials: turn.packet.question.visual.materialIds.map((materialId) => {
+        const visual = turn.packet.visualMaterials?.find(({ id }) => id === materialId);
+        if (!visual) throw new RunProblemError("follow_on_context_invalid", `Source visual material ${materialId} is unavailable in evaluation ${turn.evaluationId}.`);
+        return {
+          materialId,
+          assetId: visual.asset.assetId,
+          sha256: visual.asset.sha256,
+          altText: visual.altText,
+          ...visual.caption === void 0 ? {} : { caption: visual.caption }
+        };
+      })
+    } : void 0;
     const packets = [];
     try {
       for (const question of request.questions) {
@@ -39697,7 +39715,8 @@ async function prepareFollowOnRun(request, source, provider) {
           ...request.context.mode === "recorded" ? {} : { material: selectedMaterial },
           ...request.context.mode === "continue" ? { retainedMaterial, includeSelectedAnswer: request.context.includeSelectedAnswer ?? true } : {},
           visualMaterials: visualMaterialsFor(question),
-          ...rawResult ? { result: rawResult } : {}
+          ...rawResult ? { result: rawResult } : {},
+          ...request.context.mode === "continue" && request.context.includeSelectedAnswer !== false && sourceVisualEvidence ? { visualEvidence: sourceVisualEvidence } : {}
         }));
       }
     } catch (error62) {
@@ -46789,6 +46808,51 @@ function materialCatalogForRequest(request, lineage, contextId, respondentId, en
   const inherited = request.kind === "follow-on" ? lineage?.materialSnapshots.filter((snapshot) => snapshot.contextId === contextId && snapshot.respondentId === respondentId).flatMap(({ materials }) => materials) ?? [] : [];
   return mergeMaterialCatalog(source, inherited, encountered);
 }
+function materialCatalogForExactContext(request, lineage, contextId, respondentId, packet, branchId) {
+  const catalog = materialCatalogForRequest(request, lineage, contextId, respondentId, packet.state.encounteredItems);
+  if (request.kind !== "journey" || !branchId) return catalog;
+  const siblingMaterialIds = siblingJourneyMaterialIds(request, branchId);
+  const exposedVisualIds = /* @__PURE__ */ new Set([
+    ...(packet.visualMaterials ?? []).map(({ id }) => id),
+    ...packet.state.trajectory.responses.flatMap((response) => response.visualEvidence?.materials.map(({ materialId }) => materialId) ?? [])
+  ]);
+  return catalog.filter((material) => !siblingMaterialIds.has(material.id) && (!isImageMaterial(material) || exposedVisualIds.has(material.id)));
+}
+function siblingJourneyMaterialIds(request, branchId) {
+  const graph = journeyTopology(request.journey);
+  const nodes = new Map(graph.nodes.map((node2) => [node2.id, node2]));
+  const assignments = branchId.split("/").slice(1).flatMap((part) => {
+    const separator = part.indexOf("=");
+    return separator > 0 ? [{ forkNodeId: part.slice(0, separator), conditionId: part.slice(separator + 1) }] : [];
+  });
+  const exposuresFrom = (entryNodeId) => {
+    const exposed = /* @__PURE__ */ new Set();
+    const pending = [entryNodeId];
+    const visited = /* @__PURE__ */ new Set();
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
+      const node2 = nodes.get(nodeId);
+      if (!node2) continue;
+      if (node2.kind === "expose") exposed.add(node2.itemId);
+      pending.push(...journeyControlSuccessors(graph, nodeId).map(({ toNodeId }) => toNodeId));
+    }
+    return exposed;
+  };
+  const siblings = /* @__PURE__ */ new Set();
+  for (const { forkNodeId, conditionId } of assignments) {
+    const fork = nodes.get(forkNodeId);
+    if (fork?.kind !== "fork") continue;
+    const selected = fork.conditions.find(({ id }) => id === conditionId);
+    if (!selected) continue;
+    const selectedExposures = exposuresFrom(selected.entryNodeId);
+    for (const condition of fork.conditions) if (condition.id !== conditionId) {
+      for (const materialId of exposuresFrom(condition.entryNodeId)) if (!selectedExposures.has(materialId)) siblings.add(materialId);
+    }
+  }
+  return siblings;
+}
 function assertRetainedImageAsset(database, runId, material) {
   if (!isImageMaterial(material)) return;
   const row = database.prepare(`SELECT ia.asset_id, ia.sha256, ia.format, ia.width, ia.height, ia.byte_length
@@ -47880,8 +47944,10 @@ function validatePrepared(prepared) {
         const snapshotItem = selected && snapshot?.materials.find(({ id }) => id === selected.materialId);
         const snapshotVisual = selectedVisual && snapshot?.materials.find(({ id }) => id === selectedVisual.materialId);
         const exposed = selected && encounteredMaterialsFromState(packet.data.state).some(({ id, text: text2 }) => id === selected.materialId && text2 === selected.text);
-        const boundVisual = selectedVisual && packet.data.visualMaterials?.some(({ id, altText, caption, asset }) => id === selectedVisual.materialId && altText === selectedVisual.altText && caption === selectedVisual.caption && hashCanonical(asset) === hashCanonical(selectedVisual.asset));
-        if (mappings.length !== 1 || Boolean(selected) === Boolean(selectedVisual) || Boolean(selected && (!snapshotItem || !exposed || selected.textSha256 !== createHash5("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256)) || Boolean(selectedVisual && (!snapshotVisual || !("type" in snapshotVisual) || snapshotVisual.type !== "image" || !boundVisual || snapshotVisual.altText !== selectedVisual.altText || snapshotVisual.caption !== selectedVisual.caption || hashCanonical(snapshotVisual.asset) !== hashCanonical(selectedVisual.asset)))) {
+        const boundVisual = selectedVisual && packet.data.visualMaterials?.find(({ id }) => id === selectedVisual.materialId);
+        const snapshotVisualMatches = Boolean(selectedVisual && snapshotVisual && "type" in snapshotVisual && snapshotVisual.type === "image" && snapshotVisual.altText === selectedVisual.altText && snapshotVisual.caption === selectedVisual.caption && hashCanonical(snapshotVisual.asset) === hashCanonical(selectedVisual.asset));
+        const boundVisualMatches = !selectedVisual || !boundVisual || boundVisual.altText === selectedVisual.altText && boundVisual.caption === selectedVisual.caption && hashCanonical(boundVisual.asset) === hashCanonical(selectedVisual.asset);
+        if (mappings.length !== 1 || Boolean(selected) === Boolean(selectedVisual) || Boolean(selected && (!snapshotItem || !exposed || selected.textSha256 !== createHash5("sha256").update(selected.text, "utf8").digest("hex") || snapshotItem.text !== selected.text || snapshotItem.sourceId !== selected.sourceId || snapshotItem.sourceSha256 !== selected.sourceSha256)) || Boolean(selectedVisual && (!snapshotVisualMatches || !boundVisualMatches))) {
           throw new RunStoreError("invalid_prepared_run", "Selected-material lineage does not match its frozen recipient packet and catalog.");
         }
       }
@@ -49032,7 +49098,14 @@ function queryEvidencePage(context, input2) {
           selectedMaterialIds.add(materialId);
           selectedMaterialRespondents.add(respondentId);
           const packet = decisionPacketSchema.parse(parseJson(row.packet_json, "matched packet"));
-          const catalog = materialCatalogForRequest(parsedRequest.data, lineage, asText(row.context_id, "matched context ID"), respondentId, encounteredMaterialsFromState(packet.state));
+          const catalog = materialCatalogForExactContext(
+            parsedRequest.data,
+            lineage,
+            asText(row.context_id, "matched context ID"),
+            respondentId,
+            packet,
+            row.branch_id === null || row.branch_id === void 0 ? void 0 : asText(row.branch_id, "branch ID")
+          );
           const selected = catalog.find(({ id }) => id === materialId);
           if (!selected) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
           assertRetainedImageAsset(context.database, query.sourceRunId, selected);
@@ -49091,7 +49164,14 @@ function queryEvidencePage(context, input2) {
       if (result?.type === "choice") {
         const materialId = packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
         if (materialId) {
-          const candidate = materialCatalogForRequest(parsedRequest.data, lineage, contextId, respondentId, encounteredMaterialsFromState(packet.state)).find(({ id }) => id === materialId);
+          const candidate = materialCatalogForExactContext(
+            parsedRequest.data,
+            lineage,
+            contextId,
+            respondentId,
+            packet,
+            row.branch_id === null || row.branch_id === void 0 ? void 0 : asText(row.branch_id, "branch ID")
+          ).find(({ id }) => id === materialId);
           if (!candidate) throw new RunStoreError("data_integrity_error", `Mapped Choice answer has no retained material evidence for ${materialId}.`);
           assertRetainedImageAsset(context.database, query.sourceRunId, candidate);
           if (!isImageMaterial(candidate)) {
@@ -49337,7 +49417,8 @@ function loadFollowOnSources(database, input2, notFound) {
     const result = row.result_json === null ? void 0 : resultFromStorage(parseJson(row.result_json, "source answer"), row.execution_json === null ? void 0 : parseJson(row.execution_json, "source execution"));
     const contextId = asText(row.context_id, "context ID");
     const respondentId = asText(row.respondent_id, "respondent ID");
-    const materials = materialCatalogForRequest(sourceRequest.data, sourceLineage, contextId, respondentId, packet.state.encounteredItems);
+    const branchId = row.branch_id === null || row.branch_id === void 0 ? void 0 : asText(row.branch_id, "branch ID");
+    const materials = materialCatalogForExactContext(sourceRequest.data, sourceLineage, contextId, respondentId, packet, branchId);
     const selectedMaterialId = result?.type === "choice" && packet.question.type === "choice" ? packet.question.materialOptions?.[result.choice] : void 0;
     const selectedMaterial = selectedMaterialId ? materials.find(({ id }) => id === selectedMaterialId) : void 0;
     if (selectedMaterial && isImageMaterial(selectedMaterial)) assertRetainedImageAsset(database, request.sourceRunId, selectedMaterial);
@@ -49359,6 +49440,7 @@ function loadFollowOnSources(database, input2, notFound) {
       evaluationId: asText(row.evaluation_id, "evaluation ID"),
       contextId,
       respondentId,
+      ...branchId ? { branchId } : {},
       status: asText(row.status, "evaluation status"),
       packet,
       ...result ? { result } : {},

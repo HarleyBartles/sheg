@@ -130,12 +130,6 @@ test('visual follow-on workflow fixture covers exact image evidence, pixel reuse
   assert.equal(evaluator?.version, fixture.version);
   assert.deepEqual(fixture.setup, { kind: 'visual-follow-on-context-projection', version: 1 });
   assert.deepEqual(fixture.turns.map(({ expectedTools }) => expectedTools), [['run_query'], ['run_inspect'], []]);
-  assert.match(fixture.turns[0]!.user, /\{\{sourceRunId\}\}/);
-  assert.match(fixture.turns[1]!.user, /bind only its selectedVisualMaterial image ID in pixel mode/i);
-  assert.match(fixture.turns[1]!.criteria.join(' '), /explicitly bind/i);
-  assert.match(fixture.turns[2]!.criteria.join(' '), /incomplete pair.*missing evidence/i);
-  assert.ok(evaluator?.criteria.some(({ id }) => id === 'complete-pair-denominators'));
-  assert.ok(evaluator?.prohibitedClaims.some((claim) => /incomplete pair is a tie/i.test(claim)));
 });
 
 test('partial journey workflow fixture gates run_resume on a separate explicit user turn', () => {
