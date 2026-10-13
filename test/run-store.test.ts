@@ -622,11 +622,13 @@ test('two processes can initialize the same fresh datastore concurrently', async
     child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`Initializer exited with ${code}: ${stderr}`)));
   });
   try {
-    await Promise.all([launch(), launch()]);
+    const initializations = await Promise.allSettled([launch(), launch()]);
+    const failedInitialization = initializations.find((result) => result.status === 'rejected');
+    if (failedInitialization?.status === 'rejected') throw failedInitialization.reason;
     const store = openRunStore(root);
     store.close();
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 

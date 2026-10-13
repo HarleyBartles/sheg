@@ -244,15 +244,37 @@ function liveWorkExists(database: DatabaseSync, nowMs: number): boolean {
   return row !== undefined;
 }
 
+function concurrentMigrationProgress(database: DatabaseSync, migrations: readonly SqliteMigration[], observedVersion: number, targetVersion: number): 'advanced' | 'retry' | undefined {
+  const currentVersion = pragmaNumber(database, 'user_version');
+  const knownVersion = currentVersion === migrations.at(-1)?.toVersion || migrations.some(({ fromVersion }) => fromVersion === currentVersion);
+  if (!knownVersion) return undefined;
+  if (currentVersion >= targetVersion) return 'advanced';
+  if (currentVersion !== observedVersion) return 'retry';
+  return undefined;
+}
+
 function applyUpgrade(database: DatabaseSync, dataRoot: string, migrations: readonly SqliteMigration[], migration: SqliteMigration, now: () => number): void {
   for (let retry = 0; retry < MIGRATION_BACKUP_RETRIES; retry += 1) {
     const observedVersion = pragmaNumber(database, 'user_version');
     if (observedVersion === migration.toVersion) return;
     if (observedVersion !== migration.fromVersion) throw new RunStoreError('unsupported_schema_version', `The Sheg datastore changed to schema ${observedVersion} while opening; preserve it and use run_storage to inspect compatibility.`);
-    validateMigrationSource(database, migrations, migration.fromVersion);
+    try { validateMigrationSource(database, migrations, migration.fromVersion); }
+    catch (error) {
+      const progress = concurrentMigrationProgress(database, migrations, observedVersion, migration.toVersion);
+      if (progress === 'advanced') return;
+      if (progress === 'retry') continue;
+      throw error;
+    }
     if (liveWorkExists(database, now())) throw new RunStoreError('migration_deferred', 'A prepared launch or active worker lease is using the datastore. Wait for it to finish, then retry the upgrade.');
     const beforeBackupDataVersion = pragmaNumber(database, 'data_version');
-    const backupPath = verifiedBackup(database, dataRoot, migration.fromVersion, migration.toVersion);
+    let backupPath: string;
+    try { backupPath = verifiedBackup(database, dataRoot, migration.fromVersion, migration.toVersion); }
+    catch (error) {
+      const progress = concurrentMigrationProgress(database, migrations, observedVersion, migration.toVersion);
+      if (progress === 'advanced') return;
+      if (progress === 'retry') continue;
+      throw error;
+    }
     let transactionOpen = false;
     let foreignKeysDisabled = false;
     try {
