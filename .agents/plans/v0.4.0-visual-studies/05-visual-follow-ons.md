@@ -41,7 +41,7 @@
 
 ## Task 1: Add an Explicit Continue-Material Projection
 
-**Files:** Modify `src/domain/run/request.ts`, `src/domain/decision/prompt.ts`, and `src/application/run-inspection.ts`; extend `test/prompt.test.ts` and `test/run-store.test.ts`; regenerate request schemas and built runtime from canonical source.
+**Files:** Modify `src/domain/run/request.ts`, `src/domain/decision/prompt.ts`, and `src/application/run-inspection.ts`; extend `test/prompts.test.ts` and `test/run-store.test.ts`; regenerate request schemas and built runtime from canonical source.
 
 **Consumes:** Existing follow-on `context.mode`, exact selected source packet and profile, `prepareFollowOnPacket`, source material catalog and text `materialIds` behavior.
 
@@ -51,7 +51,7 @@
 - [ ] Add `retainedMaterialIds: string[]` (optional, uniqueness enforced but no minimum) for continue mode only. It filters previously encountered items; `materialIds` continues to add references from the source material catalog. Reject duplicate IDs across the two fields.
 - [ ] Extend `prepareFollowOnPacket` with a resolved `retainedMaterial` projection and an explicit answer-history flag. Continue mode must keep the source profile, append retained text in source encounter order, and append exactly the selected source answer only when requested. It must never carry image pixels through `PromptState`.
 - [ ] In `prepareFollowOnRun`, resolve every requested retained ID against the exact selected source turn's catalog; reject IDs absent from that context and preserve source order even when request order differs. Explicit empty input must produce no encountered items.
-- [ ] Add tests named `continue follow-on can explicitly retain no prior material while including the selected answer` and `continue follow-on retains only an ordered source-context subset independently of answer history` to `test/run-store.test.ts`. Run `node --import tsx --test test/run-store.test.ts` and confirm each new assertion fails before implementation because the input schema or compiled packet rejects/retains the wrong projection.
+- [ ] Add packet-level coverage in `test/prompts.test.ts` and store-level tests named `continue follow-on can explicitly retain no prior material while including the selected answer` and `continue follow-on retains only an ordered source-context subset independently of answer history` to `test/run-store.test.ts`. Run `node --import tsx --test test/prompts.test.ts test/run-store.test.ts` and confirm each new assertion fails before implementation because the input schema or compiled packet rejects/retains the wrong projection.
 - [ ] Implement the schema and projection, then rerun the focused tests. Assert the actual frozen packet state, trajectory response count and exact item order, not helper arguments or source code shape.
 - [ ] Run `npm run contracts:build`, `npm run build`, and the focused suite; confirm generated schema/plugin changes are derived from the source and the prior text follow-on tests still pass.
 
