@@ -74,7 +74,7 @@
 - [x] **Step 2: Build and inspect the copied package.** Run `npm run contracts:build`, `npm run build`, `npm run plugin:package -- --validate-only`, and inspect generated parity plus the copied-runtime dependency boundary.
 - [x] **Step 3: Run focused tests and `npm run verify`.** Include the released-store upgrade, package integration, recovery, and relevant typed-request tests. Fix any failure through its established owner and rerun the full gate after the final change.
 - [x] **Step 4: Review the whole final diff and resolve findings.** Check the spec, source-quality method, boundaries, test value, generated output, user data custody, and version identity. Keep final findings in the working chat/PR, not in a new receipt file.
-- [ ] **Step 5: Publish and close the Plan 7 cursor.** Refresh `origin/develop`, confirm the unique version remains `0.4.0-dev.11`, rebuild/reverify if stale, commit/push and open the authorized feature PR to `develop`, confirm exact-head CI and merge, fast-forward the canonical checkout, update this roadmap with the merged commit/PR, then retire only this verified clean worktree and merged feature branch.
+- [x] **Step 5: Publish and close the Plan 7 cursor.** Refresh `origin/develop`, confirm the unique version remains `0.4.0-dev.11`, rebuild/reverify if stale, commit/push and open the authorized feature PR to `develop`, confirm exact-head CI and merge, fast-forward the canonical checkout, update this roadmap with the merged commit/PR, then retire only this verified clean worktree and merged feature branch.
 
 ## Execution Handoff
 
