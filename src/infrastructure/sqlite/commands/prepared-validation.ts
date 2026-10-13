@@ -3,12 +3,13 @@ import { decisionRequestSchema } from '../../../domain/decision/decision.js';
 import { compileDecisionPacketForCompiler } from '../../../domain/decision/prompt.js';
 import type { JourneyDefinition } from '../../../domain/study/arm.js';
 import type { JourneyRespondentState } from '../../../domain/run/lifecycle.js';
-import { providerSelectionPolicySnapshotSchema } from '../../../domain/run/lifecycle.js';
+import { providerSelectionInitialChoiceSchema, providerSelectionPolicySnapshotSchema } from '../../../domain/run/lifecycle.js';
 import { followOnLineageSchema, runRequestSchema, type FollowOnLineage, type PreparedJourneyRun, type PreparedRun } from '../../../domain/run/request.js';
 import { RunStoreError } from '../../../application/run-store.js';
 import { hashCanonical } from '../../identity.js';
 import { journeyTopology } from '../../../domain/journey/topology.js';
 import { encounteredMaterialsFromState, materialCatalogForRequest } from '../evidence-records.js';
+import { providerModelIdentity } from '../../../providers/config.js';
 
 function isJourneyAskNode(journey: JourneyDefinition, nodeId: string, questionId: string): boolean {
   const node = journeyTopology(journey).nodes.find((candidate) => candidate.id === nodeId);
@@ -20,6 +21,18 @@ export function validatePrepared(prepared: PreparedRun): PreparedRun {
   if (!parsedRequest.success || prepared.compilerFingerprint.length === 0 ||
       hashCanonical({ request: parsedRequest.data, compilerFingerprint: prepared.compilerFingerprint }) !== prepared.requestFingerprint) {
     throw new RunStoreError('invalid_prepared_run', 'Prepared run request or fingerprint is invalid.');
+  }
+  if (parsedRequest.data.kind === 'follow-on' && !parsedRequest.data.provider && parsedRequest.data.providerSelection) {
+    const snapshot = prepared.providerSelectionSnapshot;
+    if (!snapshot) throw new RunStoreError('invalid_prepared_run', 'Automatic follow-on routing requires its frozen provider catalogue.');
+    for (const evaluation of prepared.evaluations) {
+      const choice = providerSelectionInitialChoiceSchema.safeParse(evaluation.providerSelection);
+      const entry = choice.success ? snapshot.catalogue.entries.find(({ id }) => id === choice.data.providerId) : undefined;
+      if (!choice.success || choice.data.respondentId !== evaluation.respondentId || choice.data.questionId !== evaluation.questionId ||
+          !entry?.enabled || providerModelIdentity(entry.provider) !== choice.data.modelIdentity) {
+        throw new RunStoreError('invalid_prepared_run', 'Automatic follow-on evaluations must retain a matching enabled provider from the frozen catalogue.');
+      }
+    }
   }
   if (parsedRequest.data.kind === 'follow-on') {
     const parsedLineage = followOnLineageSchema.safeParse(prepared.lineage);

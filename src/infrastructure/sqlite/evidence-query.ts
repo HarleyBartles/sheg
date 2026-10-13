@@ -7,7 +7,7 @@ import { assertRetainedImageAsset, materialCatalogForExactContext, resultFromSto
 import { providerExecutionEvidenceSchema } from '../../domain/decision/decision.js';
 import { decisionPacketSchema } from '../../domain/decision/prompt.js';
 import { hashCanonical } from '../identity.js';
-import { runStatusSchema, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView } from '../../domain/run/lifecycle.js';
+import { providerSelectionInitialChoiceSchema, providerSelectionPolicySnapshotSchema, runStatusSchema, type RunEvidencePage, type RunEvidenceQuery, type RunStatus, type RunStatusView } from '../../domain/run/lifecycle.js';
 import { requireExplicitProvider } from '../../domain/run/request.js';
 import { followOnLineageSchema, runEvidenceQuerySchema, runLifecycleSchema, runRequestSchema, type FollowOnLineage } from '../../domain/run/request.js';
 import { decisionValueSchema } from '../../domain/decision/decision.js';
@@ -15,6 +15,7 @@ import { decodeStoredPayload } from './payload-codecs.js';
 import { z } from 'zod';
 import { evaluationCriteriaSql } from './evaluation-criteria.js';
 import { isImageMaterial } from '../../domain/study/stimulus.js';
+import { providerModelIdentity } from '../../providers/config.js';
 
 type EvidenceCursorPayload = {
   kind: 'evidence';
@@ -56,6 +57,10 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
       if (!parsedRequest.success || typeof storedRecord.compilerFingerprint !== 'string') {
         throw new RunStoreError('data_integrity_error', 'Stored run request is invalid.');
       }
+      const parsedSelectionSnapshot = storedRecord.providerSelectionSnapshot === undefined
+        ? undefined : providerSelectionPolicySnapshotSchema.safeParse(storedRecord.providerSelectionSnapshot);
+      if (parsedSelectionSnapshot && !parsedSelectionSnapshot.success) throw new RunStoreError('data_integrity_error', 'Stored provider selection snapshot is invalid.');
+      const selectionSnapshot = parsedSelectionSnapshot?.success ? parsedSelectionSnapshot.data : undefined;
       const compilerFingerprint = storedRecord.compilerFingerprint;
       let lineage: FollowOnLineage | undefined;
       if (parsedRequest.data.kind === 'follow-on') {
@@ -189,21 +194,25 @@ export function queryEvidencePage(context: EvidenceQueryContext, input: RunEvide
         .all(query.sourceRunId, ...pageIds) as DatabaseRow[];
       const hasMore = rows.length > limit;
       const pageRows = rows.slice(0, limit);
-      const provider = requireExplicitProvider(parsedRequest.data);
-      const endpoint = provider.kind === 'jev'
-        ? provider.endpoint
-        : provider.kind === 'laya'
-          ? provider.baseUrl
-          : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
-      const model = provider.kind === 'jev' || provider.kind === 'clef'
-        ? provider.model
-        : provider.checkpoint;
       const items: RunEvidencePage['items'] = pageRows.map((row) => {
         const contextId = asText(row.context_id, 'context ID');
         const respondentId = asText(row.respondent_id, 'respondent ID');
         const packet = decisionPacketSchema.parse(parseJson(row.packet_json, 'evidence packet'));
         const result = row.result_json === null ? undefined : resultFromStorage(parseJson(row.result_json, 'decision result'), row.execution_json === null ? undefined : parseJson(row.execution_json, 'provider execution'));
         const failure = storedEvaluationFailure(row);
+        const storedChoice = row.provider_selection_json === null || row.provider_selection_json === undefined ? undefined
+          : providerSelectionInitialChoiceSchema.safeParse(parseJson(row.provider_selection_json, 'evaluation provider selection'));
+        if (storedChoice && !storedChoice.success) throw new RunStoreError('data_integrity_error', 'Stored evaluation provider selection is invalid.');
+        const providerChoice = storedChoice?.success ? storedChoice.data : selectionSnapshot?.initialChoices?.find((choice) =>
+          choice.respondentId === respondentId && choice.questionId === asText(row.question_id, 'question ID') &&
+          (choice.branchId ?? 'root') === (row.branch_id === null || row.branch_id === undefined ? 'root' : asText(row.branch_id, 'branch ID')));
+        const selectedEntry = providerChoice && selectionSnapshot?.catalogue.entries.find(({ id }) => id === providerChoice.providerId);
+        if (providerChoice && !selectedEntry) throw new RunStoreError('data_integrity_error', 'A frozen evaluation provider is absent from the accepted provider catalogue.');
+        const provider = parsedRequest.data.provider ? requireExplicitProvider(parsedRequest.data) : selectedEntry?.provider;
+        if (!provider) throw new RunStoreError('data_integrity_error', 'The evaluation has no frozen provider provenance.');
+        const endpoint = provider.kind === 'jev' ? provider.endpoint : provider.kind === 'laya' ? provider.baseUrl
+          : `https://api.cloudflare.com/client/v4/accounts/${provider.accountId}/ai/run/@cf/cloudflare/${provider.model}`;
+        const model = providerModelIdentity(provider);
         let selectedMaterial: RunEvidencePage['items'][number]['selectedMaterial'];
         let selectedVisualMaterial: RunEvidencePage['items'][number]['selectedVisualMaterial'];
         if (result?.type === 'choice') {

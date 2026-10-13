@@ -12,7 +12,7 @@ import { createRunService, type ProviderFactory } from '../src/application/run-s
 import { openImageAssetRepository } from '../src/infrastructure/sqlite/image-assets.js';
 import { openRunStore, splitRunStore } from '../src/infrastructure/run-store.js';
 import { providerCatalogueSchema } from '../src/providers/config.js';
-import { inlineJourneyRequestSchema } from '../src/domain/run/request.js';
+import { followOnRunRequestSchema, inlineJourneyRequestSchema } from '../src/domain/run/request.js';
 
 const local = { kind: 'laya' as const, baseUrl: 'http://127.0.0.1:7071', checkpoint: 'local-reader', contextLimit: 16000, headLimit: 4000,
   tokenizerJsonPath: 'C:/models/tokenizer.json', tokenizerSha256: 'a'.repeat(64), timeoutMs: 30000 };
@@ -123,6 +123,12 @@ test('automatic journey routes reached units, preserves matched-provider locks, 
     await service.resume(accepted.runId);
     await executeQuestionRun(splitRunStore(store), accepted.runId, factory);
     assert.equal(store.getStatus(accepted.runId).status, 'completed', JSON.stringify({ status: store.getStatus(accepted.runId), answers: store.answers(accepted.runId).items }));
+    const queried = store.queryEvidence({ sourceRunId: accepted.runId, criteria: { status: 'answered' } });
+    assert.deepEqual(queried.items.map(({ questionId, provenance }) => [questionId, provenance.provider, provenance.model, provenance.endpoint]), [
+      ['continue', 'laya', 'local-reader', 'http://127.0.0.1:7071'], ['continue', 'laya', 'local-reader', 'http://127.0.0.1:7071'],
+      ['image-fit', 'clef', 'clef', 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/clef'],
+      ['image-fit', 'clef', 'clef', 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/clef'],
+    ]);
     assert.equal(requests.filter(({ request: packet }) => packet.question.id === 'continue').length, 2);
     assert.equal(requests.filter(({ kind, request: packet }) => kind === 'clef' && packet.question.id === 'image-fit').length, 3);
     assert.deepEqual(requests.find(({ kind, request: packet }) => kind === 'clef' && packet.question.id === 'image-fit')?.request.visualMaterials?.map(({ id }) => id), ['portrait']);
@@ -134,6 +140,36 @@ test('automatic journey routes reached units, preserves matched-provider locks, 
       ['reader-a', 'continue', 'local'], ['reader-b', 'continue', 'local'], ['reader-a', 'image-fit', 'vision'], ['reader-b', 'image-fit', 'vision'],
     ]);
     assert.equal(store.attempts(accepted.runId).items.length, 5);
+
+    store.setProviderSettings({ catalogue: { entries: catalogue.entries.map((entry) => entry.id === 'vision' ? { ...entry, enabled: true } : entry) }, preferences: { preferredOrder: [] } }, 2);
+    const imageEvaluation = saved.find(({ respondentId, questionId }) => respondentId === 'reader-a' && questionId === 'image-fit')!;
+    const followOn = followOnRunRequestSchema.parse({ kind: 'follow-on', sourceRunId: accepted.runId,
+      selection: { references: [{ evaluationId: imageEvaluation.evaluationId, contextId: imageEvaluation.contextId }] },
+      context: { mode: 'continue', materialIds: ['portrait'] },
+      questions: [{ type: 'choice', id: 'follow-image', instructions: 'Does this image still fit?', options: { supports: 'It fits', distracts: 'It distracts' }, visual: { mode: 'pixels', materialIds: ['portrait'] } }],
+      providerSelection: {}, maxCalls: 1 });
+    const followInspection = await service.inspect(followOn);
+    assert.equal(followInspection.valid, true, JSON.stringify(followInspection.problems));
+    assert.equal(followInspection.initialChoices?.[0]?.providerId, 'vision');
+    const otherImageEvaluation = saved.find(({ respondentId, questionId }) => respondentId === 'reader-b' && questionId === 'image-fit')!;
+    const lockedFollowOn = followOnRunRequestSchema.parse({ ...followOn,
+      selection: { references: [
+        { evaluationId: imageEvaluation.evaluationId, contextId: imageEvaluation.contextId },
+        { evaluationId: otherImageEvaluation.evaluationId, contextId: otherImageEvaluation.contextId },
+      ] },
+      providerSelection: { comparisonLocks: [{ id: 'visual-match', members: [
+        { respondentId: 'reader-a', questionId: 'follow-image' }, { respondentId: 'reader-b', questionId: 'follow-image' },
+      ] }] } });
+    const lockedInspection = await service.inspect(lockedFollowOn);
+    assert.equal(lockedInspection.valid, false);
+    assert.match(lockedInspection.problems[0]?.message ?? '', /exact source contexts/);
+    const followAccepted = await service.start(randomUUID(), { ...followOn, expectedSelectionFingerprint: followInspection.selectionFingerprint });
+    store.setProviderSettings({ catalogue: { entries: catalogue.entries.map((entry) => entry.id === 'vision' ? { ...entry, enabled: false } : entry) }, preferences: { preferredOrder: ['local'] } }, 3);
+    await executeQuestionRun(splitRunStore(store), followAccepted.runId, (config) => provider(config.kind === 'laya' ? 'laya' : 'clef', requests));
+    assert.equal(store.getStatus(followAccepted.runId).status, 'completed', JSON.stringify(store.answers(followAccepted.runId).items));
+    const followEvaluations = store.getRequest(followAccepted.runId).evaluations;
+    assert.equal(followEvaluations[0]?.providerSelection?.providerId, 'vision');
+    assert.equal(store.queryEvidence({ sourceRunId: followAccepted.runId, criteria: { status: 'answered' } }).items[0]?.provenance.provider, 'clef');
   } finally { store.close(); images.close(); await rm(root, { recursive: true, force: true }); }
   }
 });

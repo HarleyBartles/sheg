@@ -111,7 +111,7 @@ function assertProviderSettingsSnapshot(database: DatabaseSync, snapshot: Prepar
       asText(row.preferences_json, 'provider preferences') !== JSON.stringify(snapshot.preferences)) {
     throw new RunStoreError('provider_settings_revision_conflict', 'Provider settings changed after inspection. Inspect the request again before accepting it.');
   }
-  if (request.expectedSelectionFingerprint && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
+  if (request.expectedSelectionFingerprint && snapshot.initialChoices !== undefined && request.expectedSelectionFingerprint !== providerSelectionFingerprint(request, snapshot)) {
     throw new RunStoreError('provider_selection_fingerprint_stale', 'Provider selection inputs changed after inspection. Inspect the request again before accepting it.');
   }
 }
@@ -256,7 +256,9 @@ export function insertPreparedRunData(database: NodeSQLiteDatabase, runId: strin
     groupId: evaluation.groupId!,
     packetJson: JSON.stringify(evaluation.packet),
     packetFingerprint: evaluation.packetFingerprint,
-    providerSelectionJson: prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId) ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
+    providerSelectionJson: evaluation.providerSelection ? JSON.stringify(evaluation.providerSelection)
+      : prepared.providerSelectionSnapshot?.initialChoices?.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)
+        ? JSON.stringify(prepared.providerSelectionSnapshot.initialChoices.find((choice) => choice.respondentId === evaluation.respondentId && choice.questionId === evaluation.questionId)) : null,
     status: 'pending' as const,
   }));
   for (const batch of chunks(evaluationRows, SQLITE_INSERT_BATCH_SIZE)) database.insert(evaluations).values(batch).run();

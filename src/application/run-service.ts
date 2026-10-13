@@ -107,6 +107,15 @@ export function createRunService(
     return { ...admission, snapshot: frozenSnapshot, fingerprint: providerSelectionFingerprint(request, frozenSnapshot) };
   }
 
+  async function inspectAutomaticFollowOn(request: Extract<ParsedRunRequest, { kind: 'follow-on' }>, snapshot: ProviderSelectionPolicySnapshot) {
+    const candidates = await automaticCandidates(snapshot);
+    commands.reconcile(request.sourceRunId, Date.now());
+    const source = reads.resolveFollowOnSources(request);
+    const admission = await prepareFollowOnRun(request, source, undefined, { catalogue: { revision: snapshot.catalogueRevision, entries: snapshot.catalogue.entries }, preferences: snapshot.preferences, candidates });
+    const fingerprintSnapshot = selectionSnapshot(request, admission.inspection.initialChoices);
+    return { ...admission, snapshot: selectionSnapshot(request), fingerprint: providerSelectionFingerprint(request, fingerprintSnapshot) };
+  }
+
   async function inspect(input: unknown) {
     let request: ParsedRunRequest;
     try { request = normalizeRequest(input); }
@@ -117,6 +126,10 @@ export function createRunService(
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
+        if (!followOn.provider && snapshot) {
+          const admission = await inspectAutomaticFollowOn(followOn, snapshot);
+          return { ...admission.inspection, selectionFingerprint: admission.fingerprint };
+        }
         commands.reconcile(followOn.sourceRunId, Date.now());
         const source = reads.resolveFollowOnSources(followOn);
         const inspection = (await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)))).inspection;
@@ -156,6 +169,7 @@ export function createRunService(
     }
     let automaticAdmission: Awaited<ReturnType<typeof inspectAutomaticPoll>> | undefined;
     let automaticJourneyAdmission: Awaited<ReturnType<typeof inspectAutomaticJourney>> | undefined;
+    let automaticFollowOnAdmission: Awaited<ReturnType<typeof inspectAutomaticFollowOn>> | undefined;
     if (!request.provider && baseSnapshot && request.kind === 'poll') {
       automaticAdmission = await inspectAutomaticPoll(request, baseSnapshot);
       if (request.expectedSelectionFingerprint && automaticAdmission.fingerprint !== request.expectedSelectionFingerprint) {
@@ -182,6 +196,19 @@ export function createRunService(
         const entry = automaticJourneyAdmission.snapshot.catalogue.entries.find(({ id }) => id === providerId);
         if (entry) await assertReady(entry.provider);
       }
+    } else if (!request.provider && baseSnapshot && request.kind === 'follow-on') {
+      automaticFollowOnAdmission = await inspectAutomaticFollowOn(followOnRunRequestSchema.parse(request), baseSnapshot);
+      if (request.expectedSelectionFingerprint && automaticFollowOnAdmission.fingerprint !== request.expectedSelectionFingerprint) {
+        throw new RunServiceError('provider_selection_fingerprint_stale', 'Provider selection inputs or follow-on contexts changed after inspection. Inspect the request again before starting it.');
+      }
+      if (!automaticFollowOnAdmission.inspection.valid || !automaticFollowOnAdmission.prepared) {
+        throw new RunServiceError('admission_failed', automaticFollowOnAdmission.inspection.problems.map(({ message }) => message).join('; ') || 'Automatic follow-on provider admission failed.');
+      }
+      const selectedProviderIds = [...new Set((automaticFollowOnAdmission.snapshot.initialChoices ?? []).map(({ providerId }) => providerId))];
+      for (const providerId of selectedProviderIds) {
+        const entry = automaticFollowOnAdmission.snapshot.catalogue.entries.find(({ id }) => id === providerId);
+        if (entry) await assertReady(entry.provider);
+      }
     } else if (!request.provider && baseSnapshot) {
       throw new RunServiceError('provider_selection_not_ready', 'Automatic provider selection is not yet available for this request kind.');
     } else if (request.provider) await assertReady(request.provider);
@@ -189,11 +216,15 @@ export function createRunService(
     if (request.kind === 'follow-on') {
       try {
         const followOn = followOnRunRequestSchema.parse(request);
-        commands.reconcile(followOn.sourceRunId, Date.now());
-        const source = reads.resolveFollowOnSources(followOn);
-        const admission = await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)));
-        if (!admission.inspection.valid) throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
-        accepted = commands.accept(submissionId, admission.prepared);
+        if (automaticFollowOnAdmission) accepted = commands.accept(submissionId, { ...automaticFollowOnAdmission.prepared,
+          providerSelectionSnapshot: automaticFollowOnAdmission.snapshot });
+        else {
+          commands.reconcile(followOn.sourceRunId, Date.now());
+          const source = reads.resolveFollowOnSources(followOn);
+          const admission = await prepareFollowOnRun(followOn, source, providerFactory(requireExplicitProvider(followOn)));
+          if (!admission.inspection.valid) throw new RunServiceError('admission_failed', admission.inspection.problems.map(({ message }) => message).join('; ') || 'Request did not pass provider fit admission.');
+          accepted = commands.accept(submissionId, admission.prepared);
+        }
       } catch (error) {
         if (error instanceof RunServiceError) throw error;
         if (error instanceof Error && 'code' in error) throw new RunServiceError(String(error.code), error.message, { cause: error });

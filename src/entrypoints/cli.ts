@@ -120,7 +120,7 @@ function resolveImageSourcePath(requestPath: string, sourcePath: string): string
 
 async function readRequest(options: Record<string, string>) {
   const parsed = runRequestSchema.safeParse(await readJson(required(options, 'request')));
-  if (!parsed.success) throw new CliInputError(`Request is invalid: ${parsed.error.issues.map(({ path: issuePath }) => issuePath.join('.') || 'request').join(', ')}.`);
+  if (!parsed.success) throw new CliInputError(`Request is invalid: ${parsed.error.issues.map(({ path: issuePath, message }) => `${issuePath.join('.') || 'request'}: ${message}`).join('; ')}.`);
   return parsed.data;
 }
 

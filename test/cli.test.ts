@@ -342,6 +342,33 @@ test('CLI inspect validates current inline requests without starting a run', asy
   assert.deepEqual(JSON.parse(output[0] ?? '{}'), { valid: true, respondentCount: 1 });
 });
 
+test('CLI validation retains authored graph paths and safe domain causes', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'sheg-cli-graph-diagnostics-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const requestPath = path.join(directory, 'request.json');
+  const base = { kind: 'journey', respondents: [{ id: 'reader', intent: 'Learn', context: 'New', desired_outcome: 'Choose', engagement_cues: 'Examples', friction_cues: 'Hype' }],
+    journey: { id: 'article', label: 'Article', items: [{ id: 'opening', text: 'A short opening.' }], tasks: [{ type: 'choice', id: 'continue', instructions: 'Continue?', options: { yes: 'Yes', no: 'No' } }],
+      presentation: { kind: 'graph', entryNodeId: 'ask-node', maxDecisions: 1, nodes: [{ id: 'ask-node', kind: 'ask', taskId: 'continue' }, { id: 'done', kind: 'terminal', outcome: 'complete' }],
+        transitions: [{ fromNodeId: 'ask-node', optionId: 'yes', toNodeId: 'done' }, { fromNodeId: 'ask-node', optionId: 'no', toNodeId: 'done' }] } },
+    provider: { kind: 'jev', route: 'openrouter', model: 'typesafe/jev-1.13' }, maxCalls: 1 };
+  const errors: string[] = [];
+  const io = { out: () => true, error: (text: string) => { errors.push(text); return true; } };
+  const duplicate = structuredClone(base);
+  duplicate.journey.presentation.nodes.push({ id: 'opening', kind: 'terminal', outcome: 'duplicate' });
+  await writeFile(requestPath, JSON.stringify(duplicate));
+  assert.equal(await runCli(['inspect', '--request', requestPath], io, {} as never), 1);
+  assert.match(JSON.parse(errors.pop()!).error, /journey\.presentation.*Item, task, and graph node IDs must be unique/);
+
+  const missingRoute = structuredClone(base) as { journey: { tasks: unknown[]; presentation: unknown } };
+  missingRoute.journey.tasks = [{ type: 'score', id: 'score', instructions: 'How clear?', rubric: ['Not clear', 'Clear'] }];
+  missingRoute.journey.presentation = { kind: 'graph', entryNodeId: 'score-node', maxDecisions: 1,
+    nodes: [{ id: 'score-node', kind: 'ask', taskId: 'score' }, { id: 'done', kind: 'terminal', outcome: 'complete' }],
+    transitions: [{ fromNodeId: 'score-node', toNodeId: 'done', when: { type: 'score', minimum: 0, maximum: 0.5, minimumInclusive: true, maximumInclusive: true } }] };
+  await writeFile(requestPath, JSON.stringify(missingRoute));
+  assert.equal(await runCli(['inspect', '--request', requestPath], io, {} as never), 1);
+  assert.match(JSON.parse(errors.pop()!).error, /journey\.presentation.*SCORE route intervals must cover the complete response domain/);
+});
+
 test('CLI rejects unknown and duplicate options before reading input or calling the service', async () => {
   let inspections = 0;
   const service = { async inspect() { inspections += 1; return { valid: true }; } } as never;

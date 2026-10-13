@@ -8,7 +8,7 @@ Clef can compare character sketches against a written character brief, judge whe
 
 ## Connect Cloudflare
 
-Clef uses your Cloudflare account ID and a Workers AI API token. The account ID is provider configuration; the token stays in Windows Credential Manager. Create a Workers AI API token from the Cloudflare dashboard's Workers AI REST API page. Cloudflare's [REST API setup guide](https://developers.cloudflare.com/workers-ai/get-started/rest-api/) says a custom token needs Workers AI Read and Workers AI Edit permissions. Review the permissions shown in your dashboard before saving the token.
+Clef needs two separate setup values: a Workers AI API token and your Cloudflare account ID. The credential `status` command checks only whether the token is available in Windows Credential Manager; it does not confirm that an account ID is configured. To copy the account ID, open Cloudflare's Workers AI page, choose **Use REST API**, then copy the value in **Get Account ID**. The same page creates the API token. Cloudflare's [REST API setup guide](https://developers.cloudflare.com/workers-ai/get-started/rest-api/) documents both steps and says a custom token needs Workers AI Read and Workers AI Edit permissions. Review the permissions shown in your dashboard before saving the token.
 
 The fixed credential target is `Sheg/Clef/Cloudflare`. Sheg's local secure helper prompts for the key and never accepts it as request data:
 
@@ -17,7 +17,7 @@ node .\dist\cli.js provider-credential --route clef --operation setup
 node .\dist\cli.js provider-credential --route clef --operation status
 ```
 
-The CLI and MCP also support `status`, `setup`, and `remove` through the `provider-credential` command and `provider_credential` tool. Setup requires a local interactive Windows session. The key is read by Sheg's Windows helper, not by the model or MCP request. To remove the saved credential, run:
+The CLI and MCP also support `status`, `setup`, and `remove` through the `provider-credential` command and `provider_credential` tool. Setup requires a local interactive Windows session. The key is read by Sheg's Windows helper, not by the model or MCP request. Configure the copied account ID in the `accountId` field of an enabled Clef entry through [`provider_settings`](routing.md). To remove the saved credential, run:
 
 ```powershell
 node .\dist\cli.js provider-credential --route clef --operation remove
